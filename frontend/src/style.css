@@ -1,0 +1,244 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --ed-bg-void: #050506;
+    --ed-bg-panel: #0b0907;
+    --ed-bg-surface: #120d09;
+    --ed-bg-elevated: #1b130c;
+    --ed-bg-hover: #24180e;
+    --ed-border-dim: #2b1d11;
+    --ed-border: #3d2816;
+    --ed-border-bright: #ff7100;
+    --ed-amber: #ff7100;
+    --ed-amber-bright: #ff8c24;
+    --ed-cyan: #00d2ff;
+    --ed-text-main: #f4ece4;
+    --ed-text-muted: #a6907c;
+    --ed-text-dim: #6e5b4b;
+  }
+
+  * {
+    box-sizing: border-box;
+    border-radius: 0px;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #050506;
+    color: #f4ece4;
+    font-family:
+      "Rajdhani", "Bahnschrift", "Eurostile", "DIN Alternate", "Inter", "Segoe UI",
+      -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: 0.015em;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  select {
+    user-select: text;
+    font-family: inherit;
+  }
+}
+
+.select-text {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.font-mono-tabular {
+  font-family:
+    "JetBrains Mono", "Fira Code", "Cascadia Mono", "Consolas", ui-monospace, SFMono-Regular,
+    Menlo, Monaco, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Authentic Elite Dangerous Cockpit / Station Services background texture */
+.cockpit-grid-bg {
+  background-color: #050506;
+  background-image:
+    linear-gradient(180deg, rgba(255, 113, 0, 0.05) 0%, rgba(5, 5, 6, 0) 140px),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 113, 0, 0.018) 0px,
+      rgba(255, 113, 0, 0.018) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+}
+
+/* ED Holo-HUD structural panel with left or top accent rule */
+.ed-panel {
+  background-color: #0b0907;
+  border: 1px solid #2e1f12;
+}
+
+.ed-header-bar {
+  background: linear-gradient(90deg, rgba(255, 113, 0, 0.16) 0%, rgba(18, 13, 9, 0.95) 60%);
+  border-top: 2px solid #ff7100;
+  border-bottom: 1px solid #3a2615;
+}
+
+.ed-subheader-cyan {
+  background: linear-gradient(90deg, rgba(0, 210, 255, 0.14) 0%, rgba(18, 13, 9, 0.95) 65%);
+  border-left: 3px solid #00d2ff;
+  border-bottom: 1px solid #1b3544;
+}
+
+/* ED Station Services button styles */
+.ed-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background-color: #16100b;
+  color: #f4ece4;
+  border: 1px solid #472e19;
+  border-left: 2px solid #ff7100;
+  transition:
+    background-color 80ms ease,
+    color 80ms ease,
+    border-color 80ms ease;
+  cursor: pointer;
+}
+
+.ed-btn:hover:not(:disabled) {
+  background-color: #ff7100;
+  color: #050506;
+  border-color: #ff7100;
+}
+
+.ed-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ed-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.9rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background-color: #ff7100;
+  color: #050506;
+  border: 1px solid #ff8c24;
+  transition:
+    background-color 80ms ease,
+    transform 60ms ease;
+  cursor: pointer;
+}
+
+.ed-btn-primary:hover:not(:disabled) {
+  background-color: #ff9436;
+}
+
+.ed-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ed-btn-cyan {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background-color: #08151c;
+  color: #00d2ff;
+  border: 1px solid #16485c;
+  border-left: 2px solid #00d2ff;
+  transition:
+    background-color 80ms ease,
+    color 80ms ease,
+    border-color 80ms ease;
+  cursor: pointer;
+}
+
+.ed-btn-cyan:hover:not(:disabled) {
+  background-color: #00d2ff;
+  color: #050506;
+  border-color: #00d2ff;
+}
+
+.ed-btn-cyan:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ed-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background-color: #190909;
+  color: #ff4d3d;
+  border: 1px solid #4d1915;
+  border-left: 2px solid #ff3b2f;
+  transition:
+    background-color 80ms ease,
+    color 80ms ease;
+  cursor: pointer;
+}
+
+.ed-btn-danger:hover:not(:disabled) {
+  background-color: #ff3b2f;
+  color: #050506;
+}
+
+/* Indeterminate HUD scan animation for loading bars */
+@keyframes ed-scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.ed-scan-bar {
+  animation: ed-scan 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Custom slim cockpit scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #060504;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3d2816;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #ff7100;
+}

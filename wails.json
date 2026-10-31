@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "_comment": "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json",
+  "author": {
+    "name": "Alexander Mot"
+  },
+  "frontend:build": "npm run build",
+  "frontend:dev:serverUrl": "auto",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:install": "npm install",
+  "info": {
+    "comments": "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal",
+    "productName": "Planisphere",
+    "productVersion": "0.1.0"
+  },
+  "name": "planisphere",
+  "outputfilename": "planisphere"
+}
