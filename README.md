@@ -19,7 +19,6 @@ The solution to that problem was different travel modes with different stats, an
 
 That's where Planisphere comes in.
 
----
 
 ## Features
 
@@ -41,7 +40,6 @@ Get estimated credit values for bodies you scan (FSS, DSS, first discovery, firs
 ### Built-in POI catalog
 Automatically flags systems listed in EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP). When your route passes a notable landmark or planetary nebula, you get the POI name and one-click shortcuts to EDAstro, Inara, and EDSM.
 
----
 
 ## Installation
 
@@ -88,7 +86,6 @@ Planisphere currently builds from source as a native desktop binary.
 
 Standalone releases (Linux AppImages and Windows installers) will be published under GitHub Releases so you can grab a binary without needing Go or Node installed.
 
----
 
 ## Development
 
@@ -121,7 +118,6 @@ npm --prefix frontend run test
 npm --prefix frontend run sync-metadata
 ```
 
----
 
 ## Improvements & Future Ideas
 
@@ -133,7 +129,6 @@ npm --prefix frontend run sync-metadata
 - **Prebuilt Releases**: Packaged Linux AppImages and Windows installers distributed directly via GitHub Releases, removing the need to install Go, Node, or C compiler headers.
 - **Expedition Log Exports**: Export completed expedition stats, visited waypoints, and discoveries into clean markdown reports, flight log summaries, or CSV sheets.
 
----
 
 ## Disclaimer
 
