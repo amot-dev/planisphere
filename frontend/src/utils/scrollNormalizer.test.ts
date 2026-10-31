@@ -10,7 +10,7 @@ function createMockElement(classes: string[], dimensions: {
   scrollLeft?: number
 } = {}, parent: any = null): HTMLElement {
   const classSet = new Set(classes)
-  const el: any = {
+  const mockElement: any = {
     classList: {
       contains: (c: string) => classSet.has(c),
     },
@@ -23,7 +23,7 @@ function createMockElement(classes: string[], dimensions: {
     scrollLeft: dimensions.scrollLeft ?? 0,
     parentElement: parent,
   }
-  return el as HTMLElement
+  return mockElement as HTMLElement
 }
 
 describe('Scroll Performance & Normalizer', () => {
@@ -79,7 +79,7 @@ describe('Scroll Performance & Normalizer', () => {
       expect(typeof wheelHandler).toBe('function')
 
       // Wheel event targeted at Window object
-      const fakeWheelEv: any = {
+      const fakeWheelEvent: any = {
         target: mockWindow,
         deltaY: 50,
         deltaX: 0,
@@ -91,7 +91,7 @@ describe('Scroll Performance & Normalizer', () => {
       }
 
       // Should not throw TypeError: parameter 1 is not of type 'Node'
-      expect(() => wheelHandler(fakeWheelEv)).not.toThrow()
+      expect(() => wheelHandler(fakeWheelEvent)).not.toThrow()
 
       cleanup()
     } finally {

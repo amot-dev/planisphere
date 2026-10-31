@@ -42,56 +42,56 @@ type Metrics struct {
 	FirstLogged        int     `json:"firstLogged"`
 }
 
-// Add returns the field-wise sum of m and o.
-func (m Metrics) Add(o Metrics) Metrics {
-	var trit *int
-	if m.TritiumUsed != nil || o.TritiumUsed != nil {
-		t := 0
-		if m.TritiumUsed != nil {
-			t += *m.TritiumUsed
+// Add returns the field-wise sum of baseMetrics and otherMetrics.
+func (baseMetrics Metrics) Add(otherMetrics Metrics) Metrics {
+	var tritiumTotal *int
+	if baseMetrics.TritiumUsed != nil || otherMetrics.TritiumUsed != nil {
+		tritiumSum := 0
+		if baseMetrics.TritiumUsed != nil {
+			tritiumSum += *baseMetrics.TritiumUsed
 		}
-		if o.TritiumUsed != nil {
-			t += *o.TritiumUsed
+		if otherMetrics.TritiumUsed != nil {
+			tritiumSum += *otherMetrics.TritiumUsed
 		}
-		trit = &t
+		tritiumTotal = &tritiumSum
 	}
 	return Metrics{
-		DistanceLy:         m.DistanceLy + o.DistanceLy,
-		ShipDistanceLy:     m.ShipDistanceLy + o.ShipDistanceLy,
-		CarrierPassengerLy: m.CarrierPassengerLy + o.CarrierPassengerLy,
-		Jumps:              m.Jumps + o.Jumps,
-		CarrierJumps:       m.CarrierJumps + o.CarrierJumps,
-		CarrierDistanceLy:  m.CarrierDistanceLy + o.CarrierDistanceLy,
-		TritiumUsed:        trit,
-		JetConeBoosts:      m.JetConeBoosts + o.JetConeBoosts,
-		PremiumBoosts:      m.PremiumBoosts + o.PremiumBoosts,
-		StandardBoosts:     m.StandardBoosts + o.StandardBoosts,
-		BasicBoosts:        m.BasicBoosts + o.BasicBoosts,
-		BodiesScanned:      m.BodiesScanned + o.BodiesScanned,
-		BodiesMapped:       m.BodiesMapped + o.BodiesMapped,
-		ScanValueTotal:     m.ScanValueTotal + o.ScanValueTotal,
-		ScanValueBase:      m.ScanValueBase + o.ScanValueBase,
-		ScanValueBonus:     m.ScanValueBonus + o.ScanValueBonus,
-		FirstDiscoveries:   m.FirstDiscoveries + o.FirstDiscoveries,
-		FirstMapped:        m.FirstMapped + o.FirstMapped,
-		OrganicSamples:     m.OrganicSamples + o.OrganicSamples,
-		OrganicValueTotal:  m.OrganicValueTotal + o.OrganicValueTotal,
-		OrganicValueBase:   m.OrganicValueBase + o.OrganicValueBase,
-		OrganicValueBonus:  m.OrganicValueBonus + o.OrganicValueBonus,
-		FirstLogged:        m.FirstLogged + o.FirstLogged,
+		DistanceLy:         baseMetrics.DistanceLy + otherMetrics.DistanceLy,
+		ShipDistanceLy:     baseMetrics.ShipDistanceLy + otherMetrics.ShipDistanceLy,
+		CarrierPassengerLy: baseMetrics.CarrierPassengerLy + otherMetrics.CarrierPassengerLy,
+		Jumps:              baseMetrics.Jumps + otherMetrics.Jumps,
+		CarrierJumps:       baseMetrics.CarrierJumps + otherMetrics.CarrierJumps,
+		CarrierDistanceLy:  baseMetrics.CarrierDistanceLy + otherMetrics.CarrierDistanceLy,
+		TritiumUsed:        tritiumTotal,
+		JetConeBoosts:      baseMetrics.JetConeBoosts + otherMetrics.JetConeBoosts,
+		PremiumBoosts:      baseMetrics.PremiumBoosts + otherMetrics.PremiumBoosts,
+		StandardBoosts:     baseMetrics.StandardBoosts + otherMetrics.StandardBoosts,
+		BasicBoosts:        baseMetrics.BasicBoosts + otherMetrics.BasicBoosts,
+		BodiesScanned:      baseMetrics.BodiesScanned + otherMetrics.BodiesScanned,
+		BodiesMapped:       baseMetrics.BodiesMapped + otherMetrics.BodiesMapped,
+		ScanValueTotal:     baseMetrics.ScanValueTotal + otherMetrics.ScanValueTotal,
+		ScanValueBase:      baseMetrics.ScanValueBase + otherMetrics.ScanValueBase,
+		ScanValueBonus:     baseMetrics.ScanValueBonus + otherMetrics.ScanValueBonus,
+		FirstDiscoveries:   baseMetrics.FirstDiscoveries + otherMetrics.FirstDiscoveries,
+		FirstMapped:        baseMetrics.FirstMapped + otherMetrics.FirstMapped,
+		OrganicSamples:     baseMetrics.OrganicSamples + otherMetrics.OrganicSamples,
+		OrganicValueTotal:  baseMetrics.OrganicValueTotal + otherMetrics.OrganicValueTotal,
+		OrganicValueBase:   baseMetrics.OrganicValueBase + otherMetrics.OrganicValueBase,
+		OrganicValueBonus:  baseMetrics.OrganicValueBonus + otherMetrics.OrganicValueBonus,
+		FirstLogged:        baseMetrics.FirstLogged + otherMetrics.FirstLogged,
 	}
 }
 
-func (m *Metrics) addScan(v ed.ScanValue) {
-	m.ScanValueTotal += v.Total
-	m.ScanValueBase += v.Base
-	m.ScanValueBonus += v.Bonus
+func (targetMetrics *Metrics) addScan(scanVal ed.ScanValue) {
+	targetMetrics.ScanValueTotal += scanVal.Total
+	targetMetrics.ScanValueBase += scanVal.Base
+	targetMetrics.ScanValueBonus += scanVal.Bonus
 }
 
-func (m *Metrics) addOrganic(v ed.ScanValue) {
-	m.OrganicValueTotal += v.Total
-	m.OrganicValueBase += v.Base
-	m.OrganicValueBonus += v.Bonus
+func (targetMetrics *Metrics) addOrganic(organicVal ed.ScanValue) {
+	targetMetrics.OrganicValueTotal += organicVal.Total
+	targetMetrics.OrganicValueBase += organicVal.Base
+	targetMetrics.OrganicValueBonus += organicVal.Bonus
 }
 
 // Range is the half-open time range (After, Until]. Empty After means "from
@@ -101,12 +101,12 @@ type Range struct {
 	Until string `json:"until"`
 }
 
-func (r Range) bounds() (string, string) {
-	until := r.Until
+func (timeRange Range) bounds() (string, string) {
+	until := timeRange.Until
 	if until == "" {
 		until = "9999-12-31T23:59:59Z"
 	}
-	return r.After, until
+	return timeRange.After, until
 }
 
 // ModeSelection controls which modes contribute to which metric family.
@@ -128,35 +128,35 @@ type filterSets struct {
 	timeline          *modes.Timeline
 }
 
-func (f *Filter) prepare(q db.Queryer) (*filterSets, error) {
-	if f == nil || !f.Enabled {
+func (filter *Filter) prepare(queryer db.Queryer) (*filterSets, error) {
+	if filter == nil || !filter.Enabled {
 		return nil, nil
 	}
-	tl, err := modes.LoadTimeline(q)
-	if err != nil {
-		return nil, err
+	timeline, loadError := modes.LoadTimeline(queryer)
+	if loadError != nil {
+		return nil, loadError
 	}
-	fs := &filterSets{travel: map[int64]bool{}, discovery: map[int64]bool{}, timeline: tl}
-	for _, m := range f.Modes {
-		if m.Travel {
-			fs.travel[m.ModeID] = true
+	sets := &filterSets{travel: map[int64]bool{}, discovery: map[int64]bool{}, timeline: timeline}
+	for _, modeSelection := range filter.Modes {
+		if modeSelection.Travel {
+			sets.travel[modeSelection.ModeID] = true
 		}
-		if m.Discovery {
-			fs.discovery[m.ModeID] = true
+		if modeSelection.Discovery {
+			sets.discovery[modeSelection.ModeID] = true
 		}
 	}
-	return fs, nil
+	return sets, nil
 }
 
-func (fs *filterSets) allow(ts string, discovery bool) bool {
-	if fs == nil {
+func (sets *filterSets) allow(timestamp string, discovery bool) bool {
+	if sets == nil {
 		return true
 	}
-	mode := fs.timeline.ModeAt(ts)
+	mode := sets.timeline.ModeAt(timestamp)
 	if discovery {
-		return fs.discovery[mode]
+		return sets.discovery[mode]
 	}
-	return fs.travel[mode]
+	return sets.travel[mode]
 }
 
 // Engine computes Metrics from the database.
@@ -166,227 +166,229 @@ type Engine struct {
 }
 
 // NewEngine creates an engine (Odyssey mapping bonus enabled).
-func NewEngine(q db.Queryer) *Engine { return &Engine{DB: q, Odyssey: true} }
+func NewEngine(queryer db.Queryer) *Engine { return &Engine{DB: queryer, Odyssey: true} }
 
-type row struct {
-	uid     string
-	ts      string
-	event   string
-	sysAddr sql.NullInt64
-	bodyID  sql.NullInt64
-	starPos *ed.Vec3
-	raw     string
+type eventRow struct {
+	eventUID      string
+	timestamp     string
+	eventType     string
+	systemAddress sql.NullInt64
+	bodyID        sql.NullInt64
+	starPosition  *ed.Vec3
+	rawJSON       string
 }
 
 var metricEvents = []string{"FSDJump", "CarrierJump", "Scan", "SAAScanComplete", "ScanOrganic"}
 
-func (e *Engine) loadEvents(after, until string, names []string) ([]row, error) {
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNames []string) ([]eventRow, error) {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(eventNames)), ",")
 	args := []any{}
-	for _, n := range names {
-		args = append(args, n)
+	for _, name := range eventNames {
+		args = append(args, name)
 	}
-	args = append(args, after, until)
-	rs, err := e.DB.Query(`SELECT event_uid, timestamp, event, system_address, body_id, star_x, star_y, star_z, raw_json
-		FROM journal_events WHERE event IN (`+ph+`) AND timestamp > ? AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
+	args = append(args, afterTimestamp, untilTimestamp)
+	rows, queryError := engine.DB.Query(`SELECT event_uid, timestamp, event, system_address, body_id, star_x, star_y, star_z, raw_json
+		FROM journal_events WHERE event IN (`+placeholders+`) AND timestamp > ? AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
 		ORDER BY timestamp, id`, args...)
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	defer rs.Close()
-	var out []row
-	for rs.Next() {
-		var r row
-		var x, y, z sql.NullFloat64
-		if err := rs.Scan(&r.uid, &r.ts, &r.event, &r.sysAddr, &r.bodyID, &x, &y, &z, &r.raw); err != nil {
-			return nil, err
+	defer rows.Close()
+	var out []eventRow
+	for rows.Next() {
+		var eventItem eventRow
+		var starX, starY, starZ sql.NullFloat64
+		if scanError := rows.Scan(&eventItem.eventUID, &eventItem.timestamp, &eventItem.eventType, &eventItem.systemAddress, &eventItem.bodyID, &starX, &starY, &starZ, &eventItem.rawJSON); scanError != nil {
+			return nil, scanError
 		}
-		if x.Valid && y.Valid && z.Valid {
-			r.starPos = &ed.Vec3{X: x.Float64, Y: y.Float64, Z: z.Float64}
+		if starX.Valid && starY.Valid && starZ.Valid {
+			eventItem.starPosition = &ed.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
 		}
-		out = append(out, r)
+		out = append(out, eventItem)
 	}
-	return out, rs.Err()
+	return out, rows.Err()
 }
 
-type bodyKey struct{ sys, body int64 }
+type bodyKey struct{ systemAddress, bodyID int64 }
 
-// lookupScan finds the most recent Scan of a body at or before ts.
-func (e *Engine) lookupScan(k bodyKey, ts string) (*journal.ScanEvent, error) {
-	var raw string
-	err := e.DB.QueryRow(`SELECT raw_json FROM journal_events WHERE event = 'Scan' AND system_address = ? AND body_id = ?
-		AND timestamp <= ? AND `+journal.CmdrFilterSQL+` ORDER BY timestamp DESC LIMIT 1`, k.sys, k.body, ts).Scan(&raw)
-	if err == sql.ErrNoRows {
+// lookupScan finds the most recent Scan of a body at or before timestamp.
+func (engine *Engine) lookupScan(key bodyKey, timestamp string) (*journal.ScanEvent, error) {
+	var rawJSON string
+	queryError := engine.DB.QueryRow(`SELECT raw_json FROM journal_events WHERE event = 'Scan' AND system_address = ? AND body_id = ?
+		AND timestamp <= ? AND `+journal.CmdrFilterSQL+` ORDER BY timestamp DESC LIMIT 1`, key.systemAddress, key.bodyID, timestamp).Scan(&rawJSON)
+	if queryError == sql.ErrNoRows {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	var s journal.ScanEvent
-	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+	var scanEvent journal.ScanEvent
+	if unmarshalError := json.Unmarshal([]byte(rawJSON), &scanEvent); unmarshalError != nil {
 		return nil, nil
 	}
-	return &s, nil
+	return &scanEvent, nil
 }
 
-func toBodyScan(s *journal.ScanEvent) ed.BodyScan {
+func toBodyScan(scanEvent *journal.ScanEvent) ed.BodyScan {
 	return ed.BodyScan{
-		StarType: s.StarType, PlanetClass: s.PlanetClass, MassEM: s.MassEM, StellarMass: s.StellarMass,
-		TerraformState: s.TerraformState, WasDiscovered: s.WasDiscovered, WasMapped: s.WasMapped,
+		StarType: scanEvent.StarType, PlanetClass: scanEvent.PlanetClass, MassEM: scanEvent.MassEM, StellarMass: scanEvent.StellarMass,
+		TerraformState: scanEvent.TerraformState, WasDiscovered: scanEvent.WasDiscovered, WasMapped: scanEvent.WasMapped,
 	}
 }
 
-// Compute returns metrics for events in r, optionally filtered by mode.
-func (e *Engine) Compute(r Range, f *Filter) (Metrics, error) {
-	var m Metrics
-	after, until := r.bounds()
-	fs, err := f.prepare(e.DB)
-	if err != nil {
-		return m, err
+// Compute returns metrics for events in timeRange, optionally filtered by mode.
+func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) {
+	var metrics Metrics
+	after, until := timeRange.bounds()
+	filterSet, prepareError := filter.prepare(engine.DB)
+	if prepareError != nil {
+		return metrics, prepareError
 	}
-	events, err := e.loadEvents(after, until, metricEvents)
-	if err != nil {
-		return m, err
+	events, loadError := engine.loadEvents(after, until, metricEvents)
+	if loadError != nil {
+		return metrics, loadError
 	}
-	var carrier map[string]CarrierLeg
+	var carrierLegs map[string]CarrierLeg
 	scans := map[bodyKey]*journal.ScanEvent{}
-	scanned := map[bodyKey]bool{}
-	mapped := map[bodyKey]bool{}
+	scannedBodies := map[bodyKey]bool{}
+	mappedBodies := map[bodyKey]bool{}
 
-	for _, ev := range events {
-		switch ev.event {
+	for _, eventRow := range events {
+		switch eventRow.eventType {
 		case "FSDJump":
-			if !fs.allow(ev.ts, false) {
+			if !filterSet.allow(eventRow.timestamp, false) {
 				continue
 			}
-			var j journal.FSDJumpEvent
-			if json.Unmarshal([]byte(ev.raw), &j) != nil {
+			var jumpEvent journal.FSDJumpEvent
+			if json.Unmarshal([]byte(eventRow.rawJSON), &jumpEvent) != nil {
 				continue
 			}
-			m.Jumps++
-			m.ShipDistanceLy += j.JumpDist
-			m.DistanceLy += j.JumpDist
-			switch j.BoostUsed {
+			metrics.Jumps++
+			metrics.ShipDistanceLy += jumpEvent.JumpDist
+			metrics.DistanceLy += jumpEvent.JumpDist
+			switch jumpEvent.BoostUsed {
 			case 4:
-				m.JetConeBoosts++
+				metrics.JetConeBoosts++
 			case 3:
-				m.PremiumBoosts++
+				metrics.PremiumBoosts++
 			case 2:
-				m.StandardBoosts++
+				metrics.StandardBoosts++
 			case 1:
-				m.BasicBoosts++
+				metrics.BasicBoosts++
 			}
 		case "CarrierJump":
-			if carrier == nil {
-				if carrier, err = e.CarrierLegsRange(after, until); err != nil {
-					return m, err
+			if carrierLegs == nil {
+				var legError error
+				if carrierLegs, legError = engine.CarrierLegsRange(after, until); legError != nil {
+					return metrics, legError
 				}
 			}
-			leg := carrier[ev.uid]
-			if fs.allow(ev.ts, false) {
-				m.CarrierPassengerLy += leg.DistanceLy
-				m.DistanceLy += leg.DistanceLy
+			leg := carrierLegs[eventRow.eventUID]
+			if filterSet.allow(eventRow.timestamp, false) {
+				metrics.CarrierPassengerLy += leg.DistanceLy
+				metrics.DistanceLy += leg.DistanceLy
 			}
-			m.CarrierJumps++
-			m.CarrierDistanceLy += leg.DistanceLy
+			metrics.CarrierJumps++
+			metrics.CarrierDistanceLy += leg.DistanceLy
 			if leg.Tritium > 0 {
-				cur := 0
-				if m.TritiumUsed != nil {
-					cur = *m.TritiumUsed
+				currentTritium := 0
+				if metrics.TritiumUsed != nil {
+					currentTritium = *metrics.TritiumUsed
 				}
-				next := cur + leg.Tritium
-				m.TritiumUsed = &next
+				nextTritium := currentTritium + leg.Tritium
+				metrics.TritiumUsed = &nextTritium
 			}
 		case "Scan":
-			var s journal.ScanEvent
-			if json.Unmarshal([]byte(ev.raw), &s) != nil {
+			var scanEvent journal.ScanEvent
+			if json.Unmarshal([]byte(eventRow.rawJSON), &scanEvent) != nil {
 				continue
 			}
-			if s.IsBeltCluster() {
+			if scanEvent.IsBeltCluster() {
 				continue
 			}
-			k := bodyKey{s.SystemAddress, s.BodyID}
-			sc := s
-			scans[k] = &sc
-			if !fs.allow(ev.ts, true) {
+			key := bodyKey{scanEvent.SystemAddress, scanEvent.BodyID}
+			scanCopy := scanEvent
+			scans[key] = &scanCopy
+			if !filterSet.allow(eventRow.timestamp, true) {
 				continue
 			}
-			m.BodiesScanned++
-			if s.ScanType == "NavBeaconDetail" || scanned[k] {
+			metrics.BodiesScanned++
+			if scanEvent.ScanType == "NavBeaconDetail" || scannedBodies[key] {
 				continue
 			}
-			scanned[k] = true
-			if !s.WasDiscovered {
-				m.FirstDiscoveries++
+			scannedBodies[key] = true
+			if !scanEvent.WasDiscovered {
+				metrics.FirstDiscoveries++
 			}
-			m.addScan(ed.EstimateBodyValue(toBodyScan(&s), ed.MappingInfo{}, e.Odyssey))
+			metrics.addScan(ed.EstimateBodyValue(toBodyScan(&scanEvent), ed.MappingInfo{}, engine.Odyssey))
 		case "SAAScanComplete":
-			var sa journal.SAAScanCompleteEvent
-			if json.Unmarshal([]byte(ev.raw), &sa) != nil {
+			var saaEvent journal.SAAScanCompleteEvent
+			if json.Unmarshal([]byte(eventRow.rawJSON), &saaEvent) != nil {
 				continue
 			}
-			k := bodyKey{sa.SystemAddress, sa.BodyID}
-			if mapped[k] || !fs.allow(ev.ts, true) {
+			key := bodyKey{saaEvent.SystemAddress, saaEvent.BodyID}
+			if mappedBodies[key] || !filterSet.allow(eventRow.timestamp, true) {
 				continue
 			}
-			mapped[k] = true
-			m.BodiesMapped++
-			scan := scans[k]
+			mappedBodies[key] = true
+			metrics.BodiesMapped++
+			scan := scans[key]
 			if scan == nil {
-				if scan, err = e.lookupScan(k, ev.ts); err != nil {
-					return m, err
+				var lookupError error
+				if scan, lookupError = engine.lookupScan(key, eventRow.timestamp); lookupError != nil {
+					return metrics, lookupError
 				}
 				if scan != nil {
-					scans[k] = scan
+					scans[key] = scan
 				}
 			}
 			if scan == nil {
 				continue
 			}
 			if !scan.WasMapped {
-				m.FirstMapped++
+				metrics.FirstMapped++
 			}
-			mi := ed.MappingInfo{Mapped: true, ProbesUsed: sa.ProbesUsed, EfficiencyTarget: sa.EfficiencyTarget}
-			m.addScan(ed.EstimateMappingIncrement(toBodyScan(scan), mi, e.Odyssey))
+			mappingInfo := ed.MappingInfo{Mapped: true, ProbesUsed: saaEvent.ProbesUsed, EfficiencyTarget: saaEvent.EfficiencyTarget}
+			metrics.addScan(ed.EstimateMappingIncrement(toBodyScan(scan), mappingInfo, engine.Odyssey))
 		case "ScanOrganic":
-			var o journal.ScanOrganicEvent
-			if json.Unmarshal([]byte(ev.raw), &o) != nil || !strings.EqualFold(o.ScanType, "Analyse") {
+			var organicEvent journal.ScanOrganicEvent
+			if json.Unmarshal([]byte(eventRow.rawJSON), &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
 				continue
 			}
-			if !fs.allow(ev.ts, true) {
+			if !filterSet.allow(eventRow.timestamp, true) {
 				continue
 			}
-			m.OrganicSamples++
-			base := ed.SpeciesBaseValue(o.Species, o.SpeciesLocalised, o.Genus)
-			first, err := e.firstLogged(&o, scans, ev.ts)
-			if err != nil {
-				return m, err
+			metrics.OrganicSamples++
+			baseValue := ed.SpeciesBaseValue(organicEvent.Species, organicEvent.SpeciesLocalised, organicEvent.Genus)
+			firstLoggedBonus, checkError := engine.firstLogged(&organicEvent, scans, eventRow.timestamp)
+			if checkError != nil {
+				return metrics, checkError
 			}
-			if first {
-				m.FirstLogged++
+			if firstLoggedBonus {
+				metrics.FirstLogged++
 			}
-			m.addOrganic(ed.OrganicValue(base, first))
+			metrics.addOrganic(ed.OrganicValue(baseValue, firstLoggedBonus))
 		}
 	}
-	return m, nil
+	return metrics, nil
 }
 
 // firstLogged decides whether the first-logged (5x) bonus applies. The
 // ScanOrganic WasLogged flag is authoritative when the journal provides it;
 // older journals fall back to the parent body's Scan WasFootfalled == false.
-func (e *Engine) firstLogged(o *journal.ScanOrganicEvent, scans map[bodyKey]*journal.ScanEvent, ts string) (bool, error) {
-	if o.WasLogged != nil {
-		return !*o.WasLogged, nil
+func (engine *Engine) firstLogged(organicEvent *journal.ScanOrganicEvent, scans map[bodyKey]*journal.ScanEvent, timestamp string) (bool, error) {
+	if organicEvent.WasLogged != nil {
+		return !*organicEvent.WasLogged, nil
 	}
-	k := bodyKey{o.SystemAddress, o.Body}
-	scan := scans[k]
+	key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}
+	scan := scans[key]
 	if scan == nil {
-		var err error
-		if scan, err = e.lookupScan(k, ts); err != nil {
-			return false, err
+		var lookupError error
+		if scan, lookupError = engine.lookupScan(key, timestamp); lookupError != nil {
+			return false, lookupError
 		}
 		if scan != nil {
-			scans[k] = scan
+			scans[key] = scan
 		}
 	}
 	if scan == nil || scan.WasFootfalled == nil {
@@ -410,99 +412,99 @@ type CarrierLeg struct {
 // two CarrierStats snapshots with no other jump in between (and the delta is
 // plausible); otherwise it is estimated with ed.CarrierTritiumCost using the
 // latest known fuel level and used capacity.
-func (e *Engine) CarrierLegs(until string) (map[string]CarrierLeg, error) {
-	return e.CarrierLegsRange("", until)
+func (engine *Engine) CarrierLegs(untilTimestamp string) (map[string]CarrierLeg, error) {
+	return engine.CarrierLegsRange("", untilTimestamp)
 }
 
 // CarrierLegsRange simulates carrier jumps in (after, until], seeding the
 // initial position and CarrierStats snapshot from the most recent events at or
 // before after when after is non-empty.
-func (e *Engine) CarrierLegsRange(after, until string) (map[string]CarrierLeg, error) {
+func (engine *Engine) CarrierLegsRange(afterTimestamp, untilTimestamp string) (map[string]CarrierLeg, error) {
 	var prevPos *ed.Vec3
-	fuel, used := 1000, 0 // assumptions until a CarrierStats snapshot is seen
+	fuelLevel, usedCapacity := 1000, 0 // assumptions until a CarrierStats snapshot is seen
 	var lastStats *journal.CarrierStatsEvent
 
-	if after != "" {
-		var x, y, z sql.NullFloat64
-		err := e.DB.QueryRow(`SELECT star_x, star_y, star_z FROM journal_events
+	if afterTimestamp != "" {
+		var starX, starY, starZ sql.NullFloat64
+		queryError := engine.DB.QueryRow(`SELECT star_x, star_y, star_z FROM journal_events
 			WHERE event IN ('FSDJump', 'Location', 'CarrierJump') AND star_x IS NOT NULL
 			AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
-			ORDER BY timestamp DESC, id DESC LIMIT 1`, after).Scan(&x, &y, &z)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, err
+			ORDER BY timestamp DESC, id DESC LIMIT 1`, afterTimestamp).Scan(&starX, &starY, &starZ)
+		if queryError != nil && queryError != sql.ErrNoRows {
+			return nil, queryError
 		}
-		if x.Valid && y.Valid && z.Valid {
-			prevPos = &ed.Vec3{X: x.Float64, Y: y.Float64, Z: z.Float64}
+		if starX.Valid && starY.Valid && starZ.Valid {
+			prevPos = &ed.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
 		}
 
-		var rawCS string
-		err = e.DB.QueryRow(`SELECT raw_json FROM journal_events
+		var rawCarrierStats string
+		queryError = engine.DB.QueryRow(`SELECT raw_json FROM journal_events
 			WHERE event = 'CarrierStats' AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
-			ORDER BY timestamp DESC, id DESC LIMIT 1`, after).Scan(&rawCS)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, err
+			ORDER BY timestamp DESC, id DESC LIMIT 1`, afterTimestamp).Scan(&rawCarrierStats)
+		if queryError != nil && queryError != sql.ErrNoRows {
+			return nil, queryError
 		}
-		if rawCS != "" {
-			var cs journal.CarrierStatsEvent
-			if json.Unmarshal([]byte(rawCS), &cs) == nil {
-				lastStats = &cs
-				fuel, used = cs.FuelLevel, cs.UsedCapacity()
+		if rawCarrierStats != "" {
+			var carrierStats journal.CarrierStatsEvent
+			if json.Unmarshal([]byte(rawCarrierStats), &carrierStats) == nil {
+				lastStats = &carrierStats
+				fuelLevel, usedCapacity = carrierStats.FuelLevel, carrierStats.UsedCapacity()
 			}
 		}
 	}
 
-	events, err := e.loadEvents(after, until, []string{"FSDJump", "Location", "CarrierJump", "CarrierStats"})
-	if err != nil {
-		return nil, err
+	events, loadError := engine.loadEvents(afterTimestamp, untilTimestamp, []string{"FSDJump", "Location", "CarrierJump", "CarrierStats"})
+	if loadError != nil {
+		return nil, loadError
 	}
-	out := map[string]CarrierLeg{}
+	legs := map[string]CarrierLeg{}
 	var pendingJump string // jump since lastStats (only if exactly one)
 	jumpsSinceStats := 0
 
-	for _, ev := range events {
-		switch ev.event {
+	for _, eventRow := range events {
+		switch eventRow.eventType {
 		case "FSDJump", "Location":
-			if ev.starPos != nil {
-				p := *ev.starPos
-				prevPos = &p
+			if eventRow.starPosition != nil {
+				positionCopy := *eventRow.starPosition
+				prevPos = &positionCopy
 			}
 		case "CarrierStats":
-			var cs journal.CarrierStatsEvent
-			if json.Unmarshal([]byte(ev.raw), &cs) != nil {
+			var carrierStats journal.CarrierStatsEvent
+			if json.Unmarshal([]byte(eventRow.rawJSON), &carrierStats) != nil {
 				continue
 			}
-			if lastStats != nil && jumpsSinceStats == 1 && pendingJump != "" && cs.CarrierID == lastStats.CarrierID {
-				delta := lastStats.FuelLevel - cs.FuelLevel
-				leg := out[pendingJump]
+			if lastStats != nil && jumpsSinceStats == 1 && pendingJump != "" && carrierStats.CarrierID == lastStats.CarrierID {
+				delta := lastStats.FuelLevel - carrierStats.FuelLevel
+				leg := legs[pendingJump]
 				if delta > 0 && leg.Tritium > 0 && delta <= leg.Tritium*2+10 {
 					leg.Tritium, leg.FromDelta = delta, true
-					out[pendingJump] = leg
+					legs[pendingJump] = leg
 				}
 			}
-			c := cs
-			lastStats = &c
-			fuel, used = cs.FuelLevel, cs.UsedCapacity()
+			carrierStatsCopy := carrierStats
+			lastStats = &carrierStatsCopy
+			fuelLevel, usedCapacity = carrierStats.FuelLevel, carrierStats.UsedCapacity()
 			jumpsSinceStats, pendingJump = 0, ""
 		case "CarrierJump":
 			leg := CarrierLeg{}
-			if prevPos != nil && ev.starPos != nil {
-				leg.DistanceLy = ed.Distance(*prevPos, *ev.starPos)
-				leg.Tritium = ed.CarrierTritiumCost(leg.DistanceLy, used, fuel)
-				fuel -= leg.Tritium
-				if fuel < 0 {
-					fuel = 0
+			if prevPos != nil && eventRow.starPosition != nil {
+				leg.DistanceLy = ed.Distance(*prevPos, *eventRow.starPosition)
+				leg.Tritium = ed.CarrierTritiumCost(leg.DistanceLy, usedCapacity, fuelLevel)
+				fuelLevel -= leg.Tritium
+				if fuelLevel < 0 {
+					fuelLevel = 0
 				}
 			}
-			if ev.starPos != nil {
-				p := *ev.starPos
-				prevPos = &p
+			if eventRow.starPosition != nil {
+				positionCopy := *eventRow.starPosition
+				prevPos = &positionCopy
 			}
-			out[ev.uid] = leg
+			legs[eventRow.eventUID] = leg
 			jumpsSinceStats++
-			pendingJump = ev.uid
+			pendingJump = eventRow.eventUID
 		}
 	}
-	return out, nil
+	return legs, nil
 }
 
 // MetricsFromStatistics maps a lifetime Statistics event onto Metrics for use
@@ -512,22 +514,22 @@ func (e *Engine) CarrierLegsRange(after, until string) (map[string]CarrierLeg, e
 // (Planets_Scanned_To_Level_2 and Planets_Scanned_To_Level_3 are pre-3.3
 // Horizons DSS scan level counters and are identical in modern journals), so
 // BodiesMapped is left 0 rather than duplicating BodiesScanned.
-func MetricsFromStatistics(s journal.StatisticsEvent) Metrics {
+func MetricsFromStatistics(statsEvent journal.StatisticsEvent) Metrics {
 	return Metrics{
-		DistanceLy:        s.Exploration.TotalHyperspaceDist,
-		ShipDistanceLy:    s.Exploration.TotalHyperspaceDist,
-		Jumps:             int(s.Exploration.TotalHyperspaceJumps),
-		BodiesScanned:     int(s.Exploration.PlanetsScannedToLevel3),
+		DistanceLy:        statsEvent.Exploration.TotalHyperspaceDist,
+		ShipDistanceLy:    statsEvent.Exploration.TotalHyperspaceDist,
+		Jumps:             int(statsEvent.Exploration.TotalHyperspaceJumps),
+		BodiesScanned:     int(statsEvent.Exploration.PlanetsScannedToLevel3),
 		BodiesMapped:      0,
-		ScanValueTotal:    int64(s.Exploration.ExplorationProfits),
-		ScanValueBase:     int64(s.Exploration.ExplorationProfits),
-		OrganicSamples:    int(s.Exobiology.OrganicData),
-		OrganicValueTotal: int64(s.Exobiology.OrganicDataProfits),
-		OrganicValueBase:  int64(s.Exobiology.OrganicDataProfits - s.Exobiology.FirstLoggedProfits),
-		OrganicValueBonus: int64(s.Exobiology.FirstLoggedProfits),
-		FirstLogged:       int(s.Exobiology.FirstLogged),
-		CarrierJumps:      int(s.FleetCarrierNumber("FLEETCARRIER_TOTAL_JUMPS")),
-		CarrierDistanceLy: s.FleetCarrierNumber("FLEETCARRIER_DISTANCE_TRAVELLED"),
+		ScanValueTotal:    int64(statsEvent.Exploration.ExplorationProfits),
+		ScanValueBase:     int64(statsEvent.Exploration.ExplorationProfits),
+		OrganicSamples:    int(statsEvent.Exobiology.OrganicData),
+		OrganicValueTotal: int64(statsEvent.Exobiology.OrganicDataProfits),
+		OrganicValueBase:  int64(statsEvent.Exobiology.OrganicDataProfits - statsEvent.Exobiology.FirstLoggedProfits),
+		OrganicValueBonus: int64(statsEvent.Exobiology.FirstLoggedProfits),
+		FirstLogged:       int(statsEvent.Exobiology.FirstLogged),
+		CarrierJumps:      int(statsEvent.FleetCarrierNumber("FLEETCARRIER_TOTAL_JUMPS")),
+		CarrierDistanceLy: statsEvent.FleetCarrierNumber("FLEETCARRIER_DISTANCE_TRAVELLED"),
 		TritiumUsed:       nil,
 	}
 }

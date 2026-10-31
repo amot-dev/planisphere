@@ -57,12 +57,12 @@ type CarrierStatsEvent struct {
 }
 
 // UsedCapacity returns occupied carrier capacity in tonnes.
-func (c CarrierStatsEvent) UsedCapacity() int {
-	u := c.SpaceUsage.TotalCapacity - c.SpaceUsage.FreeSpace
-	if u < 0 {
+func (statsEvent CarrierStatsEvent) UsedCapacity() int {
+	used := statsEvent.SpaceUsage.TotalCapacity - statsEvent.SpaceUsage.FreeSpace
+	if used < 0 {
 		return 0
 	}
-	return u
+	return used
 }
 
 // ScanEvent is an FSS / auto / detailed body scan.
@@ -84,8 +84,8 @@ type ScanEvent struct {
 }
 
 // IsBeltCluster reports whether the scan is of an asteroid belt cluster.
-func (s ScanEvent) IsBeltCluster() bool {
-	return strings.Contains(s.BodyName, "Belt Cluster") || (s.StarType == "" && s.PlanetClass == "")
+func (scanEvent ScanEvent) IsBeltCluster() bool {
+	return strings.Contains(scanEvent.BodyName, "Belt Cluster") || (scanEvent.StarType == "" && scanEvent.PlanetClass == "")
 }
 
 // SAAScanCompleteEvent is a completed DSS (surface probe) mapping.
@@ -160,36 +160,36 @@ type StatisticsEvent struct {
 
 // FleetCarrierNumber reads a numeric FLEETCARRIER statistic. Some of these are
 // written as strings with units (e.g. "1234 LY"), so parsing is lenient.
-func (s StatisticsEvent) FleetCarrierNumber(key string) float64 {
-	raw, ok := s.FleetCarrier[key]
+func (statsEvent StatisticsEvent) FleetCarrierNumber(key string) float64 {
+	raw, ok := statsEvent.FleetCarrier[key]
 	if !ok {
 		return 0
 	}
-	var f float64
-	if err := json.Unmarshal(raw, &f); err == nil {
-		return f
+	var numericValue float64
+	if unmarshalError := json.Unmarshal(raw, &numericValue); unmarshalError == nil {
+		return numericValue
 	}
-	var str string
-	if err := json.Unmarshal(raw, &str); err == nil {
-		return leadingNumber(str)
+	var stringValue string
+	if unmarshalError := json.Unmarshal(raw, &stringValue); unmarshalError == nil {
+		return leadingNumber(stringValue)
 	}
 	return 0
 }
 
-func leadingNumber(s string) float64 {
-	s = strings.TrimSpace(strings.ReplaceAll(s, ",", ""))
+func leadingNumber(rawString string) float64 {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(rawString, ",", ""))
 	end := 0
-	for end < len(s) && (s[end] == '.' || s[end] == '-' || (s[end] >= '0' && s[end] <= '9')) {
+	for end < len(trimmed) && (trimmed[end] == '.' || trimmed[end] == '-' || (trimmed[end] >= '0' && trimmed[end] <= '9')) {
 		end++
 	}
-	f, _ := strconv.ParseFloat(s[:end], 64)
-	return f
+	parsedNumber, _ := strconv.ParseFloat(trimmed[:end], 64)
+	return parsedNumber
 }
 
-// Vec returns the StarPos as (x, y, z) and whether it was present.
-func Vec(pos []float64) (x, y, z float64, ok bool) {
-	if len(pos) != 3 {
+// Vec returns the StarPos as (coordX, coordY, coordZ) and whether it was present.
+func Vec(positionCoords []float64) (coordX, coordY, coordZ float64, hasCoords bool) {
+	if len(positionCoords) != 3 {
 		return 0, 0, 0, false
 	}
-	return pos[0], pos[1], pos[2], true
+	return positionCoords[0], positionCoords[1], positionCoords[2], true
 }

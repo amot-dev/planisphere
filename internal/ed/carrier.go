@@ -9,10 +9,10 @@ type Vec3 struct {
 	Z float64 `json:"z"`
 }
 
-// Distance returns the 3D Euclidean distance between a and b.
-func Distance(a, b Vec3) float64 {
-	dx, dy, dz := b.X-a.X, b.Y-a.Y, b.Z-a.Z
-	return math.Sqrt(dx*dx + dy*dy + dz*dz)
+// Distance returns the 3D Euclidean distance between pointA and pointB.
+func Distance(pointA, pointB Vec3) float64 {
+	deltaX, deltaY, deltaZ := pointB.X-pointA.X, pointB.Y-pointA.Y, pointB.Z-pointA.Z
+	return math.Sqrt(deltaX*deltaX + deltaY*deltaY + deltaZ*deltaZ)
 }
 
 // Fleet carrier constants.

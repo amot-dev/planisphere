@@ -29,8 +29,8 @@ type Info struct {
 	Source        string   `json:"source"` // journal | edsm | notfound
 }
 
-// ErrNotFound is returned when no source knows the system.
-var ErrNotFound = errors.New("system not found")
+// ErrorNotFound is returned when no source knows the system.
+var ErrorNotFound = errors.New("system not found")
 
 // Resolver looks up systems.
 type Resolver struct {
@@ -44,9 +44,9 @@ type Resolver struct {
 }
 
 // NewResolver creates a resolver using the public EDSM API.
-func NewResolver(conn *sql.DB, online func() bool) *Resolver {
+func NewResolver(dbConn *sql.DB, online func() bool) *Resolver {
 	return &Resolver{
-		DB:         conn,
+		DB:         dbConn,
 		HTTP:       &http.Client{Timeout: 15 * time.Second},
 		EDSMBase:   "https://www.edsm.net",
 		Online:     online,
@@ -57,91 +57,91 @@ func NewResolver(conn *sql.DB, online func() bool) *Resolver {
 func key(name string) string { return strings.ToLower(strings.Join(strings.Fields(name), " ")) }
 
 // FromJournal finds the system's coordinates in the local archive.
-func FromJournal(q db.Queryer, name string) (*Info, error) {
-	var addr sql.NullInt64
-	var x, y, z float64
+func FromJournal(queryer db.Queryer, name string) (*Info, error) {
+	var addressVal sql.NullInt64
+	var starX, starY, starZ float64
 	var canonical string
-	err := q.QueryRow(`SELECT system_name, system_address, star_x, star_y, star_z FROM journal_events
+	queryError := queryer.QueryRow(`SELECT system_name, system_address, star_x, star_y, star_z FROM journal_events
 		WHERE system_name = ? COLLATE NOCASE AND star_x IS NOT NULL ORDER BY timestamp DESC LIMIT 1`, name).
-		Scan(&canonical, &addr, &x, &y, &z)
-	if errors.Is(err, sql.ErrNoRows) {
+		Scan(&canonical, &addressVal, &starX, &starY, &starZ)
+	if errors.Is(queryError, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	return &Info{Name: canonical, SystemAddress: addr.Int64, Pos: &ed.Vec3{X: x, Y: y, Z: z}, Source: "journal"}, nil
+	return &Info{Name: canonical, SystemAddress: addressVal.Int64, Pos: &ed.Vec3{X: starX, Y: starY, Z: starZ}, Source: "journal"}, nil
 }
 
-func (r *Resolver) fromCache(name string) (*Info, error) {
-	var in Info
-	var addr, edsm sql.NullInt64
-	var x, y, z sql.NullFloat64
-	err := r.DB.QueryRow(`SELECT system_name, system_address, edsm_id, x, y, z, source, fetched_at FROM system_cache WHERE name_key = ?`, key(name)).
-		Scan(&in.Name, &addr, &edsm, &x, &y, &z, &in.Source, new(string))
-	if errors.Is(err, sql.ErrNoRows) {
+func (resolver *Resolver) fromCache(name string) (*Info, error) {
+	var systemInfo Info
+	var addressVal, edsmVal sql.NullInt64
+	var xVal, yVal, zVal sql.NullFloat64
+	queryError := resolver.DB.QueryRow(`SELECT system_name, system_address, edsm_id, x, y, z, source, fetched_at FROM system_cache WHERE name_key = ?`, key(name)).
+		Scan(&systemInfo.Name, &addressVal, &edsmVal, &xVal, &yVal, &zVal, &systemInfo.Source, new(string))
+	if errors.Is(queryError, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	in.SystemAddress, in.EDSMID = addr.Int64, edsm.Int64
-	if x.Valid {
-		in.Pos = &ed.Vec3{X: x.Float64, Y: y.Float64, Z: z.Float64}
+	systemInfo.SystemAddress, systemInfo.EDSMID = addressVal.Int64, edsmVal.Int64
+	if xVal.Valid {
+		systemInfo.Pos = &ed.Vec3{X: xVal.Float64, Y: yVal.Float64, Z: zVal.Float64}
 	}
-	return &in, nil
+	return &systemInfo, nil
 }
 
-func (r *Resolver) store(name string, in *Info) {
-	var x, y, z, addr, edsm any
-	if in.Pos != nil {
-		x, y, z = in.Pos.X, in.Pos.Y, in.Pos.Z
+func (resolver *Resolver) store(name string, systemInfo *Info) {
+	var xCoord, yCoord, zCoord, addressVal, edsmIDVal any
+	if systemInfo.Pos != nil {
+		xCoord, yCoord, zCoord = systemInfo.Pos.X, systemInfo.Pos.Y, systemInfo.Pos.Z
 	}
-	if in.SystemAddress != 0 {
-		addr = in.SystemAddress
+	if systemInfo.SystemAddress != 0 {
+		addressVal = systemInfo.SystemAddress
 	}
-	if in.EDSMID != 0 {
-		edsm = in.EDSMID
+	if systemInfo.EDSMID != 0 {
+		edsmIDVal = systemInfo.EDSMID
 	}
-	_, _ = r.DB.Exec(`INSERT INTO system_cache(name_key, system_name, system_address, edsm_id, x, y, z, source, fetched_at)
+	_, _ = resolver.DB.Exec(`INSERT INTO system_cache(name_key, system_name, system_address, edsm_id, x, y, z, source, fetched_at)
 		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(name_key) DO UPDATE SET system_name=excluded.system_name,
 		system_address=excluded.system_address, edsm_id=excluded.edsm_id, x=excluded.x, y=excluded.y, z=excluded.z,
 		source=excluded.source, fetched_at=excluded.fetched_at`,
-		key(name), in.Name, addr, edsm, x, y, z, in.Source, ed.NowISO())
+		key(name), systemInfo.Name, addressVal, edsmIDVal, xCoord, yCoord, zCoord, systemInfo.Source, ed.NowISO())
 }
 
 // Resolve looks a system up (journal -> cache -> EDSM).
-func (r *Resolver) Resolve(ctx context.Context, name string) (*Info, error) {
+func (resolver *Resolver) Resolve(ctx context.Context, name string) (*Info, error) {
 	name = strings.Join(strings.Fields(name), " ")
 	if name == "" {
-		return nil, ErrNotFound
+		return nil, ErrorNotFound
 	}
-	if in, err := FromJournal(r.DB, name); err != nil || in != nil {
-		if in != nil {
+	if journalInfo, journalError := FromJournal(resolver.DB, name); journalError != nil || journalInfo != nil {
+		if journalInfo != nil {
 			// Enrich with a cached EDSM id when available.
-			if c, _ := r.fromCache(name); c != nil && c.EDSMID != 0 {
-				in.EDSMID = c.EDSMID
+			if cachedInfo, _ := resolver.fromCache(name); cachedInfo != nil && cachedInfo.EDSMID != 0 {
+				journalInfo.EDSMID = cachedInfo.EDSMID
 			}
 		}
-		return in, err
+		return journalInfo, journalError
 	}
-	if c, err := r.fromCache(name); err != nil {
-		return nil, err
-	} else if c != nil && c.Pos != nil {
-		return c, nil
+	if cachedInfo, cacheError := resolver.fromCache(name); cacheError != nil {
+		return nil, cacheError
+	} else if cachedInfo != nil && cachedInfo.Pos != nil {
+		return cachedInfo, nil
 	}
-	if r.Online != nil && !r.Online() {
-		return nil, fmt.Errorf("%w (online lookups disabled)", ErrNotFound)
+	if resolver.Online != nil && !resolver.Online() {
+		return nil, fmt.Errorf("%w (online lookups disabled)", ErrorNotFound)
 	}
-	in, err := r.fetchEDSM(ctx, name)
-	if err != nil {
-		return nil, err
+	edsmInfo, edsmError := resolver.fetchEDSM(ctx, name)
+	if edsmError != nil {
+		return nil, edsmError
 	}
-	r.store(name, in)
-	if in.Pos == nil {
-		return in, ErrNotFound
+	resolver.store(name, edsmInfo)
+	if edsmInfo.Pos == nil {
+		return edsmInfo, ErrorNotFound
 	}
-	return in, nil
+	return edsmInfo, nil
 }
 
 type edsmSystem struct {
@@ -155,16 +155,16 @@ type edsmSystem struct {
 	} `json:"coords"`
 }
 
-func (r *Resolver) fetchEDSM(ctx context.Context, name string) (*Info, error) {
+func (resolver *Resolver) fetchEDSM(ctx context.Context, name string) (*Info, error) {
 	// EDSM's public API enforces rate limits (~2 requests/sec). We space consecutive requests
 	// by minSpacing (500ms) to prevent HTTP 429 throttling or temporary IP bans.
-	r.mu.Lock()
-	wait := r.minSpacing - time.Since(r.lastCall)
+	resolver.mu.Lock()
+	wait := resolver.minSpacing - time.Since(resolver.lastCall)
 	if wait < 0 {
 		wait = 0
 	}
-	r.lastCall = time.Now().Add(wait)
-	r.mu.Unlock()
+	resolver.lastCall = time.Now().Add(wait)
+	resolver.mu.Unlock()
 
 	if wait > 0 {
 		select {
@@ -174,40 +174,40 @@ func (r *Resolver) fetchEDSM(ctx context.Context, name string) (*Info, error) {
 		}
 	}
 
-	u := fmt.Sprintf("%s/api-v1/system?systemName=%s&showCoordinates=1&showId=1", r.EDSMBase, url.QueryEscape(name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
+	requestURL := fmt.Sprintf("%s/api-v1/system?systemName=%s&showCoordinates=1&showId=1", resolver.EDSMBase, url.QueryEscape(name))
+	httpRequest, requestError := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if requestError != nil {
+		return nil, requestError
 	}
-	req.Header.Set("User-Agent", version.UserAgent)
-	resp, err := r.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("EDSM request failed: %w", err)
+	httpRequest.Header.Set("User-Agent", version.UserAgent)
+	httpResponse, httpError := resolver.HTTP.Do(httpRequest)
+	if httpError != nil {
+		return nil, fmt.Errorf("EDSM request failed: %w", httpError)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("EDSM returned HTTP %d", resp.StatusCode)
+	defer httpResponse.Body.Close()
+	if httpResponse.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("EDSM returned HTTP %d", httpResponse.StatusCode)
 	}
-	var raw json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("EDSM decode: %w", err)
+	var rawPayload json.RawMessage
+	if decodeError := json.NewDecoder(httpResponse.Body).Decode(&rawPayload); decodeError != nil {
+		return nil, fmt.Errorf("EDSM decode: %w", decodeError)
 	}
 	// Unknown systems are returned as an empty array "[]".
-	if t := strings.TrimSpace(string(raw)); t == "[]" || t == "{}" {
+	if trimmedPayload := strings.TrimSpace(string(rawPayload)); trimmedPayload == "[]" || trimmedPayload == "{}" {
 		return &Info{Name: name, Source: "notfound"}, nil
 	}
-	var s edsmSystem
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("EDSM decode: %w", err)
+	var parsedSystem edsmSystem
+	if unmarshalError := json.Unmarshal(rawPayload, &parsedSystem); unmarshalError != nil {
+		return nil, fmt.Errorf("EDSM decode: %w", unmarshalError)
 	}
-	in := &Info{Name: html.UnescapeString(s.Name), SystemAddress: s.ID64, EDSMID: s.ID, Source: "edsm"}
-	if in.Name == "" {
-		in.Name = name
+	resolvedInfo := &Info{Name: html.UnescapeString(parsedSystem.Name), SystemAddress: parsedSystem.ID64, EDSMID: parsedSystem.ID, Source: "edsm"}
+	if resolvedInfo.Name == "" {
+		resolvedInfo.Name = name
 	}
-	if s.Coords != nil {
-		in.Pos = &ed.Vec3{X: s.Coords.X, Y: s.Coords.Y, Z: s.Coords.Z}
+	if parsedSystem.Coords != nil {
+		resolvedInfo.Pos = &ed.Vec3{X: parsedSystem.Coords.X, Y: parsedSystem.Coords.Y, Z: parsedSystem.Coords.Z}
 	} else {
-		in.Source = "notfound"
+		resolvedInfo.Source = "notfound"
 	}
-	return in, nil
+	return resolvedInfo, nil
 }

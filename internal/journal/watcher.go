@@ -15,55 +15,55 @@ import (
 // a safety net for platforms/filesystems (Proton, network shares, Windows
 // buffered writes) where change notifications are unreliable.
 type Watcher struct {
-	ing     *Ingester
-	onBatch func(Result)
+	ingester *Ingester
+	onBatch  func(Result)
 
 	mu      sync.Mutex
 	dir     string
 	cancel  context.CancelFunc
-	active  bool
-	lastErr string
+	active    bool
+	lastError string
 }
 
 // NewWatcher creates a watcher. onBatch is invoked (from the watcher
 // goroutine) after every ingestion pass that inserted new events.
-func NewWatcher(ing *Ingester, onBatch func(Result)) *Watcher {
-	return &Watcher{ing: ing, onBatch: onBatch}
+func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
+	return &Watcher{ingester: ingester, onBatch: onBatch}
 }
 
 // Active reports whether fsnotify is currently watching the directory.
-func (w *Watcher) Active() (bool, string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.active, w.lastErr
+func (watcher *Watcher) Active() (bool, string) {
+	watcher.mu.Lock()
+	defer watcher.mu.Unlock()
+	return watcher.active, watcher.lastError
 }
 
 // Start (re)starts watching dir. Any previous watch is stopped.
-func (w *Watcher) Start(parent context.Context, dir string) {
-	w.Stop()
+func (watcher *Watcher) Start(parent context.Context, dir string) {
+	watcher.Stop()
 	ctx, cancel := context.WithCancel(parent)
-	w.mu.Lock()
-	w.dir = dir
-	w.cancel = cancel
-	w.mu.Unlock()
-	go w.run(ctx, dir)
+	watcher.mu.Lock()
+	watcher.dir = dir
+	watcher.cancel = cancel
+	watcher.mu.Unlock()
+	go watcher.run(ctx, dir)
 }
 
 // Stop stops watching.
-func (w *Watcher) Stop() {
-	w.mu.Lock()
-	if w.cancel != nil {
-		w.cancel()
-		w.cancel = nil
+func (watcher *Watcher) Stop() {
+	watcher.mu.Lock()
+	if watcher.cancel != nil {
+		watcher.cancel()
+		watcher.cancel = nil
 	}
-	w.active = false
-	w.mu.Unlock()
+	watcher.active = false
+	watcher.mu.Unlock()
 }
 
-func (w *Watcher) setActive(active bool, errMsg string) {
-	w.mu.Lock()
-	w.active, w.lastErr = active, errMsg
-	w.mu.Unlock()
+func (watcher *Watcher) setActive(active bool, errorMessage string) {
+	watcher.mu.Lock()
+	watcher.active, watcher.lastError = active, errorMessage
+	watcher.mu.Unlock()
 }
 
 const (
@@ -71,33 +71,33 @@ const (
 	pollInterval  = 3 * time.Second
 )
 
-func (w *Watcher) run(ctx context.Context, dir string) {
-	var fw *fsnotify.Watcher
-	var events <-chan fsnotify.Event
-	var errs <-chan error
+func (watcher *Watcher) run(ctx context.Context, dir string) {
+	var fsWatcher *fsnotify.Watcher
+	var fsEvents <-chan fsnotify.Event
+	var errorChan <-chan error
 
 	tryWatch := func() {
-		if fw != nil || !DirExists(dir) {
+		if fsWatcher != nil || !DirExists(dir) {
 			return
 		}
-		nw, err := fsnotify.NewWatcher()
-		if err != nil {
-			w.setActive(false, err.Error())
+		newWatcher, watcherError := fsnotify.NewWatcher()
+		if watcherError != nil {
+			watcher.setActive(false, watcherError.Error())
 			return
 		}
-		if err := nw.Add(dir); err != nil {
-			nw.Close()
-			w.setActive(false, err.Error())
+		if addError := newWatcher.Add(dir); addError != nil {
+			newWatcher.Close()
+			watcher.setActive(false, addError.Error())
 			return
 		}
-		fw, events, errs = nw, nw.Events, nw.Errors
-		w.setActive(true, "")
+		fsWatcher, fsEvents, errorChan = newWatcher, newWatcher.Events, newWatcher.Errors
+		watcher.setActive(true, "")
 	}
 	defer func() {
-		if fw != nil {
-			fw.Close()
+		if fsWatcher != nil {
+			fsWatcher.Close()
 		}
-		w.setActive(false, "")
+		watcher.setActive(false, "")
 	}()
 
 	tryWatch()
@@ -109,15 +109,15 @@ func (w *Watcher) run(ctx context.Context, dir string) {
 
 	flush := func(paths []string) {
 		var total Result
-		for _, p := range paths {
-			r, err := w.ing.IngestFile(p)
-			if err != nil {
-				log.Printf("journal: ingest %s: %v", filepath.Base(p), err)
+		for _, path := range paths {
+			fileResult, ingestError := watcher.ingester.IngestFile(path)
+			if ingestError != nil {
+				log.Printf("journal: ingest %s: %v", filepath.Base(path), ingestError)
 			}
-			total.merge(r)
+			total.merge(fileResult)
 		}
-		if len(total.NewEvents) > 0 && w.onBatch != nil {
-			w.onBatch(total)
+		if len(total.NewEvents) > 0 && watcher.onBatch != nil {
+			watcher.onBatch(total)
 		}
 	}
 
@@ -125,31 +125,31 @@ func (w *Watcher) run(ctx context.Context, dir string) {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-events:
+		case fsEvent, ok := <-fsEvents:
 			if !ok {
-				fw, events, errs = nil, nil, nil
-				w.setActive(false, "watcher closed")
+				fsWatcher, fsEvents, errorChan = nil, nil, nil
+				watcher.setActive(false, "watcher closed")
 				continue
 			}
-			if IsJournalFile(ev.Name) && ev.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-				pending[ev.Name] = true
+			if IsJournalFile(fsEvent.Name) && fsEvent.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+				pending[fsEvent.Name] = true
 				debounce.Reset(debounceDelay)
 			}
-		case err, ok := <-errs:
-			if ok && err != nil {
-				log.Printf("journal: watcher error: %v", err)
+		case watchError, ok := <-errorChan:
+			if ok && watchError != nil {
+				log.Printf("journal: watcher error: %v", watchError)
 			}
 		case <-debounce.C:
 			paths := make([]string, 0, len(pending))
-			for p := range pending {
-				paths = append(paths, p)
+			for path := range pending {
+				paths = append(paths, path)
 			}
 			pending = map[string]bool{}
 			flush(paths)
 		case <-poll.C:
 			tryWatch()
-			files, err := ListJournalFiles(dir)
-			if err != nil || len(files) == 0 {
+			files, listError := ListJournalFiles(dir)
+			if listError != nil || len(files) == 0 {
 				continue
 			}
 			// The newest journal (and the previous one, in case the game

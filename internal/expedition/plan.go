@@ -81,329 +81,332 @@ type PlanView struct {
 // GECLookup resolves GEC entries for a system.
 type GECLookup func(systemName string, systemAddress int64) *GECRef
 
-// ShipChange is one ship switch.
+// shipState is one ship switch.
 type shipState struct {
-	at   string
-	id   int64
-	name string
+	timestamp string
+	id        int64
+	name      string
 }
 
-func loadShipTimeline(q db.Queryer) ([]shipState, error) {
-	rs, err := q.Query(`SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp, id`)
-	if err != nil {
-		return nil, err
+func loadShipTimeline(queryer db.Queryer) ([]shipState, error) {
+	rows, queryError := queryer.Query(`SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp, id`)
+	if queryError != nil {
+		return nil, queryError
 	}
-	defer rs.Close()
-	var out []shipState
-	for rs.Next() {
-		var ts, ev, raw string
-		if err := rs.Scan(&ts, &ev, &raw); err != nil {
-			return nil, err
+	defer rows.Close()
+	var states []shipState
+	for rows.Next() {
+		var timestamp, eventType, rawJSON string
+		if scanError := rows.Scan(&timestamp, &eventType, &rawJSON); scanError != nil {
+			return nil, scanError
 		}
-		var s shipState
-		s.at = ts
-		switch ev {
+		var state shipState
+		state.timestamp = timestamp
+		switch eventType {
 		case "LoadGame":
-			var lg journal.LoadGameEvent
-			if json.Unmarshal([]byte(raw), &lg) != nil || lg.Ship == "" || !isShip(lg.Ship) {
+			var loadGameEvent journal.LoadGameEvent
+			if json.Unmarshal([]byte(rawJSON), &loadGameEvent) != nil || loadGameEvent.Ship == "" || !isShip(loadGameEvent.Ship) {
 				continue
 			}
-			s.id, s.name = lg.ShipID, ed.ShipDisplayName(lg.Ship, lg.ShipLocalised)
+			state.id, state.name = loadGameEvent.ShipID, ed.ShipDisplayName(loadGameEvent.Ship, loadGameEvent.ShipLocalised)
 		case "ShipyardSwap":
-			var sw journal.ShipyardSwapEvent
-			if json.Unmarshal([]byte(raw), &sw) != nil || sw.ShipType == "" {
+			var swapEvent journal.ShipyardSwapEvent
+			if json.Unmarshal([]byte(rawJSON), &swapEvent) != nil || swapEvent.ShipType == "" {
 				continue
 			}
-			s.id, s.name = sw.ShipID, ed.ShipDisplayName(sw.ShipType, sw.ShipTypeLocalised)
+			state.id, state.name = swapEvent.ShipID, ed.ShipDisplayName(swapEvent.ShipType, swapEvent.ShipTypeLocalised)
 		}
-		out = append(out, s)
+		states = append(states, state)
 	}
-	return out, rs.Err()
+	return states, rows.Err()
 }
 
 // isShip filters out on-foot suits, SRVs and fighters reported by LoadGame.
 func isShip(internal string) bool {
-	l := strings.ToLower(internal)
-	return !strings.Contains(l, "suit") && !strings.Contains(l, "buggy") && !strings.Contains(l, "srv") &&
-		!strings.Contains(l, "fighter")
+	lower := strings.ToLower(internal)
+	return !strings.Contains(lower, "suit") && !strings.Contains(lower, "buggy") && !strings.Contains(lower, "srv") &&
+		!strings.Contains(lower, "fighter")
 }
 
-func shipAt(tl []shipState, ts string) *shipState {
-	i := sort.Search(len(tl), func(i int) bool { return tl[i].at > ts }) - 1
-	if i < 0 {
+func shipAt(timeline []shipState, timestamp string) *shipState {
+	segmentIndex := sort.Search(len(timeline), func(i int) bool { return timeline[i].timestamp > timestamp }) - 1
+	if segmentIndex < 0 {
 		return nil
 	}
-	return &tl[i]
+	return &timeline[segmentIndex]
 }
 
-func loadJumpTimestamps(q db.Queryer, after string) ([]string, error) {
-	rs, err := q.Query(`SELECT timestamp FROM journal_events WHERE event = 'FSDJump' AND timestamp >= ? AND `+journal.CmdrFilterSQL+` ORDER BY timestamp, id`, after)
-	if err != nil {
-		return nil, err
+func loadJumpTimestamps(queryer db.Queryer, after string) ([]string, error) {
+	rows, queryError := queryer.Query(`SELECT timestamp FROM journal_events WHERE event = 'FSDJump' AND timestamp >= ? AND `+journal.CmdrFilterSQL+` ORDER BY timestamp, id`, after)
+	if queryError != nil {
+		return nil, queryError
 	}
-	defer rs.Close()
-	var out []string
-	for rs.Next() {
-		var ts string
-		if err := rs.Scan(&ts); err != nil {
-			return nil, err
+	defer rows.Close()
+	var timestamps []string
+	for rows.Next() {
+		var timestamp string
+		if scanError := rows.Scan(&timestamp); scanError != nil {
+			return nil, scanError
 		}
-		out = append(out, ts)
+		timestamps = append(timestamps, timestamp)
 	}
-	return out, rs.Err()
+	return timestamps, rows.Err()
 }
 
-func shipsUsedOnLeg(tl []shipState, jumps []string, after, until string) []Transition {
-	var out []Transition
+func shipsUsedOnLeg(timeline []shipState, jumps []string, after, until string) []Transition {
+	var transitions []Transition
 	seen := map[string]bool{}
-	startIdx := sort.Search(len(jumps), func(i int) bool { return jumps[i] > after })
-	for i := startIdx; i < len(jumps); i++ {
-		ts := jumps[i]
-		if ts > until {
+	startIndex := sort.Search(len(jumps), func(i int) bool { return jumps[i] > after })
+	for i := startIndex; i < len(jumps); i++ {
+		jumpTimestamp := jumps[i]
+		if jumpTimestamp > until {
 			break
 		}
-		s := shipAt(tl, ts)
-		if s == nil || s.name == "" || seen[s.name] {
+		state := shipAt(timeline, jumpTimestamp)
+		if state == nil || state.name == "" || seen[state.name] {
 			continue
 		}
-		seen[s.name] = true
-		out = append(out, Transition{
+		seen[state.name] = true
+		transitions = append(transitions, Transition{
 			Kind:       "ship",
-			At:         ts,
-			AtGalactic: ed.ToGalactic(ts),
-			To:         s.name,
+			At:         jumpTimestamp,
+			AtGalactic: ed.ToGalactic(jumpTimestamp),
+			To:         state.name,
 		})
 	}
-	return out
+	return transitions
 }
 
 
 // BuildPlan assembles the planner view for an expedition.
-func BuildPlan(q db.Queryer, expID int64, gec GECLookup) (PlanView, error) {
-	e, err := Get(q, expID)
-	if err != nil {
-		return PlanView{}, err
+func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (PlanView, error) {
+	expeditionRecord, getExpeditionError := Get(queryer, expeditionID)
+	if getExpeditionError != nil {
+		return PlanView{}, getExpeditionError
 	}
-	rows, err := ListRows(q, expID)
-	if err != nil {
-		return PlanView{}, err
+	rows, rowsError := ListRows(queryer, expeditionID)
+	if rowsError != nil {
+		return PlanView{}, rowsError
 	}
-	pv := PlanView{Expedition: e, StartGalactic: ed.ToGalactic(e.StartTimestamp), EndGalactic: ed.ToGalactic(e.EndTimestamp)}
+	planView := PlanView{Expedition: expeditionRecord, StartGalactic: ed.ToGalactic(expeditionRecord.StartTimestamp), EndGalactic: ed.ToGalactic(expeditionRecord.EndTimestamp)}
 
 	// Current waypoint = visited waypoint with the latest visit time.
-	var current *Row
+	var currentWaypoint *Row
 	for i := range rows {
-		r := &rows[i]
-		if r.IsWaypoint() && r.VisitedAt != "" && (current == nil || r.VisitedAt > current.VisitedAt) {
-			current = r
+		rowItem := &rows[i]
+		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && (currentWaypoint == nil || rowItem.VisitedAt > currentWaypoint.VisitedAt) {
+			currentWaypoint = rowItem
 		}
 	}
-	if current != nil {
-		pv.CurrentRowID = current.ID
+	if currentWaypoint != nil {
+		planView.CurrentRowID = currentWaypoint.ID
 	}
 
-	var shipTL []shipState
-	var jumpTS []string
-	modeTL, err := modes.LoadTimeline(q)
-	if err != nil {
-		return pv, err
+	var shipTimeline []shipState
+	var jumpTimestamps []string
+	modeTimeline, modeError := modes.LoadTimeline(queryer)
+	if modeError != nil {
+		return planView, modeError
 	}
-	ms, err := modes.List(q)
-	if err != nil {
-		return pv, err
+	modeList, listError := modes.List(queryer)
+	if listError != nil {
+		return planView, listError
 	}
-	pv.Modes = ms
+	planView.Modes = modeList
 	modeByID := map[int64]modes.Mode{}
-	for _, m := range ms {
-		modeByID[m.ID] = m
+	for _, modeItem := range modeList {
+		modeByID[modeItem.ID] = modeItem
 	}
-	defaultModeID := modes.DefaultFallbackModeID(q)
+	defaultModeID := modes.DefaultFallbackModeID(queryer)
 	resolveMode := func(id int64) (int64, string, string) {
-		if m, ok := modeByID[id]; ok {
-			return m.ID, m.Name, m.Color
+		if modeItem, ok := modeByID[id]; ok {
+			return modeItem.ID, modeItem.Name, modeItem.Color
 		}
-		if m, ok := modeByID[defaultModeID]; ok {
-			return m.ID, m.Name, m.Color
+		if modeItem, ok := modeByID[defaultModeID]; ok {
+			return modeItem.ID, modeItem.Name, modeItem.Color
 		}
-		if len(ms) > 0 {
-			return ms[0].ID, ms[0].Name, ms[0].Color
+		if len(modeList) > 0 {
+			return modeList[0].ID, modeList[0].Name, modeList[0].Color
 		}
 		return 0, "Travel", "#FF7100"
 	}
 
-	if e.StartTimestamp != "" {
-		if shipTL, err = loadShipTimeline(q); err != nil {
-			return pv, err
+	if expeditionRecord.StartTimestamp != "" {
+		var shipError, jumpError error
+		if shipTimeline, shipError = loadShipTimeline(queryer); shipError != nil {
+			return planView, shipError
 		}
-		if jumpTS, err = loadJumpTimestamps(q, e.StartTimestamp); err != nil {
-			return pv, err
+		if jumpTimestamps, jumpError = loadJumpTimestamps(queryer, expeditionRecord.StartTimestamp); jumpError != nil {
+			return planView, jumpError
 		}
 	}
 
 	// Visited waypoints sorted by visit time for leg transitions.
 	prevVisit := map[int64]string{}
 	var visited []Row
-	for _, r := range rows {
-		if r.IsWaypoint() && r.VisitedAt != "" {
-			visited = append(visited, r)
+	for _, rowItem := range rows {
+		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" {
+			visited = append(visited, rowItem)
 		}
 	}
-	sort.SliceStable(visited, func(i, j int) bool { return visited[i].VisitedAt < visited[j].VisitedAt })
+	sort.SliceStable(visited, func(firstIndex, secondIndex int) bool {
+		return visited[firstIndex].VisitedAt < visited[secondIndex].VisitedAt
+	})
 	for i := 1; i < len(visited); i++ {
 		prevVisit[visited[i].ID] = visited[i-1].VisitedAt
 	}
 
-	num := 0
-	var prevWP *Row
-	var curPos *ed.Vec3
-	if current != nil && current.HasCoords {
-		p, _ := current.Coords()
-		curPos = &p
+	waypointNumber := 0
+	var prevWaypoint *Row
+	var currentPos *ed.Vec3
+	if currentWaypoint != nil && currentWaypoint.HasCoords {
+		coords, _ := currentWaypoint.Coords()
+		currentPos = &coords
 	}
 	for i := range rows {
-		r := rows[i]
-		v := RowView{Row: r, Transitions: []Transition{}}
-		if r.RowType == RowRegion {
-			if reg, ok := ed.RegionByID(r.RegionID); ok {
-				v.RegionName = reg.Name
+		rowItem := rows[i]
+		rowViewItem := RowView{Row: rowItem, Transitions: []Transition{}}
+		if rowItem.RowType == RowRegion {
+			if region, ok := ed.RegionByID(rowItem.RegionID); ok {
+				rowViewItem.RegionName = region.Name
 			}
-			pv.Rows = append(pv.Rows, v)
+			planView.Rows = append(planView.Rows, rowViewItem)
 			continue
 		}
-		num++
-		pv.WaypointCount++
-		v.Number = num
-		if r.FCStop && !r.FCArrived && pv.NextFCStopRowID == 0 {
-			pv.NextFCStopRowID = r.ID
+		waypointNumber++
+		planView.WaypointCount++
+		rowViewItem.Number = waypointNumber
+		if rowItem.FCStop && !rowItem.FCArrived && planView.NextFCStopRowID == 0 {
+			planView.NextFCStopRowID = rowItem.ID
 		}
-		if r.HasCoords {
-			if reg, ok := ed.RegionAt(r.X, r.Y, r.Z); ok {
-				v.DetectedRegionID, v.DetectedRegion = reg.ID, reg.Name
+		if rowItem.HasCoords {
+			if region, ok := ed.RegionAt(rowItem.X, rowItem.Y, rowItem.Z); ok {
+				rowViewItem.DetectedRegionID, rowViewItem.DetectedRegion = region.ID, region.Name
 			}
 		}
 		switch {
-		case current != nil && r.ID == current.ID:
-			v.VisitState = VisitCurrent
-		case r.VisitedAt != "":
-			v.VisitState = VisitVisited
+		case currentWaypoint != nil && rowItem.ID == currentWaypoint.ID:
+			rowViewItem.VisitState = VisitCurrent
+		case rowItem.VisitedAt != "":
+			rowViewItem.VisitState = VisitVisited
 		default:
-			v.VisitState = VisitFuture
+			rowViewItem.VisitState = VisitFuture
 		}
-		if r.VisitedAt != "" {
-			pv.VisitedCount++
-			v.VisitedAtGalactic = ed.ToGalactic(r.VisitedAt)
-			if after, ok := prevVisit[r.ID]; ok && shipTL != nil {
-				v.Transitions = shipsUsedOnLeg(shipTL, jumpTS, after, r.VisitedAt)
-				mID := r.LegModeID
-				if mID == 0 && modeTL != nil {
-					mID = modeTL.ModeAt(r.VisitedAt)
+		if rowItem.VisitedAt != "" {
+			planView.VisitedCount++
+			rowViewItem.VisitedAtGalactic = ed.ToGalactic(rowItem.VisitedAt)
+			if after, ok := prevVisit[rowItem.ID]; ok && shipTimeline != nil {
+				rowViewItem.Transitions = shipsUsedOnLeg(shipTimeline, jumpTimestamps, after, rowItem.VisitedAt)
+				modeID := rowItem.LegModeID
+				if modeID == 0 && modeTimeline != nil {
+					modeID = modeTimeline.ModeAt(rowItem.VisitedAt)
 				}
-				v.LegModeID, v.LegModeName, v.LegModeColor = resolveMode(mID)
+				rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = resolveMode(modeID)
 			}
-		} else if num > 1 && r.LegModeID > 0 {
-			v.LegModeID, v.LegModeName, v.LegModeColor = resolveMode(r.LegModeID)
+		} else if waypointNumber > 1 && rowItem.LegModeID > 0 {
+			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = resolveMode(rowItem.LegModeID)
 		}
-		if prevWP != nil && prevWP.HasCoords && r.HasCoords {
-			a, _ := prevWP.Coords()
-			b, _ := r.Coords()
-			d := ed.Distance(a, b)
-			v.DistFromPrevLy = &d
-			pv.PlannedLy += d
-			if r.VisitedAt == "" {
-				pv.RemainingLy += d
+		if prevWaypoint != nil && prevWaypoint.HasCoords && rowItem.HasCoords {
+			startPos, _ := prevWaypoint.Coords()
+			endPos, _ := rowItem.Coords()
+			dist := ed.Distance(startPos, endPos)
+			rowViewItem.DistFromPrevLy = &dist
+			planView.PlannedLy += dist
+			if rowItem.VisitedAt == "" {
+				planView.RemainingLy += dist
 			}
 		}
-		if r.VisitedAt == "" && curPos != nil && r.HasCoords {
-			b, _ := r.Coords()
-			d := ed.Distance(*curPos, b)
-			v.DistFromCurrentLy = &d
+		if rowItem.VisitedAt == "" && currentPos != nil && rowItem.HasCoords {
+			endPos, _ := rowItem.Coords()
+			dist := ed.Distance(*currentPos, endPos)
+			rowViewItem.DistFromCurrentLy = &dist
 		}
-		if gec != nil && r.SystemName != "" {
-			v.GEC = gec(r.SystemName, r.SystemAddress)
+		if gecLookup != nil && rowItem.SystemName != "" {
+			rowViewItem.GEC = gecLookup(rowItem.SystemName, rowItem.SystemAddress)
 		}
-		rr := r
-		prevWP = &rr
-		pv.Rows = append(pv.Rows, v)
+		rowCopy := rowItem
+		prevWaypoint = &rowCopy
+		planView.Rows = append(planView.Rows, rowViewItem)
 	}
-	if pv.Rows == nil {
-		pv.Rows = []RowView{}
+	if planView.Rows == nil {
+		planView.Rows = []RowView{}
 	}
-	pv.PendingTransitions = []Transition{}
-	if current != nil && shipTL != nil {
-		until := e.EndTimestamp
+	planView.PendingTransitions = []Transition{}
+	if currentWaypoint != nil && shipTimeline != nil {
+		until := expeditionRecord.EndTimestamp
 		if until == "" {
 			until = ed.NowISO()
 		}
-		pv.PendingTransitions = shipsUsedOnLeg(shipTL, jumpTS, current.VisitedAt, until)
-		mID := modeTL.ModeAt(until)
-		pv.ActiveModeID, pv.ActiveModeName, pv.ActiveModeColor = resolveMode(mID)
+		planView.PendingTransitions = shipsUsedOnLeg(shipTimeline, jumpTimestamps, currentWaypoint.VisitedAt, until)
+		modeID := modeTimeline.ModeAt(until)
+		planView.ActiveModeID, planView.ActiveModeName, planView.ActiveModeColor = resolveMode(modeID)
 	} else {
-		pv.ActiveModeID, pv.ActiveModeName, pv.ActiveModeColor = resolveMode(modeTL.ModeAt(ed.NowISO()))
+		planView.ActiveModeID, planView.ActiveModeName, planView.ActiveModeColor = resolveMode(modeTimeline.ModeAt(ed.NowISO()))
 	}
-	return pv, nil
+	return planView, nil
 }
 
-func addOneSecond(iso string) string {
-	t, err := ed.ParseISO(iso)
-	if err != nil {
-		return iso
+func addOneSecond(isoTimestamp string) string {
+	parsedTime, parseError := ed.ParseISO(isoTimestamp)
+	if parseError != nil {
+		return isoTimestamp
 	}
-	return t.Add(time.Second).UTC().Format("2006-01-02T15:04:05Z")
+	return parsedTime.Add(time.Second).UTC().Format("2006-01-02T15:04:05Z")
 }
 
 // SetLegMode updates the single mode assigned to the leg arriving at rowID.
 // When the waypoint has been visited (after a previous visited waypoint), it
 // also updates the corresponding time window (prevVisit, rowVisit] in mode_windows
 // so filtered expedition and all-time stats immediately reflect the change.
-func SetLegMode(tx *sql.Tx, rowID int64, modeID int64) (int64, error) {
-	r, err := GetRow(tx, rowID)
-	if err != nil {
-		return 0, err
+func SetLegMode(transaction *sql.Tx, rowID int64, modeID int64) (int64, error) {
+	targetRow, rowError := GetRow(transaction, rowID)
+	if rowError != nil {
+		return 0, rowError
 	}
-	if _, err := UpdateRow(tx, RowPatch{ID: rowID, LegModeID: &modeID}); err != nil {
-		return 0, err
+	if _, updateError := UpdateRow(transaction, RowPatch{ID: rowID, LegModeID: &modeID}); updateError != nil {
+		return 0, updateError
 	}
-	if r.VisitedAt != "" {
-		rows, err := ListRows(tx, r.ExpeditionID)
-		if err != nil {
-			return r.ExpeditionID, err
+	if targetRow.VisitedAt != "" {
+		rows, listError := ListRows(transaction, targetRow.ExpeditionID)
+		if listError != nil {
+			return targetRow.ExpeditionID, listError
 		}
-		prevTS := ""
-		for _, cand := range rows {
-			if cand.IsWaypoint() && cand.VisitedAt != "" && cand.VisitedAt < r.VisitedAt && cand.VisitedAt > prevTS {
-				prevTS = cand.VisitedAt
+		prevTimestamp := ""
+		for _, candidateRow := range rows {
+			if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt < targetRow.VisitedAt && candidateRow.VisitedAt > prevTimestamp {
+				prevTimestamp = candidateRow.VisitedAt
 			}
 		}
-		if prevTS != "" {
-			startISO := addOneSecond(prevTS)
-			endISO := addOneSecond(r.VisitedAt)
+		if prevTimestamp != "" {
+			startISO := addOneSecond(prevTimestamp)
+			endISO := addOneSecond(targetRow.VisitedAt)
 			if endISO > startISO {
-				if err := modes.SetWindow(tx, 0, modeID, startISO, endISO); err != nil {
-					return r.ExpeditionID, err
+				if windowError := modes.SetWindow(transaction, 0, modeID, startISO, endISO); windowError != nil {
+					return targetRow.ExpeditionID, windowError
 				}
 			}
 		}
 	}
-	return r.ExpeditionID, nil
+	return targetRow.ExpeditionID, nil
 }
 
 // SetActiveLegMode sets the mode for the current in-progress leg (from the
 // latest visited waypoint's timestamp forward).
-func SetActiveLegMode(tx *sql.Tx, expID int64, modeID int64) error {
-	rows, err := ListRows(tx, expID)
-	if err != nil {
-		return err
+func SetActiveLegMode(transaction *sql.Tx, expeditionID int64, modeID int64) error {
+	rows, listError := ListRows(transaction, expeditionID)
+	if listError != nil {
+		return listError
 	}
-	latestTS := ""
-	for _, r := range rows {
-		if r.IsWaypoint() && r.VisitedAt != "" && r.VisitedAt > latestTS {
-			latestTS = r.VisitedAt
+	latestTimestamp := ""
+	for _, rowItem := range rows {
+		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && rowItem.VisitedAt > latestTimestamp {
+			latestTimestamp = rowItem.VisitedAt
 		}
 	}
-	if latestTS != "" {
-		return modes.SetWindow(tx, 0, modeID, addOneSecond(latestTS), "")
+	if latestTimestamp != "" {
+		return modes.SetWindow(transaction, 0, modeID, addOneSecond(latestTimestamp), "")
 	}
-	return modes.Switch(tx, modeID, "")
+	return modes.Switch(transaction, modeID, "")
 }
 
 // WaypointDetails is the content of a waypoint's expandable drawer.
@@ -427,99 +430,104 @@ type WaypointDetails struct {
 
 // Details computes the drawer content for a waypoint row.
 func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
-	r, err := GetRow(conn, rowID)
-	if err != nil {
-		return WaypointDetails{}, err
+	targetRow, rowError := GetRow(conn, rowID)
+	if rowError != nil {
+		return WaypointDetails{}, rowError
 	}
-	pv, err := BuildPlan(conn, r.ExpeditionID, nil)
-	if err != nil {
-		return WaypointDetails{}, err
+	planView, planError := BuildPlan(conn, targetRow.ExpeditionID, nil)
+	if planError != nil {
+		return WaypointDetails{}, planError
 	}
-	var self *RowView
-	var prev *RowView
-	var current *RowView
-	for i := range pv.Rows {
-		v := &pv.Rows[i]
-		if v.Row.RowType != RowWaypoint {
+	var selfView *RowView
+	var prevView *RowView
+	var currentView *RowView
+	for i := range planView.Rows {
+		rowViewItem := &planView.Rows[i]
+		if rowViewItem.Row.RowType != RowWaypoint {
 			continue
 		}
-		if v.Row.ID == pv.CurrentRowID {
-			current = v
+		if rowViewItem.Row.ID == planView.CurrentRowID {
+			currentView = rowViewItem
 		}
-		if v.Row.ID == rowID {
-			self = v
-		} else if self == nil {
-			prev = v
+		if rowViewItem.Row.ID == rowID {
+			selfView = rowViewItem
+		} else if selfView == nil {
+			prevView = rowViewItem
 		}
 	}
-	if self == nil {
+	if selfView == nil {
 		return WaypointDetails{}, nil
 	}
-	d := WaypointDetails{RowID: rowID, Number: self.Number}
-	if prev != nil {
-		d.PrevSystem = prev.Row.SystemName
+	waypointDetails := WaypointDetails{RowID: rowID, Number: selfView.Number}
+	if prevView != nil {
+		waypointDetails.PrevSystem = prevView.Row.SystemName
 	}
 	engine := stats.NewEngine(conn)
 
-	if self.Row.VisitedAt == "" {
-		d.Kind = "future"
-		d.EstDistFromPrevLy = self.DistFromPrevLy
-		d.EstDistFromCurrentLy = self.DistFromCurrentLy
-		if current != nil {
-			d.CurrentSystem = current.Row.SystemName
+	if selfView.Row.VisitedAt == "" {
+		waypointDetails.Kind = "future"
+		waypointDetails.EstDistFromPrevLy = selfView.DistFromPrevLy
+		waypointDetails.EstDistFromCurrentLy = selfView.DistFromCurrentLy
+		if currentView != nil {
+			waypointDetails.CurrentSystem = currentView.Row.SystemName
 		}
-		d.MissingCoords = !self.Row.HasCoords || (prev != nil && !prev.Row.HasCoords)
-		return d, nil
+		waypointDetails.MissingCoords = !selfView.Row.HasCoords || (prevView != nil && !prevView.Row.HasCoords)
+		return waypointDetails, nil
 	}
 
-	if self.Number == 1 {
-		d.Kind = "origin"
-		d.To, d.ToGalactic = self.Row.VisitedAt, ed.ToGalactic(self.Row.VisitedAt)
+	if selfView.Number == 1 {
+		waypointDetails.Kind = "origin"
+		waypointDetails.To, waypointDetails.ToGalactic = selfView.Row.VisitedAt, ed.ToGalactic(selfView.Row.VisitedAt)
 		var first sql.NullString
 		_ = conn.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE `+journal.CmdrFilterSQL).Scan(&first)
-		d.From, d.FromGalactic = first.String, ed.ToGalactic(first.String)
-		d.Metrics, err = engine.Compute(stats.Range{After: "", Until: self.Row.VisitedAt}, nil)
+		waypointDetails.From, waypointDetails.FromGalactic = first.String, ed.ToGalactic(first.String)
+		var computeError error
+		waypointDetails.Metrics, computeError = engine.Compute(stats.Range{After: "", Until: selfView.Row.VisitedAt}, nil)
+		if computeError != nil {
+			return waypointDetails, computeError
+		}
 	} else {
-		d.Kind = "leg"
+		waypointDetails.Kind = "leg"
 		// The leg starts at the visit of the waypoint visited immediately before this one.
-		after := ""
-		for i := range pv.Rows {
-			v := pv.Rows[i]
-			if v.Row.RowType == RowWaypoint && v.Row.VisitedAt != "" && v.Row.VisitedAt < self.Row.VisitedAt && v.Row.VisitedAt > after {
-				after = v.Row.VisitedAt
-				d.PrevSystem = v.Row.SystemName
+		afterTimestamp := ""
+		for i := range planView.Rows {
+			rowViewItem := planView.Rows[i]
+			if rowViewItem.Row.RowType == RowWaypoint && rowViewItem.Row.VisitedAt != "" && rowViewItem.Row.VisitedAt < selfView.Row.VisitedAt && rowViewItem.Row.VisitedAt > afterTimestamp {
+				afterTimestamp = rowViewItem.Row.VisitedAt
+				waypointDetails.PrevSystem = rowViewItem.Row.SystemName
 			}
 		}
-		if after == "" {
-			after = pv.Expedition.StartTimestamp
+		if afterTimestamp == "" {
+			afterTimestamp = planView.Expedition.StartTimestamp
 		}
-		d.From, d.FromGalactic = after, ed.ToGalactic(after)
-		d.To, d.ToGalactic = self.Row.VisitedAt, ed.ToGalactic(self.Row.VisitedAt)
-		d.Metrics, err = engine.Compute(stats.Range{After: after, Until: self.Row.VisitedAt}, nil)
-	}
-	if err != nil {
-		return d, err
-	}
-	if a, err1 := ed.ParseISO(d.From); err1 == nil {
-		if b, err2 := ed.ParseISO(d.To); err2 == nil {
-			d.Elapsed = ed.DurationLabel(b.Sub(a))
+		waypointDetails.From, waypointDetails.FromGalactic = afterTimestamp, ed.ToGalactic(afterTimestamp)
+		waypointDetails.To, waypointDetails.ToGalactic = selfView.Row.VisitedAt, ed.ToGalactic(selfView.Row.VisitedAt)
+		var computeError error
+		waypointDetails.Metrics, computeError = engine.Compute(stats.Range{After: afterTimestamp, Until: selfView.Row.VisitedAt}, nil)
+		if computeError != nil {
+			return waypointDetails, computeError
 		}
 	}
-	return d, nil
+	if startTime, parseStartError := ed.ParseISO(waypointDetails.From); parseStartError == nil {
+		if endTime, parseEndError := ed.ParseISO(waypointDetails.To); parseEndError == nil {
+			waypointDetails.Elapsed = ed.DurationLabel(endTime.Sub(startTime))
+		}
+	}
+	return waypointDetails, nil
 }
 
-// Elapsed returns a human label between two ISO timestamps (now when to is empty).
+// Elapsed returns a human label between two ISO timestamps (now when toTimestamp is empty).
 // Uses rounded days and years without hours/minutes.
-func Elapsed(from, to string) string {
-	a, err := ed.ParseISO(from)
-	if err != nil {
+func Elapsed(fromTimestamp, toTimestamp string) string {
+	startTime, parseError := ed.ParseISO(fromTimestamp)
+	if parseError != nil {
 		return ""
 	}
-	b := time.Now().UTC()
-	if to != "" {
-		if t, err := ed.ParseISO(to); err == nil {
-			b = t
+	endTime := time.Now().UTC()
+	if toTimestamp != "" {
+		if parsedTime, parseError := ed.ParseISO(toTimestamp); parseError == nil {
+			endTime = parsedTime
 		}
 	}
-	return ed.DurationDaysLabel(b.Sub(a))
+	return ed.DurationDaysLabel(endTime.Sub(startTime))
 }

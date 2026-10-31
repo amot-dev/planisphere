@@ -71,7 +71,7 @@ export function StartExpeditionModal({
   onStarted: () => void
 }) {
   const [candidates, setCandidates] = useState<app.StartCandidates | null>(null)
-  const [selectedTs, setSelectedTs] = useState<string>('')
+  const [selectedTimestamp, setSelectedTimestamp] = useState<string>('')
   const [customGalactic, setCustomGalactic] = useState<string>(() => nowGalacticTime())
   const [mode, setMode] = useState<'history' | 'custom' | 'arrival'>('history')
   const [busy, setBusy] = useState<boolean>(false)
@@ -79,16 +79,16 @@ export function StartExpeditionModal({
 
   useEffect(() => {
     GetStartCandidates(expeditionId)
-      .then((c) => {
-        setCandidates(c)
-        if (c.visits && c.visits.length > 0) {
-          setSelectedTs(c.visits[0].timestamp)
+      .then((candidatesResult) => {
+        setCandidates(candidatesResult)
+        if (candidatesResult.visits && candidatesResult.visits.length > 0) {
+          setSelectedTimestamp(candidatesResult.visits[0].timestamp)
           setMode('history')
         } else {
           setMode('arrival')
         }
       })
-      .catch((e) => setError(String(e)))
+      .catch((error) => setError(String(error)))
   }, [expeditionId])
 
   async function handleConfirm() {
@@ -96,21 +96,21 @@ export function StartExpeditionModal({
     setBusy(true)
     try {
       if (mode === 'history') {
-        if (!selectedTs) {
+        if (!selectedTimestamp) {
           setError('Select a recorded visit timestamp first.')
           return
         }
-        await StartExpedition(expeditionId, selectedTs)
+        await StartExpedition(expeditionId, selectedTimestamp)
       } else if (mode === 'custom') {
-        const iso = fromGalacticTime(customGalactic)
-        await StartExpedition(expeditionId, iso)
+        const isoTimestamp = fromGalacticTime(customGalactic)
+        await StartExpedition(expeditionId, isoTimestamp)
       } else {
         await StartExpeditionOnArrival(expeditionId)
       }
       onStarted()
       onClose()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     } finally {
       setBusy(false)
     }
@@ -147,16 +147,16 @@ export function StartExpeditionModal({
             </div>
             {candidates && candidates.visits.length > 0 ? (
               <select
-                value={selectedTs}
-                onChange={(e) => {
-                  setSelectedTs(e.target.value)
+                value={selectedTimestamp}
+                onChange={(event) => {
+                  setSelectedTimestamp(event.target.value)
                   setMode('history')
                 }}
                 className="w-full bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
               >
-                {candidates.visits.map((v) => (
-                  <option key={v.uid} value={v.timestamp}>
-                    {v.galactic} — ({v.event})
+                {candidates.visits.map((visit) => (
+                  <option key={visit.uid} value={visit.timestamp}>
+                    {visit.galactic} — ({visit.event})
                   </option>
                 ))}
               </select>
@@ -209,8 +209,8 @@ export function StartExpeditionModal({
               type="text"
               value={customGalactic}
               onFocus={() => setMode('custom')}
-              onChange={(e) => {
-                setCustomGalactic(e.target.value)
+              onChange={(event) => {
+                setCustomGalactic(event.target.value)
                 setMode('custom')
               }}
               placeholder="3312-01-18 19:42:10 UTC"
@@ -283,8 +283,8 @@ export function SettingsModal({
     try {
       const picked = await BrowseJournalDir()
       if (picked) setDir(picked)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -293,8 +293,8 @@ export function SettingsModal({
     try {
       await SetJournalDir(dir)
       onRefresh()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -304,8 +304,8 @@ export function SettingsModal({
       await SetJournalDir('')
       setDir(settings?.defaultJournalDir ?? '')
       onRefresh()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -321,8 +321,8 @@ export function SettingsModal({
     try {
       await RefreshGEC()
       onRefresh()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     } finally {
       setGecBusy(false)
     }
@@ -333,8 +333,8 @@ export function SettingsModal({
     try {
       await SetCommanderEnabled(name, enabled)
       onRefresh()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -342,8 +342,8 @@ export function SettingsModal({
     try {
       const picked = await BrowseEDDiscoveryDB()
       if (picked) setEddPath(picked)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -357,8 +357,8 @@ export function SettingsModal({
         `Imported ${count.toLocaleString()} historical journal events into local database.`,
       )
       onRefresh()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     } finally {
       setEddBusy(false)
     }
@@ -371,8 +371,8 @@ export function SettingsModal({
       setNewModeName('')
       setNewModeDesc('')
       onRefresh()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -407,7 +407,7 @@ export function SettingsModal({
           <input
             type="text"
             value={dir}
-            onChange={(e) => setDir(e.target.value)}
+            onChange={(event) => setDir(event.target.value)}
             className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
           />
           <button
@@ -481,37 +481,37 @@ export function SettingsModal({
           Environment Modes
         </div>
         <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#050506]">
-          {(modesState?.modes ?? []).map((m) => (
-            <div key={m.id} className="p-2 flex items-center justify-between gap-3">
+          {(modesState?.modes ?? []).map((modeItem) => (
+            <div key={modeItem.id} className="p-2 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <input
                   type="color"
-                  value={m.color}
-                  onChange={(e) =>
-                    UpdateMode(m.id, m.name, m.description, e.target.value).then(onRefresh)
+                  value={modeItem.color}
+                  onChange={(event) =>
+                    UpdateMode(modeItem.id, modeItem.name, modeItem.description, event.target.value).then(onRefresh)
                   }
                   className="w-5 h-5 bg-transparent border border-[#3d2816] cursor-pointer shrink-0"
                 />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-                      {m.name}
+                      {modeItem.name}
                     </span>
-                    {m.isDefault && (
+                    {modeItem.isDefault && (
                       <span className="text-[9px] font-mono-tabular uppercase px-1.5 py-0.2 bg-[#16100b] border border-[#3d2816] text-[#a6907c]">
                         DEFAULT
                       </span>
                     )}
                   </div>
-                  {m.description && (
-                    <div className="text-[10px] text-[#a6907c] truncate">{m.description}</div>
+                  {modeItem.description && (
+                    <div className="text-[10px] text-[#a6907c] truncate">{modeItem.description}</div>
                   )}
                 </div>
               </div>
-              {!m.isDefault && (
+              {!modeItem.isDefault && (
                 <button
                   type="button"
-                  onClick={() => DeleteMode(m.id).then(onRefresh)}
+                  onClick={() => DeleteMode(modeItem.id).then(onRefresh)}
                   className="ed-btn-danger"
                 >
                   Delete
@@ -526,14 +526,14 @@ export function SettingsModal({
           <input
             type="text"
             value={newModeName}
-            onChange={(e) => setNewModeName(e.target.value)}
+            onChange={(event) => setNewModeName(event.target.value)}
             placeholder="New mode name..."
             className="bg-[#050506] border border-[#3d2816] px-2.5 py-1 text-[#F4ECE4]"
           />
           <input
             type="text"
             value={newModeDesc}
-            onChange={(e) => setNewModeDesc(e.target.value)}
+            onChange={(event) => setNewModeDesc(event.target.value)}
             placeholder="Optional description..."
             className="bg-[#050506] border border-[#3d2816] px-2.5 py-1 text-[#F4ECE4]"
           />
@@ -541,7 +541,7 @@ export function SettingsModal({
             <input
               type="color"
               value={newModeColor}
-              onChange={(e) => setNewModeColor(e.target.value)}
+              onChange={(event) => setNewModeColor(event.target.value)}
               className="w-7 h-7 bg-transparent border border-[#3d2816] cursor-pointer"
             />
             <button
@@ -571,26 +571,26 @@ export function SettingsModal({
           </div>
         ) : (
           <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#050506]">
-            {(settings?.commanders ?? []).map((c) => (
+            {(settings?.commanders ?? []).map((commanderItem) => (
               <label
-                key={c.name}
+                key={commanderItem.name}
                 className="px-3 py-2 flex items-center justify-between gap-3 cursor-pointer hover:bg-[#16100b]"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <input
                     type="checkbox"
-                    checked={c.enabled}
-                    onChange={(e) => handleToggleCommander(c.name, e.target.checked)}
+                    checked={commanderItem.enabled}
+                    onChange={(event) => handleToggleCommander(commanderItem.name, event.target.checked)}
                     className="w-4 h-4 accent-[#FF7100] cursor-pointer"
                   />
                   <div className="min-w-0">
                     <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-                      CMDR {c.name}
+                      CMDR {commanderItem.name}
                     </span>
                   </div>
                 </div>
                 <span className="font-mono-tabular text-xs font-bold text-[#00D2FF] shrink-0">
-                  {c.eventCount.toLocaleString()} EV
+                  {commanderItem.eventCount.toLocaleString()} EV
                 </span>
               </label>
             ))}
@@ -612,7 +612,7 @@ export function SettingsModal({
           <input
             type="text"
             value={eddPath}
-            onChange={(e) => setEddPath(e.target.value)}
+            onChange={(event) => setEddPath(event.target.value)}
             placeholder="Path to EDDUser.sqlite..."
             className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
           />
@@ -669,7 +669,7 @@ export function SettingsModal({
           <input
             type="checkbox"
             checked={online}
-            onChange={(e) => handleToggleOnline(e.target.checked)}
+            onChange={(event) => handleToggleOnline(event.target.checked)}
             className="w-4 h-4 accent-[#FF7100]"
           />
         </label>
@@ -724,22 +724,22 @@ export function ExpeditionManageModal({
   onRefresh: () => void
 }) {
   const [name, setName] = useState('')
-  const [desc, setDesc] = useState('')
+  const [description, setDescription] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
-  const [editDesc, setEditDesc] = useState('')
+  const [editDescription, setEditDescription] = useState('')
 
   async function handleCreate() {
     if (!name.trim()) return
-    const created = await CreateExpedition(name.trim(), desc.trim())
+    const created = await CreateExpedition(name.trim(), description.trim())
     setName('')
-    setDesc('')
+    setDescription('')
     onSelect(created.id)
     onClose()
   }
 
   async function handleSaveEdit(id: number) {
-    await UpdateExpedition(id, editName, editDesc)
+    await UpdateExpedition(id, editName, editDescription)
     setEditingId(null)
     onRefresh()
   }
@@ -764,14 +764,14 @@ export function ExpeditionManageModal({
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(event) => setName(event.target.value)}
             placeholder="Expedition Name (e.g. Colonia & Sagittarius A*)"
             className="bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 text-[#F4ECE4]"
           />
           <input
             type="text"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
             placeholder="Optional description..."
             className="bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 text-[#F4ECE4]"
           />
@@ -788,25 +788,25 @@ export function ExpeditionManageModal({
       </div>
 
       <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#110c08]">
-        {expeditions.map((e) => (
-          <div key={e.id} className="p-2.5 flex items-center justify-between gap-2">
-            {editingId === e.id ? (
+        {expeditions.map((expeditionItem) => (
+          <div key={expeditionItem.id} className="p-2.5 flex items-center justify-between gap-2">
+            {editingId === expeditionItem.id ? (
               <div className="flex-1 flex items-center gap-2">
                 <input
                   type="text"
                   value={editName}
-                  onChange={(ev) => setEditName(ev.target.value)}
+                  onChange={(event) => setEditName(event.target.value)}
                   className="bg-[#050506] border border-[#3d2816] px-2 py-1 text-[#F4ECE4]"
                 />
                 <input
                   type="text"
-                  value={editDesc}
-                  onChange={(ev) => setEditDesc(ev.target.value)}
+                  value={editDescription}
+                  onChange={(event) => setEditDescription(event.target.value)}
                   className="flex-1 bg-[#050506] border border-[#3d2816] px-2 py-1 text-[#F4ECE4]"
                 />
                 <button
                   type="button"
-                  onClick={() => handleSaveEdit(e.id)}
+                  onClick={() => handleSaveEdit(expeditionItem.id)}
                   className="ed-btn-cyan"
                 >
                   Save
@@ -817,7 +817,7 @@ export function ExpeditionManageModal({
                 <button
                   type="button"
                   onClick={() => {
-                    onSelect(e.id)
+                    onSelect(expeditionItem.id)
                     onClose()
                   }}
                   className="flex-1 text-left cursor-pointer"
@@ -825,21 +825,21 @@ export function ExpeditionManageModal({
                   <div className="flex items-center gap-2">
                     <span
                       className={`font-bold uppercase tracking-wider ${
-                        e.id === activeId ? 'text-[#FF7100]' : 'text-[#F4ECE4]'
+                        expeditionItem.id === activeId ? 'text-[#FF7100]' : 'text-[#F4ECE4]'
                       }`}
                     >
-                      {e.name}
+                      {expeditionItem.name}
                     </span>
                     <span className="text-[9px] font-mono-tabular uppercase px-1.5 py-0.5 bg-[#16100b] border border-[#3d2816] text-[#a6907c]">
-                      {e.status}
+                      {expeditionItem.status}
                     </span>
                   </div>
-                  {e.description && <div className="text-[11px] text-[#a6907c]">{e.description}</div>}
+                  {expeditionItem.description && <div className="text-[11px] text-[#a6907c]">{expeditionItem.description}</div>}
                 </button>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handleClone(e.id)}
+                    onClick={() => handleClone(expeditionItem.id)}
                     title="Clone this expedition into a new expedition in the Planning phase"
                     className="ed-btn-cyan"
                   >
@@ -848,9 +848,9 @@ export function ExpeditionManageModal({
                   <button
                     type="button"
                     onClick={() => {
-                      setEditingId(e.id)
-                      setEditName(e.name)
-                      setEditDesc(e.description)
+                      setEditingId(expeditionItem.id)
+                      setEditName(expeditionItem.name)
+                      setEditDescription(expeditionItem.description)
                     }}
                     className="ed-btn"
                   >
@@ -859,7 +859,7 @@ export function ExpeditionManageModal({
                   {expeditions.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => DeleteExpedition(e.id).then(onRefresh)}
+                      onClick={() => DeleteExpedition(expeditionItem.id).then(onRefresh)}
                       className="ed-btn-danger"
                     >
                       Delete

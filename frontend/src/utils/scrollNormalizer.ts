@@ -15,20 +15,20 @@
  * - Target scrollable element is cached during active scrolling gestures.
  */
 
-function isHTMLElement(val: any): val is HTMLElement {
-  if (!val || typeof val !== 'object') return false
+function isHTMLElement(candidate: any): candidate is HTMLElement {
+  if (!candidate || typeof candidate !== 'object') return false
   if (typeof HTMLElement !== 'undefined') {
-    return val instanceof HTMLElement
+    return candidate instanceof HTMLElement
   }
-  return 'classList' in val && 'scrollHeight' in val
+  return 'classList' in candidate && 'scrollHeight' in candidate
 }
 
-function isNode(val: any): val is Node {
-  if (!val || typeof val !== 'object') return false
+function isNode(candidate: any): candidate is Node {
+  if (!candidate || typeof candidate !== 'object') return false
   if (typeof Node !== 'undefined') {
-    return val instanceof Node
+    return candidate instanceof Node
   }
-  return 'nodeType' in val || 'parentElement' in val || 'classList' in val
+  return 'nodeType' in candidate || 'parentElement' in candidate || 'classList' in candidate
 }
 
 export function findScrollable(
@@ -38,76 +38,76 @@ export function findScrollable(
 ): HTMLElement | null {
   const hasDoc = typeof document !== 'undefined'
   if (!start) return null
-  const initialEl: HTMLElement | null =
+  const initialElement: HTMLElement | null =
     isHTMLElement(start)
       ? start
       : isNode(start) && isHTMLElement((start as any).parentElement)
         ? (start as any).parentElement
         : null
-  if (!initialEl || (hasDoc && (initialEl === document.body || initialEl === document.documentElement))) {
+  if (!initialElement || (hasDoc && (initialElement === document.body || initialElement === document.documentElement))) {
     return null
   }
 
   // Fast path: find closest declared scrollable ancestor without getComputedStyle
-  let curr: HTMLElement | null = initialEl
-  while (curr && (!hasDoc || (curr !== document.body && curr !== document.documentElement))) {
-    const cl = curr.classList
+  let currentElement: HTMLElement | null = initialElement
+  while (currentElement && (!hasDoc || (currentElement !== document.body && currentElement !== document.documentElement))) {
+    const classList = currentElement.classList
     const isDeclaredScrollable = Boolean(
-      cl &&
-      (cl.contains('overflow-y-auto') ||
-        cl.contains('overflow-auto') ||
-        cl.contains('overflow-y-scroll') ||
-        cl.contains('overflow-x-auto') ||
-        cl.contains('overflow-x-scroll') ||
-        (curr.hasAttribute && curr.hasAttribute('data-scrollable')))
+      classList &&
+      (classList.contains('overflow-y-auto') ||
+        classList.contains('overflow-auto') ||
+        classList.contains('overflow-y-scroll') ||
+        classList.contains('overflow-x-auto') ||
+        classList.contains('overflow-x-scroll') ||
+        (currentElement.hasAttribute && currentElement.hasAttribute('data-scrollable')))
     )
 
     if (isDeclaredScrollable) {
       const canScrollY =
-        (deltaY > 0 && curr.scrollTop + curr.clientHeight < curr.scrollHeight - 1) ||
-        (deltaY < 0 && curr.scrollTop > 0)
+        (deltaY > 0 && currentElement.scrollTop + currentElement.clientHeight < currentElement.scrollHeight - 1) ||
+        (deltaY < 0 && currentElement.scrollTop > 0)
       const canScrollX =
-        (deltaX > 0 && curr.scrollLeft + curr.clientWidth < curr.scrollWidth - 1) ||
-        (deltaX < 0 && curr.scrollLeft > 0)
+        (deltaX > 0 && currentElement.scrollLeft + currentElement.clientWidth < currentElement.scrollWidth - 1) ||
+        (deltaX < 0 && currentElement.scrollLeft > 0)
 
       if (canScrollY || canScrollX) {
-        return curr
+        return currentElement
       }
     }
 
-    curr = curr.parentElement
+    currentElement = currentElement.parentElement
   }
 
   // Fallback path: check computed style only if no declared scroll class was found
   if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
-    curr = initialEl
-    while (curr && (!hasDoc || (curr !== document.body && curr !== document.documentElement))) {
-      const style = window.getComputedStyle(curr)
+    currentElement = initialElement
+    while (currentElement && (!hasDoc || (currentElement !== document.body && currentElement !== document.documentElement))) {
+      const style = window.getComputedStyle(currentElement)
       const overflowY = style.overflowY
       const overflowX = style.overflowX
 
       const hasScrollY =
         (overflowY === 'auto' || overflowY === 'scroll') &&
-        curr.scrollHeight > curr.clientHeight
+        currentElement.scrollHeight > currentElement.clientHeight
       const hasScrollX =
         (overflowX === 'auto' || overflowX === 'scroll') &&
-        curr.scrollWidth > curr.clientWidth
+        currentElement.scrollWidth > currentElement.clientWidth
 
       const canScrollY =
         hasScrollY &&
-        ((deltaY > 0 && curr.scrollTop + curr.clientHeight < curr.scrollHeight - 1) ||
-          (deltaY < 0 && curr.scrollTop > 0))
+        ((deltaY > 0 && currentElement.scrollTop + currentElement.clientHeight < currentElement.scrollHeight - 1) ||
+          (deltaY < 0 && currentElement.scrollTop > 0))
 
       const canScrollX =
         hasScrollX &&
-        ((deltaX > 0 && curr.scrollLeft + curr.clientWidth < curr.scrollWidth - 1) ||
-          (deltaX < 0 && curr.scrollLeft > 0))
+        ((deltaX > 0 && currentElement.scrollLeft + currentElement.clientWidth < currentElement.scrollWidth - 1) ||
+          (deltaX < 0 && currentElement.scrollLeft > 0))
 
       if (canScrollY || canScrollX) {
-        return curr
+        return currentElement
       }
 
-      curr = curr.parentElement
+      currentElement = currentElement.parentElement
     }
   }
 
@@ -122,30 +122,30 @@ export function initScrollSpeedNormalizer(): () => void {
   let cachedScrollable: HTMLElement | null = null
   let cacheTimer: ReturnType<typeof setTimeout> | null = null
 
-  function handleWheel(e: WheelEvent) {
+  function handleWheel(event: WheelEvent) {
     // Pass through browser zoom shortcuts (Ctrl + wheel)
-    if (e.ctrlKey) return
+    if (event.ctrlKey) return
 
-    let dy = e.deltaY
-    let dx = e.deltaX
+    let deltaY = event.deltaY
+    let deltaX = event.deltaX
 
     // Shift key converts vertical scroll into horizontal scroll
-    if (e.shiftKey && dy !== 0 && dx === 0) {
-      dx = dy
-      dy = 0
+    if (event.shiftKey && deltaY !== 0 && deltaX === 0) {
+      deltaX = deltaY
+      deltaY = 0
     }
 
     // Touchpad detection on Linux/WebKitGTK:
     // Continuous precision touchpads produce non-integer (fractional) deltas or very small pixel deltas (|dy| < 12).
     // Discrete mouse wheels produce integer deltas (e.g. 20, 24, 30, 33, 40) or deltaMode === 1 (lines).
     // Let touchpads scroll natively via hardware compositor for 60-144 FPS smoothness!
-    const isTouchpad = e.deltaMode === 0 && (!Number.isInteger(dy) || Math.abs(dy) < 12)
+    const isTouchpad = event.deltaMode === 0 && (!Number.isInteger(deltaY) || Math.abs(deltaY) < 12)
     if (isTouchpad) {
       return
     }
 
     let scrollable: HTMLElement | null = null
-    const target = e.target
+    const target = event.target
 
     if (
       cachedScrollable &&
@@ -154,15 +154,15 @@ export function initScrollSpeedNormalizer(): () => void {
           typeof cachedScrollable.contains === 'function' &&
           cachedScrollable.contains(target as Node)))
     ) {
-      const canY = deltaCheck(cachedScrollable, dy, 'y')
-      const canX = deltaCheck(cachedScrollable, dx, 'x')
-      if (canY || canX) {
+      const canScrollY = deltaCheck(cachedScrollable, deltaY, 'y')
+      const canScrollX = deltaCheck(cachedScrollable, deltaX, 'x')
+      if (canScrollY || canScrollX) {
         scrollable = cachedScrollable
       }
     }
 
     if (!scrollable) {
-      scrollable = findScrollable(target, dy, dx)
+      scrollable = findScrollable(target, deltaY, deltaX)
       if (scrollable) {
         cachedScrollable = scrollable
       }
@@ -176,46 +176,46 @@ export function initScrollSpeedNormalizer(): () => void {
     if (!scrollable) return
 
     // Scale delta based on deltaMode and input magnitude
-    if (e.deltaMode === 1) {
+    if (event.deltaMode === 1) {
       // DOM_DELTA_LINE: default WebKit 1 line ~20px -> scale to ~35px per line
-      dy *= 35
-      dx *= 35
-    } else if (e.deltaMode === 2) {
+      deltaY *= 35
+      deltaX *= 35
+    } else if (event.deltaMode === 2) {
       // DOM_DELTA_PAGE
-      dy *= scrollable.clientHeight * 0.8
-      dx *= scrollable.clientWidth * 0.8
+      deltaY *= scrollable.clientHeight * 0.8
+      deltaX *= scrollable.clientWidth * 0.8
     } else {
       // DOM_DELTA_PIXEL:
       // Discrete mouse wheel notches on Linux libinput/WebKitGTK typically produce 20-33px.
       // Native Linux desktop apps scroll ~90-110px per notch (2.8x - 3x multiplier).
-      const multiplier = Math.abs(dy) >= 15 || Math.abs(dx) >= 15 ? 2.8 : 2.0
-      dy *= multiplier
-      dx *= multiplier
+      const multiplier = Math.abs(deltaY) >= 15 || Math.abs(deltaX) >= 15 ? 2.8 : 2.0
+      deltaY *= multiplier
+      deltaX *= multiplier
     }
 
-    if (e.cancelable) {
-      e.preventDefault()
+    if (event.cancelable) {
+      event.preventDefault()
     }
 
-    if (dy !== 0) {
-      scrollable.scrollTop += dy
+    if (deltaY !== 0) {
+      scrollable.scrollTop += deltaY
     }
-    if (dx !== 0) {
-      scrollable.scrollLeft += dx
+    if (deltaX !== 0) {
+      scrollable.scrollLeft += deltaX
     }
   }
 
-  function deltaCheck(el: HTMLElement, delta: number, axis: 'y' | 'x'): boolean {
+  function deltaCheck(element: HTMLElement, delta: number, axis: 'y' | 'x'): boolean {
     if (delta === 0) return false
     if (axis === 'y') {
       return (
-        (delta > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) ||
-        (delta < 0 && el.scrollTop > 0)
+        (delta > 0 && element.scrollTop + element.clientHeight < element.scrollHeight - 1) ||
+        (delta < 0 && element.scrollTop > 0)
       )
     }
     return (
-      (delta > 0 && el.scrollLeft + el.clientWidth < el.scrollWidth - 1) ||
-      (delta < 0 && el.scrollLeft > 0)
+      (delta > 0 && element.scrollLeft + element.clientWidth < element.scrollWidth - 1) ||
+      (delta < 0 && element.scrollLeft > 0)
     )
   }
 

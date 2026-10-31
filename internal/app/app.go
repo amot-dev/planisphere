@@ -71,10 +71,10 @@ type App struct {
 	resolver *systems.Resolver
 	gec      *gec.Catalog
 
-	scanning   atomic.Bool
-	lastErrMu  sync.Mutex
-	lastErr    string
-	resolveMu  sync.Mutex
+	scanning    atomic.Bool
+	lastErrorMu sync.Mutex
+	lastError   string
+	resolveMu   sync.Mutex
 	resolving  map[int64]bool
 	resolveSem chan struct{}
 
@@ -95,350 +95,350 @@ var timeNow = func() time.Time { return time.Now().UTC() }
 
 // StartupHook returns the Wails OnStartup callback. Lifecycle hooks are
 // package-level functions (not methods) so Wails does not bind them to JS.
-func StartupHook(a *App) func(ctx context.Context) { return a.startup }
+func StartupHook(app *App) func(ctx context.Context) { return app.startup }
 
 // ShutdownHook returns the Wails OnShutdown callback.
-func ShutdownHook(a *App) func(ctx context.Context) { return a.shutdown }
+func ShutdownHook(app *App) func(ctx context.Context) { return app.shutdown }
 
-func (a *App) startup(ctx context.Context) {
-	a.emit = func(event string, data ...any) { runtime.EventsEmit(ctx, event, data...) }
-	if err := a.initialize(ctx, os.Getenv("ED_PLANNER_DB")); err != nil {
-		log.Printf("startup: %v", err)
-		a.setErr(err.Error())
+func (app *App) startup(ctx context.Context) {
+	app.emit = func(event string, data ...any) { runtime.EventsEmit(ctx, event, data...) }
+	if initError := app.initialize(ctx, os.Getenv("ED_PLANNER_DB")); initError != nil {
+		log.Printf("startup: %v", initError)
+		app.setError(initError.Error())
 		return
 	}
-	go a.backgroundStart()
+	go app.backgroundStart()
 }
 
 // initialize opens the database and wires up services. dbPath "" uses the configured or default path.
-func (a *App) initialize(ctx context.Context, dbPath string) error {
-	a.ctx, a.cancel = context.WithCancel(ctx)
-	if a.emit == nil {
-		a.emit = func(string, ...any) {}
+func (app *App) initialize(ctx context.Context, dbPath string) error {
+	app.ctx, app.cancel = context.WithCancel(ctx)
+	if app.emit == nil {
+		app.emit = func(string, ...any) {}
 	}
 	if dbPath == "" {
-		p, err := db.ResolveConfiguredPath()
-		if err != nil {
-			return err
+		configuredPath, resolveError := db.ResolveConfiguredPath()
+		if resolveError != nil {
+			return resolveError
 		}
-		dbPath = p
+		dbPath = configuredPath
 	}
-	return a.openAndWireDB(dbPath)
+	return app.openAndWireDB(dbPath)
 }
 
-func (a *App) openAndWireDB(dbPath string) error {
-	conn, err := db.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open database %s: %w", dbPath, err)
+func (app *App) openAndWireDB(dbPath string) error {
+	dbConn, openError := db.Open(dbPath)
+	if openError != nil {
+		return fmt.Errorf("open database %s: %w", dbPath, openError)
 	}
-	if a.watcher != nil {
-		a.watcher.Stop()
+	if app.watcher != nil {
+		app.watcher.Stop()
 	}
-	if a.db != nil {
-		_ = a.db.Close()
+	if app.db != nil {
+		_ = app.db.Close()
 	}
-	a.db, a.dbPath = conn, dbPath
-	a.ingester = journal.NewIngester(conn)
-	a.watcher = journal.NewWatcher(a.ingester, a.onJournalBatch)
-	a.resolver = systems.NewResolver(conn, a.onlineEnabled)
-	a.gec = gec.NewCatalog(conn)
-	a.invalidateAllTimeCache()
+	app.db, app.dbPath = dbConn, dbPath
+	app.ingester = journal.NewIngester(dbConn)
+	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
+	app.resolver = systems.NewResolver(dbConn, app.onlineEnabled)
+	app.gec = gec.NewCatalog(dbConn)
+	app.invalidateAllTimeCache()
 	return nil
 }
 
-func (a *App) shutdown(ctx context.Context) {
-	if a.watcher != nil {
-		a.watcher.Stop()
+func (app *App) shutdown(ctx context.Context) {
+	if app.watcher != nil {
+		app.watcher.Stop()
 	}
-	if a.cancel != nil {
-		a.cancel()
+	if app.cancel != nil {
+		app.cancel()
 	}
-	if a.db != nil {
-		_ = a.db.Close()
+	if app.db != nil {
+		_ = app.db.Close()
 	}
 }
 
-func (a *App) backgroundStart() {
-	if !a.setupCompleted() {
+func (app *App) backgroundStart() {
+	if !app.setupCompleted() {
 		return
 	}
-	a.runScan()
-	a.watcher.Start(a.ctx, a.journalDir())
-	a.maybeRefreshGEC()
+	app.runScan()
+	app.watcher.Start(app.ctx, app.journalDir())
+	app.maybeRefreshGEC()
 }
 
-func (a *App) setErr(msg string) {
-	a.lastErrMu.Lock()
-	a.lastErr = msg
-	a.lastErrMu.Unlock()
+func (app *App) setError(errorMessage string) {
+	app.lastErrorMu.Lock()
+	app.lastError = errorMessage
+	app.lastErrorMu.Unlock()
 }
 
-func (a *App) getErr() string {
-	a.lastErrMu.Lock()
-	defer a.lastErrMu.Unlock()
-	return a.lastErr
+func (app *App) getError() string {
+	app.lastErrorMu.Lock()
+	defer app.lastErrorMu.Unlock()
+	return app.lastError
 }
 
-func (a *App) changed(scope string, expID int64) {
-	a.emit(EventDataChanged, DataChanged{Scope: scope, ExpeditionID: expID})
+func (app *App) changed(scope string, expeditionID int64) {
+	app.emit(EventDataChanged, DataChanged{Scope: scope, ExpeditionID: expeditionID})
 }
 
-func (a *App) emitEDDProgress(active bool, cur, tot, files int, stage string) {
+func (app *App) emitEDDProgress(active bool, current, total, files int, stage string) {
 	pct := 0
-	if tot > 0 {
-		pct = (cur * 100) / tot
+	if total > 0 {
+		pct = (current * 100) / total
 		if pct > 100 {
 			pct = 100
 		}
 	}
-	a.emit(EventEDDProgress, EDDImportProgress{
+	app.emit(EventEDDProgress, EDDImportProgress{
 		Active:  active,
 		Stage:   stage,
-		Current: cur,
-		Total:   tot,
+		Current: current,
+		Total:   total,
 		Percent: pct,
 		Files:   files,
 	})
 }
 
-func (a *App) journalDir() string {
-	v, _ := db.GetSetting(a.db, settingJournalDir)
-	if strings.TrimSpace(v) == "" {
+func (app *App) journalDir() string {
+	settingValue, _ := db.GetSetting(app.db, settingJournalDir)
+	if strings.TrimSpace(settingValue) == "" {
 		return journal.DefaultJournalDir()
 	}
-	return v
+	return settingValue
 }
 
-func (a *App) onlineEnabled() bool {
-	v, _ := db.GetSetting(a.db, settingOnline)
-	return v != "0"
+func (app *App) onlineEnabled() bool {
+	settingValue, _ := db.GetSetting(app.db, settingOnline)
+	return settingValue != "0"
 }
 
-func (a *App) activeExpeditionID() int64 {
-	v, _ := db.GetSetting(a.db, settingActiveExp)
-	var id int64
-	fmt.Sscan(v, &id)
-	return id
+func (app *App) activeExpeditionID() int64 {
+	settingValue, _ := db.GetSetting(app.db, settingActiveExp)
+	var expeditionID int64
+	fmt.Sscan(settingValue, &expeditionID)
+	return expeditionID
 }
 
-func (a *App) setupCompleted() bool {
-	if a.db == nil {
+func (app *App) setupCompleted() bool {
+	if app.db == nil {
 		return false
 	}
-	v, _ := db.GetSetting(a.db, settingSetupCompleted)
-	return v == "1"
+	settingValue, _ := db.GetSetting(app.db, settingSetupCompleted)
+	return settingValue == "1"
 }
 
 // runScan performs the idempotent catch-up scan of the journal directory and
 // re-evaluates active expeditions.
-func (a *App) runScan() {
-	if !a.scanning.CompareAndSwap(false, true) {
+func (app *App) runScan() {
+	if !app.scanning.CompareAndSwap(false, true) {
 		return
 	}
-	defer a.scanning.Store(false)
-	a.emit(EventIngest, nil)
-	dir := a.journalDir()
-	res, err := a.ingester.ScanDir(dir)
-	if err != nil {
-		a.setErr(err.Error())
-	} else if len(res.Errors) > 0 {
-		a.setErr(fmt.Sprintf("%d journal lines could not be parsed (first: %s)", len(res.Errors), res.Errors[0]))
+	defer app.scanning.Store(false)
+	app.emit(EventIngest, nil)
+	dir := app.journalDir()
+	scanResult, scanError := app.ingester.ScanDir(dir)
+	if scanError != nil {
+		app.setError(scanError.Error())
+	} else if len(scanResult.Errors) > 0 {
+		app.setError(fmt.Sprintf("%d journal lines could not be parsed (first: %s)", len(scanResult.Errors), scanResult.Errors[0]))
 	} else {
-		a.setErr("")
+		app.setError("")
 	}
-	_ = db.SetSetting(a.db, settingLastScanAt, ed.NowISO())
-	if res.LinesRead > 0 {
-		a.invalidateAllTimeCache()
+	_ = db.SetSetting(app.db, settingLastScanAt, ed.NowISO())
+	if scanResult.LinesRead > 0 {
+		app.invalidateAllTimeCache()
 	}
-	a.reevaluateActive()
-	a.emit(EventIngest, nil)
-	if res.LinesRead > 0 {
-		a.changed("journal", 0)
+	app.reevaluateActive()
+	app.emit(EventIngest, nil)
+	if scanResult.LinesRead > 0 {
+		app.changed("journal", 0)
 	}
 }
 
 // onJournalBatch runs after the live tailer stored new events.
-func (a *App) onJournalBatch(res journal.Result) {
-	a.invalidateAllTimeCache()
-	a.reevaluateActive()
-	a.changed("journal", 0)
+func (app *App) onJournalBatch(scanResult journal.Result) {
+	app.invalidateAllTimeCache()
+	app.reevaluateActive()
+	app.changed("journal", 0)
 }
 
-func (a *App) invalidateAllTimeCache() {
-	a.allTimeMu.Lock()
-	a.allTimeValid = false
-	a.allTimeMu.Unlock()
+func (app *App) invalidateAllTimeCache() {
+	app.allTimeMu.Lock()
+	app.allTimeValid = false
+	app.allTimeMu.Unlock()
 }
 
-func (a *App) getAllTimeMetrics() (stats.Metrics, error) {
-	a.allTimeMu.Lock()
-	defer a.allTimeMu.Unlock()
-	if a.allTimeValid {
-		return a.allTimeMetrics, nil
+func (app *App) getAllTimeMetrics() (stats.Metrics, error) {
+	app.allTimeMu.Lock()
+	defer app.allTimeMu.Unlock()
+	if app.allTimeValid {
+		return app.allTimeMetrics, nil
 	}
-	eng := stats.NewEngine(a.db)
-	all, err := eng.Compute(stats.Range{}, nil)
-	if err != nil {
-		return stats.Metrics{}, err
+	statsEngine := stats.NewEngine(app.db)
+	allMetrics, computeError := statsEngine.Compute(stats.Range{}, nil)
+	if computeError != nil {
+		return stats.Metrics{}, computeError
 	}
 	var totalJumps sql.NullInt64
 	var distTravelled sql.NullFloat64
-	_ = a.db.QueryRow(`SELECT json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_TOTAL_JUMPS'), json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_DISTANCE_TRAVELLED')
+	_ = app.db.QueryRow(`SELECT json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_TOTAL_JUMPS'), json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_DISTANCE_TRAVELLED')
 		FROM journal_events WHERE event = 'Statistics' AND json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_TOTAL_JUMPS') IS NOT NULL AND `+journal.CmdrFilterSQL+`
 		ORDER BY timestamp DESC LIMIT 1`).Scan(&totalJumps, &distTravelled)
 	if totalJumps.Valid && totalJumps.Int64 > 0 {
-		all.CarrierJumps = int(totalJumps.Int64)
-		all.CarrierDistanceLy = distTravelled.Float64
+		allMetrics.CarrierJumps = int(totalJumps.Int64)
+		allMetrics.CarrierDistanceLy = distTravelled.Float64
 	}
-	a.allTimeMetrics = all
-	a.allTimeValid = true
-	return all, nil
+	app.allTimeMetrics = allMetrics
+	app.allTimeValid = true
+	return allMetrics, nil
 }
 
-func (a *App) reevaluateActive() {
-	ids, err := expedition.ActiveExpeditionIDs(a.db)
-	if err != nil {
-		log.Printf("reevaluate: %v", err)
+func (app *App) reevaluateActive() {
+	expeditionIDs, getIDsError := expedition.ActiveExpeditionIDs(app.db)
+	if getIDsError != nil {
+		log.Printf("reevaluate: %v", getIDsError)
 		return
 	}
-	for _, id := range ids {
-		a.reevaluate(id)
-		a.kickResolution(id, false)
+	for _, id := range expeditionIDs {
+		app.reevaluate(id)
+		app.kickResolution(id, false)
 	}
 }
 
-func (a *App) reevaluate(expID int64) {
-	err := db.WithTx(a.db, func(tx *sql.Tx) error {
-		_, err := expedition.Reevaluate(tx, expID)
-		return err
+func (app *App) reevaluate(expeditionID int64) {
+	txError := db.WithTx(app.db, func(transaction *sql.Tx) error {
+		_, reevalError := expedition.Reevaluate(transaction, expeditionID)
+		return reevalError
 	})
-	if err != nil {
-		log.Printf("reevaluate expedition %d: %v", expID, err)
+	if txError != nil {
+		log.Printf("reevaluate expedition %d: %v", expeditionID, txError)
 	}
 }
 
-func (a *App) maybeRefreshGEC() {
-	if !a.onlineEnabled() {
+func (app *App) maybeRefreshGEC() {
+	if !app.onlineEnabled() {
 		return
 	}
-	last := a.gec.LastFetched()
-	if last != "" {
-		if t, err := ed.ParseISO(last); err == nil && time.Since(t) < gecRefreshInterval && a.gec.Count() > 0 {
+	lastFetched := app.gec.LastFetched()
+	if lastFetched != "" {
+		if parsedTime, parseError := ed.ParseISO(lastFetched); parseError == nil && time.Since(parsedTime) < gecRefreshInterval && app.gec.Count() > 0 {
 			return
 		}
 	}
-	if _, err := a.gec.Refresh(a.ctx); err != nil {
-		log.Printf("gec refresh: %v", err)
+	if _, refreshError := app.gec.Refresh(app.ctx); refreshError != nil {
+		log.Printf("gec refresh: %v", refreshError)
 		return
 	}
-	a.populateMissingPOIs()
-	a.changed("plan", 0)
+	app.populateMissingPOIs()
+	app.changed("plan", 0)
 }
 
 // kickResolution resolves coordinates for waypoints of an expedition that
 // don't have them yet. allowRetry also retries rows previously marked
 // not-found (journal lookup first, so a visit fills them in offline).
-func (a *App) kickResolution(expID int64, allowRetry bool) {
-	if expID == 0 {
+func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
+	if expeditionID == 0 {
 		return
 	}
-	rows, err := expedition.ListRows(a.db, expID)
-	if err != nil {
+	rows, listError := expedition.ListRows(app.db, expeditionID)
+	if listError != nil {
 		return
 	}
-	for _, r := range rows {
-		if !r.IsWaypoint() || r.SystemName == "" || r.HasCoords {
+	for _, rowItem := range rows {
+		if !rowItem.IsWaypoint() || rowItem.SystemName == "" || rowItem.HasCoords {
 			continue
 		}
-		switch r.CoordsSource {
+		switch rowItem.CoordsSource {
 		case "":
-			a.resolveRowAsync(r, true)
+			app.resolveRowAsync(rowItem, true)
 		case "notfound", "error":
 			// Only retry against the local journal (cheap) unless asked.
-			a.resolveRowAsync(r, allowRetry)
+			app.resolveRowAsync(rowItem, allowRetry)
 		}
 	}
 }
 
-func (a *App) resolveRowAsync(r expedition.Row, online bool) {
-	a.resolveMu.Lock()
-	if a.resolving[r.ID] {
-		a.resolveMu.Unlock()
+func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
+	app.resolveMu.Lock()
+	if app.resolving[rowItem.ID] {
+		app.resolveMu.Unlock()
 		return
 	}
-	a.resolving[r.ID] = true
-	a.resolveMu.Unlock()
+	app.resolving[rowItem.ID] = true
+	app.resolveMu.Unlock()
 
 	go func() {
 		defer func() {
-			a.resolveMu.Lock()
-			delete(a.resolving, r.ID)
-			a.resolveMu.Unlock()
+			app.resolveMu.Lock()
+			delete(app.resolving, rowItem.ID)
+			app.resolveMu.Unlock()
 		}()
-		var info *systems.Info
-		var err error
+		var systemInfo *systems.Info
+		var lookupError error
 		if online {
-			a.resolveSem <- struct{}{}
-			info, err = a.resolver.Resolve(a.ctx, r.SystemName)
-			<-a.resolveSem
+			app.resolveSem <- struct{}{}
+			systemInfo, lookupError = app.resolver.Resolve(app.ctx, rowItem.SystemName)
+			<-app.resolveSem
 		} else {
-			info, err = systems.FromJournal(a.db, r.SystemName)
-			if info == nil && err == nil {
+			systemInfo, lookupError = systems.FromJournal(app.db, rowItem.SystemName)
+			if systemInfo == nil && lookupError == nil {
 				return
 			}
 		}
 		source := "error"
-		var addr, edsmID int64
-		var pos *ed.Vec3
+		var systemAddress, edsmID int64
+		var positionCoords *ed.Vec3
 		switch {
-		case info != nil && info.Pos != nil:
-			source, addr, edsmID, pos = info.Source, info.SystemAddress, info.EDSMID, info.Pos
-		case info != nil:
+		case systemInfo != nil && systemInfo.Pos != nil:
+			source, systemAddress, edsmID, positionCoords = systemInfo.Source, systemInfo.SystemAddress, systemInfo.EDSMID, systemInfo.Pos
+		case systemInfo != nil:
 			source = "notfound"
-		case err != nil && strings.Contains(err.Error(), systems.ErrNotFound.Error()):
+		case lookupError != nil && strings.Contains(lookupError.Error(), systems.ErrorNotFound.Error()):
 			source = "notfound"
 		}
-		if err := expedition.SetRowCoords(a.db, r.ID, r.SystemName, addr, edsmID, pos, source); err != nil {
-			log.Printf("store coords: %v", err)
+		if setCoordsError := expedition.SetRowCoords(app.db, rowItem.ID, rowItem.SystemName, systemAddress, edsmID, positionCoords, source); setCoordsError != nil {
+			log.Printf("store coords: %v", setCoordsError)
 			return
 		}
 		// Populate POI name from EDAstro GEC/GMP if the waypoint does not already have one set
-		var curPOI string
-		_ = a.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, r.ID).Scan(&curPOI)
-		if strings.TrimSpace(curPOI) == "" {
-			if ps := a.gec.Lookup(r.SystemName, addr); len(ps) > 0 && strings.TrimSpace(ps[0].Name) != "" {
-				poiName := html.UnescapeString(strings.TrimSpace(ps[0].Name))
-				_, _ = a.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, r.ID)
+		var curPOIName string
+		_ = app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&curPOIName)
+		if strings.TrimSpace(curPOIName) == "" {
+			if matchedPOIs := app.gec.Lookup(rowItem.SystemName, systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
+				poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
+				_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID)
 			}
 		}
-		a.reevaluate(r.ExpeditionID)
-		a.changed("plan", r.ExpeditionID)
+		app.reevaluate(rowItem.ExpeditionID)
+		app.changed("plan", rowItem.ExpeditionID)
 	}()
 }
 
-func (a *App) populateMissingPOIs() {
-	rows, err := a.db.Query(`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`)
-	if err != nil {
+func (app *App) populateMissingPOIs() {
+	rows, queryError := app.db.Query(`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`)
+	if queryError != nil {
 		return
 	}
 	defer rows.Close()
-	type item struct {
-		id   int64
-		sys  string
-		addr int64
+	type missingPOIItem struct {
+		id            int64
+		systemName    string
+		systemAddress int64
 	}
-	var items []item
+	var items []missingPOIItem
 	for rows.Next() {
-		var it item
-		if err := rows.Scan(&it.id, &it.sys, &it.addr); err == nil {
-			items = append(items, it)
+		var item missingPOIItem
+		if scanError := rows.Scan(&item.id, &item.systemName, &item.systemAddress); scanError == nil {
+			items = append(items, item)
 		}
 	}
 	rows.Close()
-	for _, it := range items {
-		if ps := a.gec.Lookup(it.sys, it.addr); len(ps) > 0 && strings.TrimSpace(ps[0].Name) != "" {
-			poiName := html.UnescapeString(strings.TrimSpace(ps[0].Name))
-			_, _ = a.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, it.id)
+	for _, item := range items {
+		if matchedPOIs := app.gec.Lookup(item.systemName, item.systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
+			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
+			_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, item.id)
 		}
 	}
 }

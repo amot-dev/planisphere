@@ -31,8 +31,8 @@ type MappingInfo struct {
 }
 
 // Efficient reports whether the DSS mapping met the efficiency target.
-func (m MappingInfo) Efficient() bool {
-	return m.Mapped && m.EfficiencyTarget > 0 && m.ProbesUsed <= m.EfficiencyTarget
+func (mapping MappingInfo) Efficient() bool {
+	return mapping.Mapped && mapping.EfficiencyTarget > 0 && mapping.ProbesUsed <= mapping.EfficiencyTarget
 }
 
 // ScanValue is a value split into the base payout and the first
@@ -44,13 +44,13 @@ type ScanValue struct {
 }
 
 // Add returns the component-wise sum.
-func (v ScanValue) Add(o ScanValue) ScanValue {
-	return ScanValue{Base: v.Base + o.Base, Bonus: v.Bonus + o.Bonus, Total: v.Total + o.Total}
+func (value ScanValue) Add(other ScanValue) ScanValue {
+	return ScanValue{Base: value.Base + other.Base, Bonus: value.Bonus + other.Bonus, Total: value.Total + other.Total}
 }
 
 // Sub returns the component-wise difference.
-func (v ScanValue) Sub(o ScanValue) ScanValue {
-	return ScanValue{Base: v.Base - o.Base, Bonus: v.Bonus - o.Bonus, Total: v.Total - o.Total}
+func (value ScanValue) Sub(other ScanValue) ScanValue {
+	return ScanValue{Base: value.Base - other.Base, Bonus: value.Bonus - other.Bonus, Total: value.Total - other.Total}
 }
 
 const (
@@ -60,15 +60,15 @@ const (
 )
 
 // IsStar reports whether the scan describes a star (or other stellar object).
-func (b BodyScan) IsStar() bool { return b.StarType != "" }
+func (bodyScan BodyScan) IsStar() bool { return bodyScan.StarType != "" }
 
 // IsValuable reports whether the scan describes a star or planet. Belt
 // clusters and rings produce Scan events with neither StarType nor PlanetClass.
-func (b BodyScan) IsValuable() bool { return b.StarType != "" || b.PlanetClass != "" }
+func (bodyScan BodyScan) IsValuable() bool { return bodyScan.StarType != "" || bodyScan.PlanetClass != "" }
 
 // IsTerraformable reports whether the body is (or was) a terraforming candidate.
-func (b BodyScan) IsTerraformable() bool {
-	switch strings.ToLower(b.TerraformState) {
+func (bodyScan BodyScan) IsTerraformable() bool {
+	switch strings.ToLower(bodyScan.TerraformState) {
 	case "terraformable", "terraforming", "terraformed":
 		return true
 	}
@@ -76,13 +76,12 @@ func (b BodyScan) IsTerraformable() bool {
 }
 
 func starK(starType string) float64 {
-	st := starType
 	switch {
-	case st == "N" || st == "H":
+	case starType == "N" || starType == "H":
 		return 22628
-	case strings.EqualFold(st, "SupermassiveBlackHole"):
+	case strings.EqualFold(starType, "SupermassiveBlackHole"):
 		return 33.5678
-	case strings.HasPrefix(st, "D") && len(st) <= 3: // D, DA, DAB, DAO, DAZ, DAV, DB, DBZ, DBV, DO, DOV, DQ, DC, DCV, DX
+	case strings.HasPrefix(starType, "D") && len(starType) <= 3: // D, DA, DAB, DAO, DAZ, DAV, DB, DBZ, DBV, DO, DOV, DQ, DC, DCV, DX
 		return 14057
 	default:
 		return 1200
@@ -91,79 +90,79 @@ func starK(starType string) float64 {
 
 // planetK returns the base k value and the terraformable bonus for a planet class.
 func planetK(planetClass string, terraformable bool) float64 {
-	pc := strings.ToLower(planetClass)
-	k := 300.0
-	tb := 93328.0
-	switch pc {
+	classLower := strings.ToLower(planetClass)
+	baseK := 300.0
+	terraformBonus := 93328.0
+	switch classLower {
 	case "metal rich body":
-		k, tb = 21790, 0
+		baseK, terraformBonus = 21790, 0
 	case "ammonia world":
-		k, tb = 96932, 0
+		baseK, terraformBonus = 96932, 0
 	case "sudarsky class i gas giant":
-		k, tb = 1656, 0
+		baseK, terraformBonus = 1656, 0
 	case "sudarsky class ii gas giant", "high metal content body":
-		k, tb = 9654, 100677
+		baseK, terraformBonus = 9654, 100677
 	case "water world":
-		k, tb = 64831, 116295
+		baseK, terraformBonus = 64831, 116295
 	case "earthlike body":
 		// Earth-like worlds always receive the terraformable bonus.
 		return 64831 + 116295
 	case "rocky body", "icy body", "rocky ice body":
-		k, tb = 300, 93328
+		baseK, terraformBonus = 300, 93328
 	default:
 		// Remaining gas giants (class III-V, helium, water giants, life-bearing).
-		k, tb = 300, 0
+		baseK, terraformBonus = 300, 0
 	}
 	if terraformable {
-		k += tb
+		baseK += terraformBonus
 	}
-	return k
+	return baseK
 }
 
-func starValue(b BodyScan, firstDiscovery bool) float64 {
-	k := starK(b.StarType)
-	mass := b.StellarMass
+func starValue(bodyScan BodyScan, firstDiscovery bool) float64 {
+	starKVal := starK(bodyScan.StarType)
+	mass := bodyScan.StellarMass
 	if mass <= 0 {
 		mass = 1
 	}
-	v := k + (mass * k / 66.25)
+	calculatedValue := starKVal + (mass * starKVal / 66.25)
 	if firstDiscovery {
-		v *= firstDiscoveryMultiplier
+		calculatedValue *= firstDiscoveryMultiplier
 	}
-	return math.Round(v)
+	return math.Round(calculatedValue)
 }
 
-func planetValue(b BodyScan, firstDiscovery, mapped, firstMapped, efficient, odyssey bool) float64 {
-	k := planetK(b.PlanetClass, b.IsTerraformable())
-	mass := b.MassEM
+func planetValue(bodyScan BodyScan, firstDiscovery, mapped, firstMapped, efficient, odyssey bool) float64 {
+	planetKVal := planetK(bodyScan.PlanetClass, bodyScan.IsTerraformable())
+	mass := bodyScan.MassEM
 	if mass <= 0 {
 		mass = 1
 	}
-	mult := 1.0
+	multiplier := 1.0
 	if mapped {
 		switch {
 		case firstDiscovery && firstMapped:
-			mult = 3.699622554
+			multiplier = 3.699622554
 		case firstMapped:
-			mult = 8.0956
+			multiplier = 8.0956
 		default:
-			mult = 10.0 / 3.0
+			multiplier = 10.0 / 3.0
 		}
 	}
-	v := (k + k*planetMassQ*math.Pow(mass, 0.2)) * mult
+	calculatedValue := (planetKVal + planetKVal*planetMassQ*math.Pow(mass, 0.2)) * multiplier
 	if mapped {
 		if odyssey {
-			v += math.Max(v*0.3, 555)
+			calculatedValue += math.Max(calculatedValue*0.3, 555)
 		}
 		if efficient {
-			v *= 1.25
+			calculatedValue *= 1.25
 		}
 	}
-	v = math.Max(minimumBodyValue, v)
+	calculatedValue = math.Max(minimumBodyValue, calculatedValue)
 	if firstDiscovery {
-		v *= firstDiscoveryMultiplier
+		calculatedValue *= firstDiscoveryMultiplier
 	}
-	return math.Round(v)
+	return math.Round(calculatedValue)
 }
 
 // EstimateBodyValue returns the estimated Universal Cartographics payout for a
@@ -172,19 +171,19 @@ func planetValue(b BodyScan, firstDiscovery, mapped, firstMapped, efficient, ody
 //
 // First discovery is `WasDiscovered == false`; first mapped is
 // `WasMapped == false` combined with a completed DSS mapping.
-func EstimateBodyValue(b BodyScan, m MappingInfo, odyssey bool) ScanValue {
-	if !b.IsValuable() {
+func EstimateBodyValue(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool) ScanValue {
+	if !bodyScan.IsValuable() {
 		return ScanValue{}
 	}
-	firstDisc := !b.WasDiscovered
+	isFirstDiscovery := !bodyScan.WasDiscovered
 	var base, total float64
-	if b.IsStar() {
-		base = starValue(b, false)
-		total = starValue(b, firstDisc)
+	if bodyScan.IsStar() {
+		base = starValue(bodyScan, false)
+		total = starValue(bodyScan, isFirstDiscovery)
 	} else {
-		firstMapped := m.Mapped && !b.WasMapped
-		base = planetValue(b, false, m.Mapped, false, m.Efficient(), odyssey)
-		total = planetValue(b, firstDisc, m.Mapped, firstMapped, m.Efficient(), odyssey)
+		isFirstMapped := mappingInfo.Mapped && !bodyScan.WasMapped
+		base = planetValue(bodyScan, false, mappingInfo.Mapped, false, mappingInfo.Efficient(), odyssey)
+		total = planetValue(bodyScan, isFirstDiscovery, mappingInfo.Mapped, isFirstMapped, mappingInfo.Efficient(), odyssey)
 	}
 	if total < base {
 		total = base
@@ -196,9 +195,9 @@ func EstimateBodyValue(b BodyScan, m MappingInfo, odyssey bool) ScanValue {
 // body whose FSS scan has already been valued, i.e. value(mapped) - value(unmapped).
 // This lets scan value and mapping value be attributed to different time ranges
 // (legs) while always summing to the correct total.
-func EstimateMappingIncrement(b BodyScan, m MappingInfo, odyssey bool) ScanValue {
-	if !m.Mapped || b.IsStar() || !b.IsValuable() {
+func EstimateMappingIncrement(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool) ScanValue {
+	if !mappingInfo.Mapped || bodyScan.IsStar() || !bodyScan.IsValuable() {
 		return ScanValue{}
 	}
-	return EstimateBodyValue(b, m, odyssey).Sub(EstimateBodyValue(b, MappingInfo{}, odyssey))
+	return EstimateBodyValue(bodyScan, mappingInfo, odyssey).Sub(EstimateBodyValue(bodyScan, MappingInfo{}, odyssey))
 }

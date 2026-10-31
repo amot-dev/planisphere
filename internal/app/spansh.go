@@ -58,126 +58,126 @@ type ActiveCarrierRouteState struct {
 }
 
 // GetActiveCarrierRoute retrieves the persisted active carrier route for an expedition.
-func (a *App) GetActiveCarrierRoute(expID int64) (*ActiveCarrierRouteState, error) {
-	if err := a.ready(); err != nil {
-		return nil, err
+func (app *App) GetActiveCarrierRoute(expeditionID int64) (*ActiveCarrierRouteState, error) {
+	if readyError := app.ready(); readyError != nil {
+		return nil, readyError
 	}
-	key := fmt.Sprintf("active_carrier_route_%d", expID)
-	val, err := db.GetSetting(a.db, key)
-	if err != nil || val == "" {
+	key := fmt.Sprintf("active_carrier_route_%d", expeditionID)
+	routeSettingValue, getError := db.GetSetting(app.db, key)
+	if getError != nil || routeSettingValue == "" {
 		return nil, nil
 	}
 	var state ActiveCarrierRouteState
-	if err := json.Unmarshal([]byte(val), &state); err != nil {
+	if unmarshalError := json.Unmarshal([]byte(routeSettingValue), &state); unmarshalError != nil {
 		return nil, nil
 	}
 	return &state, nil
 }
 
 // SaveActiveCarrierRoute persists the active carrier route state for an expedition.
-func (a *App) SaveActiveCarrierRoute(state ActiveCarrierRouteState) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) SaveActiveCarrierRoute(state ActiveCarrierRouteState) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
 	if state.ExpeditionID <= 0 {
 		return fmt.Errorf("invalid expedition id: %d", state.ExpeditionID)
 	}
-	b, err := json.Marshal(state)
-	if err != nil {
-		return err
+	routeJSON, marshalError := json.Marshal(state)
+	if marshalError != nil {
+		return marshalError
 	}
 	key := fmt.Sprintf("active_carrier_route_%d", state.ExpeditionID)
-	return db.SetSetting(a.db, key, string(b))
+	return db.SetSetting(app.db, key, string(routeJSON))
 }
 
 // ClearActiveCarrierRoute deletes the active carrier route for an expedition.
-func (a *App) ClearActiveCarrierRoute(expID int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	key := fmt.Sprintf("active_carrier_route_%d", expID)
-	_, err := a.db.Exec(`DELETE FROM settings WHERE key = ?`, key)
-	return err
+	key := fmt.Sprintf("active_carrier_route_%d", expeditionID)
+	_, deleteError := app.db.Exec(`DELETE FROM settings WHERE key = ?`, key)
+	return deleteError
 }
 
 // GetCarrierLastLocation returns the system name of the most recent CarrierJump event.
-func (a *App) GetCarrierLastLocation() (string, error) {
-	if err := a.ready(); err != nil {
-		return "", err
+func (app *App) GetCarrierLastLocation() (string, error) {
+	if readyError := app.ready(); readyError != nil {
+		return "", readyError
 	}
-	var sys string
-	err := a.db.QueryRow(`SELECT system_name FROM journal_events
+	var systemName string
+	queryError := app.db.QueryRow(`SELECT system_name FROM journal_events
 		WHERE event = 'CarrierJump' AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&sys)
-	if err != nil {
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&systemName)
+	if queryError != nil {
 		return "", nil
 	}
-	return sys, nil
+	return systemName, nil
 }
 
 // GetDefaultCarrierCapacity returns the most recently logged Fleet Carrier used capacity in tonnes,
 // or 5000 if no CarrierStats event exists in the journal archive.
-func (a *App) GetDefaultCarrierCapacity() int {
-	if err := a.ready(); err != nil {
+func (app *App) GetDefaultCarrierCapacity() int {
+	if readyError := app.ready(); readyError != nil {
 		return 5000
 	}
-	var raw string
-	err := a.db.QueryRow(`SELECT raw_json FROM journal_events WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&raw)
-	if err != nil || raw == "" {
+	var rawJSON string
+	queryError := app.db.QueryRow(`SELECT raw_json FROM journal_events WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawJSON)
+	if queryError != nil || rawJSON == "" {
 		return 5000
 	}
-	var cs journal.CarrierStatsEvent
-	if json.Unmarshal([]byte(raw), &cs) != nil {
+	var carrierStats journal.CarrierStatsEvent
+	if json.Unmarshal([]byte(rawJSON), &carrierStats) != nil {
 		return 5000
 	}
-	if used := cs.UsedCapacity(); used > 0 {
-		return used
+	if usedCapacity := carrierStats.UsedCapacity(); usedCapacity > 0 {
+		return usedCapacity
 	}
 	return 5000
 }
 
 // RecordCarrierJump logs a single completed expedition carrier jump (from Spansh hop completion or Manual Mode)
 // into the expedition's manual carrier adjustments.
-func (a *App) RecordCarrierJump(expID int64, distanceLy float64, tritium int) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritium int) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	e, err := expedition.Get(a.db, expID)
-	if err != nil {
-		return err
+	expeditionRecord, getError := expedition.Get(app.db, expeditionID)
+	if getError != nil {
+		return getError
 	}
-	adj := e.Adjustments
-	adj.CarrierJumps++
+	adjustments := expeditionRecord.Adjustments
+	adjustments.CarrierJumps++
 	if distanceLy > 0 {
-		adj.CarrierDistanceLy += distanceLy
+		adjustments.CarrierDistanceLy += distanceLy
 	}
 	if tritium > 0 {
-		cur := 0
-		if adj.TritiumUsed != nil {
-			cur = *adj.TritiumUsed
+		currentTritium := 0
+		if adjustments.TritiumUsed != nil {
+			currentTritium = *adjustments.TritiumUsed
 		}
-		next := cur + tritium
-		adj.TritiumUsed = &next
+		nextTritium := currentTritium + tritium
+		adjustments.TritiumUsed = &nextTritium
 	}
-	if err := expedition.SaveAdjustments(a.db, expID, adj); err != nil {
-		return err
+	if saveError := expedition.SaveAdjustments(app.db, expeditionID, adjustments); saveError != nil {
+		return saveError
 	}
-	a.changed("all", expID)
+	app.changed("all", expeditionID)
 	return nil
 }
 
-func (a *App) canonicalSystemName(name string) string {
+func (app *App) canonicalSystemName(name string) string {
 	name = strings.TrimSpace(name)
-	if name == "" || a.db == nil {
+	if name == "" || app.db == nil {
 		return name
 	}
 	var canonical string
-	if err := a.db.QueryRow(`SELECT system_name FROM journal_events WHERE system_name = ? COLLATE NOCASE LIMIT 1`, name).Scan(&canonical); err == nil && canonical != "" {
+	if queryError := app.db.QueryRow(`SELECT system_name FROM journal_events WHERE system_name = ? COLLATE NOCASE LIMIT 1`, name).Scan(&canonical); queryError == nil && canonical != "" {
 		return canonical
 	}
 	nameKey := strings.ToLower(strings.Join(strings.Fields(name), " "))
-	if err := a.db.QueryRow(`SELECT system_name FROM system_cache WHERE name_key = ? LIMIT 1`, nameKey).Scan(&canonical); err == nil && canonical != "" {
+	if queryError := app.db.QueryRow(`SELECT system_name FROM system_cache WHERE name_key = ? LIMIT 1`, nameKey).Scan(&canonical); queryError == nil && canonical != "" {
 		return canonical
 	}
 	return name
@@ -186,9 +186,9 @@ func (a *App) canonicalSystemName(name string) string {
 // PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination.
 // If Spansh cannot plot a route (e.g. unknown system, offline, or timeout), it returns a
 // CarrierRouteResult with ManualMode=true so the UI smoothly opens the bottom panel in manual mode.
-func (a *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string) (CarrierRouteResult, error) {
-	source = a.canonicalSystemName(source)
-	destination = a.canonicalSystemName(destination)
+func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string) (CarrierRouteResult, error) {
+	source = app.canonicalSystemName(source)
+	destination = app.canonicalSystemName(destination)
 	if capacityUsed < 0 {
 		capacityUsed = 0
 	}
@@ -198,7 +198,7 @@ func (a *App) PlotCarrierRoute(source, destination string, capacityUsed int, car
 	if carrierType == "" {
 		carrierType = "player"
 	}
-	res := CarrierRouteResult{
+	routeResult := CarrierRouteResult{
 		Origin:       source,
 		Destination:  destination,
 		CarrierType:  carrierType,
@@ -206,41 +206,41 @@ func (a *App) PlotCarrierRoute(source, destination string, capacityUsed int, car
 		Jumps:        []CarrierRouteJump{},
 	}
 	if source == "" || destination == "" {
-		res.ManualMode = true
-		res.Error = "Origin or destination system name is empty — switched to Manual Mode."
-		return res, nil
+		routeResult.ManualMode = true
+		routeResult.Error = "Origin or destination system name is empty — switched to Manual Mode."
+		return routeResult, nil
 	}
 	if strings.EqualFold(source, destination) {
-		res.ManualMode = true
-		res.Error = "Origin and destination are the same system — switched to Manual Mode."
-		return res, nil
+		routeResult.ManualMode = true
+		routeResult.Error = "Origin and destination are the same system — switched to Manual Mode."
+		return routeResult, nil
 	}
 
-	ctx := a.ctx
+	ctx := app.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	jumps, err := querySpanshCarrierRoute(reqCtx, source, destination, capacityUsed)
-	if err != nil || len(jumps) == 0 {
-		res.ManualMode = true
-		if err != nil {
-			res.Error = err.Error()
+	jumps, queryError := querySpanshCarrierRoute(reqCtx, source, destination, capacityUsed)
+	if queryError != nil || len(jumps) == 0 {
+		routeResult.ManualMode = true
+		if queryError != nil {
+			routeResult.Error = queryError.Error()
 		} else {
-			res.Error = "Spansh returned no jumps for this route — switched to Manual Mode."
+			routeResult.Error = "Spansh returned no jumps for this route — switched to Manual Mode."
 		}
-		return res, nil
+		return routeResult, nil
 	}
 
-	res.Jumps = jumps
-	res.TotalJumps = len(jumps)
-	for _, j := range jumps {
-		res.TotalDistLy += j.DistanceLy
-		res.TotalTritium += j.TritiumUsed
+	routeResult.Jumps = jumps
+	routeResult.TotalJumps = len(jumps)
+	for _, jump := range jumps {
+		routeResult.TotalDistLy += jump.DistanceLy
+		routeResult.TotalTritium += jump.TritiumUsed
 	}
-	return res, nil
+	return routeResult, nil
 }
 
 type spanshJobResp struct {
@@ -274,23 +274,23 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 	form.Set("capacity_used", strconv.Itoa(capacityUsed))
 	form.Set("calculate_tritium", "1")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://spansh.co.uk/api/fleetcarrier/route", strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
+	httpRequest, requestError := http.NewRequestWithContext(ctx, http.MethodPost, "https://spansh.co.uk/api/fleetcarrier/route", strings.NewReader(form.Encode()))
+	if requestError != nil {
+		return nil, requestError
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", version.UserAgent)
+	httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	httpRequest.Header.Set("User-Agent", version.UserAgent)
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not reach Spansh API: %w", err)
+	httpResponse, responseError := client.Do(httpRequest)
+	if responseError != nil {
+		return nil, fmt.Errorf("could not reach Spansh API: %w", responseError)
 	}
-	defer resp.Body.Close()
+	defer httpResponse.Body.Close()
 
 	var job spanshJobResp
-	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
-		return nil, fmt.Errorf("invalid Spansh response (HTTP %d)", resp.StatusCode)
+	if decodeError := json.NewDecoder(httpResponse.Body).Decode(&job); decodeError != nil {
+		return nil, fmt.Errorf("invalid Spansh response (HTTP %d)", httpResponse.StatusCode)
 	}
 	if job.Job == "" && job.JobID != "" {
 		job.Job = job.JobID
@@ -299,7 +299,7 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 		return nil, fmt.Errorf("Spansh: %s", job.Error)
 	}
 	if job.Job == "" {
-		return nil, fmt.Errorf("Spansh did not return a job ID (HTTP %d)", resp.StatusCode)
+		return nil, fmt.Errorf("Spansh did not return a job ID (HTTP %d)", httpResponse.StatusCode)
 	}
 
 	pollURL := "https://spansh.co.uk/api/results/" + url.PathEscape(job.Job)
@@ -312,19 +312,19 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 		case <-ctx.Done():
 			return nil, fmt.Errorf("Spansh route calculation timed out")
 		case <-ticker.C:
-			pReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
-			if err != nil {
-				return nil, err
+			pollRequest, pollRequestError := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+			if pollRequestError != nil {
+				return nil, pollRequestError
 			}
-			pReq.Header.Set("User-Agent", version.UserAgent)
-			pResp, err := client.Do(pReq)
-			if err != nil {
+			pollRequest.Header.Set("User-Agent", version.UserAgent)
+			pollResponse, pollResponseError := client.Do(pollRequest)
+			if pollResponseError != nil {
 				continue
 			}
 			var poll spanshPollResp
-			decErr := json.NewDecoder(pResp.Body).Decode(&poll)
-			pResp.Body.Close()
-			if decErr != nil {
+			decodePollError := json.NewDecoder(pollResponse.Body).Decode(&poll)
+			pollResponse.Body.Close()
+			if decodePollError != nil {
 				continue
 			}
 			if poll.Error != "" {
@@ -339,33 +339,33 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 				continue
 			}
 			if poll.Status == "ok" {
-				var out []CarrierRouteJump
-				for idx, j := range poll.Result.Jumps {
+				var carrierRouteJumps []CarrierRouteJump
+				for index, jumpItem := range poll.Result.Jumps {
 					// Index 0 in Spansh fleet carrier results is the origin system with distance 0.
-					if idx == 0 && j.Distance <= 0 {
+					if index == 0 && jumpItem.Distance <= 0 {
 						continue
 					}
-					trit := j.FuelUsed
-					if trit <= 0 {
-						trit = j.TritiumUsed
+					tritiumAmount := jumpItem.FuelUsed
+					if tritiumAmount <= 0 {
+						tritiumAmount = jumpItem.TritiumUsed
 					}
-					if trit <= 0 && j.Distance > 0 {
-						fuel := j.FuelInTank
-						if fuel <= 0 {
-							fuel = 1000
+					if tritiumAmount <= 0 && jumpItem.Distance > 0 {
+						tankFuel := jumpItem.FuelInTank
+						if tankFuel <= 0 {
+							tankFuel = 1000
 						}
-						trit = ed.CarrierTritiumCost(j.Distance, capacityUsed, fuel)
+						tritiumAmount = ed.CarrierTritiumCost(jumpItem.Distance, capacityUsed, tankFuel)
 					}
-					out = append(out, CarrierRouteJump{
-						SystemName:       j.Name,
-						DistanceLy:       j.Distance,
-						DistanceToDestLy: j.DistanceToDestination,
-						TritiumUsed:      trit,
-						FuelInTank:       j.FuelInTank,
-						HasIcyRing:       j.HasIcyRing,
+					carrierRouteJumps = append(carrierRouteJumps, CarrierRouteJump{
+						SystemName:       jumpItem.Name,
+						DistanceLy:       jumpItem.Distance,
+						DistanceToDestLy: jumpItem.DistanceToDestination,
+						TritiumUsed:      tritiumAmount,
+						FuelInTank:       jumpItem.FuelInTank,
+						HasIcyRing:       jumpItem.HasIcyRing,
 					})
 				}
-				return out, nil
+				return carrierRouteJumps, nil
 			}
 		}
 	}

@@ -17,8 +17,8 @@ import {
 export function GalacticClockBadge() {
   const [time, setTime] = useState(() => nowGalacticTime())
   useEffect(() => {
-    const t = setInterval(() => setTime(nowGalacticTime()), 1000)
-    return () => clearInterval(t)
+    const clockTimer = setInterval(() => setTime(nowGalacticTime()), 1000)
+    return () => clearInterval(clockTimer)
   }, [])
   return (
     <div
@@ -47,13 +47,13 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
   locked = false,
   onSelect,
 }: RegionDropdownProps) {
-  const [opts, setOpts] = useState<app.RegionOptions | null>(null)
+  const [regionOptions, setRegionOptions] = useState<app.RegionOptions | null>(null)
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
     if (!open) return
     GetRegionOptions(expeditionId, rowId, true)
-      .then(setOpts)
+      .then(setRegionOptions)
       .catch(console.error)
   }, [open, expeditionId, rowId])
 
@@ -65,16 +65,16 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
     )
   }
 
-  const adjacentList = opts?.options?.filter((o) => o.adjacent) ?? []
-  const anchorOpt = opts?.options?.find((o) => o.anchor)
-  const otherList = opts?.options?.filter((o) => !o.adjacent && !o.anchor) ?? []
-  const suggestedOpt = opts?.options?.find((o) => o.id === opts.suggestedRegionId)
+  const adjacentList = regionOptions?.options?.filter((option) => option.adjacent) ?? []
+  const anchorOption = regionOptions?.options?.find((option) => option.anchor)
+  const otherList = regionOptions?.options?.filter((option) => !option.adjacent && !option.anchor) ?? []
+  const suggestedOption = regionOptions?.options?.find((option) => option.id === regionOptions.suggestedRegionId)
 
   return (
     <div className="relative inline-block">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen((previousOpen) => !previousOpen)}
         className="inline-flex items-center gap-1.5 text-sm font-extrabold tracking-[0.12em] uppercase text-[#FF7100] hover:text-[#ff9436] cursor-pointer"
         title="Click to switch Galactic Region"
       >
@@ -96,17 +96,17 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute left-0 mt-1.5 w-80 max-h-96 overflow-y-auto z-40 border border-[#FF7100] bg-[#1c140d] shadow-2xl shadow-black text-xs">
-            {opts && opts.suggestedRegionId > 0 && suggestedOpt && (
+            {regionOptions && regionOptions.suggestedRegionId > 0 && suggestedOption && (
               <div className="p-2 border-b border-[#3d2816] bg-[#241a10]">
                 <button
                   type="button"
                   onClick={() => {
-                    onSelect(opts.suggestedRegionId)
+                    onSelect(regionOptions.suggestedRegionId)
                     setOpen(false)
                   }}
                   className="w-full text-left px-2 py-1 bg-[#08151c] border border-[#00D2FF] text-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506] font-bold uppercase tracking-wider transition cursor-pointer"
                 >
-                  Suggested from next waypoint: {suggestedOpt.name}
+                  Suggested from next waypoint: {suggestedOption.name}
                 </button>
               </div>
             )}
@@ -114,23 +114,23 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
             {adjacentList.length > 0 && (
               <div>
                 <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#FF7100] bg-[#2b190c] border-b border-[#3d2816]">
-                  Adjacent to {opts?.anchorName} ({adjacentList.length})
+                  Adjacent to {regionOptions?.anchorName} ({adjacentList.length})
                 </div>
-                {adjacentList.map((r) => (
+                {adjacentList.map((region) => (
                   <button
-                    key={r.id}
+                    key={region.id}
                     type="button"
                     onClick={() => {
-                      onSelect(r.id)
+                      onSelect(region.id)
                       setOpen(false)
                     }}
                     className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-[#FF7100] hover:text-[#050506] transition cursor-pointer ${
-                      r.id === currentRegionId
+                      region.id === currentRegionId
                         ? 'bg-[#2b190c] text-[#FF7100] font-bold'
                         : 'text-[#F4ECE4]'
                     }`}
                   >
-                    <span>{r.name}</span>
+                    <span>{region.name}</span>
                     <span className="text-[9px] font-mono-tabular px-1.5 py-0.5 bg-[#16100b] text-[#FF7100] border border-[#472e19]">
                       ADJACENT
                     </span>
@@ -139,7 +139,7 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
               </div>
             )}
 
-            {anchorOpt && (
+            {anchorOption && (
               <div>
                 <div className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-[#00D2FF] bg-[#08151c] border-y border-[#16485c]">
                   Anchor Region
@@ -147,16 +147,16 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
                 <button
                   type="button"
                   onClick={() => {
-                    onSelect(anchorOpt.id)
+                    onSelect(anchorOption.id)
                     setOpen(false)
                   }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-[#00D2FF] hover:text-[#050506] transition cursor-pointer ${
-                    anchorOpt.id === currentRegionId
+                    anchorOption.id === currentRegionId
                       ? 'bg-[#08151c] text-[#00D2FF] font-bold'
                       : 'text-[#F4ECE4]'
                   }`}
                 >
-                  <span>{anchorOpt.name}</span>
+                  <span>{anchorOption.name}</span>
                   <span className="text-[9px] font-mono-tabular px-1.5 py-0.5 bg-[#08151c] text-[#00D2FF] border border-[#16485c]">
                     ANCHOR
                   </span>
@@ -168,21 +168,21 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
               <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#a6907c] bg-[#241a10] border-y border-[#3d2816]">
                 All Other Galactic Regions ({otherList.length})
               </div>
-              {otherList.map((r) => (
+              {otherList.map((region) => (
                 <button
-                  key={r.id}
+                  key={region.id}
                   type="button"
                   onClick={() => {
-                    onSelect(r.id)
+                    onSelect(region.id)
                     setOpen(false)
                   }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-[#FF7100] hover:text-[#050506] transition cursor-pointer ${
-                    r.id === currentRegionId
+                    region.id === currentRegionId
                       ? 'bg-[#211307] text-[#FF7100] font-bold'
                       : 'text-[#d6c7b8]'
                   }`}
                 >
-                  <span>{r.name}</span>
+                  <span>{region.name}</span>
                 </button>
               ))}
             </div>
@@ -205,13 +205,13 @@ export function LegModeDropdown({
   onChangeMode: (nextModeId: number) => void
 }) {
   const [open, setOpen] = useState(false)
-  const currentMode = modesList.find((m) => m.id === modeId) || modesList[0]
+  const currentMode = modesList.find((mode) => mode.id === modeId) || modesList[0]
 
   return (
     <div className="relative inline-block">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen((previousOpen) => !previousOpen)}
         title="Active mode for this leg (click to change)"
         className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular uppercase tracking-wider border border-[#472e19] border-l-2 border-l-[#FF7100] bg-[#16100b] text-[#FF7100] hover:bg-[#24180e] transition cursor-pointer"
       >
@@ -241,14 +241,14 @@ export function LegModeDropdown({
             <div className="px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider text-[#a6907c] bg-[#241a10] border-b border-[#3d2816]">
               Select Leg Mode
             </div>
-            {modesList.map((m) => {
-              const isSelected = m.id === modeId
+            {modesList.map((mode) => {
+              const isSelected = mode.id === modeId
               return (
                 <button
-                  key={m.id}
+                  key={mode.id}
                   type="button"
                   onClick={() => {
-                    onChangeMode(m.id)
+                    onChangeMode(mode.id)
                     setOpen(false)
                   }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-left transition cursor-pointer ${
@@ -260,10 +260,10 @@ export function LegModeDropdown({
                   <div className="flex items-center gap-2">
                     <span
                       className="w-2 h-2 shrink-0"
-                      style={{ backgroundColor: m.color || '#FF7100' }}
+                      style={{ backgroundColor: mode.color || '#FF7100' }}
                     />
                     <span className="font-mono-tabular uppercase tracking-wider text-[11px]">
-                      {m.name}
+                      {mode.name}
                     </span>
                   </div>
                   {isSelected && <span className="text-[10px] font-bold">✓</span>}
@@ -293,8 +293,8 @@ export const LegBanner = memo(function LegBanner({
   const shipsUsed = Array.from(
     new Set(
       (transitions ?? [])
-        .filter((t) => t.kind === 'ship' && t.to)
-        .map((t) => t.to),
+        .filter((transition) => transition.kind === 'ship' && transition.to)
+        .map((transition) => transition.to),
     ),
   )
 
@@ -324,31 +324,31 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
 }: {
   rowView: expedition.RowView
 }) {
-  const sys = rowView.row.systemName?.trim()
-  if (!sys) return null
-  const inara = inaraSystemUrl(sys)
-  const edsm = edsmSystemUrl(sys)
+  const systemName = rowView.row.systemName?.trim()
+  if (!systemName) return null
+  const inara = inaraSystemUrl(systemName)
+  const edsm = edsmSystemUrl(systemName)
 
   return (
     <div className="inline-flex items-center gap-1 opacity-85 group-hover:opacity-100 shrink-0 whitespace-nowrap">
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation()
+        onClick={(event) => {
+          event.stopPropagation()
           OpenURL(inara).catch(console.error)
         }}
-        title={`Open ${sys} on Inara (${inara})`}
+        title={`Open ${systemName} on Inara (${inara})`}
         className="h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#16100b] hover:bg-[#FF7100] text-[#FF7100] hover:text-[#050506] border border-[#472e19] cursor-pointer"
       >
         INARA ↗
       </button>
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation()
+        onClick={(event) => {
+          event.stopPropagation()
           OpenURL(edsm).catch(console.error)
         }}
-        title={`Open ${sys} on EDSM (${edsm})`}
+        title={`Open ${systemName} on EDSM (${edsm})`}
         className="h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#16485c] cursor-pointer"
       >
         EDSM ↗
@@ -356,8 +356,8 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
       {rowView.gec?.url && (
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation()
+          onClick={(event) => {
+            event.stopPropagation()
             OpenURL(rowView.gec!.url).catch(console.error)
           }}
           title={`EDAstro GEC POI: ${rowView.gec.name} (${rowView.gec.type})`}
@@ -439,7 +439,7 @@ export function WaypointDetailsDrawer({
     )
   }
 
-  const m = details.metrics
+  const metrics = details.metrics
   const isOrigin = details.kind === 'origin'
 
   return (
@@ -468,22 +468,22 @@ export function WaypointDetailsDrawer({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <MetricMiniCard
           label="Distance Travelled"
-          value={formatLy(m.distanceLy)}
+          value={formatLy(metrics.distanceLy)}
           sub={`Ship: ${formatLy(
-            m.shipDistanceLy || Math.max(0, m.distanceLy - (m.carrierPassengerLy || 0)),
+            metrics.shipDistanceLy || Math.max(0, metrics.distanceLy - (metrics.carrierPassengerLy || 0)),
             1,
-          )} · Carrier: ${formatLy(m.carrierPassengerLy || 0, 1)}`}
+          )} · Carrier: ${formatLy(metrics.carrierPassengerLy || 0, 1)}`}
           accent="amber"
         />
-        <MetricMiniCard label="Hyperspace Jumps" value={formatInt(m.jumps)} />
+        <MetricMiniCard label="Hyperspace Jumps" value={formatInt(metrics.jumps)} />
         <MetricMiniCard
           label="Boosts (Jet/Pr/St/Ba)"
-          value={`${m.jetConeBoosts} / ${m.premiumBoosts} / ${m.standardBoosts} / ${m.basicBoosts}`}
+          value={`${metrics.jetConeBoosts} / ${metrics.premiumBoosts} / ${metrics.standardBoosts} / ${metrics.basicBoosts}`}
         />
         <MetricMiniCard
           label="Scanned / Mapped"
-          value={`${formatInt(m.bodiesScanned)} / ${formatInt(m.bodiesMapped)}`}
-          sub={`First: ${m.firstDiscoveries} disc · ${m.firstMapped} map`}
+          value={`${formatInt(metrics.bodiesScanned)} / ${formatInt(metrics.bodiesMapped)}`}
+          sub={`First: ${metrics.firstDiscoveries} disc · ${metrics.firstMapped} map`}
         />
       </div>
 
@@ -494,20 +494,20 @@ export function WaypointDetailsDrawer({
               Cartographics Value
             </span>
             <span className="font-mono-tabular text-sm font-extrabold text-[#00D2FF] whitespace-nowrap shrink-0">
-              {formatCredits(m.scanValueTotal)}
+              {formatCredits(metrics.scanValueTotal)}
             </span>
           </div>
           <div className="mt-1.5 grid grid-cols-2 gap-2 pt-1.5 border-t border-[#2e1f12] text-[11px]">
             <div className="flex justify-between gap-2 text-[#a6907c]">
               <span className="truncate">Base Scans &amp; Mapping:</span>
               <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
-                {formatCredits(m.scanValueBase)}
+                {formatCredits(metrics.scanValueBase)}
               </span>
             </div>
             <div className="flex justify-between gap-2 text-[#a6907c]">
               <span className="truncate">First Disc. / Mapped:</span>
               <span className="font-mono-tabular text-[#00D2FF] font-bold whitespace-nowrap shrink-0">
-                +{formatCredits(m.scanValueBonus)}
+                +{formatCredits(metrics.scanValueBonus)}
               </span>
             </div>
           </div>
@@ -516,23 +516,23 @@ export function WaypointDetailsDrawer({
         <div className="p-2.5 border border-[#3d2816] border-l-2 border-l-[#00E5A3] bg-[#120d09]">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] uppercase tracking-wider text-[#a6907c] font-bold truncate">
-              Exobiology Value ({formatInt(m.organicSamples)} samples)
+              Exobiology Value ({formatInt(metrics.organicSamples)} samples)
             </span>
             <span className="font-mono-tabular text-sm font-extrabold text-[#00E5A3] whitespace-nowrap shrink-0">
-              {formatCredits(m.organicValueTotal)}
+              {formatCredits(metrics.organicValueTotal)}
             </span>
           </div>
           <div className="mt-1.5 grid grid-cols-2 gap-2 pt-1.5 border-t border-[#2e1f12] text-[11px]">
             <div className="flex justify-between gap-2 text-[#a6907c]">
               <span className="truncate">Base Organic Value:</span>
               <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
-                {formatCredits(m.organicValueBase)}
+                {formatCredits(metrics.organicValueBase)}
               </span>
             </div>
             <div className="flex justify-between gap-2 text-[#a6907c]">
               <span className="truncate">First Logged Bonus:</span>
               <span className="font-mono-tabular text-[#00E5A3] font-bold whitespace-nowrap shrink-0">
-                +{formatCredits(m.organicValueBonus)}
+                +{formatCredits(metrics.organicValueBonus)}
               </span>
             </div>
           </div>
@@ -611,20 +611,20 @@ export const CoordStatusIndicator = memo(function CoordStatusIndicator({
 }: {
   rowView: expedition.RowView
 }) {
-  const r = rowView.row
-  if (!r.systemName) return null
-  if (r.hasCoords) {
-    const isJournal = r.coordsSource?.toLowerCase() === 'journal'
+  const row = rowView.row
+  if (!row.systemName) return null
+  if (row.hasCoords) {
+    const isJournal = row.coordsSource?.toLowerCase() === 'journal'
     return (
       <span
-        title={`Coordinates (${r.x.toFixed(1)}, ${r.y.toFixed(1)}, ${r.z.toFixed(1)}) via ${r.coordsSource.toUpperCase()}${
+        title={`Coordinates (${row.x.toFixed(1)}, ${row.y.toFixed(1)}, ${row.z.toFixed(1)}) via ${row.coordsSource.toUpperCase()}${
           isJournal ? ' (Previously Visited in Flight Logs)' : ' (EDSM Star Map)'
         }${rowView.detectedRegion ? ` — ${rowView.detectedRegion}` : ''}`}
         className={`w-1.5 h-3 shrink-0 ${isJournal ? 'bg-[#00E599]' : 'bg-[#00D2FF]'}`}
       />
     )
   }
-  if (r.coordsSource === 'notfound' || r.coordsSource === 'error') {
+  if (row.coordsSource === 'notfound' || row.coordsSource === 'error') {
     return (
       <span
         title="Coordinates not yet found in local journals or EDSM"
@@ -740,22 +740,22 @@ export const RowManipulationButtons = memo(function RowManipulationButtons({
 
 export interface CarrierRouteBottomPanelProps {
   route: app.CarrierRouteResult
-  jumpIdx: number
+  jumpIndex: number
   manualMode: boolean
   onCancelRoute?: () => void
   onToggleManualMode: () => void
   onCompleteSpanshJump: () => void
-  manualDistInput: string
-  onChangeManualDist: (v: string) => void
-  manualTritInput: string
-  onChangeManualTrit: (v: string) => void
+  manualDistanceInput: string
+  onChangeManualDistance: (value: string) => void
+  manualTritiumInput: string
+  onChangeManualTritium: (value: string) => void
   onLogManualJump: () => void
   manualLegJumps: number
-  manualLegDist: number
-  manualLegTrit: number
+  manualLegDistance: number
+  manualLegTritium: number
   loggingJump: boolean
   copiedNextJump: boolean
-  onCopySystem: (sys: string) => void
+  onCopySystem: (systemName: string) => void
   onArrive: () => void
 }
 
@@ -765,19 +765,19 @@ export interface CarrierRouteBottomPanelProps {
  */
 export function CarrierRouteBottomPanel({
   route,
-  jumpIdx,
+  jumpIndex,
   manualMode,
   onCancelRoute,
   onToggleManualMode,
   onCompleteSpanshJump,
-  manualDistInput,
-  onChangeManualDist,
-  manualTritInput,
-  onChangeManualTrit,
+  manualDistanceInput,
+  onChangeManualDistance,
+  manualTritiumInput,
+  onChangeManualTritium,
   onLogManualJump,
   manualLegJumps,
-  manualLegDist,
-  manualLegTrit,
+  manualLegDistance,
+  manualLegTritium,
   loggingJump,
   copiedNextJump,
   onCopySystem,
@@ -786,17 +786,17 @@ export function CarrierRouteBottomPanel({
   const jumps = route.jumps ?? []
   const hasSpanshJumps = jumps.length > 0
   const currentSystem =
-    jumpIdx === 0
+    jumpIndex === 0
       ? route.origin || 'Origin'
-      : jumps[Math.min(jumpIdx - 1, jumps.length - 1)]?.systemName || route.destination
-  const nextHop = jumpIdx < jumps.length ? jumps[jumpIdx] : null
-  const remainingJumps = Math.max(0, jumps.length - jumpIdx)
+      : jumps[Math.min(jumpIndex - 1, jumps.length - 1)]?.systemName || route.destination
+  const nextHop = jumpIndex < jumps.length ? jumps[jumpIndex] : null
+  const remainingJumps = Math.max(0, jumps.length - jumpIndex)
   const remainingDistLy = jumps
-    .slice(jumpIdx)
-    .reduce((acc, j) => acc + (j.distanceLy || 0), 0)
+    .slice(jumpIndex)
+    .reduce((totalDistance, jump) => totalDistance + (jump.distanceLy || 0), 0)
   const remainingTrit = jumps
-    .slice(jumpIdx)
-    .reduce((acc, j) => acc + (j.tritiumUsed || 0), 0)
+    .slice(jumpIndex)
+    .reduce((totalTritium, jump) => totalTritium + (jump.tritiumUsed || 0), 0)
 
   return (
     <div className="border-t-2 border-[#00D2FF] bg-[#0b0907] px-5 py-3 shadow-2xl text-xs">
@@ -858,7 +858,7 @@ export function CarrierRouteBottomPanel({
 
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
-                Next Carrier Jump {nextHop ? `[#${jumpIdx + 1} OF ${jumps.length}]` : ''}
+                Next Carrier Jump {nextHop ? `[#${jumpIndex + 1} OF ${jumps.length}]` : ''}
               </span>
               {nextHop ? (
                 <div className="flex items-center gap-2">
@@ -918,7 +918,7 @@ export function CarrierRouteBottomPanel({
                 onClick={onCompleteSpanshJump}
                 className="ed-btn-primary"
               >
-                {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${jumpIdx + 1} ✓`}
+                {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${jumpIndex + 1} ✓`}
               </button>
             ) : (
               <button
@@ -941,8 +941,8 @@ export function CarrierRouteBottomPanel({
               <span className="font-mono-tabular text-xs text-[#F4ECE4]">
                 Logged this leg:{' '}
                 <span className="text-[#00D2FF] font-bold">{manualLegJumps} JUMPS</span> ·{' '}
-                <span className="text-[#FF7100] font-bold">{formatLy(manualLegDist, 1)}</span> ·{' '}
-                <span>{formatInt(manualLegTrit)} t TRITIUM</span>
+                <span className="text-[#FF7100] font-bold">{formatLy(manualLegDistance, 1)}</span> ·{' '}
+                <span>{formatInt(manualLegTritium)} t TRITIUM</span>
               </span>
             </div>
 
@@ -956,8 +956,8 @@ export function CarrierRouteBottomPanel({
                   step="0.01"
                   min="0"
                   max="500"
-                  value={manualDistInput}
-                  onChange={(e) => onChangeManualDist(e.target.value)}
+                  value={manualDistanceInput}
+                  onChange={(event) => onChangeManualDistance(event.target.value)}
                   placeholder="e.g. 498.4"
                   className="w-32 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />
@@ -971,8 +971,8 @@ export function CarrierRouteBottomPanel({
                   type="number"
                   step="1"
                   min="0"
-                  value={manualTritInput}
-                  onChange={(e) => onChangeManualTrit(e.target.value)}
+                  value={manualTritiumInput}
+                  onChange={(event) => onChangeManualTritium(event.target.value)}
                   placeholder="e.g. 68"
                   className="w-28 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />
@@ -1017,8 +1017,8 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
 }: {
   value: string
   placeholder: string
-  onChange: (val: string) => void
-  onBlur: (val: string) => void
+  onChange: (value: string) => void
+  onBlur: (value: string) => void
   className?: string
   maxLines?: number
 }) {
@@ -1034,16 +1034,16 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
   }, [value, maxLines])
 
   const adjustHeight = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
+    const textareaElement = textareaRef.current
+    if (!textareaElement) return
 
     const minHeight = TEXTAREA_LINE_HEIGHT + TEXTAREA_VERTICAL_PAD
     const maxHeight = TEXTAREA_LINE_HEIGHT * maxLines + TEXTAREA_VERTICAL_PAD
 
-    el.style.height = 'auto'
-    const targetHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)
-    el.style.height = `${targetHeight}px`
-    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    textareaElement.style.height = 'auto'
+    const targetHeight = Math.min(Math.max(textareaElement.scrollHeight, minHeight), maxHeight)
+    textareaElement.style.height = `${targetHeight}px`
+    textareaElement.style.overflowY = textareaElement.scrollHeight > maxHeight ? 'auto' : 'hidden'
   }, [maxLines])
 
   // Only measure scrollHeight when actively focused and user is typing
@@ -1065,17 +1065,17 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
         setIsFocused(true)
         adjustHeight()
       }}
-      onChange={(e) => {
-        onChange(e.target.value)
+      onChange={(event) => {
+        onChange(event.target.value)
       }}
-      onBlur={(e) => {
+      onBlur={(event) => {
         setIsFocused(false)
-        onBlur(e.target.value)
+        onBlur(event.target.value)
       }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault()
-          e.currentTarget.blur()
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          event.currentTarget.blur()
         }
       }}
       className={`w-full bg-transparent px-1.5 py-1 border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none resize-none leading-5 text-xs block ${className}`}

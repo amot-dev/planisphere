@@ -85,68 +85,68 @@ func PeekEventName(line []byte) string {
 		return ""
 	}
 	rest := line[i+len(eventKey):]
-	j := bytes.IndexByte(rest, '"')
-	if j < 0 {
+	quoteStart := bytes.IndexByte(rest, '"')
+	if quoteStart < 0 {
 		return ""
 	}
-	rest = rest[j+1:]
-	k := bytes.IndexByte(rest, '"')
-	if k < 0 {
+	rest = rest[quoteStart+1:]
+	quoteEnd := bytes.IndexByte(rest, '"')
+	if quoteEnd < 0 {
 		return ""
 	}
-	return string(rest[:k])
+	return string(rest[:quoteEnd])
 }
 
-func optInt(p *int64) string {
-	if p == nil {
+func optInt(intValue *int64) string {
+	if intValue == nil {
 		return ""
 	}
-	return strconv.FormatInt(*p, 10)
+	return strconv.FormatInt(*intValue, 10)
 }
 
-func optFloat(p *float64) string {
-	if p == nil {
+func optFloat(floatValue *float64) string {
+	if floatValue == nil {
 		return ""
 	}
-	return strconv.FormatFloat(*p, 'f', -1, 64)
+	return strconv.FormatFloat(*floatValue, 'f', -1, 64)
 }
 
 // ComputeUID returns SHA256(timestamp + event + key identifiers) as hex. The
 // key identifiers are chosen per event type so that the same in-game action is
 // always mapped to the same UID, regardless of which file it was read from.
 func ComputeUID(timestamp, event string, keys ...string) string {
-	h := sha256.New()
-	h.Write([]byte(timestamp))
-	h.Write([]byte{0})
-	h.Write([]byte(event))
-	for _, k := range keys {
-		h.Write([]byte{0})
-		h.Write([]byte(k))
+	hasher := sha256.New()
+	hasher.Write([]byte(timestamp))
+	hasher.Write([]byte{0})
+	hasher.Write([]byte(event))
+	for _, key := range keys {
+		hasher.Write([]byte{0})
+		hasher.Write([]byte(key))
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-func keyIdentifiers(c *commonFields, raw []byte) []string {
-	body := strings.TrimSpace(string(c.Body))
-	switch c.Event {
+func keyIdentifiers(fields *commonFields, raw []byte) []string {
+	body := strings.TrimSpace(string(fields.Body))
+	switch fields.Event {
 	case "FSDJump", "Location", "CarrierJump", "FSSDiscoveryScan", "FSDTarget":
-		return []string{optInt(c.SystemAddress)}
+		return []string{optInt(fields.SystemAddress)}
 	case "Scan":
-		return []string{optInt(c.SystemAddress), optInt(c.BodyID), c.ScanType}
+		return []string{optInt(fields.SystemAddress), optInt(fields.BodyID), fields.ScanType}
 	case "SAAScanComplete":
-		return []string{optInt(c.SystemAddress), optInt(c.BodyID)}
+		return []string{optInt(fields.SystemAddress), optInt(fields.BodyID)}
 	case "ScanOrganic":
-		return []string{optInt(c.SystemAddress), body, c.Species, c.ScanType}
+		return []string{optInt(fields.SystemAddress), body, fields.Species, fields.ScanType}
 	case "Commander":
-		return []string{c.FID, c.Commander}
+		return []string{fields.FID, fields.Commander}
 	case "LoadGame":
-		return []string{c.FID, optInt(c.ShipID)}
+		return []string{fields.FID, optInt(fields.ShipID)}
 	case "ShipyardSwap":
-		return []string{optInt(c.ShipID), optInt(c.StoreShipID)}
+		return []string{optInt(fields.ShipID), optInt(fields.StoreShipID)}
 	case "CarrierStats":
-		return []string{optInt(c.CarrierID), optFloat(c.FuelLevel)}
+		return []string{optInt(fields.CarrierID), optFloat(fields.FuelLevel)}
 	case "MultiSellExplorationData", "SellExplorationData":
-		return []string{optInt(c.TotalEarnings)}
+		return []string{optInt(fields.TotalEarnings)}
 	case "Statistics":
 		return nil
 	default:
@@ -158,7 +158,7 @@ func keyIdentifiers(c *commonFields, raw []byte) []string {
 
 // ParseLine parses a journal line. ok is false when the line is not a relevant
 // event (or is not valid JSON).
-func ParseLine(line []byte, sourceFile string) (ev Event, ok bool, err error) {
+func ParseLine(line []byte, sourceFile string) (parsedEvent Event, ok bool, parseError error) {
 	line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("\xef\xbb\xbf")))
 	if len(line) == 0 || line[0] != '{' {
 		return Event{}, false, nil
@@ -167,53 +167,53 @@ func ParseLine(line []byte, sourceFile string) (ev Event, ok bool, err error) {
 	if !RelevantEvents[name] {
 		return Event{}, false, nil
 	}
-	var c commonFields
-	if err := json.Unmarshal(line, &c); err != nil {
-		return Event{}, false, fmt.Errorf("decode %s: %w", name, err)
+	var fields commonFields
+	if unmarshalError := json.Unmarshal(line, &fields); unmarshalError != nil {
+		return Event{}, false, fmt.Errorf("decode %s: %w", name, unmarshalError)
 	}
-	if !RelevantEvents[c.Event] || c.Timestamp == "" {
+	if !RelevantEvents[fields.Event] || fields.Timestamp == "" {
 		return Event{}, false, nil
 	}
-	ts, err := ed.NormalizeISO(c.Timestamp)
-	if err != nil {
-		return Event{}, false, err
+	normalizedTimestamp, normalizeError := ed.NormalizeISO(fields.Timestamp)
+	if normalizeError != nil {
+		return Event{}, false, normalizeError
 	}
-	ev = Event{
-		Timestamp:     ts,
-		Event:         c.Event,
-		Commander:     strings.TrimSpace(c.Commander),
-		FID:           strings.TrimSpace(c.FID),
-		SystemAddress: c.SystemAddress,
-		BodyID:        c.BodyID,
-		BodyName:      c.BodyName,
+	parsedEvent = Event{
+		Timestamp:     normalizedTimestamp,
+		Event:         fields.Event,
+		Commander:     strings.TrimSpace(fields.Commander),
+		FID:           strings.TrimSpace(fields.FID),
+		SystemAddress: fields.SystemAddress,
+		BodyID:        fields.BodyID,
+		BodyName:      fields.BodyName,
 		SourceFile:    sourceFile,
 		Raw:           string(line),
 	}
-	if c.Event == "Commander" && ev.Commander == "" {
-		ev.Commander = strings.TrimSpace(c.Name)
+	if fields.Event == "Commander" && parsedEvent.Commander == "" {
+		parsedEvent.Commander = strings.TrimSpace(fields.Name)
 	}
 	switch {
-	case c.StarSystem != "":
-		ev.SystemName = c.StarSystem
-	case c.SystemName != "":
-		ev.SystemName = c.SystemName
-	case c.Event == "FSDTarget":
-		ev.SystemName = c.Name
+	case fields.StarSystem != "":
+		parsedEvent.SystemName = fields.StarSystem
+	case fields.SystemName != "":
+		parsedEvent.SystemName = fields.SystemName
+	case fields.Event == "FSDTarget":
+		parsedEvent.SystemName = fields.Name
 	}
-	if c.Event == "ScanOrganic" && ev.BodyID == nil && len(c.Body) > 0 {
-		if n, err := strconv.ParseInt(strings.TrimSpace(string(c.Body)), 10, 64); err == nil {
-			ev.BodyID = &n
+	if fields.Event == "ScanOrganic" && parsedEvent.BodyID == nil && len(fields.Body) > 0 {
+		if parsedBodyID, numError := strconv.ParseInt(strings.TrimSpace(string(fields.Body)), 10, 64); numError == nil {
+			parsedEvent.BodyID = &parsedBodyID
 		}
 	}
-	if c.Event == "Location" && ev.BodyName == "" && len(c.Body) > 0 {
-		var s string
-		if json.Unmarshal(c.Body, &s) == nil {
-			ev.BodyName = s
+	if fields.Event == "Location" && parsedEvent.BodyName == "" && len(fields.Body) > 0 {
+		var bodyString string
+		if json.Unmarshal(fields.Body, &bodyString) == nil {
+			parsedEvent.BodyName = bodyString
 		}
 	}
-	if x, y, z, ok := Vec(c.StarPos); ok {
-		ev.StarPos = &ed.Vec3{X: x, Y: y, Z: z}
+	if coordX, coordY, coordZ, hasCoords := Vec(fields.StarPos); hasCoords {
+		parsedEvent.StarPos = &ed.Vec3{X: coordX, Y: coordY, Z: coordZ}
 	}
-	ev.UID = ComputeUID(ts, c.Event, keyIdentifiers(&c, line)...)
-	return ev, true, nil
+	parsedEvent.UID = ComputeUID(normalizedTimestamp, fields.Event, keyIdentifiers(&fields, line)...)
+	return parsedEvent, true, nil
 }

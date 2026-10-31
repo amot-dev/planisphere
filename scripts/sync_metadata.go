@@ -21,141 +21,142 @@ type Config struct {
 }
 
 func main() {
-	rootDir, err := findRootDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error locating root directory: %v\n", err)
+	rootDir, findError := findRootDir()
+	if findError != nil {
+		fmt.Fprintf(os.Stderr, "Error locating root directory: %v\n", findError)
 		os.Exit(1)
 	}
 
 	configPath := filepath.Join(rootDir, "app.config.json")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", configPath, err)
+	data, readError := os.ReadFile(configPath)
+	if readError != nil {
+		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", configPath, readError)
 		os.Exit(1)
 	}
 
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing %s: %v\n", configPath, err)
+	var appConfig Config
+	if parseError := json.Unmarshal(data, &appConfig); parseError != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing %s: %v\n", configPath, parseError)
 		os.Exit(1)
 	}
 
-	if cfg.ProductName == "" {
-		cfg.ProductName = "Planisphere"
+	if appConfig.ProductName == "" {
+		appConfig.ProductName = "Planisphere"
 	}
-	if cfg.BinaryName == "" {
-		cfg.BinaryName = "planisphere"
+	if appConfig.BinaryName == "" {
+		appConfig.BinaryName = "planisphere"
 	}
 
-	fmt.Printf("[sync-metadata] Reading app.config.json: %s v%s (%s)\n", cfg.ProductName, cfg.Version, cfg.BinaryName)
+	fmt.Printf("[sync-metadata] Reading app.config.json: %s v%s (%s)\n", appConfig.ProductName, appConfig.Version, appConfig.BinaryName)
 
 	// 1. Sync wails.json
-	syncWailsJSON(filepath.Join(rootDir, "wails.json"), cfg)
+	syncWailsJSON(filepath.Join(rootDir, "wails.json"), appConfig)
 
 	// 2. Sync frontend/package.json
-	syncPackageJSON(filepath.Join(rootDir, "frontend", "package.json"), cfg)
+	syncPackageJSON(filepath.Join(rootDir, "frontend", "package.json"), appConfig)
 
 	// 3. Sync frontend/index.html
-	syncIndexHTML(filepath.Join(rootDir, "frontend", "index.html"), cfg)
+	syncIndexHTML(filepath.Join(rootDir, "frontend", "index.html"), appConfig)
 
 	// 4. Generate internal/version/version.go (consumed directly by main.go & backend)
-	generateGoVersion(filepath.Join(rootDir, "internal", "version", "version.go"), cfg)
+	generateGoVersion(filepath.Join(rootDir, "internal", "version", "version.go"), appConfig)
 
 	// 5. Generate frontend/src/version.ts (consumed by frontend UI)
-	generateTSVersion(filepath.Join(rootDir, "frontend", "src", "version.ts"), cfg)
+	generateTSVersion(filepath.Join(rootDir, "frontend", "src", "version.ts"), appConfig)
 
 	// 6. Sync go.mod and internal Go imports
-	syncGoMod(filepath.Join(rootDir, "go.mod"), rootDir, cfg)
+	syncGoMod(filepath.Join(rootDir, "go.mod"), rootDir, appConfig)
 
 	fmt.Printf("✓ Metadata synchronized successfully across all project targets.\n")
 }
 
 func findRootDir() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
+	currentDir, cwdError := os.Getwd()
+	if cwdError != nil {
+		return "", cwdError
 	}
+	dirCursor := currentDir
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "app.config.json")); err == nil {
-			return dir, nil
+		if _, statError := os.Stat(filepath.Join(dirCursor, "app.config.json")); statError == nil {
+			return dirCursor, nil
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
+		parentDir := filepath.Dir(dirCursor)
+		if parentDir == dirCursor {
 			break
 		}
-		dir = parent
+		dirCursor = parentDir
 	}
 	return ".", nil
 }
 
-func syncWailsJSON(path string, cfg Config) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, err)
+func syncWailsJSON(path string, appConfig Config) {
+	data, readError := os.ReadFile(path)
+	if readError != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, readError)
 		return
 	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	var manifestMap map[string]any
+	if unmarshalError := json.Unmarshal(data, &manifestMap); unmarshalError != nil {
 		return
 	}
-	m["_comment"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
-	m["name"] = cfg.Name
-	m["outputfilename"] = cfg.BinaryName
-	if author, ok := m["author"].(map[string]any); ok {
-		author["name"] = cfg.Author
+	manifestMap["_comment"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
+	manifestMap["name"] = appConfig.Name
+	manifestMap["outputfilename"] = appConfig.BinaryName
+	if author, ok := manifestMap["author"].(map[string]any); ok {
+		author["name"] = appConfig.Author
 	} else {
-		m["author"] = map[string]any{"name": cfg.Author}
+		manifestMap["author"] = map[string]any{"name": appConfig.Author}
 	}
-	if info, ok := m["info"].(map[string]any); ok {
-		info["productName"] = cfg.ProductName
-		info["productVersion"] = cfg.Version
-		info["comments"] = cfg.Description
+	if info, ok := manifestMap["info"].(map[string]any); ok {
+		info["productName"] = appConfig.ProductName
+		info["productVersion"] = appConfig.Version
+		info["comments"] = appConfig.Description
 	} else {
-		m["info"] = map[string]any{
-			"productName":    cfg.ProductName,
-			"productVersion": cfg.Version,
-			"comments":       cfg.Description,
+		manifestMap["info"] = map[string]any{
+			"productName":    appConfig.ProductName,
+			"productVersion": appConfig.Version,
+			"comments":       appConfig.Description,
 		}
 	}
-	out, _ := json.MarshalIndent(m, "", "  ")
+	out, _ := json.MarshalIndent(manifestMap, "", "  ")
 	_ = os.WriteFile(path, append(out, '\n'), 0644)
-	fmt.Printf("  -> Updated wails.json (name: %q, binary: %q, product: %q)\n", cfg.Name, cfg.BinaryName, cfg.ProductName)
+	fmt.Printf("  -> Updated wails.json (name: %q, binary: %q, product: %q)\n", appConfig.Name, appConfig.BinaryName, appConfig.ProductName)
 }
 
-func syncPackageJSON(path string, cfg Config) {
-	data, err := os.ReadFile(path)
-	if err != nil {
+func syncPackageJSON(path string, appConfig Config) {
+	data, readError := os.ReadFile(path)
+	if readError != nil {
 		return
 	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	var packageMap map[string]any
+	if unmarshalError := json.Unmarshal(data, &packageMap); unmarshalError != nil {
 		return
 	}
-	m["//"] = "DO NOT EDIT METADATA DIRECTLY: Synced from app.config.json via 'npm run sync-metadata'"
-	m["name"] = cfg.Name
-	m["version"] = cfg.Version
-	m["description"] = cfg.Description
-	out, _ := json.MarshalIndent(m, "", "  ")
+	packageMap["//"] = "DO NOT EDIT METADATA DIRECTLY: Synced from app.config.json via 'npm run sync-metadata'"
+	packageMap["name"] = appConfig.Name
+	packageMap["version"] = appConfig.Version
+	packageMap["description"] = appConfig.Description
+	out, _ := json.MarshalIndent(packageMap, "", "  ")
 	_ = os.WriteFile(path, append(out, '\n'), 0644)
-	fmt.Printf("  -> Updated frontend/package.json (name: %q, version: %q)\n", cfg.Name, cfg.Version)
+	fmt.Printf("  -> Updated frontend/package.json (name: %q, version: %q)\n", appConfig.Name, appConfig.Version)
 }
 
-func syncIndexHTML(path string, cfg Config) {
-	data, err := os.ReadFile(path)
-	if err != nil {
+func syncIndexHTML(path string, appConfig Config) {
+	data, readError := os.ReadFile(path)
+	if readError != nil {
 		return
 	}
 	// Replace title tag with comment banner and title
-	re := regexp.MustCompile(`(<!--.*?-->\s*)?<title>.*?</title>`)
-	newTitle := fmt.Sprintf("<!-- Managed by scripts/sync_metadata.go. Edit app.config.json instead. -->\n    <title>%s — %s</title>", cfg.ProductName, cfg.Tagline)
-	replaced := re.ReplaceAllString(string(data), newTitle)
+	titleRegex := regexp.MustCompile(`(<!--.*?-->\s*)?<title>.*?</title>`)
+	newTitle := fmt.Sprintf("<!-- Managed by scripts/sync_metadata.go. Edit app.config.json instead. -->\n    <title>%s — %s</title>", appConfig.ProductName, appConfig.Tagline)
+	replaced := titleRegex.ReplaceAllString(string(data), newTitle)
 	_ = os.WriteFile(path, []byte(replaced), 0644)
-	fmt.Printf("  -> Updated frontend/index.html (<title>%s — %s</title>)\n", cfg.ProductName, cfg.Tagline)
+	fmt.Printf("  -> Updated frontend/index.html (<title>%s — %s</title>)\n", appConfig.ProductName, appConfig.Tagline)
 }
 
-func generateGoVersion(path string, cfg Config) {
+func generateGoVersion(path string, appConfig Config) {
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
-	userAgent := fmt.Sprintf("%s/%s", cfg.ProductName, cfg.Version)
+	userAgent := fmt.Sprintf("%s/%s", appConfig.ProductName, appConfig.Version)
 	content := fmt.Sprintf(`// Code generated by scripts/sync_metadata.go; DO NOT EDIT.
 // Source: app.config.json
 package version
@@ -170,12 +171,12 @@ const (
 	BinaryName  = %q
 	UserAgent   = %q
 )
-`, cfg.Name, cfg.ProductName, cfg.Tagline, cfg.Version, cfg.Author, cfg.Description, cfg.BinaryName, userAgent)
+`, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName, userAgent)
 	_ = os.WriteFile(path, []byte(content), 0644)
 	fmt.Printf("  -> Generated internal/version/version.go\n")
 }
 
-func generateTSVersion(path string, cfg Config) {
+func generateTSVersion(path string, appConfig Config) {
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
 	content := fmt.Sprintf(`// Code generated by scripts/sync_metadata.go; DO NOT EDIT.
 // Source: app.config.json
@@ -187,41 +188,41 @@ export const APP_VERSION = %q
 export const APP_AUTHOR = %q
 export const APP_DESCRIPTION = %q
 export const APP_BINARY_NAME = %q
-`, cfg.Name, cfg.ProductName, cfg.Tagline, cfg.Version, cfg.Author, cfg.Description, cfg.BinaryName)
+`, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName)
 	_ = os.WriteFile(path, []byte(content), 0644)
 	fmt.Printf("  -> Generated frontend/src/version.ts\n")
 }
 
-func syncGoMod(path, rootDir string, cfg Config) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, err)
+func syncGoMod(path, rootDir string, appConfig Config) {
+	data, readError := os.ReadFile(path)
+	if readError != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, readError)
 		return
 	}
-	re := regexp.MustCompile(`(?m)^module\s+([^\s\r\n]+)`)
-	matches := re.FindSubmatch(data)
+	moduleRegex := regexp.MustCompile(`(?m)^module\s+([^\s\r\n]+)`)
+	matches := moduleRegex.FindSubmatch(data)
 	if len(matches) < 2 {
 		return
 	}
 	oldModule := string(matches[1])
-	if oldModule != cfg.Name {
-		updated := re.ReplaceAll(data, []byte("module "+cfg.Name))
-		if err := os.WriteFile(path, updated, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", path, err)
+	if oldModule != appConfig.Name {
+		updated := moduleRegex.ReplaceAll(data, []byte("module "+appConfig.Name))
+		if writeError := os.WriteFile(path, updated, 0644); writeError != nil {
+			fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", path, writeError)
 			return
 		}
-		fmt.Printf("  -> Updated go.mod (module: %q -> %q)\n", oldModule, cfg.Name)
-		updateGoImports(rootDir, oldModule, cfg.Name)
+		fmt.Printf("  -> Updated go.mod (module: %q -> %q)\n", oldModule, appConfig.Name)
+		updateGoImports(rootDir, oldModule, appConfig.Name)
 	}
 }
 
-func updateGoImports(rootDir, oldMod, newMod string) {
-	oldPattern := []byte(`"` + oldMod + `/`)
-	newPattern := []byte(`"` + newMod + `/`)
+func updateGoImports(rootDir, oldModule, newModule string) {
+	oldPattern := []byte(`"` + oldModule + `/`)
+	newPattern := []byte(`"` + newModule + `/`)
 	count := 0
 
-	_ = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	_ = filepath.Walk(rootDir, func(path string, info os.FileInfo, walkError error) error {
+		if walkError != nil {
 			return nil
 		}
 		if info.IsDir() {
@@ -234,19 +235,19 @@ func updateGoImports(rootDir, oldMod, newMod string) {
 		if !strings.HasSuffix(info.Name(), ".go") {
 			return nil
 		}
-		content, err := os.ReadFile(path)
-		if err != nil {
+		content, readError := os.ReadFile(path)
+		if readError != nil {
 			return nil
 		}
 		if bytes.Contains(content, oldPattern) {
 			newContent := bytes.ReplaceAll(content, oldPattern, newPattern)
-			if err := os.WriteFile(path, newContent, info.Mode().Perm()); err == nil {
+			if writeError := os.WriteFile(path, newContent, info.Mode().Perm()); writeError == nil {
 				count++
 			}
 		}
 		return nil
 	})
 	if count > 0 {
-		fmt.Printf("  -> Updated Go import paths in %d files (%s -> %s)\n", count, oldMod, newMod)
+		fmt.Printf("  -> Updated Go import paths in %d files (%s -> %s)\n", count, oldModule, newModule)
 	}
 }

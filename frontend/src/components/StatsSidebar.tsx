@@ -25,25 +25,25 @@ export const StatsSidebar = memo(function StatsSidebar({
   const [viewScope, setViewScope] = useState<'expedition' | 'allTime'>('expedition')
 
   const modeList: modes.Mode[] = modesState?.modes ?? []
-  const travelMode = modeList.find((m) => m.name.toLowerCase() === 'travel')
+  const travelMode = modeList.find((modeItem) => modeItem.name.toLowerCase() === 'travel')
   const activeModeId =
     modesState?.activeModeId || travelMode?.id || modeList[0]?.id || 0
 
   function getSelection(modeId: number): stats.ModeSelection {
-    const found = filter.modes?.find((m) => m.modeId === modeId)
+    const found = filter.modes?.find((modeSelection) => modeSelection.modeId === modeId)
     if (found) return found
     return stats.ModeSelection.createFrom({ modeId, travel: true, discovery: true })
   }
 
   function setModeSelection(modeId: number, travel: boolean, discovery: boolean) {
-    const allIds = modeList.map((m) => m.id)
-    const updated = allIds.map((id) => {
-      if (id === modeId) {
-        return stats.ModeSelection.createFrom({ modeId: id, travel, discovery })
+    const allIds = modeList.map((mode) => mode.id)
+    const updated = allIds.map((targetModeId) => {
+      if (targetModeId === modeId) {
+        return stats.ModeSelection.createFrom({ modeId: targetModeId, travel, discovery })
       }
-      return getSelection(id)
+      return getSelection(targetModeId)
     })
-    const anyHidden = updated.some((s) => !s.travel || !s.discovery)
+    const anyHidden = updated.some((selection) => !selection.travel || !selection.discovery)
     onFilterChange(
       stats.Filter.createFrom({
         enabled: anyHidden,
@@ -53,11 +53,11 @@ export const StatsSidebar = memo(function StatsSidebar({
   }
 
   function cycleModeSelection(modeId: number) {
-    const sel = getSelection(modeId)
-    if (sel.travel && sel.discovery) {
+    const selection = getSelection(modeId)
+    if (selection.travel && selection.discovery) {
       // Full -> Partial (Scans & Exobio only)
       setModeSelection(modeId, false, true)
-    } else if (!sel.travel && sel.discovery) {
+    } else if (!selection.travel && selection.discovery) {
       // Partial -> Excluded (None)
       setModeSelection(modeId, false, false)
     } else {
@@ -70,8 +70,8 @@ export const StatsSidebar = memo(function StatsSidebar({
     onFilterChange(
       stats.Filter.createFrom({
         enabled: false,
-        modes: modeList.map((m) => ({
-          modeId: m.id,
+        modes: modeList.map((modeItem) => ({
+          modeId: modeItem.id,
           travel: true,
           discovery: true,
         })),
@@ -98,13 +98,13 @@ export const StatsSidebar = memo(function StatsSidebar({
           </span>
           <select
             value={activeModeId}
-            onChange={(e) => onQuickSwitchMode(Number(e.target.value))}
+            onChange={(event) => onQuickSwitchMode(Number(event.target.value))}
             title="Current gameplay mode (logs newly recorded jumps and scans to this mode)"
             className="flex-1 bg-[#050506] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer"
           >
-            {modeList.map((m) => (
-              <option key={m.id} value={m.id} className="bg-[#0b0907] text-[#F4ECE4]">
-                {m.name}
+            {modeList.map((mode) => (
+              <option key={mode.id} value={mode.id} className="bg-[#0b0907] text-[#F4ECE4]">
+                {mode.name}
               </option>
             ))}
           </select>
@@ -129,22 +129,22 @@ export const StatsSidebar = memo(function StatsSidebar({
           </div>
 
           <div className="grid grid-cols-2 gap-1.5">
-            {modeList.map((m) => {
-              const sel = getSelection(m.id)
-              const isFull = sel.travel && sel.discovery
-              const isPartial = !sel.travel && sel.discovery
+            {modeList.map((mode) => {
+              const selection = getSelection(mode.id)
+              const isFull = selection.travel && selection.discovery
+              const isPartial = !selection.travel && selection.discovery
 
               const titleText = isFull
-                ? `${m.name}: All telemetry included. Click to switch to Scans & Exobio only.`
+                ? `${mode.name}: All telemetry included. Click to switch to Scans & Exobio only.`
                 : isPartial
-                  ? `${m.name}: Scans & Exobio only (jumps/Ly hidden). Click to exclude.`
-                  : `${m.name}: Excluded from metrics. Click to include all.`
+                  ? `${mode.name}: Scans & Exobio only (jumps/Ly hidden). Click to exclude.`
+                  : `${mode.name}: Excluded from metrics. Click to include all.`
 
               return (
                 <button
-                  key={m.id}
+                  key={mode.id}
                   type="button"
-                  onClick={() => cycleModeSelection(m.id)}
+                  onClick={() => cycleModeSelection(mode.id)}
                   title={titleText}
                   className={`flex items-center gap-2 px-2 py-1 border text-xs cursor-pointer transition select-none text-left ${
                     isFull
@@ -169,10 +169,10 @@ export const StatsSidebar = memo(function StatsSidebar({
 
                   <span
                     className="w-1.5 h-3 shrink-0"
-                    style={{ backgroundColor: m.color }}
+                    style={{ backgroundColor: mode.color }}
                   />
                   <span className="truncate font-bold uppercase tracking-wider text-[11px] flex-1">
-                    {m.name}
+                    {mode.name}
                   </span>
                 </button>
               )
@@ -406,7 +406,7 @@ export const StatsSidebar = memo(function StatsSidebar({
           <div className="p-2.5">
             <button
               type="button"
-              onClick={() => setScanExpanded((v) => !v)}
+              onClick={() => setScanExpanded((previous) => !previous)}
               className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
             >
               <div className="flex items-center gap-1.5 min-w-0">
@@ -453,7 +453,7 @@ export const StatsSidebar = memo(function StatsSidebar({
           <div className="p-2.5">
             <button
               type="button"
-              onClick={() => setOrganicExpanded((v) => !v)}
+              onClick={() => setOrganicExpanded((previous) => !previous)}
               className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
             >
               <div className="flex items-center gap-1.5 min-w-0">

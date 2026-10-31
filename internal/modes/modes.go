@@ -36,27 +36,27 @@ type Window struct {
 	End    string `json:"end"`
 }
 
-// Contains reports whether ts lies in [Start, End).
-func (w Window) Contains(ts string) bool {
-	return ts >= w.Start && (w.End == "" || ts < w.End)
+// Contains reports whether timestamp lies in [Start, End).
+func (window Window) Contains(timestamp string) bool {
+	return timestamp >= window.Start && (window.End == "" || timestamp < window.End)
 }
 
 // List returns all modes ordered for display.
-func List(q db.Queryer) ([]Mode, error) {
-	rows, err := q.Query(`SELECT id, name, description, color, is_default, sort_order FROM modes ORDER BY sort_order, id`)
-	if err != nil {
-		return nil, err
+func List(queryer db.Queryer) ([]Mode, error) {
+	rows, queryError := queryer.Query(`SELECT id, name, description, color, is_default, sort_order FROM modes ORDER BY sort_order, id`)
+	if queryError != nil {
+		return nil, queryError
 	}
 	defer rows.Close()
-	var out []Mode
+	var modesList []Mode
 	for rows.Next() {
-		var m Mode
-		if err := rows.Scan(&m.ID, &m.Name, &m.Description, &m.Color, &m.IsDefault, &m.SortOrder); err != nil {
-			return nil, err
+		var modeItem Mode
+		if scanError := rows.Scan(&modeItem.ID, &modeItem.Name, &modeItem.Description, &modeItem.Color, &modeItem.IsDefault, &modeItem.SortOrder); scanError != nil {
+			return nil, scanError
 		}
-		out = append(out, m)
+		modesList = append(modesList, modeItem)
 	}
-	return out, rows.Err()
+	return modesList, rows.Err()
 }
 
 func validate(name, color string) (string, string, error) {
@@ -75,191 +75,193 @@ func validate(name, color string) (string, string, error) {
 }
 
 // Create adds a custom mode.
-func Create(q db.Queryer, name, description, color string) (Mode, error) {
-	name, color, err := validate(name, color)
-	if err != nil {
-		return Mode{}, err
+func Create(queryer db.Queryer, name, description, color string) (Mode, error) {
+	validName, validColor, validateError := validate(name, color)
+	if validateError != nil {
+		return Mode{}, validateError
 	}
 	var maxOrder int
-	_ = q.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM modes`).Scan(&maxOrder)
-	res, err := q.Exec(`INSERT INTO modes(name, description, color, is_default, sort_order, created_at) VALUES(?,?,?,0,?,?)`,
-		name, strings.TrimSpace(description), color, maxOrder+1, ed.NowISO())
-	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			return Mode{}, fmt.Errorf("a mode named %q already exists", name)
+	_ = queryer.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM modes`).Scan(&maxOrder)
+	insertResult, insertError := queryer.Exec(`INSERT INTO modes(name, description, color, is_default, sort_order, created_at) VALUES(?,?,?,0,?,?)`,
+		validName, strings.TrimSpace(description), validColor, maxOrder+1, ed.NowISO())
+	if insertError != nil {
+		if strings.Contains(insertError.Error(), "UNIQUE") {
+			return Mode{}, fmt.Errorf("a mode named %q already exists", validName)
 		}
-		return Mode{}, err
+		return Mode{}, insertError
 	}
-	id, _ := res.LastInsertId()
-	return Mode{ID: id, Name: name, Description: strings.TrimSpace(description), Color: color, SortOrder: maxOrder + 1}, nil
+	modeID, _ := insertResult.LastInsertId()
+	return Mode{ID: modeID, Name: validName, Description: strings.TrimSpace(description), Color: validColor, SortOrder: maxOrder + 1}, nil
 }
 
 // Update edits a mode's name, description and colour.
-func Update(q db.Queryer, id int64, name, description, color string) error {
-	name, color, err := validate(name, color)
-	if err != nil {
-		return err
+func Update(queryer db.Queryer, modeID int64, name, description, color string) error {
+	validName, validColor, validateError := validate(name, color)
+	if validateError != nil {
+		return validateError
 	}
-	res, err := q.Exec(`UPDATE modes SET name = ?, description = ?, color = ? WHERE id = ?`, name, strings.TrimSpace(description), color, id)
-	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			return fmt.Errorf("a mode named %q already exists", name)
+	updateResult, updateError := queryer.Exec(`UPDATE modes SET name = ?, description = ?, color = ? WHERE id = ?`, validName, strings.TrimSpace(description), validColor, modeID)
+	if updateError != nil {
+		if strings.Contains(updateError.Error(), "UNIQUE") {
+			return fmt.Errorf("a mode named %q already exists", validName)
 		}
-		return err
+		return updateError
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("mode %d not found", id)
+	if affectedRows, _ := updateResult.RowsAffected(); affectedRows == 0 {
+		return fmt.Errorf("mode %d not found", modeID)
 	}
 	return nil
 }
 
 // Delete removes a custom mode (and, via ON DELETE CASCADE, its windows).
 // The three default modes cannot be deleted.
-func Delete(q db.Queryer, id int64) error {
+func Delete(queryer db.Queryer, modeID int64) error {
 	var isDefault bool
-	if err := q.QueryRow(`SELECT is_default FROM modes WHERE id = ?`, id).Scan(&isDefault); err != nil {
-		return fmt.Errorf("mode %d not found", id)
+	if queryError := queryer.QueryRow(`SELECT is_default FROM modes WHERE id = ?`, modeID).Scan(&isDefault); queryError != nil {
+		return fmt.Errorf("mode %d not found", modeID)
 	}
 	if isDefault {
 		return errors.New("default modes cannot be deleted (you can rename or recolour them)")
 	}
-	_, err := q.Exec(`DELETE FROM modes WHERE id = ?`, id)
-	return err
+	_, deleteError := queryer.Exec(`DELETE FROM modes WHERE id = ?`, modeID)
+	return deleteError
 }
 
 // ListWindows returns every window ordered by start.
-func ListWindows(q db.Queryer) ([]Window, error) {
-	rows, err := q.Query(`SELECT id, mode_id, start_timestamp, COALESCE(end_timestamp, '') FROM mode_windows ORDER BY start_timestamp, id`)
-	if err != nil {
-		return nil, err
+func ListWindows(queryer db.Queryer) ([]Window, error) {
+	rows, queryError := queryer.Query(`SELECT id, mode_id, start_timestamp, COALESCE(end_timestamp, '') FROM mode_windows ORDER BY start_timestamp, id`)
+	if queryError != nil {
+		return nil, queryError
 	}
 	defer rows.Close()
-	var out []Window
+	var windowsList []Window
 	for rows.Next() {
-		var w Window
-		if err := rows.Scan(&w.ID, &w.ModeID, &w.Start, &w.End); err != nil {
-			return nil, err
+		var windowItem Window
+		if scanError := rows.Scan(&windowItem.ID, &windowItem.ModeID, &windowItem.Start, &windowItem.End); scanError != nil {
+			return nil, scanError
 		}
-		out = append(out, w)
+		windowsList = append(windowsList, windowItem)
 	}
-	return out, rows.Err()
+	return windowsList, rows.Err()
 }
 
 // Active returns the currently active (open-ended) mode window, if any.
-func Active(q db.Queryer) (*Window, error) {
-	var w Window
-	err := q.QueryRow(`SELECT id, mode_id, start_timestamp FROM mode_windows WHERE end_timestamp IS NULL ORDER BY start_timestamp DESC LIMIT 1`).
-		Scan(&w.ID, &w.ModeID, &w.Start)
-	if errors.Is(err, sql.ErrNoRows) {
+func Active(queryer db.Queryer) (*Window, error) {
+	var activeWindow Window
+	queryError := queryer.QueryRow(`SELECT id, mode_id, start_timestamp FROM mode_windows WHERE end_timestamp IS NULL ORDER BY start_timestamp DESC LIMIT 1`).
+		Scan(&activeWindow.ID, &activeWindow.ModeID, &activeWindow.Start)
+	if errors.Is(queryError, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	return &w, nil
+	return &activeWindow, nil
 }
 
-// endAfter compares window ends where "" means +infinity: a > b.
-func endAfter(a, b string) bool {
-	if a == b {
+// endAfter compares window ends where "" means +infinity: firstEnd > secondEnd.
+func endAfter(firstEnd, secondEnd string) bool {
+	if firstEnd == secondEnd {
 		return false
 	}
-	if a == "" {
+	if firstEnd == "" {
 		return true
 	}
-	if b == "" {
+	if secondEnd == "" {
 		return false
 	}
-	return a > b
+	return firstEnd > secondEnd
 }
 
 // SetWindow writes [start, end) for modeID (end "" = open ended), trimming or
 // splitting any overlapping windows so windows never overlap. If replaceID is
 // non-zero that window is removed first (used when editing a window).
 // modeID == UnassignedID clears the range without inserting a new window.
-func SetWindow(tx *sql.Tx, replaceID, modeID int64, start, end string) error {
-	var err error
-	if start, err = ed.NormalizeISO(start); err != nil {
-		return err
+func SetWindow(transaction *sql.Tx, replaceID, modeID int64, start, end string) error {
+	normalizedStart, parseStartError := ed.NormalizeISO(start)
+	if parseStartError != nil {
+		return parseStartError
 	}
+	normalizedEnd := ""
 	if end != "" {
-		if end, err = ed.NormalizeISO(end); err != nil {
-			return err
+		var parseEndError error
+		if normalizedEnd, parseEndError = ed.NormalizeISO(end); parseEndError != nil {
+			return parseEndError
 		}
-		if end <= start {
+		if normalizedEnd <= normalizedStart {
 			return errors.New("window end must be after its start")
 		}
 	}
 	if replaceID != 0 {
-		if _, err := tx.Exec(`DELETE FROM mode_windows WHERE id = ?`, replaceID); err != nil {
-			return err
+		if _, deleteError := transaction.Exec(`DELETE FROM mode_windows WHERE id = ?`, replaceID); deleteError != nil {
+			return deleteError
 		}
 	}
-	existing, err := ListWindows(tx)
-	if err != nil {
-		return err
+	existingWindows, listError := ListWindows(transaction)
+	if listError != nil {
+		return listError
 	}
-	for _, w := range existing {
-		overlaps := (end == "" || w.Start < end) && (w.End == "" || start < w.End)
+	for _, windowItem := range existingWindows {
+		overlaps := (normalizedEnd == "" || windowItem.Start < normalizedEnd) && (windowItem.End == "" || normalizedStart < windowItem.End)
 		if !overlaps {
 			continue
 		}
-		if _, err := tx.Exec(`DELETE FROM mode_windows WHERE id = ?`, w.ID); err != nil {
-			return err
+		if _, deleteError := transaction.Exec(`DELETE FROM mode_windows WHERE id = ?`, windowItem.ID); deleteError != nil {
+			return deleteError
 		}
-		if w.Start < start { // keep head [w.Start, start)
-			if err := insertWindow(tx, w.ModeID, w.Start, start); err != nil {
-				return err
+		if windowItem.Start < normalizedStart { // keep head [windowItem.Start, normalizedStart)
+			if insertHeadError := insertWindow(transaction, windowItem.ModeID, windowItem.Start, normalizedStart); insertHeadError != nil {
+				return insertHeadError
 			}
 		}
-		if end != "" && endAfter(w.End, end) { // keep tail [end, w.End)
-			if err := insertWindow(tx, w.ModeID, end, w.End); err != nil {
-				return err
+		if normalizedEnd != "" && endAfter(windowItem.End, normalizedEnd) { // keep tail [normalizedEnd, windowItem.End)
+			if insertTailError := insertWindow(transaction, windowItem.ModeID, normalizedEnd, windowItem.End); insertTailError != nil {
+				return insertTailError
 			}
 		}
 	}
 	if modeID == UnassignedID {
 		return nil
 	}
-	var exists int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM modes WHERE id = ?`, modeID).Scan(&exists); err != nil || exists == 0 {
+	var modeCount int
+	if countError := transaction.QueryRow(`SELECT COUNT(*) FROM modes WHERE id = ?`, modeID).Scan(&modeCount); countError != nil || modeCount == 0 {
 		return fmt.Errorf("mode %d not found", modeID)
 	}
-	return insertWindow(tx, modeID, start, end)
+	return insertWindow(transaction, modeID, normalizedStart, normalizedEnd)
 }
 
-func insertWindow(tx *sql.Tx, modeID int64, start, end string) error {
-	var endV any
-	if end != "" {
-		endV = end
+func insertWindow(transaction *sql.Tx, modeID int64, startTime, endTime string) error {
+	var endVal any
+	if endTime != "" {
+		endVal = endTime
 	}
-	_, err := tx.Exec(`INSERT INTO mode_windows(mode_id, start_timestamp, end_timestamp) VALUES(?,?,?)`, modeID, start, endV)
-	return err
+	_, execError := transaction.Exec(`INSERT INTO mode_windows(mode_id, start_timestamp, end_timestamp) VALUES(?,?,?)`, modeID, startTime, endVal)
+	return execError
 }
 
 // Switch makes modeID the active mode from now on (UnassignedID stops tracking).
-func Switch(tx *sql.Tx, modeID int64, at string) error {
-	if at == "" {
-		at = ed.NowISO()
+func Switch(transaction *sql.Tx, modeID int64, atTimestamp string) error {
+	if atTimestamp == "" {
+		atTimestamp = ed.NowISO()
 	}
-	return SetWindow(tx, 0, modeID, at, "")
+	return SetWindow(transaction, 0, modeID, atTimestamp, "")
 }
 
 // DeleteWindow removes a window.
-func DeleteWindow(q db.Queryer, id int64) error {
-	_, err := q.Exec(`DELETE FROM mode_windows WHERE id = ?`, id)
-	return err
+func DeleteWindow(queryer db.Queryer, windowID int64) error {
+	_, execError := queryer.Exec(`DELETE FROM mode_windows WHERE id = ?`, windowID)
+	return execError
 }
 
 // DefaultFallbackModeID returns the mode ID used whenever no explicit mode
 // window covers a timestamp (prefers the default "Travel" mode).
-func DefaultFallbackModeID(q db.Queryer) int64 {
-	var id int64
-	if err := q.QueryRow(`SELECT id FROM modes WHERE name = 'Travel' COLLATE NOCASE LIMIT 1`).Scan(&id); err == nil && id > 0 {
-		return id
+func DefaultFallbackModeID(queryer db.Queryer) int64 {
+	var fallbackModeID int64
+	if queryError := queryer.QueryRow(`SELECT id FROM modes WHERE name = 'Travel' COLLATE NOCASE LIMIT 1`).Scan(&fallbackModeID); queryError == nil && fallbackModeID > 0 {
+		return fallbackModeID
 	}
-	if err := q.QueryRow(`SELECT id FROM modes ORDER BY is_default DESC, sort_order ASC, id ASC LIMIT 1`).Scan(&id); err == nil && id > 0 {
-		return id
+	if queryError := queryer.QueryRow(`SELECT id FROM modes ORDER BY is_default DESC, sort_order ASC, id ASC LIMIT 1`).Scan(&fallbackModeID); queryError == nil && fallbackModeID > 0 {
+		return fallbackModeID
 	}
 	return UnassignedID
 }
@@ -271,32 +273,34 @@ type Timeline struct {
 }
 
 // NewTimeline builds a timeline from windows (any order).
-func NewTimeline(ws []Window, defaultModeID ...int64) *Timeline {
-	cp := append([]Window(nil), ws...)
-	sort.Slice(cp, func(i, j int) bool { return cp[i].Start < cp[j].Start })
-	def := UnassignedID
+func NewTimeline(windowsList []Window, defaultModeID ...int64) *Timeline {
+	copiedWindows := append([]Window(nil), windowsList...)
+	sort.Slice(copiedWindows, func(firstIndex, secondIndex int) bool {
+		return copiedWindows[firstIndex].Start < copiedWindows[secondIndex].Start
+	})
+	fallbackMode := UnassignedID
 	if len(defaultModeID) > 0 {
-		def = defaultModeID[0]
+		fallbackMode = defaultModeID[0]
 	}
-	return &Timeline{windows: cp, defaultModeID: def}
+	return &Timeline{windows: copiedWindows, defaultModeID: fallbackMode}
 }
 
 // LoadTimeline loads all windows into a Timeline with the default fallback mode (Travel).
-func LoadTimeline(q db.Queryer) (*Timeline, error) {
-	ws, err := ListWindows(q)
-	if err != nil {
-		return nil, err
+func LoadTimeline(queryer db.Queryer) (*Timeline, error) {
+	windowsList, listError := ListWindows(queryer)
+	if listError != nil {
+		return nil, listError
 	}
-	return NewTimeline(ws, DefaultFallbackModeID(q)), nil
+	return NewTimeline(windowsList, DefaultFallbackModeID(queryer)), nil
 }
 
-// ModeAt returns the mode active at ts (falling back to the default mode, e.g. Travel, when none).
-func (t *Timeline) ModeAt(ts string) int64 {
-	// Last window starting at or before ts. Windows written through SetWindow
-	// never overlap, so only that window can contain ts.
-	i := sort.Search(len(t.windows), func(i int) bool { return t.windows[i].Start > ts }) - 1
-	if i >= 0 && t.windows[i].Contains(ts) {
-		return t.windows[i].ModeID
+// ModeAt returns the mode active at targetTimestamp (falling back to the default mode, e.g. Travel, when none).
+func (timeline *Timeline) ModeAt(targetTimestamp string) int64 {
+	// Last window starting at or before targetTimestamp. Windows written through SetWindow
+	// never overlap, so only that window can contain targetTimestamp.
+	i := sort.Search(len(timeline.windows), func(i int) bool { return timeline.windows[i].Start > targetTimestamp }) - 1
+	if i >= 0 && timeline.windows[i].Contains(targetTimestamp) {
+		return timeline.windows[i].ModeID
 	}
-	return t.defaultModeID
+	return timeline.defaultModeID
 }

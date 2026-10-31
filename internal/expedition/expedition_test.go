@@ -14,25 +14,25 @@ import (
 	"planisphere/internal/stats"
 )
 
-func mustInsert(t *testing.T, conn *sql.DB, expID, afterID int64, rowType string, regionID int) expedition.Row {
+func mustInsert(t *testing.T, dbConn *sql.DB, expeditionID, afterID int64, rowType string, regionID int) expedition.Row {
 	t.Helper()
-	var r expedition.Row
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
-		var err error
-		r, err = expedition.InsertRow(tx, expID, afterID, rowType, regionID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	var insertedRow expedition.Row
+	if txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var insertError error
+		insertedRow, insertError = expedition.InsertRow(transaction, expeditionID, afterID, rowType, regionID)
+		return insertError
+	}); txError != nil {
+		t.Fatal(txError)
 	}
-	return r
+	return insertedRow
 }
 
 func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
 	}
-	defer conn.Close()
+	defer dbConn.Close()
 
 	tmpDir := t.TempDir()
 	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
@@ -54,94 +54,94 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 		`{"timestamp":"2026-01-18T21:00:00Z","event":"ShipyardSwap","ShipType":"explorer_nx","ShipType_Localised":"Caspian Explorer","ShipID":2,"StoreOldShip":"mandalay","StoreShipID":1}`,
 		`{"timestamp":"2026-01-18T21:30:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1005,"StarPos":[0,0,65000],"JumpDist":60.5,"BoostUsed":3}`,
 	}
-	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
 	}
 
-	ing := journal.NewIngester(conn)
-	res, err := ing.ScanDir(tmpDir)
-	if err != nil {
-		t.Fatal(err)
+	ingester := journal.NewIngester(dbConn)
+	scanResult, scanError := ingester.ScanDir(tmpDir)
+	if scanError != nil {
+		t.Fatal(scanError)
 	}
-	if len(res.NewEvents) != len(lines) {
-		t.Fatalf("ingested %d events, want %d", len(res.NewEvents), len(lines))
+	if len(scanResult.NewEvents) != len(lines) {
+		t.Fatalf("ingested %d events, want %d", len(scanResult.NewEvents), len(lines))
 	}
 
 	// Re-scanning the same directory is idempotent (0 new events).
-	res2, err := ing.ScanDir(tmpDir)
-	if err != nil {
-		t.Fatal(err)
+	rescanResult, rescanError := ingester.ScanDir(tmpDir)
+	if rescanError != nil {
+		t.Fatal(rescanError)
 	}
-	if len(res2.NewEvents) != 0 {
-		t.Fatalf("expected 0 new events on idempotent rescan, got %d", len(res2.NewEvents))
+	if len(rescanResult.NewEvents) != 0 {
+		t.Fatalf("expected 0 new events on idempotent rescan, got %d", len(rescanResult.NewEvents))
 	}
 
 	// Delete the journal file from disk: zero data may be lost.
-	if err := os.Remove(journalFile); err != nil {
-		t.Fatal(err)
+	if removeError := os.Remove(journalFile); removeError != nil {
+		t.Fatal(removeError)
 	}
 
 	// Create an expedition with 5 waypoints + a region header.
-	exp, err := expedition.Create(conn, "Distant Worlds III", "Deep space survey")
-	if err != nil {
-		t.Fatal(err)
+	expeditionRecord, createError := expedition.Create(dbConn, "Distant Worlds III", "Deep space survey")
+	if createError != nil {
+		t.Fatal(createError)
 	}
-	rows, err := expedition.ListRows(conn, exp.ID)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("expected 1 seeded row, got %d (%v)", len(rows), err)
+	rows, listError := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listError != nil || len(rows) != 1 {
+		t.Fatalf("expected 1 seeded row, got %d (%v)", len(rows), listError)
 	}
-	setName := func(rowID int64, sys string) {
-		if _, err := expedition.UpdateRow(conn, expedition.RowPatch{ID: rowID, SystemName: &sys}); err != nil {
-			t.Fatal(err)
+	setName := func(rowID int64, systemName string) {
+		if _, updateError := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
+			t.Fatal(updateError)
 		}
 	}
 	setName(rows[0].ID, "Sol")
 
-	w2 := mustInsert(t, conn, exp.ID, rows[0].ID, expedition.RowWaypoint, 0)
-	setName(w2.ID, "Dryooe Prou FF-Z d696")
-	regHeader := mustInsert(t, conn, exp.ID, w2.ID, expedition.RowRegion, 1)
-	w3 := mustInsert(t, conn, exp.ID, regHeader.ID, expedition.RowWaypoint, 0)
-	setName(w3.ID, "Outotz LS-K d8-3")
-	w4 := mustInsert(t, conn, exp.ID, w3.ID, expedition.RowWaypoint, 0)
-	setName(w4.ID, "Sagittarius A*")
-	w5 := mustInsert(t, conn, exp.ID, w4.ID, expedition.RowWaypoint, 0)
-	setName(w5.ID, "Beagle Point")
+	waypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, rows[0].ID, expedition.RowWaypoint, 0)
+	setName(waypoint2.ID, "Dryooe Prou FF-Z d696")
+	regionHeader := mustInsert(t, dbConn, expeditionRecord.ID, waypoint2.ID, expedition.RowRegion, 1)
+	waypoint3 := mustInsert(t, dbConn, expeditionRecord.ID, regionHeader.ID, expedition.RowWaypoint, 0)
+	setName(waypoint3.ID, "Outotz LS-K d8-3")
+	waypoint4 := mustInsert(t, dbConn, expeditionRecord.ID, waypoint3.ID, expedition.RowWaypoint, 0)
+	setName(waypoint4.ID, "Sagittarius A*")
+	waypoint5 := mustInsert(t, dbConn, expeditionRecord.ID, waypoint4.ID, expedition.RowWaypoint, 0)
+	setName(waypoint5.ID, "Beagle Point")
 
 	// Start expedition at 2026-01-18T19:42:10Z.
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
-		return expedition.Start(tx, exp.ID, "2026-01-18T19:42:10Z")
-	}); err != nil {
-		t.Fatal(err)
+	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:42:10Z")
+	}); startTxError != nil {
+		t.Fatal(startTxError)
 	}
 
-	plan, err := expedition.BuildPlan(conn, exp.ID, nil)
-	if err != nil {
-		t.Fatal(err)
+	plan, planError := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
+	if planError != nil {
+		t.Fatal(planError)
 	}
 	// Expected waypoint sequence after auto-reordering:
 	// #1 Sol (visited) -> #2 Dryooe Prou FF-Z d696 (visited) -> #3 Beagle Point (current, moved up!) -> #4 Outotz LS-K d8-3 (future; pre-start visit ignored) -> #5 Sagittarius A* (future).
-	var wpSystems []string
-	var wpNumbers []int
-	var wpStates []string
-	for _, r := range plan.Rows {
-		if r.Row.RowType == expedition.RowWaypoint {
-			wpSystems = append(wpSystems, r.Row.SystemName)
-			wpNumbers = append(wpNumbers, r.Number)
-			wpStates = append(wpStates, r.VisitState)
+	var waypointSystems []string
+	var waypointNumbers []int
+	var waypointStates []string
+	for _, planRow := range plan.Rows {
+		if planRow.Row.RowType == expedition.RowWaypoint {
+			waypointSystems = append(waypointSystems, planRow.Row.SystemName)
+			waypointNumbers = append(waypointNumbers, planRow.Number)
+			waypointStates = append(waypointStates, planRow.VisitState)
 		}
 	}
 	wantSystems := []string{"Sol", "Dryooe Prou FF-Z d696", "Beagle Point", "Outotz LS-K d8-3", "Sagittarius A*"}
-	if strings.Join(wpSystems, "|") != strings.Join(wantSystems, "|") {
-		t.Fatalf("waypoint order = %v, want %v", wpSystems, wantSystems)
+	if strings.Join(waypointSystems, "|") != strings.Join(wantSystems, "|") {
+		t.Fatalf("waypoint order = %v, want %v", waypointSystems, wantSystems)
 	}
-	for i, n := range wpNumbers {
-		if n != i+1 {
-			t.Fatalf("waypoint numbering = %v", wpNumbers)
+	for i, number := range waypointNumbers {
+		if number != i+1 {
+			t.Fatalf("waypoint numbering = %v", waypointNumbers)
 		}
 	}
 	wantStates := []string{expedition.VisitVisited, expedition.VisitVisited, expedition.VisitCurrent, expedition.VisitFuture, expedition.VisitFuture}
-	if strings.Join(wpStates, "|") != strings.Join(wantStates, "|") {
-		t.Fatalf("visit states = %v, want %v", wpStates, wantStates)
+	if strings.Join(waypointStates, "|") != strings.Join(wantStates, "|") {
+		t.Fatalf("visit states = %v, want %v", waypointStates, wantStates)
 	}
 
 	// Verify ship switch transition banner between #2 and #3.
@@ -151,32 +151,32 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 	}
 
 	// Verify mode filtering with the Travel scan/exobio override.
-	ms, err := modes.List(conn)
-	if err != nil || len(ms) < 3 {
-		t.Fatalf("expected 3 default modes, got %v (%v)", ms, err)
+	modesList, modesError := modes.List(dbConn)
+	if modesError != nil || len(modesList) < 3 {
+		t.Fatalf("expected 3 default modes, got %v (%v)", modesList, modesError)
 	}
 	var travelModeID int64
-	for _, m := range ms {
-		if m.Name == "Travel" {
-			travelModeID = m.ID
+	for _, modeItem := range modesList {
+		if modeItem.Name == "Travel" {
+			travelModeID = modeItem.ID
 		}
 	}
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
-		return modes.SetWindow(tx, 0, travelModeID, "2026-01-18T19:40:00Z", "2026-01-18T22:00:00Z")
-	}); err != nil {
-		t.Fatal(err)
+	if modeTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return modes.SetWindow(transaction, 0, travelModeID, "2026-01-18T19:40:00Z", "2026-01-18T22:00:00Z")
+	}); modeTxError != nil {
+		t.Fatal(modeTxError)
 	}
 
-	eng := stats.NewEngine(conn)
+	statsEngine := stats.NewEngine(dbConn)
 	// Hide Travel jumps/Ly, but include Travel scans/exobio!
-	filtered, err := eng.Compute(stats.Range{After: "2026-01-18T19:42:10Z"}, &stats.Filter{
+	filtered, computeError := statsEngine.Compute(stats.Range{After: "2026-01-18T19:42:10Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: travelModeID, Travel: false, Discovery: true},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 	if filtered.Jumps != 0 || filtered.DistanceLy != 0 {
 		t.Fatalf("expected Travel jumps/distance to be hidden, got %d jumps / %.1f Ly", filtered.Jumps, filtered.DistanceLy)
@@ -187,77 +187,77 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 }
 
 func TestPruneEmptyRowsOnComplete(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
 	}
-	defer conn.Close()
+	defer dbConn.Close()
 
-	exp, err := expedition.Create(conn, "Prune Test", "Test pruning empty rows on complete")
-	if err != nil {
-		t.Fatal(err)
+	expeditionRecord, createError := expedition.Create(dbConn, "Prune Test", "Test pruning empty rows on complete")
+	if createError != nil {
+		t.Fatal(createError)
 	}
-	initialRows, err := expedition.ListRows(conn, exp.ID)
-	if err != nil || len(initialRows) != 1 {
+	initialRows, listError := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listError != nil || len(initialRows) != 1 {
 		t.Fatalf("expected 1 initial row, got %d", len(initialRows))
 	}
-	setSys := func(rowID int64, sys string) {
-		if _, err := expedition.UpdateRow(conn, expedition.RowPatch{ID: rowID, SystemName: &sys}); err != nil {
-			t.Fatal(err)
+	setSys := func(rowID int64, systemName string) {
+		if _, updateError := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
+			t.Fatal(updateError)
 		}
 	}
 	setSys(initialRows[0].ID, "Sol")
 
 	// Header 1: Inner Orion Spur (followed by non-empty waypoints)
-	h1 := mustInsert(t, conn, exp.ID, initialRows[0].ID, expedition.RowRegion, 1)
-	w2 := mustInsert(t, conn, exp.ID, h1.ID, expedition.RowWaypoint, 0)
-	setSys(w2.ID, "Alpha Centauri")
+	header1 := mustInsert(t, dbConn, expeditionRecord.ID, initialRows[0].ID, expedition.RowRegion, 1)
+	waypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, header1.ID, expedition.RowWaypoint, 0)
+	setSys(waypoint2.ID, "Alpha Centauri")
 
 	// Header 2: Elysian Shore (followed only by empty waypoints)
-	h2 := mustInsert(t, conn, exp.ID, w2.ID, expedition.RowRegion, 2)
-	wEmpty1 := mustInsert(t, conn, exp.ID, h2.ID, expedition.RowWaypoint, 0)
-	setSys(wEmpty1.ID, "")
-	wEmpty2 := mustInsert(t, conn, exp.ID, wEmpty1.ID, expedition.RowWaypoint, 0)
-	setSys(wEmpty2.ID, "   ")
+	header2 := mustInsert(t, dbConn, expeditionRecord.ID, waypoint2.ID, expedition.RowRegion, 2)
+	emptyWaypoint1 := mustInsert(t, dbConn, expeditionRecord.ID, header2.ID, expedition.RowWaypoint, 0)
+	setSys(emptyWaypoint1.ID, "")
+	emptyWaypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, emptyWaypoint1.ID, expedition.RowWaypoint, 0)
+	setSys(emptyWaypoint2.ID, "   ")
 
 	// Header 3: Empty header at end (no waypoints at all)
-	_ = mustInsert(t, conn, exp.ID, wEmpty2.ID, expedition.RowRegion, 3)
+	_ = mustInsert(t, dbConn, expeditionRecord.ID, emptyWaypoint2.ID, expedition.RowRegion, 3)
 
 	// Start expedition
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
-		return expedition.Start(tx, exp.ID, "2026-01-18T19:00:00Z")
-	}); err != nil {
-		t.Fatal(err)
+	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:00:00Z")
+	}); startTxError != nil {
+		t.Fatal(startTxError)
 	}
 
 	// Complete expedition
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
-		return expedition.Complete(tx, exp.ID, "2026-01-18T20:00:00Z")
-	}); err != nil {
-		t.Fatal(err)
+	if completeTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Complete(transaction, expeditionRecord.ID, "2026-01-18T20:00:00Z")
+	}); completeTxError != nil {
+		t.Fatal(completeTxError)
 	}
 
-	surviving, err := expedition.ListRows(conn, exp.ID)
-	if err != nil {
-		t.Fatal(err)
+	survivingRows, survivingError := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if survivingError != nil {
+		t.Fatal(survivingError)
 	}
 
 	// Surviving should be:
 	// 1. Sol (waypoint)
-	// 2. Region 1 (h1)
+	// 2. Region 1 (header1)
 	// 3. Alpha Centauri (waypoint)
 	// All empty waypoints and headers 2 & 3 must be deleted.
-	if len(surviving) != 3 {
-		t.Fatalf("expected 3 surviving rows, got %d: %+v", len(surviving), surviving)
+	if len(survivingRows) != 3 {
+		t.Fatalf("expected 3 surviving rows, got %d: %+v", len(survivingRows), survivingRows)
 	}
-	if surviving[0].SystemName != "Sol" || surviving[0].Position != 1 {
-		t.Errorf("row 0 mismatch: %+v", surviving[0])
+	if survivingRows[0].SystemName != "Sol" || survivingRows[0].Position != 1 {
+		t.Errorf("row 0 mismatch: %+v", survivingRows[0])
 	}
-	if surviving[1].RowType != expedition.RowRegion || surviving[1].RegionID != 1 || surviving[1].Position != 2 {
-		t.Errorf("row 1 mismatch: %+v", surviving[1])
+	if survivingRows[1].RowType != expedition.RowRegion || survivingRows[1].RegionID != 1 || survivingRows[1].Position != 2 {
+		t.Errorf("row 1 mismatch: %+v", survivingRows[1])
 	}
-	if surviving[2].SystemName != "Alpha Centauri" || surviving[2].Position != 3 {
-		t.Errorf("row 2 mismatch: %+v", surviving[2])
+	if survivingRows[2].SystemName != "Alpha Centauri" || survivingRows[2].Position != 3 {
+		t.Errorf("row 2 mismatch: %+v", survivingRows[2])
 	}
 }
 

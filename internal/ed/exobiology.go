@@ -60,13 +60,13 @@ var genusFallback = map[string]int64{
 func init() {
 	add := func(prefix, genus string, entries ...any) {
 		for i := 0; i+2 < len(entries); i += 3 {
-			num := entries[i].(string)
+			variantNumber := entries[i].(string)
 			name := entries[i+1].(string)
-			val := int64(entries[i+2].(int))
-			key := strings.ToLower(prefix + "_" + num)
+			rewardValue := int64(entries[i+2].(int))
+			key := strings.ToLower(prefix + "_" + variantNumber)
 			speciesTable[key] = Species{
-				CodexID: "$Codex_Ent_" + prefix + "_" + num + "_Name;",
-				Name:    name, Genus: genus, Value: val,
+				CodexID: "$Codex_Ent_" + prefix + "_" + variantNumber + "_Name;",
+				Name:    name, Genus: genus, Value: rewardValue,
 			}
 		}
 	}
@@ -176,8 +176,8 @@ func init() {
 		"14", "Tussock Virgam", 14313700,
 		"15", "Tussock Capillum", 7025800)
 
-	for _, s := range speciesTable {
-		speciesByName[strings.ToLower(s.Name)] = s
+	for _, speciesItem := range speciesTable {
+		speciesByName[strings.ToLower(speciesItem.Name)] = speciesItem
 	}
 }
 
@@ -187,24 +187,24 @@ var codexRe = regexp.MustCompile(`(?i)^\$codex_ent_(.+?)(?:_name)?;?$`)
 var codexNumRe = regexp.MustCompile(`^(.*?)_(\d+)$`)
 
 // codexKey turns "$Codex_Ent_Stratum_07_Name;" into "stratum_07".
-func codexKey(id string) string {
-	m := codexRe.FindStringSubmatch(strings.TrimSpace(id))
-	if m == nil {
+func codexKey(codexID string) string {
+	matches := codexRe.FindStringSubmatch(strings.TrimSpace(codexID))
+	if matches == nil {
 		return ""
 	}
-	return strings.ToLower(m[1])
+	return strings.ToLower(matches[1])
 }
 
 // LookupSpecies resolves a species from a journal `Species` codex key and/or
 // the `Species_Localised` English name. ok is false when unknown.
 func LookupSpecies(codexID, localisedName string) (Species, bool) {
-	if k := codexKey(codexID); k != "" {
-		if s, ok := speciesTable[k]; ok {
-			return s, true
+	if keyString := codexKey(codexID); keyString != "" {
+		if foundSpecies, found := speciesTable[keyString]; found {
+			return foundSpecies, true
 		}
 	}
-	if s, ok := speciesByName[strings.ToLower(strings.TrimSpace(localisedName))]; ok {
-		return s, true
+	if foundSpecies, found := speciesByName[strings.ToLower(strings.TrimSpace(localisedName))]; found {
+		return foundSpecies, true
 	}
 	return Species{}, false
 }
@@ -213,22 +213,22 @@ func LookupSpecies(codexID, localisedName string) (Species, bool) {
 // falling back to genus-level values for single-value genera (anemones,
 // brain trees, tubers, ...). Returns 0 when unknown.
 func SpeciesBaseValue(speciesCodex, speciesLocalised, genusCodex string) int64 {
-	if s, ok := LookupSpecies(speciesCodex, speciesLocalised); ok {
-		return s.Value
+	if foundSpecies, found := LookupSpecies(speciesCodex, speciesLocalised); found {
+		return foundSpecies.Value
 	}
-	if k := codexKey(speciesCodex); k != "" {
-		base := k
-		if m := codexNumRe.FindStringSubmatch(k); m != nil {
-			base = m[1]
+	if speciesKey := codexKey(speciesCodex); speciesKey != "" {
+		base := speciesKey
+		if matches := codexNumRe.FindStringSubmatch(speciesKey); matches != nil {
+			base = matches[1]
 		}
-		if v, ok := genusFallback[base]; ok {
-			return v
+		if fallbackValue, found := genusFallback[base]; found {
+			return fallbackValue
 		}
 	}
-	if k := codexKey(genusCodex); k != "" {
-		k = strings.TrimSuffix(k, "_genus")
-		if v, ok := genusFallback[k]; ok {
-			return v
+	if genusKey := codexKey(genusCodex); genusKey != "" {
+		genusKey = strings.TrimSuffix(genusKey, "_genus")
+		if fallbackValue, found := genusFallback[genusKey]; found {
+			return fallbackValue
 		}
 	}
 	return 0

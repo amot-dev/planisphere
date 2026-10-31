@@ -49,163 +49,163 @@ type remotePOI struct {
 
 // Catalog is an in-memory index over gec_pois_cache.
 type Catalog struct {
-	conn   *sql.DB
+	dbConn *sql.DB
 	mu     sync.RWMutex
 	byName map[string][]POI
 	byAddr map[int64][]POI
 }
 
 // NewCatalog creates a catalog and loads the cache.
-func NewCatalog(conn *sql.DB) *Catalog {
-	c := &Catalog{conn: conn}
-	_ = c.Reload()
-	return c
+func NewCatalog(dbConn *sql.DB) *Catalog {
+	catalog := &Catalog{dbConn: dbConn}
+	_ = catalog.Reload()
+	return catalog
 }
 
 // Reload rebuilds the in-memory index from the database.
-func (c *Catalog) Reload() error {
-	rs, err := c.conn.Query(`SELECT id, name, system_name, COALESCE(system_address,0), poi_type, poi_url, COALESCE(source, 'GEC')
+func (catalog *Catalog) Reload() error {
+	rows, queryError := catalog.dbConn.Query(`SELECT id, name, system_name, COALESCE(system_address,0), poi_type, poi_url, COALESCE(source, 'GEC')
 		FROM gec_pois_cache
 		ORDER BY CASE WHEN UPPER(source) = 'GEC' THEN 0 ELSE 1 END, id`)
-	if err != nil {
-		return err
+	if queryError != nil {
+		return queryError
 	}
-	defer rs.Close()
+	defer rows.Close()
 	byName := map[string][]POI{}
 	byAddr := map[int64][]POI{}
-	for rs.Next() {
-		var p POI
-		if err := rs.Scan(&p.ID, &p.Name, &p.SystemName, &p.SystemAddress, &p.Type, &p.URL, &p.Source); err != nil {
-			return err
+	for rows.Next() {
+		var poiItem POI
+		if scanError := rows.Scan(&poiItem.ID, &poiItem.Name, &poiItem.SystemName, &poiItem.SystemAddress, &poiItem.Type, &poiItem.URL, &poiItem.Source); scanError != nil {
+			return scanError
 		}
-		p.Name = html.UnescapeString(p.Name)
-		p.SystemName = html.UnescapeString(p.SystemName)
-		p.Type = html.UnescapeString(p.Type)
-		key := strings.ToLower(p.SystemName)
-		byName[key] = append(byName[key], p)
-		if p.SystemAddress != 0 {
-			byAddr[p.SystemAddress] = append(byAddr[p.SystemAddress], p)
+		poiItem.Name = html.UnescapeString(poiItem.Name)
+		poiItem.SystemName = html.UnescapeString(poiItem.SystemName)
+		poiItem.Type = html.UnescapeString(poiItem.Type)
+		nameKey := strings.ToLower(poiItem.SystemName)
+		byName[nameKey] = append(byName[nameKey], poiItem)
+		if poiItem.SystemAddress != 0 {
+			byAddr[poiItem.SystemAddress] = append(byAddr[poiItem.SystemAddress], poiItem)
 		}
 	}
-	c.mu.Lock()
-	c.byName, c.byAddr = byName, byAddr
-	c.mu.Unlock()
-	return rs.Err()
+	catalog.mu.Lock()
+	catalog.byName, catalog.byAddr = byName, byAddr
+	catalog.mu.Unlock()
+	return rows.Err()
 }
 
 // Count returns the number of cached POIs.
-func (c *Catalog) Count() int {
-	var n int
-	_ = c.conn.QueryRow(`SELECT COUNT(*) FROM gec_pois_cache`).Scan(&n)
-	return n
+func (catalog *Catalog) Count() int {
+	var poiCount int
+	_ = catalog.dbConn.QueryRow(`SELECT COUNT(*) FROM gec_pois_cache`).Scan(&poiCount)
+	return poiCount
 }
 
 // LastFetched returns when the cache was last refreshed ("" if never).
-func (c *Catalog) LastFetched() string {
-	v, _ := db.GetSetting(c.conn, "gec_fetched_at")
-	return v
+func (catalog *Catalog) LastFetched() string {
+	fetchedTimestamp, _ := db.GetSetting(catalog.dbConn, "gec_fetched_at")
+	return fetchedTimestamp
 }
 
 // Lookup returns POIs in a system (by id64 first, then by name).
-func (c *Catalog) Lookup(systemName string, systemAddress int64) []POI {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+func (catalog *Catalog) Lookup(systemName string, systemAddress int64) []POI {
+	catalog.mu.RLock()
+	defer catalog.mu.RUnlock()
 	if systemAddress != 0 {
-		if ps := c.byAddr[systemAddress]; len(ps) > 0 {
-			return ps
+		if poisForAddress := catalog.byAddr[systemAddress]; len(poisForAddress) > 0 {
+			return poisForAddress
 		}
 	}
-	return c.byName[strings.ToLower(strings.TrimSpace(systemName))]
+	return catalog.byName[strings.ToLower(strings.TrimSpace(systemName))]
 }
 
 // Refresh downloads the combined catalogue and replaces the cache.
-func (c *Catalog) Refresh(ctx context.Context) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, CombinedURL, nil)
-	if err != nil {
-		return 0, err
+func (catalog *Catalog) Refresh(ctx context.Context) (int, error) {
+	httpRequest, requestError := http.NewRequestWithContext(ctx, http.MethodGet, CombinedURL, nil)
+	if requestError != nil {
+		return 0, requestError
 	}
-	req.Header.Set("User-Agent", version.UserAgent)
-	client := &http.Client{Timeout: 90 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("GEC download failed: %w", err)
+	httpRequest.Header.Set("User-Agent", version.UserAgent)
+	httpClient := &http.Client{Timeout: 90 * time.Second}
+	httpResponse, httpError := httpClient.Do(httpRequest)
+	if httpError != nil {
+		return 0, fmt.Errorf("GEC download failed: %w", httpError)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("GEC download: HTTP %d", resp.StatusCode)
+	defer httpResponse.Body.Close()
+	if httpResponse.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("GEC download: HTTP %d", httpResponse.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 128<<20))
-	if err != nil {
-		return 0, err
+	responseBody, readError := io.ReadAll(io.LimitReader(httpResponse.Body, 128<<20))
+	if readError != nil {
+		return 0, readError
 	}
-	n, err := c.Import(body)
-	if err != nil {
-		return 0, err
+	importedCount, importError := catalog.Import(responseBody)
+	if importError != nil {
+		return 0, importError
 	}
-	return n, c.Reload()
+	return importedCount, catalog.Reload()
 }
 
 // Import replaces the cache with a combined-catalogue JSON document.
-func (c *Catalog) Import(body []byte) (int, error) {
+func (catalog *Catalog) Import(body []byte) (int, error) {
 	var entries []json.RawMessage
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return 0, fmt.Errorf("GEC decode: %w", err)
+	if decodeError := json.Unmarshal(body, &entries); decodeError != nil {
+		return 0, fmt.Errorf("GEC decode: %w", decodeError)
 	}
 	now := ed.NowISO()
 	count := 0
-	err := db.WithTx(c.conn, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DELETE FROM gec_pois_cache`); err != nil {
-			return err
+	txError := db.WithTx(catalog.dbConn, func(transaction *sql.Tx) error {
+		if _, deleteError := transaction.Exec(`DELETE FROM gec_pois_cache`); deleteError != nil {
+			return deleteError
 		}
-		stmt, err := tx.Prepare(`INSERT OR REPLACE INTO gec_pois_cache
+		stmt, prepError := transaction.Prepare(`INSERT OR REPLACE INTO gec_pois_cache
 			(id, name, system_name, system_address, poi_type, region, summary, poi_url, x, y, z, raw_json, source, fetched_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-		if err != nil {
-			return err
+		if prepError != nil {
+			return prepError
 		}
 		defer stmt.Close()
-		for _, raw := range entries {
-			var p remotePOI
-			if json.Unmarshal(raw, &p) != nil || p.ID == 0 || strings.TrimSpace(p.GalMapSearch) == "" {
+		for _, rawJSON := range entries {
+			var remote remotePOI
+			if json.Unmarshal(rawJSON, &remote) != nil || remote.ID == 0 || strings.TrimSpace(remote.GalMapSearch) == "" {
 				continue
 			}
-			src := strings.ToUpper(strings.TrimSpace(p.Source))
-			if src == "" {
-				src = "GEC"
+			sourceName := strings.ToUpper(strings.TrimSpace(remote.Source))
+			if sourceName == "" {
+				sourceName = "GEC"
 			}
 			// Avoid primary key collisions between GEC and GMP datasets
-			rowID := p.ID
-			if src != "GEC" {
-				rowID = 1_000_000_000 + p.ID
+			rowID := remote.ID
+			if sourceName != "GEC" {
+				rowID = 1_000_000_000 + remote.ID
 			}
 
 			// Keep the cache lean: drop the long-form descriptions.
-			var m map[string]any
-			_ = json.Unmarshal(raw, &m)
-			delete(m, "descriptionMardown")
-			delete(m, "descriptionHtml")
-			slim, _ := json.Marshal(m)
-			var x, y, z any
-			if len(p.Coordinates) == 3 {
-				x, y, z = p.Coordinates[0], p.Coordinates[1], p.Coordinates[2]
+			var rawMap map[string]any
+			_ = json.Unmarshal(rawJSON, &rawMap)
+			delete(rawMap, "descriptionMardown")
+			delete(rawMap, "descriptionHtml")
+			slimJSON, _ := json.Marshal(rawMap)
+			var xCoord, yCoord, zCoord any
+			if len(remote.Coordinates) == 3 {
+				xCoord, yCoord, zCoord = remote.Coordinates[0], remote.Coordinates[1], remote.Coordinates[2]
 			}
-			url := p.PoiURL
-			if url == "" && src == "GEC" {
-				url = fmt.Sprintf("https://edastro.com/gec/view/%d", p.ID)
+			targetURL := remote.PoiURL
+			if targetURL == "" && sourceName == "GEC" {
+				targetURL = fmt.Sprintf("https://edastro.com/gec/view/%d", remote.ID)
 			}
-			name := html.UnescapeString(strings.TrimSpace(p.Name))
-			sysName := html.UnescapeString(strings.TrimSpace(p.GalMapSearch))
-			pType := html.UnescapeString(strings.TrimSpace(p.Type))
-			region := html.UnescapeString(strings.TrimSpace(p.Region))
-			summary := html.UnescapeString(strings.TrimSpace(p.Summary))
-			if _, err := stmt.Exec(rowID, name, sysName, p.ID64, pType, region, summary,
-				url, x, y, z, string(slim), src, now); err != nil {
-				return err
+			poiName := html.UnescapeString(strings.TrimSpace(remote.Name))
+			systemName := html.UnescapeString(strings.TrimSpace(remote.GalMapSearch))
+			poiType := html.UnescapeString(strings.TrimSpace(remote.Type))
+			region := html.UnescapeString(strings.TrimSpace(remote.Region))
+			summary := html.UnescapeString(strings.TrimSpace(remote.Summary))
+			if _, insertError := stmt.Exec(rowID, poiName, systemName, remote.ID64, poiType, region, summary,
+				targetURL, xCoord, yCoord, zCoord, string(slimJSON), sourceName, now); insertError != nil {
+				return insertError
 			}
 			count++
 		}
-		return db.SetSetting(tx, "gec_fetched_at", now)
+		return db.SetSetting(transaction, "gec_fetched_at", now)
 	})
-	return count, err
+	return count, txError
 }
 

@@ -33,48 +33,48 @@ export function calculateVirtualWindow<T>(
   const viewTop = Math.max(0, safeScrollTop - overscanPx)
   const viewBottom = safeScrollTop + safeContainerHeight + overscanPx
 
-  let accY = 0
-  let startIdx = 0
-  let endIdx = total - 1
+  let accumulatedHeight = 0
+  let startIndex = 0
+  let endIndex = total - 1
   let foundStart = false
 
   const heights = new Array<number>(total)
 
   for (let i = 0; i < total; i++) {
-    const rawH = getItemHeight(items[i])
-    const h = Math.max(1, Number.isFinite(rawH) ? rawH : 44)
-    heights[i] = h
-    const nextY = accY + h
+    const rawHeight = getItemHeight(items[i])
+    const itemHeight = Math.max(1, Number.isFinite(rawHeight) ? rawHeight : 44)
+    heights[i] = itemHeight
+    const nextAccumulatedHeight = accumulatedHeight + itemHeight
 
-    if (!foundStart && nextY >= viewTop) {
-      startIdx = i
+    if (!foundStart && nextAccumulatedHeight >= viewTop) {
+      startIndex = i
       foundStart = true
     }
-    if (foundStart && accY <= viewBottom) {
-      endIdx = i
+    if (foundStart && accumulatedHeight <= viewBottom) {
+      endIndex = i
     }
-    accY = nextY
+    accumulatedHeight = nextAccumulatedHeight
   }
 
-  endIdx = Math.min(total - 1, endIdx + 1)
-  if (endIdx < startIdx) {
-    endIdx = Math.min(total - 1, startIdx + 15)
+  endIndex = Math.min(total - 1, endIndex + 1)
+  if (endIndex < startIndex) {
+    endIndex = Math.min(total - 1, startIndex + 15)
   }
 
   let topSpacer = 0
-  for (let i = 0; i < startIdx; i++) {
+  for (let i = 0; i < startIndex; i++) {
     topSpacer += heights[i]
   }
 
   let bottomSpacer = 0
-  for (let i = endIdx + 1; i < total; i++) {
+  for (let i = endIndex + 1; i < total; i++) {
     bottomSpacer += heights[i]
   }
 
   return {
-    visibleItems: items.slice(startIdx, endIdx + 1),
-    startIndex: startIdx,
-    endIndex: endIdx,
+    visibleItems: items.slice(startIndex, endIndex + 1),
+    startIndex,
+    endIndex,
     topSpacerHeight: Math.max(0, Math.round(topSpacer)),
     bottomSpacerHeight: Math.max(0, Math.round(bottomSpacer)),
   }

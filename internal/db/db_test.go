@@ -7,25 +7,25 @@ import (
 )
 
 func TestDefaultPath(t *testing.T) {
-	p, err := db.DefaultPath()
-	if err != nil {
-		t.Fatalf("DefaultPath: %v", err)
+	defaultPath, pathError := db.DefaultPath()
+	if pathError != nil {
+		t.Fatalf("DefaultPath: %v", pathError)
 	}
-	if p == "" {
+	if defaultPath == "" {
 		t.Fatalf("expected non-empty default path")
 	}
 }
 
 func TestMigrationV5(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatalf("Open: %v", openError)
 	}
-	defer conn.Close()
+	defer dbConn.Close()
 
 	var count int
-	if err := conn.QueryRow("SELECT count(*) FROM pragma_table_info('gec_pois_cache') WHERE name = 'source'").Scan(&count); err != nil {
-		t.Fatalf("pragma: %v", err)
+	if queryError := dbConn.QueryRow("SELECT count(*) FROM pragma_table_info('gec_pois_cache') WHERE name = 'source'").Scan(&count); queryError != nil {
+		t.Fatalf("pragma: %v", queryError)
 	}
 	if count != 1 {
 		t.Fatalf("expected source column to exist in gec_pois_cache")

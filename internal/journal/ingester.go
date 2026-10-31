@@ -46,43 +46,43 @@ type Result struct {
 	Errors       []string
 }
 
-func (r *Result) merge(o Result) {
-	r.FilesScanned += o.FilesScanned
-	r.FilesUpdated += o.FilesUpdated
-	r.LinesRead += o.LinesRead
-	r.NewEvents = append(r.NewEvents, o.NewEvents...)
-	r.Errors = append(r.Errors, o.Errors...)
+func (result *Result) merge(other Result) {
+	result.FilesScanned += other.FilesScanned
+	result.FilesUpdated += other.FilesUpdated
+	result.LinesRead += other.LinesRead
+	result.NewEvents = append(result.NewEvents, other.NewEvents...)
+	result.Errors = append(result.Errors, other.Errors...)
 }
 
 // ListJournalFiles returns all journal files in dir sorted by name (which is
 // chronological within each of the two historical naming schemes).
 func ListJournalFiles(dir string) ([]string, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, JournalGlob))
-	if err != nil {
-		return nil, err
+	matches, globError := filepath.Glob(filepath.Join(dir, JournalGlob))
+	if globError != nil {
+		return nil, globError
 	}
 	sort.Strings(matches)
 	return matches, nil
 }
 
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
-func (in *Ingester) ScanDir(dir string) (Result, error) {
-	var res Result
+func (ingester *Ingester) ScanDir(dir string) (Result, error) {
+	var scanResult Result
 	if !DirExists(dir) {
-		return res, fmt.Errorf("journal directory not found: %s", dir)
+		return scanResult, fmt.Errorf("journal directory not found: %s", dir)
 	}
-	files, err := ListJournalFiles(dir)
-	if err != nil {
-		return res, err
+	files, listError := ListJournalFiles(dir)
+	if listError != nil {
+		return scanResult, listError
 	}
-	for _, f := range files {
-		r, err := in.IngestFile(f)
-		if err != nil {
-			res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", filepath.Base(f), err))
+	for _, filePath := range files {
+		fileResult, ingestError := ingester.IngestFile(filePath)
+		if ingestError != nil {
+			scanResult.Errors = append(scanResult.Errors, fmt.Sprintf("%s: %v", filepath.Base(filePath), ingestError))
 		}
-		res.merge(r)
+		scanResult.merge(fileResult)
 	}
-	return res, nil
+	return scanResult, nil
 }
 
 type fileState struct {
@@ -94,140 +94,140 @@ type fileState struct {
 }
 
 // IngestFile ingests any new complete lines appended to path since the last pass.
-func (in *Ingester) IngestFile(path string) (Result, error) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
+func (ingester *Ingester) IngestFile(path string) (Result, error) {
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
 
-	res := Result{FilesScanned: 1}
-	st, err := os.Stat(path)
-	if err != nil {
-		return res, err
+	result := Result{FilesScanned: 1}
+	fileInfo, statError := os.Stat(path)
+	if statError != nil {
+		return result, statError
 	}
 	name := filepath.Base(path)
-	size := st.Size()
+	size := fileInfo.Size()
 
-	var fs fileState
-	err = in.conn.QueryRow(`SELECT byte_offset, line_count, events_stored, first_timestamp, last_timestamp
-		FROM ingested_journals WHERE file_name = ?`, name).Scan(&fs.offset, &fs.lines, &fs.stored, &fs.first, &fs.last)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return res, err
+	var state fileState
+	queryError := ingester.conn.QueryRow(`SELECT byte_offset, line_count, events_stored, first_timestamp, last_timestamp
+		FROM ingested_journals WHERE file_name = ?`, name).Scan(&state.offset, &state.lines, &state.stored, &state.first, &state.last)
+	if queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
+		return result, queryError
 	}
-	if fs.offset > size {
+	if state.offset > size {
 		// File was truncated or replaced: re-read it; dedup makes this safe.
-		fs = fileState{}
+		state = fileState{}
 	}
-	if fs.offset == size && err == nil {
-		return res, nil
+	if state.offset == size && queryError == nil {
+		return result, nil
 	}
 
-	f, err := os.Open(path)
-	if err != nil {
-		return res, err
+	fileHandle, openError := os.Open(path)
+	if openError != nil {
+		return result, openError
 	}
-	defer f.Close()
-	if _, err := f.Seek(fs.offset, io.SeekStart); err != nil {
-		return res, err
+	defer fileHandle.Close()
+	if _, seekError := fileHandle.Seek(state.offset, io.SeekStart); seekError != nil {
+		return result, seekError
 	}
-	data, err := io.ReadAll(io.LimitReader(f, size-fs.offset))
-	if err != nil {
-		return res, err
+	data, readError := io.ReadAll(io.LimitReader(fileHandle, size-state.offset))
+	if readError != nil {
+		return result, readError
 	}
 	// Only consume complete lines; a partially written trailing line is
 	// picked up on the next pass.
-	lastNL := bytes.LastIndexByte(data, '\n')
-	if lastNL < 0 {
+	lastNewline := bytes.LastIndexByte(data, '\n')
+	if lastNewline < 0 {
 		data = nil
 	} else {
-		data = data[:lastNL+1]
+		data = data[:lastNewline+1]
 	}
-	newOffset := fs.offset + int64(len(data))
+	newOffset := state.offset + int64(len(data))
 
-	err = db.WithTx(in.conn, func(tx *sql.Tx) error {
+	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
 		var currentCmdr string
 		var prevCmdr sql.NullString
-		_ = tx.QueryRow(`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`, name).Scan(&prevCmdr)
+		_ = transaction.QueryRow(`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`, name).Scan(&prevCmdr)
 		currentCmdr = prevCmdr.String
 
-		stmt, err := tx.Prepare(`INSERT INTO journal_events
+		stmt, prepError := transaction.Prepare(`INSERT INTO journal_events
 			(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
 			 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(event_uid) DO UPDATE SET
 				commander = COALESCE(NULLIF(excluded.commander, ''), journal_events.commander)`)
-		if err != nil {
-			return err
+		if prepError != nil {
+			return prepError
 		}
 		defer stmt.Close()
-		existStmt, err := tx.Prepare(`SELECT 1 FROM journal_events WHERE event_uid = ?`)
-		if err != nil {
-			return err
+		existStmt, prepExistError := transaction.Prepare(`SELECT 1 FROM journal_events WHERE event_uid = ?`)
+		if prepExistError != nil {
+			return prepExistError
 		}
 		defer existStmt.Close()
-		cmdrStmt, err := tx.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
+		cmdrStmt, prepCmdrError := transaction.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
 			VALUES(?, ?, 1, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				fid = CASE WHEN excluded.fid != '' THEN excluded.fid ELSE commanders.fid END,
 				first_seen = CASE WHEN commanders.first_seen IS NULL OR excluded.first_seen < commanders.first_seen THEN excluded.first_seen ELSE commanders.first_seen END,
 				last_seen = CASE WHEN commanders.last_seen IS NULL OR excluded.last_seen > commanders.last_seen THEN excluded.last_seen ELSE commanders.last_seen END`)
-		if err != nil {
-			return err
+		if prepCmdrError != nil {
+			return prepCmdrError
 		}
 		defer cmdrStmt.Close()
 
 		now := ed.NowISO()
 		for len(data) > 0 {
-			i := bytes.IndexByte(data, '\n')
-			line := data[:i]
-			data = data[i+1:]
+			newlineIdx := bytes.IndexByte(data, '\n')
+			line := data[:newlineIdx]
+			data = data[newlineIdx+1:]
 			if len(bytes.TrimSpace(line)) == 0 {
 				continue
 			}
-			fs.lines++
-			res.LinesRead++
-			ev, ok, perr := ParseLine(line, name)
-			if perr != nil {
-				if len(res.Errors) < 20 {
-					res.Errors = append(res.Errors, fmt.Sprintf("%s line %d: %v", name, fs.lines, perr))
+			state.lines++
+			result.LinesRead++
+			parsedEvent, ok, parseError := ParseLine(line, name)
+			if parseError != nil {
+				if len(result.Errors) < 20 {
+					result.Errors = append(result.Errors, fmt.Sprintf("%s line %d: %v", name, state.lines, parseError))
 				}
 				continue
 			}
 			if !ok {
 				continue
 			}
-			if ev.Commander != "" {
-				currentCmdr = ev.Commander
-				_, _ = cmdrStmt.Exec(ev.Commander, ev.FID, ev.Timestamp, ev.Timestamp)
+			if parsedEvent.Commander != "" {
+				currentCmdr = parsedEvent.Commander
+				_, _ = cmdrStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp)
 				// Backfill any earlier events in the same file that arrived before LoadGame/Commander.
-				_, _ = tx.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCmdr, name)
+				_, _ = transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCmdr, name)
 			} else if currentCmdr != "" {
-				ev.Commander = currentCmdr
+				parsedEvent.Commander = currentCmdr
 			}
-			var x, y, z any
-			if ev.StarPos != nil {
-				x, y, z = ev.StarPos.X, ev.StarPos.Y, ev.StarPos.Z
+			var xCoord, yCoord, zCoord any
+			if parsedEvent.StarPos != nil {
+				xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
 			}
 			var existed int
-			_ = existStmt.QueryRow(ev.UID).Scan(&existed)
-			_, err := stmt.Exec(ev.UID, ev.Timestamp, ev.Event, nullStr(ev.SystemName), ev.SystemAddress, ev.BodyID,
-				nullStr(ev.BodyName), x, y, z, nullStr(ev.Commander), name, ev.Raw, now)
-			if err != nil {
-				return err
+			_ = existStmt.QueryRow(parsedEvent.UID).Scan(&existed)
+			_, execError := stmt.Exec(parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event, nullStr(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
+				nullStr(parsedEvent.BodyName), xCoord, yCoord, zCoord, nullStr(parsedEvent.Commander), name, parsedEvent.Raw, now)
+			if execError != nil {
+				return execError
 			}
 			if existed == 0 {
-				fs.stored++
-				res.NewEvents = append(res.NewEvents, ev)
-				if !fs.first.Valid || ev.Timestamp < fs.first.String {
-					fs.first = sql.NullString{String: ev.Timestamp, Valid: true}
+				state.stored++
+				result.NewEvents = append(result.NewEvents, parsedEvent)
+				if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
+					state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
 				}
-				if !fs.last.Valid || ev.Timestamp > fs.last.String {
-					fs.last = sql.NullString{String: ev.Timestamp, Valid: true}
+				if !state.last.Valid || parsedEvent.Timestamp > state.last.String {
+					state.last = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
 				}
 			}
 		}
-		if currentCmdr != "" && fs.last.Valid {
-			_, _ = cmdrStmt.Exec(currentCmdr, "", fs.last.String, fs.last.String)
+		if currentCmdr != "" && state.last.Valid {
+			_, _ = cmdrStmt.Exec(currentCmdr, "", state.last.String, state.last.String)
 		}
-		_, err = tx.Exec(`INSERT INTO ingested_journals
+		_, execError := transaction.Exec(`INSERT INTO ingested_journals
 			(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at)
 			VALUES (?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(file_name) DO UPDATE SET
@@ -235,21 +235,21 @@ func (in *Ingester) IngestFile(path string) (Result, error) {
 				file_size = excluded.file_size, events_stored = excluded.events_stored,
 				first_timestamp = excluded.first_timestamp, last_timestamp = excluded.last_timestamp,
 				updated_at = excluded.updated_at`,
-			name, path, newOffset, fs.lines, size, fs.stored, fs.first, fs.last, now)
-		return err
+			name, path, newOffset, state.lines, size, state.stored, state.first, state.last, now)
+		return execError
 	})
-	if err != nil {
-		return res, err
+	if txError != nil {
+		return result, txError
 	}
-	res.FilesUpdated = 1
-	return res, nil
+	result.FilesUpdated = 1
+	return result, nil
 }
 
-func nullStr(s string) any {
-	if strings.TrimSpace(s) == "" {
+func nullStr(text string) any {
+	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	return s
+	return text
 }
 
 // Status describes the persisted journal archive.
@@ -265,17 +265,18 @@ type Status struct {
 const CmdrFilterSQL = `(commander IS NULL OR commander = '' OR NOT EXISTS (SELECT 1 FROM commanders c WHERE c.name = journal_events.commander COLLATE NOCASE AND c.enabled = 0))`
 
 // ArchiveStatus returns counts of tracked files and stored events.
-func ArchiveStatus(q db.Queryer) (Status, error) {
-	var s Status
+// ArchiveStatus returns counts of tracked files and stored events.
+func ArchiveStatus(queryer db.Queryer) (Status, error) {
+	var status Status
 	var first, last sql.NullString
-	if err := q.QueryRow(`SELECT COUNT(*) FROM ingested_journals`).Scan(&s.FilesTracked); err != nil {
-		return s, err
+	if queryError := queryer.QueryRow(`SELECT COUNT(*) FROM ingested_journals`).Scan(&status.FilesTracked); queryError != nil {
+		return status, queryError
 	}
-	if err := q.QueryRow(`SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM journal_events WHERE `+CmdrFilterSQL).Scan(&s.EventsStored, &first, &last); err != nil {
-		return s, err
+	if queryError := queryer.QueryRow(`SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM journal_events WHERE `+CmdrFilterSQL).Scan(&status.EventsStored, &first, &last); queryError != nil {
+		return status, queryError
 	}
-	s.FirstEventAt, s.LastEventAt = first.String, last.String
-	return s, nil
+	status.FirstEventAt, status.LastEventAt = first.String, last.String
+	return status, nil
 }
 
 // Commander represents a player commander identity discovered in journals.
@@ -291,82 +292,82 @@ type Commander struct {
 }
 
 // ListCommanders returns all discovered commanders ordered by first_seen.
-func ListCommanders(q db.Queryer) ([]Commander, error) {
-	rs, err := q.Query(`SELECT c.name, COALESCE(c.fid, ''), c.enabled, COALESCE(c.first_seen, ''), COALESCE(c.last_seen, ''),
+func ListCommanders(queryer db.Queryer) ([]Commander, error) {
+	rows, queryError := queryer.Query(`SELECT c.name, COALESCE(c.fid, ''), c.enabled, COALESCE(c.first_seen, ''), COALESCE(c.last_seen, ''),
 		(SELECT COUNT(*) FROM journal_events je WHERE je.commander = c.name COLLATE NOCASE)
 		FROM commanders c
 		ORDER BY c.first_seen ASC, c.name ASC`)
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	defer rs.Close()
+	defer rows.Close()
 	out := []Commander{}
-	for rs.Next() {
-		var c Commander
-		var en int
-		if err := rs.Scan(&c.Name, &c.FID, &en, &c.FirstSeen, &c.LastSeen, &c.EventCount); err != nil {
-			return nil, err
+	for rows.Next() {
+		var commander Commander
+		var enabledFlag int
+		if scanError := rows.Scan(&commander.Name, &commander.FID, &enabledFlag, &commander.FirstSeen, &commander.LastSeen, &commander.EventCount); scanError != nil {
+			return nil, scanError
 		}
-		c.Enabled = en != 0
-		c.FirstGalactic = ed.ToGalactic(c.FirstSeen)
-		c.LastGalactic = ed.ToGalactic(c.LastSeen)
-		out = append(out, c)
+		commander.Enabled = enabledFlag != 0
+		commander.FirstGalactic = ed.ToGalactic(commander.FirstSeen)
+		commander.LastGalactic = ed.ToGalactic(commander.LastSeen)
+		out = append(out, commander)
 	}
-	return out, rs.Err()
+	return out, rows.Err()
 }
 
 // SetCommanderEnabled toggles whether a commander's events are included in stats and plans.
-func SetCommanderEnabled(q db.Queryer, name string, enabled bool) error {
-	en := 0
+func SetCommanderEnabled(queryer db.Queryer, name string, enabled bool) error {
+	enabledFlag := 0
 	if enabled {
-		en = 1
+		enabledFlag = 1
 	}
-	_, err := q.Exec(`UPDATE commanders SET enabled = ? WHERE name = ? COLLATE NOCASE`, en, strings.TrimSpace(name))
-	return err
+	_, execError := queryer.Exec(`UPDATE commanders SET enabled = ? WHERE name = ? COLLATE NOCASE`, enabledFlag, strings.TrimSpace(name))
+	return execError
 }
 
 // ImportEDDiscoveryDB performs a one-time recovery of raw journal events stored
 // inside an EDDiscovery SQLite database (JournalEntries.EventData) for older
 // .log files that may have been deleted from disk. Once imported, all events
 // live permanently inside our own journal_events table.
-func (in *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(current, total, files int, stage string)) (Result, error) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
+func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(current, total, files int, stage string)) (Result, error) {
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
 
-	report := func(cur, tot, files int, stage string) {
+	reportProgress := func(current, total, files int, stage string) {
 		if onProgress != nil {
-			onProgress(cur, tot, files, stage)
+			onProgress(current, total, files, stage)
 		}
 	}
 
-	var res Result
-	if st, err := os.Stat(eddPath); err != nil || st.IsDir() {
-		return res, fmt.Errorf("EDDiscovery database not found: %s", eddPath)
+	var result Result
+	if fileInfo, statError := os.Stat(eddPath); statError != nil || fileInfo.IsDir() {
+		return result, fmt.Errorf("EDDiscovery database not found: %s", eddPath)
 	}
 
-	report(0, 0, 0, "Opening EDDiscovery database & reading journal entries…")
-	eddConn, err := sql.Open("sqlite", "file:"+eddPath+"?mode=ro&_pragma=busy_timeout(5000)")
-	if err != nil {
-		return res, fmt.Errorf("open EDDiscovery DB: %w", err)
+	reportProgress(0, 0, 0, "Opening EDDiscovery database & reading journal entries…")
+	eddConn, openError := sql.Open("sqlite", "file:"+eddPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	if openError != nil {
+		return result, fmt.Errorf("open EDDiscovery DB: %w", openError)
 	}
 	defer eddConn.Close()
 
-	rs, err := eddConn.Query(`
-		SELECT COALESCE(NULLIF(t.Name, ''), 'EDD-' || j.TravelLogId),
-		       COALESCE(NULLIF(t.Path, ''), 'EDD-' || j.TravelLogId),
-		       j.EventData
-		FROM JournalEntries j
-		LEFT JOIN TravelLogUnit t ON t.Id = j.TravelLogId
-		WHERE j.EventType IN (
+	rows, queryError := eddConn.Query(`
+		SELECT COALESCE(NULLIF(travelUnit.Name, ''), 'EDD-' || journalEntry.TravelLogId),
+		       COALESCE(NULLIF(travelUnit.Path, ''), 'EDD-' || journalEntry.TravelLogId),
+		       journalEntry.EventData
+		FROM JournalEntries journalEntry
+		LEFT JOIN TravelLogUnit travelUnit ON travelUnit.Id = journalEntry.TravelLogId
+		WHERE journalEntry.EventType IN (
 			'Commander','LoadGame','Statistics','Location','FSDJump','CarrierJump',
 			'CarrierStats','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
 			'ScanOrganic','MultiSellExplorationData','SellOrganicData','ShipyardSwap'
 		)
-		ORDER BY j.TravelLogId ASC, j.Id ASC`)
-	if err != nil {
-		return res, fmt.Errorf("query EDDiscovery JournalEntries: %w", err)
+		ORDER BY journalEntry.TravelLogId ASC, journalEntry.Id ASC`)
+	if queryError != nil {
+		return result, fmt.Errorf("query EDDiscovery JournalEntries: %w", queryError)
 	}
-	defer rs.Close()
+	defer rows.Close()
 
 	type entryRow struct {
 		fileName string
@@ -374,40 +375,40 @@ func (in *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(current,
 		raw      string
 	}
 	var entries []entryRow
-	for rs.Next() {
-		var er entryRow
-		if err := rs.Scan(&er.fileName, &er.filePath, &er.raw); err != nil {
-			return res, err
+	for rows.Next() {
+		var entry entryRow
+		if scanError := rows.Scan(&entry.fileName, &entry.filePath, &entry.raw); scanError != nil {
+			return result, scanError
 		}
-		entries = append(entries, er)
+		entries = append(entries, entry)
 	}
-	if err := rs.Err(); err != nil {
-		return res, err
+	if rowsError := rows.Err(); rowsError != nil {
+		return result, rowsError
 	}
 
 	total := len(entries)
-	report(0, total, 0, "Ingesting historical journal events into SQLite archive…")
+	reportProgress(0, total, 0, "Ingesting historical journal events into SQLite archive…")
 
-	err = db.WithTx(in.conn, func(tx *sql.Tx) error {
-		stmt, err := tx.Prepare(`INSERT INTO journal_events
+	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
+		stmt, prepError := transaction.Prepare(`INSERT INTO journal_events
 			(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
 			 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(event_uid) DO UPDATE SET
 				commander = COALESCE(NULLIF(excluded.commander, ''), journal_events.commander)`)
-		if err != nil {
-			return err
+		if prepError != nil {
+			return prepError
 		}
 		defer stmt.Close()
 
-		cmdrStmt, err := tx.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
+		cmdrStmt, prepCmdrError := transaction.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
 			VALUES(?, ?, 1, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				fid = CASE WHEN excluded.fid != '' THEN excluded.fid ELSE commanders.fid END,
 				first_seen = CASE WHEN commanders.first_seen IS NULL OR excluded.first_seen < commanders.first_seen THEN excluded.first_seen ELSE commanders.first_seen END,
 				last_seen = CASE WHEN commanders.last_seen IS NULL OR excluded.last_seen > commanders.last_seen THEN excluded.last_seen ELSE commanders.last_seen END`)
-		if err != nil {
-			return err
+		if prepCmdrError != nil {
+			return prepCmdrError
 		}
 		defer cmdrStmt.Close()
 
@@ -419,60 +420,60 @@ func (in *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(current,
 		fileFirst := map[string]string{}
 		fileLast := map[string]string{}
 
-		for idx, er := range entries {
-			name := filepath.Base(strings.ReplaceAll(er.fileName, `\`, `/`))
+		for entryIndex, entry := range entries {
+			name := filepath.Base(strings.ReplaceAll(entry.fileName, `\`, `/`))
 			if name != lastFile {
 				lastFile = name
 				currentCmdr = ""
-				res.FilesScanned++
+				result.FilesScanned++
 			}
-			filePaths[name] = er.filePath
-			res.LinesRead++
+			filePaths[name] = entry.filePath
+			result.LinesRead++
 
-			if idx%1500 == 0 {
-				report(idx, total, res.FilesScanned, "Ingesting historical journal events into SQLite archive…")
+			if entryIndex%1500 == 0 {
+				reportProgress(entryIndex, total, result.FilesScanned, "Ingesting historical journal events into SQLite archive…")
 			}
 
-			ev, ok, perr := ParseLine([]byte(er.raw), name)
-			if perr != nil || !ok {
+			parsedEvent, ok, parseError := ParseLine([]byte(entry.raw), name)
+			if parseError != nil || !ok {
 				continue
 			}
-			if ev.Commander != "" {
-				currentCmdr = ev.Commander
-				_, _ = cmdrStmt.Exec(ev.Commander, ev.FID, ev.Timestamp, ev.Timestamp)
-				_, _ = tx.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCmdr, name)
+			if parsedEvent.Commander != "" {
+				currentCmdr = parsedEvent.Commander
+				_, _ = cmdrStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp)
+				_, _ = transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCmdr, name)
 			} else if currentCmdr != "" {
-				ev.Commander = currentCmdr
-				_, _ = cmdrStmt.Exec(currentCmdr, "", ev.Timestamp, ev.Timestamp)
+				parsedEvent.Commander = currentCmdr
+				_, _ = cmdrStmt.Exec(currentCmdr, "", parsedEvent.Timestamp, parsedEvent.Timestamp)
 			}
 
-			var x, y, z any
-			if ev.StarPos != nil {
-				x, y, z = ev.StarPos.X, ev.StarPos.Y, ev.StarPos.Z
+			var xCoord, yCoord, zCoord any
+			if parsedEvent.StarPos != nil {
+				xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
 			}
-			if _, err := stmt.Exec(ev.UID, ev.Timestamp, ev.Event, nullStr(ev.SystemName), ev.SystemAddress, ev.BodyID,
-				nullStr(ev.BodyName), x, y, z, nullStr(ev.Commander), name, ev.Raw, now); err != nil {
-				return err
+			if _, execError := stmt.Exec(parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event, nullStr(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
+				nullStr(parsedEvent.BodyName), xCoord, yCoord, zCoord, nullStr(parsedEvent.Commander), name, parsedEvent.Raw, now); execError != nil {
+				return execError
 			}
 			fileEvents[name]++
-			if f, ok := fileFirst[name]; !ok || ev.Timestamp < f {
-				fileFirst[name] = ev.Timestamp
+			if firstSeen, ok := fileFirst[name]; !ok || parsedEvent.Timestamp < firstSeen {
+				fileFirst[name] = parsedEvent.Timestamp
 			}
-			if l, ok := fileLast[name]; !ok || ev.Timestamp > l {
-				fileLast[name] = ev.Timestamp
+			if lastSeen, ok := fileLast[name]; !ok || parsedEvent.Timestamp > lastSeen {
+				fileLast[name] = parsedEvent.Timestamp
 			}
 		}
 
-		report(total, total, res.FilesScanned, "Finalizing journal archive metadata…")
+		reportProgress(total, total, result.FilesScanned, "Finalizing journal archive metadata…")
 		for name, count := range fileEvents {
-			_, _ = tx.Exec(`INSERT OR IGNORE INTO ingested_journals
+			_, _ = transaction.Exec(`INSERT OR IGNORE INTO ingested_journals
 				(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at)
 				VALUES (?, ?, 0, ?, 0, ?, ?, ?, ?)`,
 				name, filePaths[name], count, count, fileFirst[name], fileLast[name], now)
-			res.FilesUpdated++
+			result.FilesUpdated++
 		}
 		return nil
 	})
-	report(total, total, res.FilesScanned, "Complete")
-	return res, err
+	reportProgress(total, total, result.FilesScanned, "Complete")
+	return result, txError
 }

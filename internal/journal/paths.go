@@ -33,13 +33,13 @@ func steamLibraryRoots(home string) []string {
 
 	seen := map[string]bool{}
 	var roots []string
-	addRoot := func(p string) {
-		p = filepath.Clean(p)
-		if p == "" || seen[p] {
+	addRoot := func(candidatePath string) {
+		cleaned := filepath.Clean(candidatePath)
+		if cleaned == "" || seen[cleaned] {
 			return
 		}
-		seen[p] = true
-		roots = append(roots, p)
+		seen[cleaned] = true
+		roots = append(roots, cleaned)
 	}
 
 	for _, base := range baseSteamDirs {
@@ -48,12 +48,12 @@ func steamLibraryRoots(home string) []string {
 			filepath.Join("steamapps", "libraryfolders.vdf"),
 			filepath.Join("config", "libraryfolders.vdf"),
 		} {
-			data, err := os.ReadFile(filepath.Join(base, vdfRel))
-			if err != nil {
+			data, readError := os.ReadFile(filepath.Join(base, vdfRel))
+			if readError != nil {
 				continue
 			}
-			for _, m := range vdfPathRe.FindAllSubmatch(data, -1) {
-				libPath := strings.ReplaceAll(string(m[1]), `\\`, `\`)
+			for _, match := range vdfPathRe.FindAllSubmatch(data, -1) {
+				libPath := strings.ReplaceAll(string(match[1]), `\\`, `\`)
 				addRoot(libPath)
 			}
 		}
@@ -115,14 +115,14 @@ func DefaultJournalDirs() []string {
 // journal files (or exists as a directory), or the primary candidate when none exists.
 func DefaultJournalDir() string {
 	dirs := DefaultJournalDirs()
-	for _, d := range dirs {
-		if matches, err := filepath.Glob(filepath.Join(d, JournalGlob)); err == nil && len(matches) > 0 {
-			return d
+	for _, dirPath := range dirs {
+		if matches, globError := filepath.Glob(filepath.Join(dirPath, JournalGlob)); globError == nil && len(matches) > 0 {
+			return dirPath
 		}
 	}
-	for _, d := range dirs {
-		if st, err := os.Stat(d); err == nil && st.IsDir() {
-			return d
+	for _, dirPath := range dirs {
+		if fileInfo, statError := os.Stat(dirPath); statError == nil && fileInfo.IsDir() {
+			return dirPath
 		}
 	}
 	if len(dirs) > 0 {
@@ -143,15 +143,15 @@ func DiscoverEDDiscoveryDBPath() string {
 	}
 
 	var roots []string
-	for _, r := range []string{xdgData, cacheDir, configDir, os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")} {
-		if r != "" {
-			roots = append(roots, r)
+	for _, rootPath := range []string{xdgData, cacheDir, configDir, os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")} {
+		if rootPath != "" {
+			roots = append(roots, rootPath)
 		}
 	}
-	for _, r := range roots {
-		p := filepath.Join(r, "EDDiscovery", "EDDUser.sqlite")
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p
+	for _, rootPath := range roots {
+		candidateFile := filepath.Join(rootPath, "EDDiscovery", "EDDUser.sqlite")
+		if fileInfo, statError := os.Stat(candidateFile); statError == nil && !fileInfo.IsDir() {
+			return candidateFile
 		}
 	}
 	return ""
@@ -191,12 +191,12 @@ func DefaultEDDiscoveryDBPath() string {
 
 // DirExists reports whether dir exists and is a directory.
 func DirExists(dir string) bool {
-	st, err := os.Stat(dir)
-	return err == nil && st.IsDir()
+	fileInfo, statError := os.Stat(dir)
+	return statError == nil && fileInfo.IsDir()
 }
 
 // FileExists reports whether path exists and is a regular file.
 func FileExists(path string) bool {
-	st, err := os.Stat(path)
-	return err == nil && !st.IsDir()
+	fileInfo, statError := os.Stat(path)
+	return statError == nil && !fileInfo.IsDir()
 }

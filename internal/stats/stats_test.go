@@ -14,9 +14,9 @@ import (
 )
 
 func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
+	conn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
 	}
 	defer conn.Close()
 
@@ -40,47 +40,47 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		`{"timestamp":"2026-01-18T19:50:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1003,"StarPos":[0,0,106],"JumpDist":6.0}`,
 	}
 
-	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
 	}
 
-	ing := journal.NewIngester(conn)
-	res, err := ing.ScanDir(tmpDir)
-	if err != nil {
-		t.Fatal(err)
+	ingester := journal.NewIngester(conn)
+	scanResult, scanError := ingester.ScanDir(tmpDir)
+	if scanError != nil {
+		t.Fatal(scanError)
 	}
-	if len(res.NewEvents) != len(lines) {
-		t.Fatalf("ingested %d events, want %d", len(res.NewEvents), len(lines))
+	if len(scanResult.NewEvents) != len(lines) {
+		t.Fatalf("ingested %d events, want %d", len(scanResult.NewEvents), len(lines))
 	}
 
 	// Fetch default modes
-	ms, err := modes.List(conn)
-	if err != nil || len(ms) < 3 {
-		t.Fatalf("expected at least 3 default modes, got %v (%v)", ms, err)
+	modeList, listError := modes.List(conn)
+	if listError != nil || len(modeList) < 3 {
+		t.Fatalf("expected at least 3 default modes, got %v (%v)", modeList, listError)
 	}
 	var expModeID int64
-	for _, m := range ms {
-		if m.Name == "Exploration" {
-			expModeID = m.ID
+	for _, modeItem := range modeList {
+		if modeItem.Name == "Exploration" {
+			expModeID = modeItem.ID
 		}
 	}
 	if expModeID == 0 {
-		t.Fatalf("could not find Exploration mode in %v", ms)
+		t.Fatalf("could not find Exploration mode in %v", modeList)
 	}
 
 	// Set window for Exploration mode covering the jumps
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
+	if txError := db.WithTx(conn, func(tx *sql.Tx) error {
 		return modes.SetWindow(tx, 0, expModeID, "2026-01-18T19:20:00Z", "2026-01-18T20:00:00Z")
-	}); err != nil {
-		t.Fatal(err)
+	}); txError != nil {
+		t.Fatal(txError)
 	}
 
-	eng := stats.NewEngine(conn)
+	engine := stats.NewEngine(conn)
 
 	// 1. Unfiltered baseline
-	unfiltered, err := eng.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
-	if err != nil {
-		t.Fatal(err)
+	unfiltered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 	if unfiltered.CarrierJumps != 1 {
 		t.Fatalf("expected 1 carrier jump, got %d", unfiltered.CarrierJumps)
@@ -104,14 +104,14 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	// 2. Filter with Travel = false for Exploration mode
 	// Carrier Operations metrics (CarrierJumps, CarrierDistanceLy, TritiumUsed) MUST completely ignore mode!
 	// Navigation metrics (CarrierPassengerLy, ShipDistanceLy, DistanceLy) MUST be filtered out!
-	filtered, err := eng.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
+	filtered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: expModeID, Travel: false, Discovery: true},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 
 	if filtered.CarrierJumps != 1 {
@@ -140,14 +140,14 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 
 	// 2b. Filter with Travel = false AND Discovery = false (mode completely disabled)
 	// Carrier Operations metrics MUST still completely ignore mode!
-	filteredAllOff, err := eng.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
+	filteredAllOff, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: expModeID, Travel: false, Discovery: false},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 	if filteredAllOff.CarrierJumps != 1 || filteredAllOff.CarrierDistanceLy != 100.0 {
 		t.Fatalf("expected carrier operations to ignore mode even when all categories off: %+v", filteredAllOff)
@@ -160,12 +160,12 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	}
 
 	// 2c. Filter enabled with empty modes list (everything excluded by default)
-	filteredEmpty, err := eng.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
+	filteredEmpty, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes:   []stats.ModeSelection{},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 	if filteredEmpty.CarrierJumps != 1 || filteredEmpty.CarrierDistanceLy != 100.0 {
 		t.Fatalf("expected carrier operations to ignore empty mode filter: %+v", filteredEmpty)
@@ -179,14 +179,14 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 
 	// 3. Filter with Travel = true for Exploration mode
 	// All metrics included
-	filteredTravelOn, err := eng.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
+	filteredTravelOn, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: expModeID, Travel: true, Discovery: true},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 	if filteredTravelOn.CarrierJumps != 1 || filteredTravelOn.CarrierDistanceLy != 100.0 || filteredTravelOn.CarrierPassengerLy != 100.0 {
 		t.Fatalf("unexpected metrics with Travel=true: %+v", filteredTravelOn)
@@ -194,9 +194,9 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 }
 
 func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
+	conn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
 	}
 	defer conn.Close()
 
@@ -212,56 +212,56 @@ func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
 		`{"timestamp":"2026-01-18T20:30:00Z","event":"CarrierJump","StarSystem":"System2","SystemAddress":1003,"StarPos":[0,0,300]}`,
 	}
 
-	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
 	}
 
-	ing := journal.NewIngester(conn)
-	if _, err := ing.ScanDir(tmpDir); err != nil {
-		t.Fatal(err)
+	ingester := journal.NewIngester(conn)
+	if _, scanError := ingester.ScanDir(tmpDir); scanError != nil {
+		t.Fatal(scanError)
 	}
 
-	ms, err := modes.List(conn)
-	if err != nil || len(ms) < 3 {
-		t.Fatalf("expected at least 3 default modes, got %v (%v)", ms, err)
+	modeList, listError := modes.List(conn)
+	if listError != nil || len(modeList) < 2 {
+		t.Fatalf("expected at least 2 default modes, got %v (%v)", modeList, listError)
 	}
-	modeA := ms[0].ID
-	modeB := ms[1].ID
+	modeA := modeList[0].ID
+	modeB := modeList[1].ID
 
-	if err := db.WithTx(conn, func(tx *sql.Tx) error {
-		if err := modes.SetWindow(tx, 0, modeA, "2026-01-18T20:08:00Z", "2026-01-18T20:20:00Z"); err != nil {
-			return err
+	if txError := db.WithTx(conn, func(tx *sql.Tx) error {
+		if windowError := modes.SetWindow(tx, 0, modeA, "2026-01-18T20:08:00Z", "2026-01-18T20:20:00Z"); windowError != nil {
+			return windowError
 		}
 		return modes.SetWindow(tx, 0, modeB, "2026-01-18T20:20:00Z", "2026-01-18T20:40:00Z")
-	}); err != nil {
-		t.Fatal(err)
+	}); txError != nil {
+		t.Fatal(txError)
 	}
 
-	eng := stats.NewEngine(conn)
-	res, err := eng.Compute(stats.Range{After: "2026-01-18T20:00:00Z"}, &stats.Filter{
+	engine := stats.NewEngine(conn)
+	computeResult, computeError := engine.Compute(stats.Range{After: "2026-01-18T20:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: modeA, Travel: false, Discovery: true},
 			{ModeID: modeB, Travel: true, Discovery: true},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
 
 	// Carrier operations: must include both jumps (100 Ly + 200 Ly = 300 Ly, 2 jumps)
-	if res.CarrierJumps != 2 {
-		t.Fatalf("expected 2 carrier jumps across modes, got %d", res.CarrierJumps)
+	if computeResult.CarrierJumps != 2 {
+		t.Fatalf("expected 2 carrier jumps across modes, got %d", computeResult.CarrierJumps)
 	}
-	if res.CarrierDistanceLy != 300.0 {
-		t.Fatalf("expected 300.0 carrier distance Ly, got %.1f", res.CarrierDistanceLy)
+	if computeResult.CarrierDistanceLy != 300.0 {
+		t.Fatalf("expected 300.0 carrier distance Ly, got %.1f", computeResult.CarrierDistanceLy)
 	}
 
 	// Passenger navigation: only Jump 2 was in Travel=true mode (200 Ly)
-	if res.CarrierPassengerLy != 200.0 {
-		t.Fatalf("expected 200.0 carrier passenger Ly, got %.1f", res.CarrierPassengerLy)
+	if computeResult.CarrierPassengerLy != 200.0 {
+		t.Fatalf("expected 200.0 carrier passenger Ly, got %.1f", computeResult.CarrierPassengerLy)
 	}
-	if res.DistanceLy != 200.0 {
-		t.Fatalf("expected 200.0 total distance Ly, got %.1f", res.DistanceLy)
+	if computeResult.DistanceLy != 200.0 {
+		t.Fatalf("expected 200.0 total distance Ly, got %.1f", computeResult.DistanceLy)
 	}
 }

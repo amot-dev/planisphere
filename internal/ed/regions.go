@@ -113,26 +113,28 @@ func PrioritizedRegions(anchorID int) []RegionOption {
 	if _, ok := RegionByID(anchorID); !ok {
 		anchorID = InnerOrionSpurID
 	}
-	adj := map[int]bool{}
+	isAdjacent := map[int]bool{}
 	for _, id := range RegionAdjacency[anchorID] {
-		adj[id] = true
+		isAdjacent[id] = true
 	}
-	out := make([]RegionOption, 0, len(Regions))
-	for _, r := range Regions {
-		out = append(out, RegionOption{ID: r.ID, Name: r.Name, Adjacent: adj[r.ID], Anchor: r.ID == anchorID})
+	regionOptions := make([]RegionOption, 0, len(Regions))
+	for _, regionItem := range Regions {
+		regionOptions = append(regionOptions, RegionOption{ID: regionItem.ID, Name: regionItem.Name, Adjacent: isAdjacent[regionItem.ID], Anchor: regionItem.ID == anchorID})
 	}
-	rank := func(o RegionOption) int {
+	rank := func(option RegionOption) int {
 		switch {
-		case o.Adjacent:
+		case option.Adjacent:
 			return 0
-		case o.Anchor:
+		case option.Anchor:
 			return 1
 		default:
 			return 2
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
-	return out
+	sort.SliceStable(regionOptions, func(firstIndex, secondIndex int) bool {
+		return rank(regionOptions[firstIndex]) < rank(regionOptions[secondIndex])
+	})
+	return regionOptions
 }
 
 // ---- coordinate -> region lookup -------------------------------------------
@@ -154,26 +156,26 @@ func loadRegionGrid() {
 	var data struct {
 		RegionMap [][][2]int `json:"regionmap"`
 	}
-	if err := json.Unmarshal(regionMapJSON, &data); err == nil {
+	if unmarshalError := json.Unmarshal(regionMapJSON, &data); unmarshalError == nil {
 		regionGrid = data.RegionMap
 	}
 }
 
 // RegionAt returns the galactic region containing the given coordinates.
-func RegionAt(x, y, z float64) (Region, bool) {
+func RegionAt(coordX, coordY, coordZ float64) (Region, bool) {
 	regionGridOnce.Do(loadRegionGrid)
-	_ = y
-	px := int((x - regionX0) * 83 / 4096)
-	pz := int((z - regionZ0) * 83 / 4096)
-	if px < 0 || pz < 0 || pz >= len(regionGrid) {
+	_ = coordY
+	pixelX := int((coordX - regionX0) * 83 / 4096)
+	pixelZ := int((coordZ - regionZ0) * 83 / 4096)
+	if pixelX < 0 || pixelZ < 0 || pixelZ >= len(regionGrid) {
 		return Region{}, false
 	}
-	rx := 0
-	for _, run := range regionGrid[pz] {
-		if px < rx+run[0] {
+	runX := 0
+	for _, run := range regionGrid[pixelZ] {
+		if pixelX < runX+run[0] {
 			return RegionByID(run[1])
 		}
-		rx += run[0]
+		runX += run[0]
 	}
 	return Region{}, false
 }

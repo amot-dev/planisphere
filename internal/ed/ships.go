@@ -61,8 +61,8 @@ func ShipDisplayName(internal, localised string) string {
 	if strings.TrimSpace(localised) != "" {
 		return localised
 	}
-	if n, ok := shipNames[strings.ToLower(internal)]; ok {
-		return n
+	if displayName, found := shipNames[strings.ToLower(internal)]; found {
+		return displayName
 	}
 	if internal == "" {
 		return "Unknown ship"

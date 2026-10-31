@@ -36,7 +36,7 @@ export interface ExpeditionPlannerProps {
   onOpenStartModal: () => void
   onRefreshPlan: () => void
   onRefreshAll: () => void
-  onBusyChange: (msg: string | null) => void
+  onBusyChange: (busyMessage: string | null) => void
 }
 
 interface CarrierRoutePromptState {
@@ -74,39 +74,39 @@ export function ExpeditionPlanner({
   const [routePrompt, setRoutePrompt] = useState<CarrierRoutePromptState | null>(null)
   const [activeCarrierRoute, setActiveCarrierRoute] = useState<app.CarrierRouteResult | null>(null)
   const [activeCarrierTargetRowId, setActiveCarrierTargetRowId] = useState<number>(0)
-  const [carrierJumpIdx, setCarrierJumpIdx] = useState(0)
+  const [carrierJumpIndex, setCarrierJumpIndex] = useState(0)
   const [manualModeOverride, setManualModeOverride] = useState(false)
-  const [manualDistInput, setManualDistInput] = useState('')
-  const [manualTritInput, setManualTritInput] = useState('')
+  const [manualDistanceInput, setManualDistanceInput] = useState('')
+  const [manualTritiumInput, setManualTritiumInput] = useState('')
   const [manualLegJumps, setManualLegJumps] = useState(0)
-  const [manualLegDist, setManualLegDist] = useState(0)
-  const [manualLegTrit, setManualLegTrit] = useState(0)
+  const [manualLegDistance, setManualLegDistance] = useState(0)
+  const [manualLegTritium, setManualLegTritium] = useState(0)
   const [loggingJump, setLoggingJump] = useState(false)
   const [copiedNextJump, setCopiedNextJump] = useState(false)
   const [copiedSystemRowId, setCopiedSystemRowId] = useState<number | null>(null)
 
   // Load persisted carrier route state on mount or when active expedition changes
   useEffect(() => {
-    const expId = plan?.expedition?.id
-    if (!expId || expId <= 0) {
+    const expeditionId = plan?.expedition?.id
+    if (!expeditionId || expeditionId <= 0) {
       setActiveCarrierRoute(null)
       setActiveCarrierTargetRowId(0)
       return
     }
     let cancelled = false
-    GetActiveCarrierRoute(expId)
+    GetActiveCarrierRoute(expeditionId)
       .then((saved) => {
         if (cancelled) return
         if (saved && saved.route && saved.targetRowId > 0) {
           setActiveCarrierRoute(saved.route)
           setActiveCarrierTargetRowId(saved.targetRowId)
-          setCarrierJumpIdx(saved.jumpIdx || 0)
+          setCarrierJumpIndex(saved.jumpIdx || 0)
           setManualModeOverride(Boolean(saved.manualMode))
-          setManualDistInput(saved.manualDistInput || '')
-          setManualTritInput(saved.manualTritInput || '')
+          setManualDistanceInput(saved.manualDistInput || '')
+          setManualTritiumInput(saved.manualTritInput || '')
           setManualLegJumps(saved.manualLegJumps || 0)
-          setManualLegDist(saved.manualLegDist || 0)
-          setManualLegTrit(saved.manualLegTrit || 0)
+          setManualLegDistance(saved.manualLegDist || 0)
+          setManualLegTritium(saved.manualLegTrit || 0)
         } else {
           setActiveCarrierRoute(null)
           setActiveCarrierTargetRowId(0)
@@ -130,56 +130,56 @@ export function ExpeditionPlanner({
     manualLegDist?: number
     manualLegTrit?: number
   }) {
-    const expId = plan?.expedition?.id
-    if (!expId || expId <= 0) return
+    const expeditionId = plan?.expedition?.id
+    if (!expeditionId || expeditionId <= 0) return
     const route = updates.route !== undefined ? updates.route : activeCarrierRoute
     const targetRowId = updates.targetRowId !== undefined ? updates.targetRowId : activeCarrierTargetRowId
     if (!route || targetRowId <= 0) {
-      ClearActiveCarrierRoute(expId).catch(console.error)
+      ClearActiveCarrierRoute(expeditionId).catch(console.error)
       return
     }
     const state = app.ActiveCarrierRouteState.createFrom({
-      expeditionId: expId,
+      expeditionId,
       targetRowId,
       route,
-      jumpIdx: updates.jumpIdx !== undefined ? updates.jumpIdx : carrierJumpIdx,
+      jumpIdx: updates.jumpIdx !== undefined ? updates.jumpIdx : carrierJumpIndex,
       manualMode: updates.manualMode !== undefined ? updates.manualMode : manualModeOverride,
-      manualDistInput: updates.manualDistInput !== undefined ? updates.manualDistInput : manualDistInput,
-      manualTritInput: updates.manualTritInput !== undefined ? updates.manualTritInput : manualTritInput,
+      manualDistInput: updates.manualDistInput !== undefined ? updates.manualDistInput : manualDistanceInput,
+      manualTritInput: updates.manualTritInput !== undefined ? updates.manualTritInput : manualTritiumInput,
       manualLegJumps: updates.manualLegJumps !== undefined ? updates.manualLegJumps : manualLegJumps,
-      manualLegDist: updates.manualLegDist !== undefined ? updates.manualLegDist : manualLegDist,
-      manualLegTrit: updates.manualLegTrit !== undefined ? updates.manualLegTrit : manualLegTrit,
+      manualLegDist: updates.manualLegDist !== undefined ? updates.manualLegDist : manualLegDistance,
+      manualLegTrit: updates.manualLegTrit !== undefined ? updates.manualLegTrit : manualLegTritium,
     })
     SaveActiveCarrierRoute(state).catch(console.error)
   }
 
   function handleCancelCarrierRoute() {
-    const expId = plan?.expedition?.id
-    if (expId) {
-      ClearActiveCarrierRoute(expId).catch(console.error)
+    const expeditionId = plan?.expedition?.id
+    if (expeditionId) {
+      ClearActiveCarrierRoute(expeditionId).catch(console.error)
     }
     setActiveCarrierRoute(null)
     setActiveCarrierTargetRowId(0)
-    setCarrierJumpIdx(0)
+    setCarrierJumpIndex(0)
     setManualModeOverride(false)
   }
 
-  function handleCopySystem(rowId: number, sysName: string) {
-    if (!sysName) return
-    const text = sysName.trim()
+  function handleCopySystem(rowId: number, systemName: string) {
+    if (!systemName) return
+    const text = systemName.trim()
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(text).catch(console.error)
     } else {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      document.body.appendChild(ta)
-      ta.select()
+      const textareaElement = document.createElement('textarea')
+      textareaElement.value = text
+      document.body.appendChild(textareaElement)
+      textareaElement.select()
       document.execCommand('copy')
-      document.body.removeChild(ta)
+      document.body.removeChild(textareaElement)
     }
     setCopiedSystemRowId(rowId)
     setTimeout(() => {
-      setCopiedSystemRowId((curr) => (curr === rowId ? null : curr))
+      setCopiedSystemRowId((currentId) => (currentId === rowId ? null : currentId))
     }, 1500)
   }
 
@@ -191,12 +191,12 @@ export function ExpeditionPlanner({
   useEffect(() => {
     if (!plan || !plan.rows) return
     const next: Record<number, { systemName: string; poiName: string; notes: string }> = {}
-    for (const rv of plan.rows ?? []) {
-      if (!rv?.row) continue
-      next[rv.row.id] = {
-        systemName: rv.row.systemName ?? '',
-        poiName: rv.row.poiName ?? '',
-        notes: rv.row.notes ?? '',
+    for (const rowView of plan.rows ?? []) {
+      if (!rowView?.row) continue
+      next[rowView.row.id] = {
+        systemName: rowView.row.systemName ?? '',
+        poiName: rowView.row.poiName ?? '',
+        notes: rowView.row.notes ?? '',
       }
     }
     setDrafts(next)
@@ -217,26 +217,26 @@ export function ExpeditionPlanner({
   // against structural edits (reordering, deleting, or changing system name).
   const lastVisitedIndex = useMemo(() => {
     if (!plan || !plan.rows || plan.expedition?.status === 'planning') return -1
-    let maxIdx = -1
-    ;(plan.rows ?? []).forEach((rv, idx) => {
-      if (rv && (rv.visitState === 'visited' || rv.visitState === 'current')) {
-        maxIdx = idx
+    let maxIndex = -1
+    ;(plan.rows ?? []).forEach((rowView, index) => {
+      if (rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')) {
+        maxIndex = index
       }
     })
-    return maxIdx
+    return maxIndex
   }, [plan])
 
   function loadDetails(rowId: number) {
-    setLoadingDetails((p) => ({ ...p, [rowId]: true }))
+    setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
     GetWaypointDetails(rowId)
-      .then((d) => setDetailsById((p) => ({ ...p, [rowId]: d })))
+      .then((details) => setDetailsById((previous) => ({ ...previous, [rowId]: details })))
       .catch(console.error)
-      .finally(() => setLoadingDetails((p) => ({ ...p, [rowId]: false })))
+      .finally(() => setLoadingDetails((previous) => ({ ...previous, [rowId]: false })))
   }
 
   function toggleExpand(rowId: number) {
     const nextOpen = !expandedRowIds[rowId]
-    setExpandedRowIds((p) => ({ ...p, [rowId]: nextOpen }))
+    setExpandedRowIds((previous) => ({ ...previous, [rowId]: nextOpen }))
     if (nextOpen) {
       loadDetails(rowId)
     }
@@ -265,11 +265,11 @@ export function ExpeditionPlanner({
   async function toggleFcStop(row: expedition.Row) {
     if (!plan) return
     const nextFcStop = !row.fcStop
-    const optimisticRows = plan.rows.map((rv) => {
-      if (rv.row.id !== row.id) return rv
+    const optimisticRows = plan.rows.map((rowView) => {
+      if (rowView.row.id !== row.id) return rowView
       return expedition.RowView.createFrom({
-        ...rv,
-        row: { ...rv.row, fcStop: nextFcStop, fcArrived: nextFcStop ? rv.row.fcArrived : false },
+        ...rowView,
+        row: { ...rowView.row, fcStop: nextFcStop, fcArrived: nextFcStop ? rowView.row.fcArrived : false },
       })
     })
     onPlanOptimisticUpdate(
@@ -295,17 +295,17 @@ export function ExpeditionPlanner({
 
   async function setFcArrived(rowId: number, arrived: boolean) {
     if (!plan) return
-    const optimisticRows = plan.rows.map((rv) => {
-      if (rv.row.id !== rowId) return rv
+    const optimisticRows = plan.rows.map((rowView) => {
+      if (rowView.row.id !== rowId) return rowView
       return expedition.RowView.createFrom({
-        ...rv,
-        row: { ...rv.row, fcArrived: arrived },
+        ...rowView,
+        row: { ...rowView.row, fcArrived: arrived },
       })
     })
     let nextFcId = 0
-    for (const rv of optimisticRows) {
-      if (rv.row.rowType === 'waypoint' && rv.row.fcStop && !rv.row.fcArrived) {
-        nextFcId = rv.row.id
+    for (const rowView of optimisticRows) {
+      if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && !rowView.row.fcArrived) {
+        nextFcId = rowView.row.id
         break
       }
     }
@@ -333,14 +333,14 @@ export function ExpeditionPlanner({
 
   async function handleLegModeChange(rowId: number, modeId: number) {
     if (!plan) return
-    const picked = (plan.modes ?? []).find((m) => m.id === modeId)
-    const optimisticRows = plan.rows.map((rv) => {
-      if (rv.row.id !== rowId) return rv
+    const picked = (plan.modes ?? []).find((mode) => mode.id === modeId)
+    const optimisticRows = plan.rows.map((rowView) => {
+      if (rowView.row.id !== rowId) return rowView
       return expedition.RowView.createFrom({
-        ...rv,
+        ...rowView,
         legModeId: modeId,
-        legModeName: picked?.name ?? rv.legModeName,
-        legModeColor: picked?.color ?? rv.legModeColor,
+        legModeName: picked?.name ?? rowView.legModeName,
+        legModeColor: picked?.color ?? rowView.legModeColor,
       })
     })
     onPlanOptimisticUpdate(
@@ -361,7 +361,7 @@ export function ExpeditionPlanner({
 
   async function handleActiveLegModeChange(modeId: number) {
     if (!plan) return
-    const picked = (plan.modes ?? []).find((m) => m.id === modeId)
+    const picked = (plan.modes ?? []).find((mode) => mode.id === modeId)
     onPlanOptimisticUpdate(
       expedition.PlanView.createFrom({
         ...plan,
@@ -409,14 +409,14 @@ export function ExpeditionPlanner({
 
   async function handleDeleteRow(rowId: number) {
     if (!plan) return
-    const filtered = plan.rows.filter((rv) => rv.row.id !== rowId)
+    const filtered = plan.rows.filter((rowView) => rowView.row.id !== rowId)
     let wpNum = 0
-    const renumbered = filtered.map((rv) => {
-      if (rv.row.rowType === 'waypoint') {
+    const renumbered = filtered.map((rowView) => {
+      if (rowView.row.rowType === 'waypoint') {
         wpNum++
-        return expedition.RowView.createFrom({ ...rv, number: wpNum })
+        return expedition.RowView.createFrom({ ...rowView, number: wpNum })
       }
-      return rv
+      return rowView
     })
     onPlanOptimisticUpdate(
       expedition.PlanView.createFrom({
@@ -447,13 +447,13 @@ export function ExpeditionPlanner({
     const [moved] = nextRows.splice(fromIndex, 1)
     nextRows.splice(toIndex, 0, moved)
     let wpNum = 0
-    const renumbered = nextRows.map((rv, i) => {
-      const updatedRow = { ...rv.row, sortOrder: i }
-      if (rv.row.rowType === 'waypoint') {
+    const renumbered = nextRows.map((rowView, i) => {
+      const updatedRow = { ...rowView.row, sortOrder: i }
+      if (rowView.row.rowType === 'waypoint') {
         wpNum++
-        return expedition.RowView.createFrom({ ...rv, row: updatedRow, number: wpNum })
+        return expedition.RowView.createFrom({ ...rowView, row: updatedRow, number: wpNum })
       }
-      return expedition.RowView.createFrom({ ...rv, row: updatedRow })
+      return expedition.RowView.createFrom({ ...rowView, row: updatedRow })
     })
     onPlanOptimisticUpdate(
       expedition.PlanView.createFrom({
@@ -471,10 +471,10 @@ export function ExpeditionPlanner({
     }
   }
 
-  async function handleLifecycleAction(label: string, fn: () => Promise<void>) {
+  async function handleLifecycleAction(label: string, actionFunction: () => Promise<void>) {
     onBusyChange(label)
     try {
-      await fn()
+      await actionFunction()
       onRefreshAll()
     } finally {
       onBusyChange(null)
@@ -502,17 +502,17 @@ export function ExpeditionPlanner({
         }
       }
     }
-    let defaultCap = 5000
+    let defaultCapacity = 5000
     try {
-      defaultCap = await GetDefaultCarrierCapacity()
+      defaultCapacity = await GetDefaultCarrierCapacity()
     } catch {
-      defaultCap = 5000
+      defaultCapacity = 5000
     }
     setRoutePrompt({
       targetRowId: targetRow.id,
       origin: prevSystem,
       destination: (drafts[targetRow.id]?.systemName ?? targetRow.systemName ?? '').trim(),
-      capacityUsed: String(defaultCap),
+      capacityUsed: String(defaultCapacity),
       carrierType: 'player',
       loading: false,
     })
@@ -521,13 +521,13 @@ export function ExpeditionPlanner({
   async function handleStartCarrierRoute(forceManual: boolean) {
     if (!routePrompt) return
     const targetId = routePrompt.targetRowId
-    const cap = Math.max(0, Math.min(25000, parseInt(routePrompt.capacityUsed, 10) || 0))
+    const carrierCapacity = Math.max(0, Math.min(25000, parseInt(routePrompt.capacityUsed, 10) || 0))
     if (forceManual) {
-      const r = app.CarrierRouteResult.createFrom({
+      const manualRoute = app.CarrierRouteResult.createFrom({
         origin: routePrompt.origin.trim(),
         destination: routePrompt.destination.trim(),
         carrierType: routePrompt.carrierType,
-        capacityUsed: cap,
+        capacityUsed: carrierCapacity,
         manualMode: true,
         totalJumps: 0,
         totalDistLy: 0,
@@ -535,17 +535,17 @@ export function ExpeditionPlanner({
         jumps: [],
       })
       setActiveCarrierTargetRowId(targetId)
-      setActiveCarrierRoute(r)
-      setCarrierJumpIdx(0)
+      setActiveCarrierRoute(manualRoute)
+      setCarrierJumpIndex(0)
       setManualModeOverride(true)
       setManualLegJumps(0)
-      setManualLegDist(0)
-      setManualLegTrit(0)
-      setManualDistInput('')
-      setManualTritInput('')
+      setManualLegDistance(0)
+      setManualLegTritium(0)
+      setManualDistanceInput('')
+      setManualTritiumInput('')
       setRoutePrompt(null)
       persistRouteState({
-        route: r,
+        route: manualRoute,
         targetRowId: targetId,
         jumpIdx: 0,
         manualMode: true,
@@ -558,59 +558,59 @@ export function ExpeditionPlanner({
       return
     }
 
-    setRoutePrompt((p) => (p ? { ...p, loading: true } : null))
+    setRoutePrompt((previous) => (previous ? { ...previous, loading: true } : null))
     onBusyChange('PLOTTING SPANSH CARRIER ROUTE')
     try {
-      const res = await PlotCarrierRoute(
+      const routeResult = await PlotCarrierRoute(
         routePrompt.origin.trim(),
         routePrompt.destination.trim(),
-        cap,
+        carrierCapacity,
         routePrompt.carrierType,
       )
       setActiveCarrierTargetRowId(targetId)
-      setActiveCarrierRoute(res)
-      setCarrierJumpIdx(0)
-      setManualModeOverride(Boolean(res.manualMode))
+      setActiveCarrierRoute(routeResult)
+      setCarrierJumpIndex(0)
+      setManualModeOverride(Boolean(routeResult.manualMode))
       setManualLegJumps(0)
-      setManualLegDist(0)
-      setManualLegTrit(0)
-      setManualDistInput('')
-      setManualTritInput('')
+      setManualLegDistance(0)
+      setManualLegTritium(0)
+      setManualDistanceInput('')
+      setManualTritiumInput('')
       setRoutePrompt(null)
       persistRouteState({
-        route: res,
+        route: routeResult,
         targetRowId: targetId,
         jumpIdx: 0,
-        manualMode: Boolean(res.manualMode),
+        manualMode: Boolean(routeResult.manualMode),
         manualLegJumps: 0,
         manualLegDist: 0,
         manualLegTrit: 0,
         manualDistInput: '',
         manualTritInput: '',
       })
-    } catch (err: any) {
-      const errRes = app.CarrierRouteResult.createFrom({
+    } catch (routeError: any) {
+      const errorRoute = app.CarrierRouteResult.createFrom({
         origin: routePrompt.origin.trim(),
         destination: routePrompt.destination.trim(),
         carrierType: routePrompt.carrierType,
-        capacityUsed: cap,
+        capacityUsed: carrierCapacity,
         manualMode: true,
-        error: err?.message || String(err),
+        error: routeError?.message || String(routeError),
         totalJumps: 0,
         totalDistLy: 0,
         totalTritium: 0,
         jumps: [],
       })
       setActiveCarrierTargetRowId(targetId)
-      setActiveCarrierRoute(errRes)
-      setCarrierJumpIdx(0)
+      setActiveCarrierRoute(errorRoute)
+      setCarrierJumpIndex(0)
       setManualModeOverride(true)
       setManualLegJumps(0)
-      setManualLegDist(0)
-      setManualLegTrit(0)
+      setManualLegDistance(0)
+      setManualLegTritium(0)
       setRoutePrompt(null)
       persistRouteState({
-        route: errRes,
+        route: errorRoute,
         targetRowId: targetId,
         jumpIdx: 0,
         manualMode: true,
@@ -627,18 +627,18 @@ export function ExpeditionPlanner({
 
   async function handleCompleteSpanshJump() {
     if (!plan || !activeCarrierRoute || loggingJump) return
-    const hop = activeCarrierRoute.jumps?.[carrierJumpIdx]
+    const hop = activeCarrierRoute.jumps?.[carrierJumpIndex]
     if (!hop) return
     setLoggingJump(true)
     onBusyChange('LOGGING CARRIER JUMP')
     try {
       await RecordCarrierJump(plan.expedition.id, hop.distanceLy, hop.tritiumUsed)
-      const nextIdx = carrierJumpIdx + 1
-      setCarrierJumpIdx(nextIdx)
-      persistRouteState({ jumpIdx: nextIdx })
+      const nextJumpIndex = carrierJumpIndex + 1
+      setCarrierJumpIndex(nextJumpIndex)
+      persistRouteState({ jumpIdx: nextJumpIndex })
       onRefreshAll()
-    } catch (err) {
-      console.error(err)
+    } catch (error) {
+      console.error(error)
     } finally {
       setLoggingJump(false)
       onBusyChange(null)
@@ -647,31 +647,31 @@ export function ExpeditionPlanner({
 
   async function handleLogManualJump() {
     if (!plan || !activeCarrierRoute || loggingJump) return
-    const dist = parseFloat(manualDistInput) || 0
-    const trit = Math.max(0, parseInt(manualTritInput, 10) || 0)
-    if (dist <= 0 && trit <= 0) return
+    const jumpDistance = parseFloat(manualDistanceInput) || 0
+    const tritiumAmount = Math.max(0, parseInt(manualTritiumInput, 10) || 0)
+    if (jumpDistance <= 0 && tritiumAmount <= 0) return
     setLoggingJump(true)
     onBusyChange('LOGGING MANUAL CARRIER JUMP')
     try {
-      await RecordCarrierJump(plan.expedition.id, dist, trit)
+      await RecordCarrierJump(plan.expedition.id, jumpDistance, tritiumAmount)
       const nextJumps = manualLegJumps + 1
-      const nextDist = manualLegDist + Math.max(0, dist)
-      const nextTrit = manualLegTrit + trit
+      const nextTotalDistance = manualLegDistance + Math.max(0, jumpDistance)
+      const nextTotalTritium = manualLegTritium + tritiumAmount
       setManualLegJumps(nextJumps)
-      setManualLegDist(nextDist)
-      setManualLegTrit(nextTrit)
-      setManualDistInput('')
-      setManualTritInput('')
+      setManualLegDistance(nextTotalDistance)
+      setManualLegTritium(nextTotalTritium)
+      setManualDistanceInput('')
+      setManualTritiumInput('')
       persistRouteState({
         manualLegJumps: nextJumps,
-        manualLegDist: nextDist,
-        manualLegTrit: nextTrit,
+        manualLegDist: nextTotalDistance,
+        manualLegTrit: nextTotalTritium,
         manualDistInput: '',
         manualTritInput: '',
       })
       onRefreshAll()
-    } catch (err) {
-      console.error(err)
+    } catch (error) {
+      console.error(error)
     } finally {
       setLoggingJump(false)
       onBusyChange(null)
@@ -680,9 +680,9 @@ export function ExpeditionPlanner({
 
   async function handleCarrierArriveAtWaypoint() {
     const targetId = activeCarrierTargetRowId
-    const expId = plan?.expedition?.id
-    if (expId) {
-      ClearActiveCarrierRoute(expId).catch(console.error)
+    const expeditionId = plan?.expedition?.id
+    if (expeditionId) {
+      ClearActiveCarrierRoute(expeditionId).catch(console.error)
     }
     setActiveCarrierRoute(null)
     setActiveCarrierTargetRowId(0)
@@ -692,31 +692,31 @@ export function ExpeditionPlanner({
   }
 
   type TableItem =
-    | { kind: 'region'; rv: expedition.RowView; index: number; key: string }
-    | { kind: 'leg-banner'; rv: expedition.RowView; index: number; key: string }
-    | { kind: 'waypoint'; rv: expedition.RowView; index: number; key: string }
-    | { kind: 'drawer'; rv: expedition.RowView; index: number; key: string }
+    | { kind: 'region'; rowView: expedition.RowView; index: number; key: string }
+    | { kind: 'leg-banner'; rowView: expedition.RowView; index: number; key: string }
+    | { kind: 'waypoint'; rowView: expedition.RowView; index: number; key: string }
+    | { kind: 'drawer'; rowView: expedition.RowView; index: number; key: string }
 
   const isPlanning = plan?.expedition?.status === 'planning'
 
   const tableItems: TableItem[] = useMemo(() => {
     if (!plan || !plan.rows) return []
     const items: TableItem[] = []
-    ;(plan.rows ?? []).forEach((rv, index) => {
-      if (!rv?.row) return
-      const r = rv.row
-      if (r.rowType === 'region') {
-        items.push({ kind: 'region', rv, index, key: `region-${r.id}` })
+    ;(plan.rows ?? []).forEach((rowView, index) => {
+      if (!rowView?.row) return
+      const row = rowView.row
+      if (row.rowType === 'region') {
+        items.push({ kind: 'region', rowView, index, key: `region-${row.id}` })
       } else {
-        const isVisited = rv.visitState === 'visited' || rv.visitState === 'current'
-        const showLegBanner = rv.number > 1 && isVisited
+        const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
+        const showLegBanner = rowView.number > 1 && isVisited
         if (showLegBanner) {
-          items.push({ kind: 'leg-banner', rv, index, key: `banner-${r.id}` })
+          items.push({ kind: 'leg-banner', rowView, index, key: `banner-${row.id}` })
         }
-        items.push({ kind: 'waypoint', rv, index, key: `row-${r.id}` })
-        const isExpanded = Boolean(expandedRowIds[r.id])
+        items.push({ kind: 'waypoint', rowView, index, key: `row-${row.id}` })
+        const isExpanded = Boolean(expandedRowIds[row.id])
         if (!isPlanning && isExpanded) {
-          items.push({ kind: 'drawer', rv, index, key: `drawer-${r.id}` })
+          items.push({ kind: 'drawer', rowView, index, key: `drawer-${row.id}` })
         }
       }
     })
@@ -727,17 +727,17 @@ export function ExpeditionPlanner({
     (index: number, isDraggable: boolean) => {
       if (!isDraggable) return {}
       return {
-        onDragOver: (e: React.DragEvent) => {
-          e.preventDefault()
+        onDragOver: (event: React.DragEvent) => {
+          event.preventDefault()
           if (index > lastVisitedIndex) {
-            e.dataTransfer.dropEffect = 'move'
+            event.dataTransfer.dropEffect = 'move'
             if (dragOverIndex !== index) {
               setDragOverIndex(index)
             }
           }
         },
-        onDrop: (e: React.DragEvent) => {
-          e.preventDefault()
+        onDrop: (event: React.DragEvent) => {
+          event.preventDefault()
           const from = draggedIndex
           setDraggedIndex(null)
           setDragOverIndex(null)
@@ -762,14 +762,14 @@ export function ExpeditionPlanner({
     )
   }
 
-  const exp = plan.expedition
-  const isActive = exp.status === 'active'
-  const isCompleted = exp.status === 'completed'
+  const currentExpedition = plan.expedition
+  const isActive = currentExpedition.status === 'active'
+  const isCompleted = currentExpedition.status === 'completed'
   const modesList = plan.modes ?? []
 
-  const firstWp = plan.rows?.find((rv) => rv.row.rowType === 'waypoint')
+  const firstWaypoint = plan.rows?.find((rowView) => rowView.row.rowType === 'waypoint')
   const hasWp1System = Boolean(
-    (drafts[firstWp?.row.id ?? 0]?.systemName ?? firstWp?.row.systemName ?? '').trim(),
+    (drafts[firstWaypoint?.row.id ?? 0]?.systemName ?? firstWaypoint?.row.systemName ?? '').trim(),
   )
   const canComplete = (plan.visitedCount ?? 0) > 0
 
@@ -778,18 +778,18 @@ export function ExpeditionPlanner({
       {/* Expedition Flight Plan Header Bar */}
       <div className="px-5 py-3 bg-[#0e0a07] border-b border-[#3d2816] flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3.5">
-          <StatusBadge status={exp.status} armedAt={exp.armedAt} />
+          <StatusBadge status={currentExpedition.status} armedAt={currentExpedition.armedAt} />
           <div className="border-l-2 border-[#FF7100]/60 pl-3">
             <div className="flex items-center gap-2.5">
               <h2 className="text-base font-extrabold uppercase tracking-[0.1em] text-[#F4ECE4]">
-                {exp.name}
+                {currentExpedition.name}
               </h2>
               <span className="text-[11px] font-mono-tabular px-2 py-0.5 bg-[#16100b] border border-[#3d2816] text-[#FF7100]">
                 {plan.visitedCount} / {plan.waypointCount} WAYPOINTS VISITED
               </span>
             </div>
-            {exp.description && (
-              <p className="text-xs text-[#a6907c] mt-0.5">{exp.description}</p>
+            {currentExpedition.description && (
+              <p className="text-xs text-[#a6907c] mt-0.5">{currentExpedition.description}</p>
             )}
           </div>
         </div>
@@ -841,7 +841,7 @@ export function ExpeditionPlanner({
                 type="button"
                 disabled={!canComplete}
                 onClick={() =>
-                  handleLifecycleAction('COMPLETING EXPEDITION', () => CompleteExpedition(exp.id))
+                  handleLifecycleAction('COMPLETING EXPEDITION', () => CompleteExpedition(currentExpedition.id))
                 }
                 title={
                   canComplete
@@ -862,7 +862,7 @@ export function ExpeditionPlanner({
               <button
                 type="button"
                 onClick={() =>
-                  handleLifecycleAction('REOPENING EXPEDITION', () => ReopenExpedition(exp.id))
+                  handleLifecycleAction('REOPENING EXPEDITION', () => ReopenExpedition(currentExpedition.id))
                 }
                 className="ed-btn-cyan"
               >
@@ -900,8 +900,8 @@ export function ExpeditionPlanner({
 
           <tbody className="text-xs">
             {tableItems.map((item) => {
-              const rv = item.rv
-              const r = rv.row
+              const rowView = item.rowView
+              const row = rowView.row
               const index = item.index
               const isLocked = isCompleted || index <= lastVisitedIndex
               const isDraggable = !isLocked
@@ -922,12 +922,12 @@ export function ExpeditionPlanner({
                     {/* Just the Region Name and nothing else */}
                     <td colSpan={isPlanning ? 6 : 7} className="px-3 py-2 border-b border-[#3a2615]">
                       <RegionHeaderDropdown
-                        expeditionId={exp.id}
-                        rowId={r.id}
-                        currentRegionId={r.regionId}
-                        regionName={rv.regionName}
+                        expeditionId={currentExpedition.id}
+                        rowId={row.id}
+                        currentRegionId={row.regionId}
+                        regionName={rowView.regionName}
                         locked={isLocked}
-                        onSelect={(regId) => changeRegion(r.id, regId)}
+                        onSelect={(selectedRegionId) => changeRegion(row.id, selectedRegionId)}
                       />
                     </td>
 
@@ -938,22 +938,22 @@ export function ExpeditionPlanner({
                             index={index}
                             minIndex={lastVisitedIndex + 1}
                             total={plan.rows?.length ?? 0}
-                            rowId={r.id}
-                            insertMenuOpen={insertMenuAfterId === r.id}
+                            rowId={row.id}
+                            insertMenuOpen={insertMenuAfterId === row.id}
                             onToggleInsertMenu={() =>
-                              setInsertMenuAfterId(insertMenuAfterId === r.id ? null : r.id)
+                              setInsertMenuAfterId(insertMenuAfterId === row.id ? null : row.id)
                             }
-                            onInsert={(type) => handleInsert(r.id, type)}
-                            onMove={(to) => handleMoveRow(r.id, index, to)}
-                            onDelete={() => handleDeleteRow(r.id)}
+                            onInsert={(type) => handleInsert(row.id, type)}
+                            onMove={(targetIndex) => handleMoveRow(row.id, index, targetIndex)}
+                            onDelete={() => handleDeleteRow(row.id)}
                           />
                           <button
                             type="button"
                             draggable={true}
-                            onDragStart={(e) => {
+                            onDragStart={(event) => {
                               setDraggedIndex(index)
-                              e.dataTransfer.effectAllowed = 'move'
-                              e.dataTransfer.setData('text/plain', String(r.id))
+                              event.dataTransfer.effectAllowed = 'move'
+                              event.dataTransfer.setData('text/plain', String(row.id))
                             }}
                             onDragEnd={() => {
                               setDraggedIndex(null)
@@ -976,11 +976,11 @@ export function ExpeditionPlanner({
                   <tr key={item.key} style={rowStyle}>
                     <td colSpan={isPlanning ? 7 : 8} className="p-0 border-b border-[#24180e]">
                       <LegBanner
-                        transitions={rv.transitions}
-                        modeId={rv.legModeId}
-                        modeColor={rv.legModeColor}
+                        transitions={rowView.transitions}
+                        modeId={rowView.legModeId}
+                        modeColor={rowView.legModeColor}
                         modesList={modesList}
-                        onChangeMode={(nextModeId) => handleLegModeChange(r.id, nextModeId)}
+                        onChangeMode={(nextModeId) => handleLegModeChange(row.id, nextModeId)}
                       />
                     </td>
                   </tr>
@@ -992,24 +992,24 @@ export function ExpeditionPlanner({
                   <tr key={item.key} style={rowStyle}>
                     <td colSpan={8} className="p-0 border-b border-[#24180e]">
                       <WaypointDetailsDrawer
-                        details={detailsById[r.id] ?? null}
-                        loading={Boolean(loadingDetails[r.id])}
-                        rowView={rv}
+                        details={detailsById[row.id] ?? null}
+                        loading={Boolean(loadingDetails[row.id])}
+                        rowView={rowView}
                       />
                     </td>
                   </tr>
                 )
               }
 
-              const isExpanded = Boolean(expandedRowIds[r.id])
-              const isVisited = rv.visitState === 'visited' || rv.visitState === 'current'
-              const draft = drafts[r.id] ?? {
-                systemName: r.systemName ?? '',
-                poiName: r.poiName ?? '',
-                notes: r.notes ?? '',
+              const isExpanded = Boolean(expandedRowIds[row.id])
+              const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
+              const draft = drafts[row.id] ?? {
+                systemName: row.systemName ?? '',
+                poiName: row.poiName ?? '',
+                notes: row.notes ?? '',
               }
 
-              const isNextFcStop = r.fcStop && !r.fcArrived && r.id === plan.nextFcStopRowId
+              const isNextFcStop = row.fcStop && !row.fcArrived && row.id === plan.nextFcStopRowId
 
               return (
                 <tr
@@ -1033,7 +1033,7 @@ export function ExpeditionPlanner({
                     >
                       <button
                         type="button"
-                        onClick={() => toggleExpand(r.id)}
+                        onClick={() => toggleExpand(row.id)}
                         title="Toggle per-waypoint leg telemetry / distance drawer"
                         className={`p-1 hover:bg-[#24180e] cursor-pointer mt-0.5 ${
                           isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
@@ -1048,7 +1048,7 @@ export function ExpeditionPlanner({
                         >
                           <path
                             fillRule="evenodd"
-                            d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                            d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.25 4.5a.75.75 0 01-1.06-.02z"
                             clipRule="evenodd"
                           />
                         </svg>
@@ -1063,21 +1063,21 @@ export function ExpeditionPlanner({
                     }`}
                   >
                     <div className="py-1">
-                      {String(rv.number).padStart(2, '0')}
+                      {String(rowView.number).padStart(2, '0')}
                     </div>
                   </td>
 
                   {/* System Name (EDSM indicator on left + system name + copy button) */}
                   <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
                     <div className="flex items-center gap-2 min-w-0">
-                      <CoordStatusIndicator rowView={rv} />
+                      <CoordStatusIndicator rowView={rowView} />
                       <div className="flex-1 min-w-0 flex items-center gap-1">
                         {isLocked ? (
                           <span
-                            title={r.systemName}
+                            title={row.systemName}
                             className="font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-1 select-text cursor-text truncate block"
                           >
-                            {r.systemName || '—'}
+                            {row.systemName || '—'}
                           </span>
                         ) : (
                           <input
@@ -1085,32 +1085,32 @@ export function ExpeditionPlanner({
                             spellCheck={false}
                             value={draft.systemName}
                             placeholder="Star System"
-                            onChange={(e) =>
-                              setDrafts((p) => ({
-                                ...p,
-                                [r.id]: { ...draft, systemName: e.target.value },
+                            onChange={(event) =>
+                              setDrafts((previous) => ({
+                                ...previous,
+                                [row.id]: { ...draft, systemName: event.target.value },
                               }))
                             }
-                            onBlur={(e) => commitField(r, 'systemName', e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                ;(e.target as HTMLInputElement).blur()
+                            onBlur={(event) => commitField(row, 'systemName', event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                ;(event.target as HTMLInputElement).blur()
                               }
                             }}
                             className="w-full bg-transparent px-1.5 py-1 border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none font-mono-tabular font-bold text-[#F4ECE4] placeholder:text-[#6e5b4b] select-text"
                           />
                         )}
-                        {r.systemName && (
+                        {row.systemName && (
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleCopySystem(r.id, r.systemName)
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleCopySystem(row.id, row.systemName)
                             }}
-                            title={`Copy "${r.systemName}" to clipboard`}
+                            title={`Copy "${row.systemName}" to clipboard`}
                             className="p-1 text-[#6e5b4b] hover:text-[#FF7100] hover:bg-[#1f150d] cursor-pointer shrink-0"
                           >
-                            {copiedSystemRowId === r.id ? (
+                            {copiedSystemRowId === row.id ? (
                               <span className="text-[10px] font-mono-tabular font-bold text-[#00D2FF]">
                                 ✓
                               </span>
@@ -1132,13 +1132,13 @@ export function ExpeditionPlanner({
                       value={draft.poiName}
                       placeholder="POI Name"
                       maxLines={3}
-                      onChange={(val) =>
-                        setDrafts((p) => ({
-                          ...p,
-                          [r.id]: { ...draft, poiName: val },
+                      onChange={(value) =>
+                        setDrafts((previous) => ({
+                          ...previous,
+                          [row.id]: { ...draft, poiName: value },
                         }))
                       }
-                      onBlur={(val) => commitField(r, 'poiName', val)}
+                      onBlur={(value) => commitField(row, 'poiName', value)}
                       className="text-[#F4ECE4] placeholder:text-[#6e5b4b]"
                     />
                   </td>
@@ -1149,13 +1149,13 @@ export function ExpeditionPlanner({
                       value={draft.notes}
                       placeholder="Flight notes, reminders..."
                       maxLines={3}
-                      onChange={(val) =>
-                        setDrafts((p) => ({
-                          ...p,
-                          [r.id]: { ...draft, notes: val },
+                      onChange={(value) =>
+                        setDrafts((previous) => ({
+                          ...previous,
+                          [row.id]: { ...draft, notes: value },
                         }))
                       }
-                      onBlur={(val) => commitField(r, 'notes', val)}
+                      onBlur={(value) => commitField(row, 'notes', value)}
                       className="text-[#d6c7b8] placeholder:text-[#6e5b4b]"
                     />
                   </td>
@@ -1163,7 +1163,7 @@ export function ExpeditionPlanner({
                   {/* Carrier Stop (Moved here between notes and telemetry; no bare checkbox) */}
                   <td className="px-2 py-1.5 text-center align-top border-b border-[#24180e]">
                     <div className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap py-0.5">
-                      {r.fcStop ? (
+                      {row.fcStop ? (
                         <>
                           {isPlanning ? (
                             <span
@@ -1175,24 +1175,24 @@ export function ExpeditionPlanner({
                           ) : (
                             <button
                               type="button"
-                              onClick={() => setFcArrived(r.id, !r.fcArrived)}
+                              onClick={() => setFcArrived(row.id, !row.fcArrived)}
                               title={
-                                r.fcArrived
+                                row.fcArrived
                                   ? 'Carrier has arrived at this waypoint (click to mark pending)'
                                   : 'Carrier has not yet arrived (click to mark arrived)'
                               }
                               className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border cursor-pointer ${
-                                r.fcArrived
+                                row.fcArrived
                                   ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70 hover:bg-[#FF7100] hover:text-[#050506]'
                                   : 'bg-[#120d09] text-[#a6907c] border-[#3d2816] hover:border-[#FF7100] hover:text-[#F4ECE4]'
                               }`}
                             >
-                              {r.fcArrived ? '✓ ARRIVED' : 'PENDING'}
+                              {row.fcArrived ? '✓ ARRIVED' : 'PENDING'}
                             </button>
                           )}
 
                           {!isPlanning && isNextFcStop && (
-                            activeCarrierRoute && activeCarrierTargetRowId === r.id ? (
+                            activeCarrierRoute && activeCarrierTargetRowId === row.id ? (
                               <span
                                 title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
                                 className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
@@ -1202,7 +1202,7 @@ export function ExpeditionPlanner({
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => openCarrierRoutePrompt(index, r)}
+                                onClick={() => openCarrierRoutePrompt(index, row)}
                                 title="Plot Fleet Carrier route to this next carrier waypoint"
                                 className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
                               >
@@ -1214,7 +1214,7 @@ export function ExpeditionPlanner({
                           {!isLocked && (
                             <button
                               type="button"
-                              onClick={() => toggleFcStop(r)}
+                              onClick={() => toggleFcStop(row)}
                               title="Remove Fleet Carrier stop designation"
                               className="h-5 w-4 inline-flex items-center justify-center text-xs text-[#6e5b4b] hover:text-[#ff3b2f] cursor-pointer"
                             >
@@ -1225,7 +1225,7 @@ export function ExpeditionPlanner({
                       ) : !isLocked ? (
                         <button
                           type="button"
-                          onClick={() => toggleFcStop(r)}
+                          onClick={() => toggleFcStop(row)}
                           title="Designate this waypoint as a Fleet Carrier stop"
                           className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-[#6e5b4b] hover:text-[#FF7100] border border-dashed border-[#2e1f12] hover:border-[#FF7100] bg-transparent hover:bg-[#16100b] cursor-pointer"
                         >
@@ -1245,13 +1245,13 @@ export function ExpeditionPlanner({
                           ■ LOGGED VISIT
                         </span>
                         <div className="font-mono-tabular text-[10px] text-[#a6907c]">
-                          {rv.visitedAtGalactic}
+                          {rowView.visitedAtGalactic}
                         </div>
                       </div>
                     ) : (
                       <div className="font-mono-tabular text-[11px] text-[#a6907c] py-0.5">
-                        {rv.number === 1 ? (
-                          r.systemName?.trim() ? (
+                        {rowView.number === 1 ? (
+                          row.systemName?.trim() ? (
                             <span
                               className="text-[#00D2FF]"
                               title="Starting Waypoint (Origin)"
@@ -1261,23 +1261,23 @@ export function ExpeditionPlanner({
                           ) : (
                             <span className="text-[#6e5b4b]">—</span>
                           )
-                        ) : rv.distFromPrevLy !== undefined ? (
+                        ) : rowView.distFromPrevLy !== undefined ? (
                           <span
                             className="text-[#00D2FF]"
                             title="Estimated straight-line distance from previous waypoint"
                           >
-                            +{formatLy(rv.distFromPrevLy, 1)}
+                            +{formatLy(rowView.distFromPrevLy, 1)}
                           </span>
                         ) : (
                           <span
                             className="text-[#6e5b4b] uppercase text-[10px]"
                             title={
-                              r.systemName?.trim()
+                              row.systemName?.trim()
                                 ? 'Coordinates unknown for this waypoint or preceding waypoint'
                                 : undefined
                             }
                           >
-                            {r.systemName?.trim() ? 'UNKNOWN' : '—'}
+                            {row.systemName?.trim() ? 'UNKNOWN' : '—'}
                           </span>
                         )}
                       </div>
@@ -1287,29 +1287,29 @@ export function ExpeditionPlanner({
                   {/* External Links + Row Manipulation + Drag Handle on the far right */}
                   <td className="px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
                     <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap py-0.5">
-                      <HoverOpenInLinks rowView={rv} />
+                      <HoverOpenInLinks rowView={rowView} />
                       {!isLocked && (
                         <>
                           <RowManipulationButtons
                             index={index}
                             minIndex={lastVisitedIndex + 1}
                             total={plan.rows?.length ?? 0}
-                            rowId={r.id}
-                            insertMenuOpen={insertMenuAfterId === r.id}
+                            rowId={row.id}
+                            insertMenuOpen={insertMenuAfterId === row.id}
                             onToggleInsertMenu={() =>
-                              setInsertMenuAfterId(insertMenuAfterId === r.id ? null : r.id)
+                              setInsertMenuAfterId(insertMenuAfterId === row.id ? null : row.id)
                             }
-                            onInsert={(type) => handleInsert(r.id, type)}
-                            onMove={(to) => handleMoveRow(r.id, index, to)}
-                            onDelete={() => handleDeleteRow(r.id)}
+                            onInsert={(type) => handleInsert(row.id, type)}
+                            onMove={(targetIndex) => handleMoveRow(row.id, index, targetIndex)}
+                            onDelete={() => handleDeleteRow(row.id)}
                           />
                           <button
                             type="button"
                             draggable={true}
-                            onDragStart={(e) => {
+                            onDragStart={(event) => {
                               setDraggedIndex(index)
-                              e.dataTransfer.effectAllowed = 'move'
-                              e.dataTransfer.setData('text/plain', String(r.id))
+                              event.dataTransfer.effectAllowed = 'move'
+                              event.dataTransfer.setData('text/plain', String(row.id))
                             }}
                             onDragEnd={() => {
                               setDraggedIndex(null)
@@ -1384,7 +1384,7 @@ export function ExpeditionPlanner({
       {activeCarrierRoute && (
         <CarrierRouteBottomPanel
           route={activeCarrierRoute}
-          jumpIdx={carrierJumpIdx}
+          jumpIndex={carrierJumpIndex}
           manualMode={
             manualModeOverride ||
             Boolean(activeCarrierRoute.manualMode) ||
@@ -1397,24 +1397,24 @@ export function ExpeditionPlanner({
             persistRouteState({ manualMode: next })
           }}
           onCompleteSpanshJump={handleCompleteSpanshJump}
-          manualDistInput={manualDistInput}
-          onChangeManualDist={(val) => {
-            setManualDistInput(val)
-            persistRouteState({ manualDistInput: val })
+          manualDistanceInput={manualDistanceInput}
+          onChangeManualDistance={(value) => {
+            setManualDistanceInput(value)
+            persistRouteState({ manualDistInput: value })
           }}
-          manualTritInput={manualTritInput}
-          onChangeManualTrit={(val) => {
-            setManualTritInput(val)
-            persistRouteState({ manualTritInput: val })
+          manualTritiumInput={manualTritiumInput}
+          onChangeManualTritium={(value) => {
+            setManualTritiumInput(value)
+            persistRouteState({ manualTritInput: value })
           }}
           onLogManualJump={handleLogManualJump}
           manualLegJumps={manualLegJumps}
-          manualLegDist={manualLegDist}
-          manualLegTrit={manualLegTrit}
+          manualLegDistance={manualLegDistance}
+          manualLegTritium={manualLegTritium}
           loggingJump={loggingJump}
           copiedNextJump={copiedNextJump}
-          onCopySystem={(sys) => {
-            navigator.clipboard?.writeText(sys).catch(() => {})
+          onCopySystem={(systemName) => {
+            navigator.clipboard?.writeText(systemName).catch(() => {})
             setCopiedNextJump(true)
             setTimeout(() => setCopiedNextJump(false), 1500)
           }}
@@ -1449,8 +1449,8 @@ export function ExpeditionPlanner({
                   <input
                     type="text"
                     value={routePrompt.origin}
-                    onChange={(e) =>
-                      setRoutePrompt((p) => (p ? { ...p, origin: e.target.value } : null))
+                    onChange={(event) =>
+                      setRoutePrompt((previous) => (previous ? { ...previous, origin: event.target.value } : null))
                     }
                     placeholder="Origin system..."
                     className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
@@ -1463,8 +1463,8 @@ export function ExpeditionPlanner({
                   <input
                     type="text"
                     value={routePrompt.destination}
-                    onChange={(e) =>
-                      setRoutePrompt((p) => (p ? { ...p, destination: e.target.value } : null))
+                    onChange={(event) =>
+                      setRoutePrompt((previous) => (previous ? { ...previous, destination: event.target.value } : null))
                     }
                     placeholder="Destination system..."
                     className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
@@ -1480,7 +1480,7 @@ export function ExpeditionPlanner({
                   <button
                     type="button"
                     onClick={() =>
-                      setRoutePrompt((p) => (p ? { ...p, carrierType: 'player' } : null))
+                      setRoutePrompt((previous) => (previous ? { ...previous, carrierType: 'player' } : null))
                     }
                     className={`px-3 py-2 font-bold uppercase tracking-wider border transition cursor-pointer ${
                       routePrompt.carrierType === 'player'
@@ -1493,7 +1493,7 @@ export function ExpeditionPlanner({
                   <button
                     type="button"
                     onClick={() =>
-                      setRoutePrompt((p) => (p ? { ...p, carrierType: 'squadron' } : null))
+                      setRoutePrompt((previous) => (previous ? { ...previous, carrierType: 'squadron' } : null))
                     }
                     className={`px-3 py-2 font-bold uppercase tracking-wider border transition cursor-pointer ${
                       routePrompt.carrierType === 'squadron'
@@ -1515,8 +1515,8 @@ export function ExpeditionPlanner({
                   min={0}
                   max={25000}
                   value={routePrompt.capacityUsed}
-                  onChange={(e) =>
-                    setRoutePrompt((p) => (p ? { ...p, capacityUsed: e.target.value } : null))
+                  onChange={(event) =>
+                    setRoutePrompt((previous) => (previous ? { ...previous, capacityUsed: event.target.value } : null))
                   }
                   className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />

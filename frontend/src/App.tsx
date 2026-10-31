@@ -39,7 +39,7 @@ export default function App() {
   const [ingest, setIngest] = useState<app.IngestStatus | null>(null)
   const [modesState, setModesState] = useState<app.ModesState | null>(null)
   const [expeditions, setExpeditions] = useState<expedition.Expedition[]>([])
-  const [activeExpId, setActiveExpId] = useState<number>(0)
+  const [activeExpeditionId, setActiveExpeditionId] = useState<number>(0)
   const [plan, setPlan] = useState<expedition.PlanView | null>(null)
   const [sidebarStats, setSidebarStats] = useState<app.SidebarStats | null>(null)
   const [filter, setFilter] = useState<stats.Filter>(() =>
@@ -59,14 +59,14 @@ export default function App() {
     files: number
   } | null>(null)
 
-  const activeExpIdRef = useRef(0)
+  const activeExpeditionIdRef = useRef(0)
   const planReqSeq = useRef(0)
   const statsReqSeq = useRef(0)
   const filterRef = useRef(filter)
 
   useEffect(() => {
-    activeExpIdRef.current = activeExpId
-  }, [activeExpId])
+    activeExpeditionIdRef.current = activeExpeditionId
+  }, [activeExpeditionId])
 
   useEffect(() => {
     filterRef.current = filter
@@ -74,17 +74,17 @@ export default function App() {
 
   const loadCoreState = useCallback(async () => {
     try {
-      const [st, ing, mState, expList] = await Promise.all([
+      const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
         GetSettings(),
         GetIngestStatus(),
         GetModesState(),
         ListExpeditions(),
       ])
-      setSettings(st)
-      setIngest(ing)
-      setModesState(mState)
+      setSettings(settingsData)
+      setIngest(ingestStatus)
+      setModesState(modesStateData)
 
-      let list = expList
+      let list = expeditionList
       if (!list || list.length === 0) {
         const seeded = await CreateExpedition(
           'Deep Space Expedition I',
@@ -95,60 +95,60 @@ export default function App() {
       setExpeditions(list)
 
       let chosenId = 0
-      const current = activeExpIdRef.current
-      if (current && list.some((e) => e.id === current)) {
+      const current = activeExpeditionIdRef.current
+      if (current && list.some((expeditionItem) => expeditionItem.id === current)) {
         chosenId = current
-      } else if (st.activeExpeditionId && list.some((e) => e.id === st.activeExpeditionId)) {
-        chosenId = st.activeExpeditionId
+      } else if (settingsData.activeExpeditionId && list.some((expeditionItem) => expeditionItem.id === settingsData.activeExpeditionId)) {
+        chosenId = settingsData.activeExpeditionId
       } else if (list.length > 0) {
         chosenId = list[0].id
       }
 
       if (chosenId > 0) {
-        setActiveExpId(chosenId)
-        activeExpIdRef.current = chosenId
+        setActiveExpeditionId(chosenId)
+        activeExpeditionIdRef.current = chosenId
         try {
-          const pv = await GetPlan(chosenId)
-          if (pv) {
-            setPlan(pv)
+          const initialPlan = await GetPlan(chosenId)
+          if (initialPlan) {
+            setPlan(initialPlan)
           }
-        } catch (planErr) {
-          console.error('Failed to preload initial plan:', planErr)
+        } catch (planError) {
+          console.error('Failed to preload initial plan:', planError)
         }
       }
-    } catch (err) {
-      console.error('Failed to load core state:', err)
+    } catch (coreStateError) {
+      console.error('Failed to load core state:', coreStateError)
     }
   }, [])
 
   // Fast plan loader (< 5ms) — never blocked by sidebar telemetry computation
-  const loadPlanOnly = useCallback(async (expId: number) => {
-    if (!expId) return
-    const seq = ++planReqSeq.current
+  const loadPlanOnly = useCallback(async (expeditionId: number) => {
+    if (!expeditionId) return
+    const requestSeq = ++planReqSeq.current
     try {
-      const pv = await GetPlan(expId)
-      if (seq === planReqSeq.current && pv?.expedition?.id === activeExpIdRef.current) {
-        setPlan(pv)
+      const fetchedPlan = await GetPlan(expeditionId)
+      if (requestSeq === planReqSeq.current && fetchedPlan?.expedition?.id === activeExpeditionIdRef.current) {
+        setPlan(fetchedPlan)
       }
-    } catch (err) {
-      console.error('Failed to load expedition plan:', err)
+    } catch (loadPlanError) {
+      console.error('Failed to load expedition plan:', loadPlanError)
     }
   }, [])
 
   // Asynchronous sidebar telemetry loader
-  const loadStatsOnly = useCallback(async (expId: number, currentFilter: stats.Filter) => {
-    if (!expId) return
-    const seq = ++statsReqSeq.current
+  const loadStatsOnly = useCallback(async (expeditionId: number, currentFilter: stats.Filter) => {
+    if (!expeditionId) return
+    const requestSeq = ++statsReqSeq.current
     setStatsLoading(true)
     try {
-      const sb = await GetSidebarStats(expId, currentFilter)
-      if (seq === statsReqSeq.current && activeExpIdRef.current === expId) {
-        setSidebarStats(sb)
+      const fetchedSidebarStats = await GetSidebarStats(expeditionId, currentFilter)
+      if (requestSeq === statsReqSeq.current && activeExpeditionIdRef.current === expeditionId) {
+        setSidebarStats(fetchedSidebarStats)
       }
-    } catch (err) {
-      console.error('Failed to load sidebar stats:', err)
+    } catch (statsError) {
+      console.error('Failed to load sidebar stats:', statsError)
     } finally {
-      if (seq === statsReqSeq.current && activeExpIdRef.current === expId) {
+      if (requestSeq === statsReqSeq.current && activeExpeditionIdRef.current === expeditionId) {
         setStatsLoading(false)
       }
     }
@@ -171,17 +171,17 @@ export default function App() {
 
   // Load plan immediately when expedition changes
   useEffect(() => {
-    if (activeExpId > 0) {
-      loadPlanOnly(activeExpId)
+    if (activeExpeditionId > 0) {
+      loadPlanOnly(activeExpeditionId)
     }
-  }, [activeExpId, loadPlanOnly])
+  }, [activeExpeditionId, loadPlanOnly])
 
   // Reload sidebar stats when expedition or filter changes
   useEffect(() => {
-    if (activeExpId > 0) {
-      loadStatsOnly(activeExpId, filter)
+    if (activeExpeditionId > 0) {
+      loadStatsOnly(activeExpeditionId, filter)
     }
-  }, [activeExpId, filter, loadStatsOnly])
+  }, [activeExpeditionId, filter, loadStatsOnly])
 
   // Subscribe to Wails backend events (live fsnotify journal tailing, coordinate resolution, etc.)
   useEffect(() => {
@@ -189,33 +189,39 @@ export default function App() {
       return
     }
 
-    const offChanged = EventsOn('data:changed', (payload?: { kind?: string; expId?: number }) => {
-      const kind = payload?.kind ?? ''
-      const currentActive = activeExpIdRef.current
+    const offChanged = EventsOn(
+      'data:changed',
+      (payload?: { scope?: string; kind?: string; expeditionId?: number; expId?: number }) => {
+        const kind = payload?.kind ?? ''
+        const currentActive = activeExpeditionIdRef.current
+        const eventExpeditionId = payload?.expeditionId ?? payload?.expId
 
-      if (payload?.expId && currentActive > 0 && payload.expId !== currentActive) {
-        ListExpeditions().then((l) => l && setExpeditions(l)).catch(console.error)
-        return
-      }
+        if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
+          ListExpeditions()
+            .then((expeditionList) => expeditionList && setExpeditions(expeditionList))
+            .catch(console.error)
+          return
+        }
 
-      if (kind === 'plan' || kind === 'coords') {
+        if (kind === 'plan' || kind === 'coords') {
+          if (currentActive > 0) {
+            loadPlanOnly(currentActive)
+          }
+          return
+        }
+
+        loadCoreState()
         if (currentActive > 0) {
           loadPlanOnly(currentActive)
+          loadStatsOnly(currentActive, filterRef.current)
         }
-        return
-      }
-
-      loadCoreState()
-      if (currentActive > 0) {
-        loadPlanOnly(currentActive)
-        loadStatsOnly(currentActive, filterRef.current)
-      }
-    })
+      },
+    )
     const offIngest = EventsOn('ingest:status', () => {
       GetIngestStatus().then(setIngest).catch(console.error)
     })
-    const offEdd = EventsOn('edd:progress', (p) => {
-      setEddProgress(p)
+    const offEdd = EventsOn('edd:progress', (progress) => {
+      setEddProgress(progress)
     })
     return () => {
       offChanged()
@@ -225,22 +231,22 @@ export default function App() {
   }, [loadCoreState, loadPlanOnly, loadStatsOnly])
 
   const handleSelectExpedition = useCallback(
-    async (id: number) => {
-      if (!id) return
-      setActiveExpId(id)
-      activeExpIdRef.current = id
+    async (selectedExpeditionId: number) => {
+      if (!selectedExpeditionId) return
+      setActiveExpeditionId(selectedExpeditionId)
+      activeExpeditionIdRef.current = selectedExpeditionId
       try {
-        await SetActiveExpedition(id)
-      } catch (err) {
-        console.error('Failed to set active expedition:', err)
+        await SetActiveExpedition(selectedExpeditionId)
+      } catch (setActiveError) {
+        console.error('Failed to set active expedition:', setActiveError)
       }
-      const [list] = await Promise.all([
+      const [expeditionList] = await Promise.all([
         ListExpeditions(),
-        loadPlanOnly(id),
-        loadStatsOnly(id, filter),
+        loadPlanOnly(selectedExpeditionId),
+        loadStatsOnly(selectedExpeditionId, filter),
       ])
-      if (list && list.length > 0) {
-        setExpeditions(list)
+      if (expeditionList && expeditionList.length > 0) {
+        setExpeditions(expeditionList)
       }
     },
     [filter, loadPlanOnly, loadStatsOnly],
@@ -249,11 +255,11 @@ export default function App() {
   async function handleQuickSwitchMode(modeId: number) {
     setBusyAction('SWITCHING ENVIRONMENT MODE')
     try {
-      const next = await SwitchMode(modeId)
-      setModesState(next)
-      if (activeExpId > 0) {
-        loadPlanOnly(activeExpId)
-        loadStatsOnly(activeExpId, filter)
+      const nextModesState = await SwitchMode(modeId)
+      setModesState(nextModesState)
+      if (activeExpeditionId > 0) {
+        loadPlanOnly(activeExpeditionId)
+        loadStatsOnly(activeExpeditionId, filter)
       }
     } finally {
       setBusyAction(null)
@@ -265,9 +271,9 @@ export default function App() {
     try {
       await RescanJournals()
       await loadCoreState()
-      if (activeExpId > 0) {
-        await loadPlanOnly(activeExpId)
-        loadStatsOnly(activeExpId, filter)
+      if (activeExpeditionId > 0) {
+        await loadPlanOnly(activeExpeditionId)
+        loadStatsOnly(activeExpeditionId, filter)
       }
     } finally {
       setBusyAction(null)
@@ -276,28 +282,28 @@ export default function App() {
 
   const refreshAll = useCallback(() => {
     loadCoreState()
-    if (activeExpIdRef.current > 0) {
-      loadPlanOnly(activeExpIdRef.current)
-      loadStatsOnly(activeExpIdRef.current, filter)
+    if (activeExpeditionIdRef.current > 0) {
+      loadPlanOnly(activeExpeditionIdRef.current)
+      loadStatsOnly(activeExpeditionIdRef.current, filter)
     }
   }, [loadCoreState, loadPlanOnly, loadStatsOnly, filter])
 
   const refreshPlanAndStats = useCallback(() => {
-    if (activeExpIdRef.current > 0) {
-      loadPlanOnly(activeExpIdRef.current)
-      loadStatsOnly(activeExpIdRef.current, filter)
+    if (activeExpeditionIdRef.current > 0) {
+      loadPlanOnly(activeExpeditionIdRef.current)
+      loadStatsOnly(activeExpeditionIdRef.current, filter)
     }
   }, [loadPlanOnly, loadStatsOnly, filter])
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
   const handleRefreshPlan = useCallback(() => {
-    if (activeExpIdRef.current > 0) {
-      loadPlanOnly(activeExpIdRef.current)
+    if (activeExpeditionIdRef.current > 0) {
+      loadPlanOnly(activeExpeditionIdRef.current)
     }
   }, [loadPlanOnly])
   const handleRefreshStats = useCallback(() => {
-    if (activeExpIdRef.current > 0) {
-      loadStatsOnly(activeExpIdRef.current, filter)
+    if (activeExpeditionIdRef.current > 0) {
+      loadStatsOnly(activeExpeditionIdRef.current, filter)
     }
   }, [loadStatsOnly, filter])
 
@@ -377,14 +383,14 @@ export default function App() {
               Expedition
             </span>
             <select
-              value={activeExpId}
-              onChange={(e) => handleSelectExpedition(Number(e.target.value))}
+              value={activeExpeditionId}
+              onChange={(event) => handleSelectExpedition(Number(event.target.value))}
               title="Select active expedition flight plan"
               className="bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer"
             >
-              {expeditions.map((e) => (
-                <option key={e.id} value={e.id} className="bg-[#0b0907] text-[#F4ECE4]">
-                  {e.name} [{e.status.toUpperCase()}]
+              {expeditions.map((expeditionItem) => (
+                <option key={expeditionItem.id} value={expeditionItem.id} className="bg-[#0b0907] text-[#F4ECE4]">
+                  {expeditionItem.name} [{expeditionItem.status.toUpperCase()}]
                 </option>
               ))}
             </select>
@@ -529,9 +535,9 @@ export default function App() {
       </main>
 
       {/* Modal Dialogs */}
-      {activeModal === 'start' && activeExpId > 0 && (
+      {activeModal === 'start' && activeExpeditionId > 0 && (
         <StartExpeditionModal
-          expeditionId={activeExpId}
+          expeditionId={activeExpeditionId}
           onClose={() => setActiveModal(null)}
           onStarted={refreshAll}
         />
@@ -565,7 +571,7 @@ export default function App() {
       {activeModal === 'expeditions' && (
         <ExpeditionManageModal
           expeditions={expeditions}
-          activeId={activeExpId}
+          activeId={activeExpeditionId}
           onSelect={handleSelectExpedition}
           onClose={() => setActiveModal(null)}
           onRefresh={refreshAll}

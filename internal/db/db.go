@@ -47,24 +47,24 @@ func UserDataDir() (string, error) {
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
 			return local, nil
 		}
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
+		home, homeDirError := os.UserHomeDir()
+		if homeDirError != nil {
+			return "", homeDirError
 		}
 		return filepath.Join(home, "AppData", "Local"), nil
 	case "darwin":
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
+		home, homeDirError := os.UserHomeDir()
+		if homeDirError != nil {
+			return "", homeDirError
 		}
 		return filepath.Join(home, "Library", "Application Support"), nil
 	default:
 		if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
 			return xdgData, nil
 		}
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
+		home, homeDirError := os.UserHomeDir()
+		if homeDirError != nil {
+			return "", homeDirError
 		}
 		return filepath.Join(home, ".local", "share"), nil
 	}
@@ -74,11 +74,11 @@ func UserDataDir() (string, error) {
 // (e.g. ~/.local/share/Planisphere/planisphere.db on Linux,
 // %LOCALAPPDATA%\Planisphere\planisphere.db on Windows).
 func DefaultPath() (string, error) {
-	dir, err := UserDataDir()
-	if err != nil {
-		return "", err
+	dataDir, dataDirError := UserDataDir()
+	if dataDirError != nil {
+		return "", dataDirError
 	}
-	return filepath.Join(dir, AppDirName, DefaultDBFileName), nil
+	return filepath.Join(dataDir, AppDirName, DefaultDBFileName), nil
 }
 
 type bootstrapConfig struct {
@@ -86,21 +86,21 @@ type bootstrapConfig struct {
 }
 
 func bootstrapFilePath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
+	configDir, configDirError := os.UserConfigDir()
+	if configDirError != nil {
+		return "", configDirError
 	}
-	return filepath.Join(dir, AppDirName, "bootstrap.json"), nil
+	return filepath.Join(configDir, AppDirName, "bootstrap.json"), nil
 }
 
 // ResolveConfiguredPath returns the user's configured database path from
 // bootstrap.json if set, or DefaultPath() otherwise.
 func ResolveConfiguredPath() (string, error) {
-	if cfgFile, err := bootstrapFilePath(); err == nil {
-		if data, err := os.ReadFile(cfgFile); err == nil {
-			var cfg bootstrapConfig
-			if json.Unmarshal(data, &cfg) == nil && strings.TrimSpace(cfg.DBPath) != "" {
-				return filepath.Clean(strings.TrimSpace(cfg.DBPath)), nil
+	if configFilePath, bootstrapError := bootstrapFilePath(); bootstrapError == nil {
+		if data, readError := os.ReadFile(configFilePath); readError == nil {
+			var config bootstrapConfig
+			if json.Unmarshal(data, &config) == nil && strings.TrimSpace(config.DBPath) != "" {
+				return filepath.Clean(strings.TrimSpace(config.DBPath)), nil
 			}
 		}
 	}
@@ -109,16 +109,16 @@ func ResolveConfiguredPath() (string, error) {
 
 // SaveConfiguredPath persists the user's chosen database path to bootstrap.json.
 func SaveConfiguredPath(dbPath string) error {
-	cfgFile, err := bootstrapFilePath()
-	if err != nil {
-		return err
+	cfgFile, bootstrapError := bootstrapFilePath()
+	if bootstrapError != nil {
+		return bootstrapError
 	}
-	if err := os.MkdirAll(filepath.Dir(cfgFile), 0o755); err != nil {
-		return err
+	if mkdirError := os.MkdirAll(filepath.Dir(cfgFile), 0o755); mkdirError != nil {
+		return mkdirError
 	}
-	data, err := json.MarshalIndent(bootstrapConfig{DBPath: filepath.Clean(strings.TrimSpace(dbPath))}, "", "  ")
-	if err != nil {
-		return err
+	data, marshalError := json.MarshalIndent(bootstrapConfig{DBPath: filepath.Clean(strings.TrimSpace(dbPath))}, "", "  ")
+	if marshalError != nil {
+		return marshalError
 	}
 	return os.WriteFile(cfgFile, append(data, '\n'), 0o644)
 }
@@ -128,142 +128,142 @@ func SaveConfiguredPath(dbPath string) error {
 // seeds default data.
 func Open(path string) (*sql.DB, error) {
 	if path != ":memory:" {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, fmt.Errorf("create db dir: %w", err)
+		if mkdirError := os.MkdirAll(filepath.Dir(path), 0o755); mkdirError != nil {
+			return nil, fmt.Errorf("create db dir: %w", mkdirError)
 		}
 	}
-	q := url.Values{}
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "foreign_keys(1)")
-	q.Add("_pragma", "busy_timeout(10000)")
-	q.Add("_pragma", "synchronous(NORMAL)")
+	queryValues := url.Values{}
+	queryValues.Add("_pragma", "journal_mode(WAL)")
+	queryValues.Add("_pragma", "foreign_keys(1)")
+	queryValues.Add("_pragma", "busy_timeout(10000)")
+	queryValues.Add("_pragma", "synchronous(NORMAL)")
 	// Take the write lock at BEGIN so concurrent writers (live tailer + UI)
 	// wait on busy_timeout instead of failing with SQLITE_BUSY on upgrade.
-	q.Add("_txlock", "immediate")
-	dsn := "file:" + path + "?" + q.Encode()
+	queryValues.Add("_txlock", "immediate")
+	dsn := "file:" + path + "?" + queryValues.Encode()
 	if path == ":memory:" {
 		// A shared in-memory DB so every pooled connection sees the same data (tests).
-		dsn = "file:memdb" + fmt.Sprint(time.Now().UnixNano()) + "?mode=memory&cache=shared&" + q.Encode()
+		dsn = "file:memdb" + fmt.Sprint(time.Now().UnixNano()) + "?mode=memory&cache=shared&" + queryValues.Encode()
 	}
-	conn, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, err
+	dbConn, openError := sql.Open("sqlite", dsn)
+	if openError != nil {
+		return nil, openError
 	}
 	if path == ":memory:" {
-		conn.SetMaxOpenConns(1)
+		dbConn.SetMaxOpenConns(1)
 	}
-	if _, err := conn.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-64000; PRAGMA temp_store=MEMORY;`); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("pragmas: %w", err)
+	if _, pragmaError := dbConn.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-64000; PRAGMA temp_store=MEMORY;`); pragmaError != nil {
+		dbConn.Close()
+		return nil, fmt.Errorf("pragmas: %w", pragmaError)
 	}
-	if err := Migrate(conn); err != nil {
-		conn.Close()
-		return nil, err
+	if migrateError := Migrate(dbConn); migrateError != nil {
+		dbConn.Close()
+		return nil, migrateError
 	}
-	return conn, nil
+	return dbConn, nil
 }
 
 // Migrate applies the embedded schema and seeds default modes. Idempotent.
-func Migrate(conn *sql.DB) error {
+func Migrate(dbConn *sql.DB) error {
 	// Ensure the `commander` column exists on existing `journal_events` tables
 	// before applying schema.sql (which creates idx_journal_events_cmdr).
-	_, _ = conn.Exec(`ALTER TABLE journal_events ADD COLUMN commander TEXT`)
-	_, _ = conn.Exec(`ALTER TABLE expedition_rows ADD COLUMN fc_arrived INTEGER NOT NULL DEFAULT 0`)
-	_, _ = conn.Exec(`ALTER TABLE expedition_rows ADD COLUMN leg_mode_id INTEGER NOT NULL DEFAULT 0`)
-	if _, err := conn.Exec(schemaSQL); err != nil {
-		return fmt.Errorf("apply schema: %w", err)
+	_, _ = dbConn.Exec(`ALTER TABLE journal_events ADD COLUMN commander TEXT`)
+	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN fc_arrived INTEGER NOT NULL DEFAULT 0`)
+	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN leg_mode_id INTEGER NOT NULL DEFAULT 0`)
+	if _, schemaError := dbConn.Exec(schemaSQL); schemaError != nil {
+		return fmt.Errorf("apply schema: %w", schemaError)
 	}
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	seeded, err := GetSetting(conn, "default_modes_seeded")
-	if err != nil {
-		return err
+	seeded, seedCheckError := GetSetting(dbConn, "default_modes_seeded")
+	if seedCheckError != nil {
+		return seedCheckError
 	}
 	if seeded == "" {
-		for i, m := range DefaultModes {
-			if _, err := conn.Exec(`INSERT OR IGNORE INTO modes(name, description, color, is_default, sort_order, created_at)
-				VALUES(?, ?, ?, 1, ?, ?)`, m.Name, m.Description, m.Color, i, now); err != nil {
-				return fmt.Errorf("seed modes: %w", err)
+		for i, defaultMode := range DefaultModes {
+			if _, seedError := dbConn.Exec(`INSERT OR IGNORE INTO modes(name, description, color, is_default, sort_order, created_at)
+				VALUES(?, ?, ?, 1, ?, ?)`, defaultMode.Name, defaultMode.Description, defaultMode.Color, i, now); seedError != nil {
+				return fmt.Errorf("seed modes: %w", seedError)
 			}
 		}
-		if err := SetSetting(conn, "default_modes_seeded", "1"); err != nil {
-			return err
+		if setSettingError := SetSetting(dbConn, "default_modes_seeded", "1"); setSettingError != nil {
+			return setSettingError
 		}
 	}
 	// Schema v2 migration: reset ingested_journals byte offsets once so files
 	// where FSDJump/LoadGame float64 FuelLevel lines were previously skipped
 	// are re-read idempotently (journal_events deduplicates via event_uid).
-	ingestV2, err := GetSetting(conn, "ingest_parser_v2")
-	if err != nil {
-		return err
+	ingestV2, ingestCheckError := GetSetting(dbConn, "ingest_parser_v2")
+	if ingestCheckError != nil {
+		return ingestCheckError
 	}
 	if ingestV2 == "" {
-		if _, err := conn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); err != nil {
-			return err
+		if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
+			return updateError
 		}
-		if err := SetSetting(conn, "ingest_parser_v2", "1"); err != nil {
-			return err
+		if setSettingError := SetSetting(dbConn, "ingest_parser_v2", "1"); setSettingError != nil {
+			return setSettingError
 		}
 	}
 	// Schema v2 GEC cleanup: remove legacy GMP entries that lacked poiUrl or
 	// overwrote GEC entries with overlapping numeric IDs, and force a GEC refresh.
-	gecV2, err := GetSetting(conn, "gec_schema_v2")
-	if err != nil {
-		return err
+	gecV2, gecCheckError := GetSetting(dbConn, "gec_schema_v2")
+	if gecCheckError != nil {
+		return gecCheckError
 	}
 	if gecV2 == "" {
-		_, _ = conn.Exec(`DELETE FROM gec_pois_cache`)
-		_ = SetSetting(conn, "gec_fetched_at", "")
-		if err := SetSetting(conn, "gec_schema_v2", "1"); err != nil {
-			return err
+		_, _ = dbConn.Exec(`DELETE FROM gec_pois_cache`)
+		_ = SetSetting(dbConn, "gec_fetched_at", "")
+		if setSettingError := SetSetting(dbConn, "gec_schema_v2", "1"); setSettingError != nil {
+			return setSettingError
 		}
 	}
 	// Schema v3 commander tagging: reset ingested_journals byte offsets once so
 	// existing events get their commander column populated from each file's LoadGame/Commander event.
-	cmdrV3, err := GetSetting(conn, "commander_schema_v3")
-	if err != nil {
-		return err
+	cmdrV3, cmdrCheckError := GetSetting(dbConn, "commander_schema_v3")
+	if cmdrCheckError != nil {
+		return cmdrCheckError
 	}
 	if cmdrV3 == "" {
-		_, _ = conn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`)
-		_, _ = conn.Exec(`UPDATE expeditions SET baseline_json = json_set(baseline_json, '$.bodiesMapped', 0) WHERE baseline_source = 'statistics'`)
-		if err := SetSetting(conn, "commander_schema_v3", "1"); err != nil {
-			return err
+		_, _ = dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`)
+		_, _ = dbConn.Exec(`UPDATE expeditions SET baseline_json = json_set(baseline_json, '$.bodiesMapped', 0) WHERE baseline_source = 'statistics'`)
+		if setSettingError := SetSetting(dbConn, "commander_schema_v3", "1"); setSettingError != nil {
+			return setSettingError
 		}
 	}
 	// Schema v4 carrier arrival seeding: mark Waypoint #1 (first waypoint) as
 	// fc_arrived = 1 on already-started expeditions if it is an fc_stop.
-	fcArrV4, err := GetSetting(conn, "fc_arrived_v4")
-	if err != nil {
-		return err
+	fcArrivedSetting, fcArrivedCheckError := GetSetting(dbConn, "fc_arrived_v4")
+	if fcArrivedCheckError != nil {
+		return fcArrivedCheckError
 	}
-	if fcArrV4 == "" {
-		_, _ = conn.Exec(`UPDATE expedition_rows SET fc_arrived = 1
+	if fcArrivedSetting == "" {
+		_, _ = dbConn.Exec(`UPDATE expedition_rows SET fc_arrived = 1
 			WHERE fc_stop = 1 AND visited_at IS NOT NULL AND visited_at != ''
 			AND id IN (
-				SELECT MIN(r.id) FROM expedition_rows r
-				JOIN expeditions e ON e.id = r.expedition_id
-				WHERE e.status IN ('active', 'completed') AND r.row_type = 'waypoint'
-				GROUP BY r.expedition_id
+				SELECT MIN(expedition_rows.id) FROM expedition_rows
+				JOIN expeditions ON expeditions.id = expedition_rows.expedition_id
+				WHERE expeditions.status IN ('active', 'completed') AND expedition_rows.row_type = 'waypoint'
+				GROUP BY expedition_rows.expedition_id
 			)`)
-		if err := SetSetting(conn, "fc_arrived_v4", "1"); err != nil {
-			return err
+		if setSettingError := SetSetting(dbConn, "fc_arrived_v4", "1"); setSettingError != nil {
+			return setSettingError
 		}
 	}
 	// Schema v5 GEC+GMP cache: support both GEC and GMP POIs from combined.json
 	// without ID collisions, storing GMP entries with source = 'GMP'.
-	gecV5, err := GetSetting(conn, "gec_schema_v5")
-	if err != nil {
-		return err
+	gecSchemaSetting, gecSchemaCheckError := GetSetting(dbConn, "gec_schema_v5")
+	if gecSchemaCheckError != nil {
+		return gecSchemaCheckError
 	}
-	if gecV5 == "" {
-		_, _ = conn.Exec(`ALTER TABLE gec_pois_cache ADD COLUMN source TEXT NOT NULL DEFAULT 'GEC'`)
-		_, _ = conn.Exec(`DELETE FROM gec_pois_cache`)
-		_, _ = conn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&#39;', '''') WHERE poi_name LIKE '%&#39;%'`)
-		_, _ = conn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&amp;', '&') WHERE poi_name LIKE '%&amp;%'`)
-		_, _ = conn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&quot;', '"') WHERE poi_name LIKE '%&quot;%'`)
-		_ = SetSetting(conn, "gec_fetched_at", "")
-		if err := SetSetting(conn, "gec_schema_v5", "1"); err != nil {
-			return err
+	if gecSchemaSetting == "" {
+		_, _ = dbConn.Exec(`ALTER TABLE gec_pois_cache ADD COLUMN source TEXT NOT NULL DEFAULT 'GEC'`)
+		_, _ = dbConn.Exec(`DELETE FROM gec_pois_cache`)
+		_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&#39;', '''') WHERE poi_name LIKE '%&#39;%'`)
+		_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&amp;', '&') WHERE poi_name LIKE '%&amp;%'`)
+		_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&quot;', '"') WHERE poi_name LIKE '%&quot;%'`)
+		_ = SetSetting(dbConn, "gec_fetched_at", "")
+		if setSettingError := SetSetting(dbConn, "gec_schema_v5", "1"); setSettingError != nil {
+			return setSettingError
 		}
 	}
 	return nil
@@ -277,31 +277,31 @@ type Queryer interface {
 }
 
 // GetSetting returns a setting value or "" when unset.
-func GetSetting(q Queryer, key string) (string, error) {
-	var v string
-	err := q.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
+func GetSetting(queryer Queryer, key string) (string, error) {
+	var settingValue string
+	queryError := queryer.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&settingValue)
+	if errors.Is(queryError, sql.ErrNoRows) {
 		return "", nil
 	}
-	return v, err
+	return settingValue, queryError
 }
 
 // SetSetting upserts a setting.
-func SetSetting(q Queryer, key, value string) error {
-	_, err := q.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
+func SetSetting(queryer Queryer, key, value string) error {
+	_, execError := queryer.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
-	return err
+	return execError
 }
 
-// WithTx runs fn inside a transaction.
-func WithTx(conn *sql.DB, fn func(tx *sql.Tx) error) error {
-	tx, err := conn.Begin()
-	if err != nil {
-		return err
+// WithTx runs txFunc inside a transaction.
+func WithTx(dbConn *sql.DB, txFunc func(transaction *sql.Tx) error) error {
+	transaction, beginError := dbConn.Begin()
+	if beginError != nil {
+		return beginError
 	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
+	if txError := txFunc(transaction); txError != nil {
+		_ = transaction.Rollback()
+		return txError
 	}
-	return tx.Commit()
+	return transaction.Commit()
 }

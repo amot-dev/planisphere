@@ -8,13 +8,13 @@ import (
 )
 
 func TestGECandGMPCombinedImport(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatalf("open db: %v", openError)
 	}
-	defer conn.Close()
+	defer dbConn.Close()
 
-	cat := gec.NewCatalog(conn)
+	catalogInstance := gec.NewCatalog(dbConn)
 
 	// Sample JSON with 1 GEC entry and 1 GMP entry having the SAME ID 729
 	rawJSON := `[
@@ -38,19 +38,19 @@ func TestGECandGMPCombinedImport(t *testing.T) {
 		}
 	]`
 
-	count, err := cat.Import([]byte(rawJSON))
-	if err != nil {
-		t.Fatalf("import failed: %v", err)
+	count, importError := catalogInstance.Import([]byte(rawJSON))
+	if importError != nil {
+		t.Fatalf("import failed: %v", importError)
 	}
 	if count != 2 {
 		t.Fatalf("expected 2 imported entries, got %d", count)
 	}
-	if err := cat.Reload(); err != nil {
-		t.Fatalf("reload failed: %v", err)
+	if reloadError := catalogInstance.Reload(); reloadError != nil {
+		t.Fatalf("reload failed: %v", reloadError)
 	}
 
 	// Lookup GEC
-	gecMatch := cat.Lookup("Bleae Thua ZY-Z d13-0", 0)
+	gecMatch := catalogInstance.Lookup("Bleae Thua ZY-Z d13-0", 0)
 	if len(gecMatch) == 0 {
 		t.Fatalf("expected GEC match for Bleae Thua ZY-Z d13-0")
 	}
@@ -59,7 +59,7 @@ func TestGECandGMPCombinedImport(t *testing.T) {
 	}
 
 	// Lookup GMP (e.g. S171 34 -> Cupid's Arrow)
-	gmpMatch := cat.Lookup("S171 34", 0)
+	gmpMatch := catalogInstance.Lookup("S171 34", 0)
 	if len(gmpMatch) == 0 {
 		t.Fatalf("expected GMP match for S171 34")
 	}

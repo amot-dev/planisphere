@@ -22,14 +22,14 @@ import (
 	"planisphere/internal/version"
 )
 
-var errNotReady = errors.New("database is not available — check the startup error in Settings")
+var errorNotReady = errors.New("database is not available — check the startup error in Settings")
 
-func (a *App) ready() error {
-	if a.db == nil {
-		if e := a.getErr(); e != "" {
-			return fmt.Errorf("database is not available: %s", e)
+func (app *App) ready() error {
+	if app.db == nil {
+		if startupError := app.getError(); startupError != "" {
+			return fmt.Errorf("database is not available: %s", startupError)
 		}
-		return errNotReady
+		return errorNotReady
 	}
 	return nil
 }
@@ -57,45 +57,45 @@ type Settings struct {
 }
 
 // GetSettings returns the current settings.
-func (a *App) GetSettings() (Settings, error) {
-	if err := a.ready(); err != nil {
-		return Settings{}, err
+func (app *App) GetSettings() (Settings, error) {
+	if readyError := app.ready(); readyError != nil {
+		return Settings{}, readyError
 	}
-	dir := a.journalDir()
-	cmdrs, _ := journal.ListCommanders(a.db)
-	if cmdrs == nil {
-		cmdrs = []journal.Commander{}
+	dir := app.journalDir()
+	commanders, _ := journal.ListCommanders(app.db)
+	if commanders == nil {
+		commanders = []journal.Commander{}
 	}
-	defaultDB, _ := db.DefaultPath()
-	defaultEDD := journal.DefaultEDDiscoveryDBPath()
-	discoveredEDD := journal.DiscoverEDDiscoveryDBPath()
+	defaultDBPath, _ := db.DefaultPath()
+	defaultEDDPath := journal.DefaultEDDiscoveryDBPath()
+	discoveredEDDPath := journal.DiscoverEDDiscoveryDBPath()
 	return Settings{
-		SetupCompleted:           a.setupCompleted(),
+		SetupCompleted:           app.setupCompleted(),
 		JournalDir:               dir,
 		DefaultJournalDir:        journal.DefaultJournalDir(),
 		JournalDirExists:         journal.DirExists(dir),
-		OnlineLookups:            a.onlineEnabled(),
-		DBPath:                   a.dbPath,
-		DefaultDBPath:            defaultDB,
-		ActiveExpeditionID:       a.activeExpeditionID(),
-		GECCount:                 a.gec.Count(),
-		GECFetchedAt:             a.gec.LastFetched(),
-		Commanders:               cmdrs,
-		EDDiscoveryDBPath:        discoveredEDD,
-		DefaultEDDiscoveryDBPath: defaultEDD,
-		EDDiscoveryDBExists:      discoveredEDD != "" || journal.FileExists(defaultEDD),
+		OnlineLookups:            app.onlineEnabled(),
+		DBPath:                   app.dbPath,
+		DefaultDBPath:            defaultDBPath,
+		ActiveExpeditionID:       app.activeExpeditionID(),
+		GECCount:                 app.gec.Count(),
+		GECFetchedAt:             app.gec.LastFetched(),
+		Commanders:               commanders,
+		EDDiscoveryDBPath:        discoveredEDDPath,
+		DefaultEDDiscoveryDBPath: defaultEDDPath,
+		EDDiscoveryDBExists:      discoveredEDDPath != "" || journal.FileExists(defaultEDDPath),
 	}, nil
 }
 
 // BrowseDBPath opens a save-file dialog so the user can choose where the SQLite database file should be stored.
-func (a *App) BrowseDBPath() (string, error) {
+func (app *App) BrowseDBPath() (string, error) {
 	defaultDir := ""
 	defaultFilename := db.DefaultDBFileName
-	if a.dbPath != "" {
-		defaultDir = filepath.Dir(a.dbPath)
-		defaultFilename = filepath.Base(a.dbPath)
+	if app.dbPath != "" {
+		defaultDir = filepath.Dir(app.dbPath)
+		defaultFilename = filepath.Base(app.dbPath)
 	}
-	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	return runtime.SaveFileDialog(app.ctx, runtime.SaveDialogOptions{
 		Title:                fmt.Sprintf("Select %s Database Location", version.ProductName),
 		DefaultDirectory:     defaultDir,
 		DefaultFilename:      defaultFilename,
@@ -108,84 +108,84 @@ func (a *App) BrowseDBPath() (string, error) {
 
 // SetDatabasePath updates the active SQLite database location, persists it in
 // bootstrap.json, and hot-switches the running database connection if changed.
-func (a *App) SetDatabasePath(dbPath string) (Settings, error) {
+func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" {
-		p, err := db.DefaultPath()
-		if err != nil {
-			return Settings{}, err
+		defaultPath, defaultPathError := db.DefaultPath()
+		if defaultPathError != nil {
+			return Settings{}, defaultPathError
 		}
-		dbPath = p
+		dbPath = defaultPath
 	} else if journal.DirExists(dbPath) {
 		dbPath = filepath.Join(dbPath, db.DefaultDBFileName)
 	}
 	dbPath = filepath.Clean(dbPath)
-	if dbPath != a.dbPath {
-		if err := a.openAndWireDB(dbPath); err != nil {
-			return Settings{}, err
+	if dbPath != app.dbPath {
+		if openError := app.openAndWireDB(dbPath); openError != nil {
+			return Settings{}, openError
 		}
 	}
-	if err := db.SaveConfiguredPath(dbPath); err != nil {
-		return Settings{}, err
+	if saveError := db.SaveConfiguredPath(dbPath); saveError != nil {
+		return Settings{}, saveError
 	}
-	a.changed("settings", 0)
-	return a.GetSettings()
+	app.changed("settings", 0)
+	return app.GetSettings()
 }
 
 // SetupConfigureJournals sets the journal directory, performs a synchronous
 // initial scan of local .log files, starts the live watcher, and returns the
 // resulting archive status (including oldest journal date and discovered CMDRs).
-func (a *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
-	if err := a.ready(); err != nil {
-		return IngestStatus{}, err
+func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
+	if readyError := app.ready(); readyError != nil {
+		return IngestStatus{}, readyError
 	}
 	dir = strings.TrimSpace(dir)
 	if dir != "" && !journal.DirExists(dir) {
 		return IngestStatus{}, fmt.Errorf("directory does not exist: %s", dir)
 	}
-	if err := db.SetSetting(a.db, settingJournalDir, dir); err != nil {
-		return IngestStatus{}, err
+	if saveError := db.SetSetting(app.db, settingJournalDir, dir); saveError != nil {
+		return IngestStatus{}, saveError
 	}
-	a.runScan()
-	a.watcher.Start(a.ctx, a.journalDir())
-	a.changed("journal", 0)
-	return a.GetIngestStatus()
+	app.runScan()
+	app.watcher.Start(app.ctx, app.journalDir())
+	app.changed("journal", 0)
+	return app.GetIngestStatus()
 }
 
 // CompleteSetup marks the first-time setup wizard as finished and triggers
 // any deferred startup tasks (watcher and GEC catalog sync).
-func (a *App) CompleteSetup() (Settings, error) {
-	if err := a.ready(); err != nil {
-		return Settings{}, err
+func (app *App) CompleteSetup() (Settings, error) {
+	if readyError := app.ready(); readyError != nil {
+		return Settings{}, readyError
 	}
-	if err := db.SetSetting(a.db, settingSetupCompleted, "1"); err != nil {
-		return Settings{}, err
+	if saveError := db.SetSetting(app.db, settingSetupCompleted, "1"); saveError != nil {
+		return Settings{}, saveError
 	}
-	a.watcher.Start(a.ctx, a.journalDir())
-	if a.onlineEnabled() && a.gec.Count() == 0 {
-		go a.maybeRefreshGEC()
+	app.watcher.Start(app.ctx, app.journalDir())
+	if app.onlineEnabled() && app.gec.Count() == 0 {
+		go app.maybeRefreshGEC()
 	}
-	a.changed("settings", 0)
-	return a.GetSettings()
+	app.changed("settings", 0)
+	return app.GetSettings()
 }
 
 // SetCommanderEnabled enables or disables a commander in statistics and plans.
-func (a *App) SetCommanderEnabled(name string, enabled bool) (Settings, error) {
-	if err := a.ready(); err != nil {
-		return Settings{}, err
+func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error) {
+	if readyError := app.ready(); readyError != nil {
+		return Settings{}, readyError
 	}
-	if err := journal.SetCommanderEnabled(a.db, name, enabled); err != nil {
-		return Settings{}, err
+	if saveError := journal.SetCommanderEnabled(app.db, name, enabled); saveError != nil {
+		return Settings{}, saveError
 	}
-	a.invalidateAllTimeCache()
-	a.reevaluateActive()
-	a.changed("journal", 0)
-	return a.GetSettings()
+	app.invalidateAllTimeCache()
+	app.reevaluateActive()
+	app.changed("journal", 0)
+	return app.GetSettings()
 }
 
 // BrowseEDDiscoveryDB opens a file picker to select an EDDUser.sqlite file.
-func (a *App) BrowseEDDiscoveryDB() (string, error) {
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+func (app *App) BrowseEDDiscoveryDB() (string, error) {
+	return runtime.OpenFileDialog(app.ctx, runtime.OpenDialogOptions{
 		Title: "Select EDDiscovery SQLite Database (EDDUser.sqlite)",
 		Filters: []runtime.FileFilter{
 			{DisplayName: "SQLite Database (*.sqlite, *.db)", Pattern: "*.sqlite;*.db"},
@@ -196,72 +196,72 @@ func (a *App) BrowseEDDiscoveryDB() (string, error) {
 // ImportEDDiscoveryHistory imports raw historical journal events from an
 // EDDiscovery SQLite database (EDDUser.sqlite) into our self-contained SQLite
 // archive so deleted older .log files are permanently recovered.
-func (a *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
-	if err := a.ready(); err != nil {
-		return 0, err
+func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
+	if readyError := app.ready(); readyError != nil {
+		return 0, readyError
 	}
 	eddPath = strings.TrimSpace(eddPath)
 	if eddPath == "" {
 		eddPath = journal.DefaultEDDiscoveryDBPath()
 	}
-	defer a.emitEDDProgress(false, 0, 0, 0, "")
-	res, err := a.ingester.ImportEDDiscoveryDB(eddPath, func(cur, tot, files int, stage string) {
-		a.emitEDDProgress(stage != "Complete", cur, tot, files, stage)
+	defer app.emitEDDProgress(false, 0, 0, 0, "")
+	importResult, importError := app.ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
+		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
-	if err != nil {
-		return 0, err
+	if importError != nil {
+		return 0, importError
 	}
-	_ = db.SetSetting(a.db, "edd_history_recovered_v1", "1")
-	a.invalidateAllTimeCache()
-	a.reevaluateActive()
-	a.changed("journal", 0)
-	return res.LinesRead, nil
+	_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
+	app.invalidateAllTimeCache()
+	app.reevaluateActive()
+	app.changed("journal", 0)
+	return importResult.LinesRead, nil
 }
 
 // SetJournalDir changes the journal directory, restarts the watcher and
 // performs a catch-up scan in the background. Pass "" to restore the default.
-func (a *App) SetJournalDir(dir string) (Settings, error) {
-	if err := a.ready(); err != nil {
-		return Settings{}, err
+func (app *App) SetJournalDir(dir string) (Settings, error) {
+	if readyError := app.ready(); readyError != nil {
+		return Settings{}, readyError
 	}
 	dir = strings.TrimSpace(dir)
 	if dir != "" && !journal.DirExists(dir) {
 		return Settings{}, fmt.Errorf("directory does not exist: %s", dir)
 	}
-	if err := db.SetSetting(a.db, settingJournalDir, dir); err != nil {
-		return Settings{}, err
+	if saveError := db.SetSetting(app.db, settingJournalDir, dir); saveError != nil {
+		return Settings{}, saveError
 	}
 	go func() {
-		a.runScan()
-		a.watcher.Start(a.ctx, a.journalDir())
+		app.runScan()
+		app.watcher.Start(app.ctx, app.journalDir())
 	}()
-	return a.GetSettings()
+	return app.GetSettings()
 }
 
 // BrowseJournalDir opens a native directory picker and returns the choice ("" if cancelled).
-func (a *App) BrowseJournalDir() (string, error) {
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+func (app *App) BrowseJournalDir() (string, error) {
+	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
 		Title:            "Select Elite Dangerous journal folder",
-		DefaultDirectory: a.journalDir(),
+		DefaultDirectory: app.journalDir(),
 	})
 }
 
 // SetOnlineLookups enables/disables EDSM and EDAstro network requests.
-func (a *App) SetOnlineLookups(enabled bool) (Settings, error) {
-	if err := a.ready(); err != nil {
-		return Settings{}, err
+func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
+	if readyError := app.ready(); readyError != nil {
+		return Settings{}, readyError
 	}
-	v := "1"
+	settingVal := "1"
 	if !enabled {
-		v = "0"
+		settingVal = "0"
 	}
-	if err := db.SetSetting(a.db, settingOnline, v); err != nil {
-		return Settings{}, err
+	if saveError := db.SetSetting(app.db, settingOnline, settingVal); saveError != nil {
+		return Settings{}, saveError
 	}
 	if enabled {
-		go a.maybeRefreshGEC()
+		go app.maybeRefreshGEC()
 	}
-	return a.GetSettings()
+	return app.GetSettings()
 }
 
 // IngestStatus reports journal archive and watcher state.
@@ -282,84 +282,84 @@ type IngestStatus struct {
 }
 
 // GetIngestStatus returns the journal ingestion status.
-func (a *App) GetIngestStatus() (IngestStatus, error) {
-	st := IngestStatus{Scanning: a.scanning.Load(), LastError: a.getErr()}
-	if err := a.ready(); err != nil {
-		return st, nil
+func (app *App) GetIngestStatus() (IngestStatus, error) {
+	status := IngestStatus{Scanning: app.scanning.Load(), LastError: app.getError()}
+	if readyError := app.ready(); readyError != nil {
+		return status, nil
 	}
-	st.WatcherActive, st.WatcherError = a.watcher.Active()
-	st.LastScanAt, _ = db.GetSetting(a.db, settingLastScanAt)
-	arc, err := journal.ArchiveStatus(a.db)
-	if err != nil {
-		return st, err
+	status.WatcherActive, status.WatcherError = app.watcher.Active()
+	status.LastScanAt, _ = db.GetSetting(app.db, settingLastScanAt)
+	archiveStatus, archiveError := journal.ArchiveStatus(app.db)
+	if archiveError != nil {
+		return status, archiveError
 	}
-	st.FilesTracked, st.EventsStored = arc.FilesTracked, arc.EventsStored
-	st.FirstEventAt, st.LastEventAt = arc.FirstEventAt, arc.LastEventAt
-	st.FirstEventGalactic = ed.ToGalactic(arc.FirstEventAt)
-	st.LastEventGalactic = ed.ToGalactic(arc.LastEventAt)
+	status.FilesTracked, status.EventsStored = archiveStatus.FilesTracked, archiveStatus.EventsStored
+	status.FirstEventAt, status.LastEventAt = archiveStatus.FirstEventAt, archiveStatus.LastEventAt
+	status.FirstEventGalactic = ed.ToGalactic(archiveStatus.FirstEventAt)
+	status.LastEventGalactic = ed.ToGalactic(archiveStatus.LastEventAt)
 	var sys sql.NullString
-	_ = a.db.QueryRow(`SELECT system_name FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND `+journal.CmdrFilterSQL+`
+	_ = app.db.QueryRow(`SELECT system_name FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND `+journal.CmdrFilterSQL+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&sys)
-	st.CurrentSystem = sys.String
-	var raw, ev string
-	if a.db.QueryRow(`SELECT event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND `+journal.CmdrFilterSQL+`
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&ev, &raw) == nil {
-		if ev == "LoadGame" {
-			var lg journal.LoadGameEvent
-			if json.Unmarshal([]byte(raw), &lg) == nil {
-				st.CurrentShip = ed.ShipDisplayName(lg.Ship, lg.ShipLocalised)
-				if lg.ShipName != "" {
-					st.CurrentShip += " \u201c" + lg.ShipName + "\u201d"
+	status.CurrentSystem = sys.String
+	var rawJSON, eventName string
+	if app.db.QueryRow(`SELECT event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND `+journal.CmdrFilterSQL+`
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&eventName, &rawJSON) == nil {
+		if eventName == "LoadGame" {
+			var loadGame journal.LoadGameEvent
+			if json.Unmarshal([]byte(rawJSON), &loadGame) == nil {
+				status.CurrentShip = ed.ShipDisplayName(loadGame.Ship, loadGame.ShipLocalised)
+				if loadGame.ShipName != "" {
+					status.CurrentShip += " \u201c" + loadGame.ShipName + "\u201d"
 				}
 			}
 		} else {
-			var sw journal.ShipyardSwapEvent
-			if json.Unmarshal([]byte(raw), &sw) == nil {
-				st.CurrentShip = ed.ShipDisplayName(sw.ShipType, sw.ShipTypeLocalised)
+			var shipyardSwap journal.ShipyardSwapEvent
+			if json.Unmarshal([]byte(rawJSON), &shipyardSwap) == nil {
+				status.CurrentShip = ed.ShipDisplayName(shipyardSwap.ShipType, shipyardSwap.ShipTypeLocalised)
 			}
 		}
 	}
-	return st, nil
+	return status, nil
 }
 
 // RescanJournals starts a full idempotent catch-up scan in the background.
-func (a *App) RescanJournals() error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) RescanJournals() error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	go a.runScan()
+	go app.runScan()
 	return nil
 }
 
 // RefreshGEC re-downloads the EDAstro Galactic Exploration Catalog.
-func (a *App) RefreshGEC() (int, error) {
-	if err := a.ready(); err != nil {
-		return 0, err
+func (app *App) RefreshGEC() (int, error) {
+	if readyError := app.ready(); readyError != nil {
+		return 0, readyError
 	}
-	n, err := a.gec.Refresh(a.ctx)
-	if err != nil {
-		return 0, err
+	refreshCount, refreshError := app.gec.Refresh(app.ctx)
+	if refreshError != nil {
+		return 0, refreshError
 	}
-	a.populateMissingPOIs()
-	a.changed("plan", 0)
-	return n, nil
+	app.populateMissingPOIs()
+	app.changed("plan", 0)
+	return refreshCount, nil
 }
 
 // OpenURL opens an http(s) URL in the user's default browser.
-func (a *App) OpenURL(link string) error {
-	u, err := url.Parse(link)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+func (app *App) OpenURL(link string) error {
+	parsedURL, parseError := url.Parse(link)
+	if parseError != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
 		return fmt.Errorf("refusing to open %q", link)
 	}
-	runtime.BrowserOpenURL(a.ctx, link)
+	runtime.BrowserOpenURL(app.ctx, link)
 	return nil
 }
 
 // ToGalactic converts an ISO-8601 UTC timestamp to "33XX-MM-DD HH:mm:ss UTC".
-func (a *App) ToGalactic(iso string) string { return ed.ToGalactic(iso) }
+func (app *App) ToGalactic(iso string) string { return ed.ToGalactic(iso) }
 
 // FromGalactic converts "33XX-MM-DD HH:mm:ss UTC" to an ISO-8601 UTC timestamp.
-func (a *App) FromGalactic(gst string) (string, error) { return ed.FromGalactic(gst) }
+func (app *App) FromGalactic(gst string) (string, error) { return ed.FromGalactic(gst) }
 
 // ============================================================================
 // Modes
@@ -388,95 +388,95 @@ type ModesState struct {
 }
 
 // GetModesState returns modes, the active mode and all windows (newest first).
-func (a *App) GetModesState() (ModesState, error) {
-	if err := a.ready(); err != nil {
-		return ModesState{}, err
+func (app *App) GetModesState() (ModesState, error) {
+	if readyError := app.ready(); readyError != nil {
+		return ModesState{}, readyError
 	}
-	var st ModesState
-	ms, err := modes.List(a.db)
-	if err != nil {
-		return st, err
+	var modeState ModesState
+	modesList, listError := modes.List(app.db)
+	if listError != nil {
+		return modeState, listError
 	}
-	st.Modes = ms
-	if st.Modes == nil {
-		st.Modes = []modes.Mode{}
+	modeState.Modes = modesList
+	if modeState.Modes == nil {
+		modeState.Modes = []modes.Mode{}
 	}
 	byID := map[int64]modes.Mode{}
-	for _, m := range ms {
-		byID[m.ID] = m
+	for _, modeItem := range modesList {
+		byID[modeItem.ID] = modeItem
 	}
-	active, err := modes.Active(a.db)
-	if err != nil {
-		return st, err
+	active, activeError := modes.Active(app.db)
+	if activeError != nil {
+		return modeState, activeError
 	}
 	if active != nil {
-		st.ActiveModeID, st.ActiveSince, st.ActiveSinceGalactic = active.ModeID, active.Start, ed.ToGalactic(active.Start)
+		modeState.ActiveModeID, modeState.ActiveSince, modeState.ActiveSinceGalactic = active.ModeID, active.Start, ed.ToGalactic(active.Start)
 	} else {
-		st.ActiveModeID = modes.DefaultFallbackModeID(a.db)
+		modeState.ActiveModeID = modes.DefaultFallbackModeID(app.db)
 	}
-	ws, err := modes.ListWindows(a.db)
-	if err != nil {
-		return st, err
+	windowsList, windowsError := modes.ListWindows(app.db)
+	if windowsError != nil {
+		return modeState, windowsError
 	}
-	st.Windows = []ModeWindowView{}
-	for i := len(ws) - 1; i >= 0; i-- {
-		w := ws[i]
-		m := byID[w.ModeID]
-		st.Windows = append(st.Windows, ModeWindowView{
-			ID: w.ID, ModeID: w.ModeID, ModeName: m.Name, Color: m.Color, Start: w.Start, End: w.End,
-			StartGalactic: ed.ToGalactic(w.Start), EndGalactic: ed.ToGalactic(w.End),
-			Duration: expedition.Elapsed(w.Start, w.End),
+	modeState.Windows = []ModeWindowView{}
+	for windowIndex := len(windowsList) - 1; windowIndex >= 0; windowIndex-- {
+		windowItem := windowsList[windowIndex]
+		modeItem := byID[windowItem.ModeID]
+		modeState.Windows = append(modeState.Windows, ModeWindowView{
+			ID: windowItem.ID, ModeID: windowItem.ModeID, ModeName: modeItem.Name, Color: modeItem.Color, Start: windowItem.Start, End: windowItem.End,
+			StartGalactic: ed.ToGalactic(windowItem.Start), EndGalactic: ed.ToGalactic(windowItem.End),
+			Duration: expedition.Elapsed(windowItem.Start, windowItem.End),
 		})
 	}
-	return st, nil
+	return modeState, nil
 }
 
 // CreateMode adds a custom mode.
-func (a *App) CreateMode(name, description, color string) (modes.Mode, error) {
-	if err := a.ready(); err != nil {
-		return modes.Mode{}, err
+func (app *App) CreateMode(name, description, color string) (modes.Mode, error) {
+	if readyError := app.ready(); readyError != nil {
+		return modes.Mode{}, readyError
 	}
-	m, err := modes.Create(a.db, name, description, color)
-	if err == nil {
-		a.changed("modes", 0)
+	createdMode, createError := modes.Create(app.db, name, description, color)
+	if createError == nil {
+		app.changed("modes", 0)
 	}
-	return m, err
+	return createdMode, createError
 }
 
 // UpdateMode edits a mode.
-func (a *App) UpdateMode(id int64, name, description, color string) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) UpdateMode(id int64, name, description, color string) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	err := modes.Update(a.db, id, name, description, color)
-	if err == nil {
-		a.changed("modes", 0)
+	updateError := modes.Update(app.db, id, name, description, color)
+	if updateError == nil {
+		app.changed("modes", 0)
 	}
-	return err
+	return updateError
 }
 
 // DeleteMode deletes a custom mode and its windows.
-func (a *App) DeleteMode(id int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) DeleteMode(id int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	err := modes.Delete(a.db, id)
-	if err == nil {
-		a.changed("modes", 0)
+	deleteError := modes.Delete(app.db, id)
+	if deleteError == nil {
+		app.changed("modes", 0)
 	}
-	return err
+	return deleteError
 }
 
 // SwitchMode makes modeID the active mode from now (0 = stop tracking a mode).
-func (a *App) SwitchMode(modeID int64) (ModesState, error) {
-	if err := a.ready(); err != nil {
-		return ModesState{}, err
+func (app *App) SwitchMode(modeID int64) (ModesState, error) {
+	if readyError := app.ready(); readyError != nil {
+		return ModesState{}, readyError
 	}
-	if err := db.WithTx(a.db, func(tx *sql.Tx) error { return modes.Switch(tx, modeID, "") }); err != nil {
-		return ModesState{}, err
+	if switchError := db.WithTx(app.db, func(tx *sql.Tx) error { return modes.Switch(tx, modeID, "") }); switchError != nil {
+		return ModesState{}, switchError
 	}
-	a.changed("modes", 0)
-	return a.GetModesState()
+	app.changed("modes", 0)
+	return app.GetModesState()
 }
 
 // ModeWindowInput creates (ID 0) or edits a mode window. Start/End are
@@ -490,29 +490,29 @@ type ModeWindowInput struct {
 
 // SaveModeWindow writes a window retroactively; overlapping windows are
 // trimmed/split so that windows never overlap.
-func (a *App) SaveModeWindow(in ModeWindowInput) (ModesState, error) {
-	if err := a.ready(); err != nil {
-		return ModesState{}, err
+func (app *App) SaveModeWindow(in ModeWindowInput) (ModesState, error) {
+	if readyError := app.ready(); readyError != nil {
+		return ModesState{}, readyError
 	}
-	if err := db.WithTx(a.db, func(tx *sql.Tx) error {
+	if saveError := db.WithTx(app.db, func(tx *sql.Tx) error {
 		return modes.SetWindow(tx, in.ID, in.ModeID, in.Start, in.End)
-	}); err != nil {
-		return ModesState{}, err
+	}); saveError != nil {
+		return ModesState{}, saveError
 	}
-	a.changed("modes", 0)
-	return a.GetModesState()
+	app.changed("modes", 0)
+	return app.GetModesState()
 }
 
 // DeleteModeWindow removes a window.
-func (a *App) DeleteModeWindow(id int64) (ModesState, error) {
-	if err := a.ready(); err != nil {
-		return ModesState{}, err
+func (app *App) DeleteModeWindow(id int64) (ModesState, error) {
+	if readyError := app.ready(); readyError != nil {
+		return ModesState{}, readyError
 	}
-	if err := modes.DeleteWindow(a.db, id); err != nil {
-		return ModesState{}, err
+	if deleteError := modes.DeleteWindow(app.db, id); deleteError != nil {
+		return ModesState{}, deleteError
 	}
-	a.changed("modes", 0)
-	return a.GetModesState()
+	app.changed("modes", 0)
+	return app.GetModesState()
 }
 
 // ============================================================================
@@ -520,244 +520,244 @@ func (a *App) DeleteModeWindow(id int64) (ModesState, error) {
 // ============================================================================
 
 // ListExpeditions returns all expeditions (newest first).
-func (a *App) ListExpeditions() ([]expedition.Expedition, error) {
-	if err := a.ready(); err != nil {
-		return nil, err
+func (app *App) ListExpeditions() ([]expedition.Expedition, error) {
+	if readyError := app.ready(); readyError != nil {
+		return nil, readyError
 	}
-	l, err := expedition.List(a.db)
-	if l == nil {
-		l = []expedition.Expedition{}
+	expeditionsList, listError := expedition.List(app.db)
+	if expeditionsList == nil {
+		expeditionsList = []expedition.Expedition{}
 	}
-	return l, err
+	return expeditionsList, listError
 }
 
 // CreateExpedition adds an expedition and makes it the active one.
-func (a *App) CreateExpedition(name, description string) (expedition.Expedition, error) {
-	if err := a.ready(); err != nil {
-		return expedition.Expedition{}, err
+func (app *App) CreateExpedition(name, description string) (expedition.Expedition, error) {
+	if readyError := app.ready(); readyError != nil {
+		return expedition.Expedition{}, readyError
 	}
-	e, err := expedition.Create(a.db, name, description)
-	if err != nil {
-		return e, err
+	createdExpedition, createError := expedition.Create(app.db, name, description)
+	if createError != nil {
+		return createdExpedition, createError
 	}
-	_ = db.SetSetting(a.db, settingActiveExp, strconv.FormatInt(e.ID, 10))
-	a.changed("plan", e.ID)
-	return e, nil
+	_ = db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(createdExpedition.ID, 10))
+	app.changed("plan", createdExpedition.ID)
+	return createdExpedition, nil
 }
 
 // CloneExpedition duplicates an expedition (and its waypoints/region headers)
 // into a new expedition in the planning state, and makes the clone active.
-func (a *App) CloneExpedition(id int64) (expedition.Expedition, error) {
-	if err := a.ready(); err != nil {
-		return expedition.Expedition{}, err
+func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
+	if readyError := app.ready(); readyError != nil {
+		return expedition.Expedition{}, readyError
 	}
-	e, err := expedition.Clone(a.db, id)
-	if err != nil {
-		return e, err
+	clonedExpedition, cloneError := expedition.Clone(app.db, id)
+	if cloneError != nil {
+		return clonedExpedition, cloneError
 	}
-	_ = db.SetSetting(a.db, settingActiveExp, strconv.FormatInt(e.ID, 10))
-	go a.kickResolution(e.ID, false)
-	a.changed("plan", e.ID)
-	return e, nil
+	_ = db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(clonedExpedition.ID, 10))
+	go app.kickResolution(clonedExpedition.ID, false)
+	app.changed("plan", clonedExpedition.ID)
+	return clonedExpedition, nil
 }
 
 // UpdateExpedition renames an expedition.
-func (a *App) UpdateExpedition(id int64, name, description string) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) UpdateExpedition(id int64, name, description string) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	err := expedition.UpdateMeta(a.db, id, name, description)
-	if err == nil {
-		a.changed("plan", id)
+	updateError := expedition.UpdateMeta(app.db, id, name, description)
+	if updateError == nil {
+		app.changed("plan", id)
 	}
-	return err
+	return updateError
 }
 
 // DeleteExpedition deletes an expedition plan (journal history is kept).
-func (a *App) DeleteExpedition(id int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) DeleteExpedition(id int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	if err := expedition.Delete(a.db, id); err != nil {
-		return err
+	if deleteError := expedition.Delete(app.db, id); deleteError != nil {
+		return deleteError
 	}
-	if a.activeExpeditionID() == id {
-		_ = db.SetSetting(a.db, settingActiveExp, "")
+	if app.activeExpeditionID() == id {
+		_ = db.SetSetting(app.db, settingActiveExp, "")
 	}
-	a.changed("plan", id)
+	app.changed("plan", id)
 	return nil
 }
 
 // SetActiveExpedition selects the expedition shown in the planner.
-func (a *App) SetActiveExpedition(id int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) SetActiveExpedition(id int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	if err := db.SetSetting(a.db, settingActiveExp, strconv.FormatInt(id, 10)); err != nil {
-		return err
+	if saveError := db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(id, 10)); saveError != nil {
+		return saveError
 	}
-	go a.kickResolution(id, false)
+	go app.kickResolution(id, false)
 	return nil
 }
 
 // GetPlan returns the planner sheet for an expedition.
-func (a *App) GetPlan(id int64) (expedition.PlanView, error) {
-	if err := a.ready(); err != nil {
-		return expedition.PlanView{}, err
+func (app *App) GetPlan(id int64) (expedition.PlanView, error) {
+	if readyError := app.ready(); readyError != nil {
+		return expedition.PlanView{}, readyError
 	}
-	return expedition.BuildPlan(a.db, id, a.gecLookup)
+	return expedition.BuildPlan(app.db, id, app.gecLookup)
 }
 
-func (a *App) gecLookup(name string, addr int64) *expedition.GECRef {
-	ps := a.gec.Lookup(name, addr)
-	if len(ps) == 0 {
+func (app *App) gecLookup(name string, addr int64) *expedition.GECRef {
+	pois := app.gec.Lookup(name, addr)
+	if len(pois) == 0 {
 		return nil
 	}
-	return &expedition.GECRef{ID: ps[0].ID, Name: ps[0].Name, Type: ps[0].Type, URL: ps[0].URL, Count: len(ps)}
+	return &expedition.GECRef{ID: pois[0].ID, Name: pois[0].Name, Type: pois[0].Type, URL: pois[0].URL, Count: len(pois)}
 }
 
 // AddRow inserts a row after afterRowID (0 = append, -1 = top). rowType is
 // "waypoint" or "region"; regionID is used for region headers.
-func (a *App) AddRow(expID, afterRowID int64, rowType string, regionID int) (expedition.Row, error) {
-	if err := a.ready(); err != nil {
-		return expedition.Row{}, err
+func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID int) (expedition.Row, error) {
+	if readyError := app.ready(); readyError != nil {
+		return expedition.Row{}, readyError
 	}
-	var r expedition.Row
-	err := db.WithTx(a.db, func(tx *sql.Tx) error {
-		var err error
-		r, err = expedition.InsertRow(tx, expID, afterRowID, rowType, regionID)
-		return err
+	var newRow expedition.Row
+	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
+		var insertError error
+		newRow, insertError = expedition.InsertRow(tx, expeditionID, afterRowID, rowType, regionID)
+		return insertError
 	})
-	if err == nil {
-		a.changed("plan", expID)
+	if txError == nil {
+		app.changed("plan", expeditionID)
 	}
-	return r, err
+	return newRow, txError
 }
 
 // UpdateRow applies a partial update to a row. Changing the system name
 // triggers asynchronous coordinate resolution and visit re-evaluation.
-func (a *App) UpdateRow(patch expedition.RowPatch) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) UpdateRow(patch expedition.RowPatch) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	changed, err := expedition.UpdateRow(a.db, patch)
-	if err != nil {
-		return err
+	changed, updateError := expedition.UpdateRow(app.db, patch)
+	if updateError != nil {
+		return updateError
 	}
-	r, err := expedition.GetRow(a.db, patch.ID)
-	if err != nil {
-		return err
+	rowItem, getError := expedition.GetRow(app.db, patch.ID)
+	if getError != nil {
+		return getError
 	}
 	if changed {
-		if r.SystemName != "" && strings.TrimSpace(r.POIName) == "" {
-			if ps := a.gec.Lookup(r.SystemName, r.SystemAddress); len(ps) > 0 && strings.TrimSpace(ps[0].Name) != "" {
-				poiName := html.UnescapeString(strings.TrimSpace(ps[0].Name))
-				if _, err := a.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, r.ID); err == nil {
-					r.POIName = poiName
+		if rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
+			if pois := app.gec.Lookup(rowItem.SystemName, rowItem.SystemAddress); len(pois) > 0 && strings.TrimSpace(pois[0].Name) != "" {
+				poiName := html.UnescapeString(strings.TrimSpace(pois[0].Name))
+				if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID); execError == nil {
+					rowItem.POIName = poiName
 				}
 			}
 		}
-		a.reevaluate(r.ExpeditionID)
-		if r.SystemName != "" {
-			a.resolveRowAsync(r, true)
+		app.reevaluate(rowItem.ExpeditionID)
+		if rowItem.SystemName != "" {
+			app.resolveRowAsync(rowItem, true)
 		}
 	}
-	a.changed("plan", r.ExpeditionID)
+	app.changed("plan", rowItem.ExpeditionID)
 	return nil
 }
 
 // SetLegMode assigns a mode to the leg arriving at rowID and updates the
 // corresponding time window in mode_windows when the waypoint has been visited.
-func (a *App) SetLegMode(rowID, modeID int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) SetLegMode(rowID, modeID int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	var expID int64
-	err := db.WithTx(a.db, func(tx *sql.Tx) error {
-		var err error
-		expID, err = expedition.SetLegMode(tx, rowID, modeID)
-		return err
+	var expeditionID int64
+	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
+		var setModeError error
+		expeditionID, setModeError = expedition.SetLegMode(tx, rowID, modeID)
+		return setModeError
 	})
-	if err != nil {
-		return err
+	if txError != nil {
+		return txError
 	}
-	a.invalidateAllTimeCache()
-	a.changed("modes", expID)
+	app.invalidateAllTimeCache()
+	app.changed("modes", expeditionID)
 	return nil
 }
 
 // SetActiveLegMode sets the mode for the current in-progress leg (since the
 // latest visited waypoint).
-func (a *App) SetActiveLegMode(expID, modeID int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) SetActiveLegMode(expeditionID, modeID int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	err := db.WithTx(a.db, func(tx *sql.Tx) error {
-		return expedition.SetActiveLegMode(tx, expID, modeID)
+	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
+		return expedition.SetActiveLegMode(tx, expeditionID, modeID)
 	})
-	if err != nil {
-		return err
+	if txError != nil {
+		return txError
 	}
-	a.invalidateAllTimeCache()
-	a.changed("modes", expID)
+	app.invalidateAllTimeCache()
+	app.changed("modes", expeditionID)
 	return nil
 }
 
 // RetryResolve re-runs coordinate resolution for a waypoint.
-func (a *App) RetryResolve(rowID int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) RetryResolve(rowID int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	r, err := expedition.GetRow(a.db, rowID)
-	if err != nil {
-		return err
+	rowItem, getError := expedition.GetRow(app.db, rowID)
+	if getError != nil {
+		return getError
 	}
-	if r.SystemName == "" {
+	if rowItem.SystemName == "" {
 		return nil
 	}
-	_, _ = a.db.Exec(`DELETE FROM system_cache WHERE name_key = ? AND source = 'notfound'`, strings.ToLower(r.SystemName))
-	a.resolveRowAsync(r, true)
+	_, _ = app.db.Exec(`DELETE FROM system_cache WHERE name_key = ? AND source = 'notfound'`, strings.ToLower(rowItem.SystemName))
+	app.resolveRowAsync(rowItem, true)
 	return nil
 }
 
 // DeleteRow removes a row.
-func (a *App) DeleteRow(rowID int64) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) DeleteRow(rowID int64) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	var expID int64
-	err := db.WithTx(a.db, func(tx *sql.Tx) error {
-		var err error
-		expID, err = expedition.DeleteRow(tx, rowID)
-		return err
+	var expeditionID int64
+	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
+		var deleteRowError error
+		expeditionID, deleteRowError = expedition.DeleteRow(tx, rowID)
+		return deleteRowError
 	})
-	if err != nil {
-		return err
+	if txError != nil {
+		return txError
 	}
-	a.reevaluate(expID)
-	a.changed("plan", expID)
+	app.reevaluate(expeditionID)
+	app.changed("plan", expeditionID)
 	return nil
 }
 
 // MoveRow moves a row to the zero-based index toIndex.
-func (a *App) MoveRow(rowID int64, toIndex int) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) MoveRow(rowID int64, toIndex int) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	r, _ := expedition.GetRow(a.db, rowID)
-	var expID int64
-	err := db.WithTx(a.db, func(tx *sql.Tx) error {
-		var err error
-		expID, err = expedition.MoveRow(tx, rowID, toIndex)
-		return err
+	rowItem, _ := expedition.GetRow(app.db, rowID)
+	var expeditionID int64
+	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
+		var moveRowError error
+		expeditionID, moveRowError = expedition.MoveRow(tx, rowID, toIndex)
+		return moveRowError
 	})
-	if err != nil {
-		return err
+	if txError != nil {
+		return txError
 	}
-	if r.RowType == expedition.RowWaypoint {
-		a.reevaluate(expID)
+	if rowItem.RowType == expedition.RowWaypoint {
+		app.reevaluate(expeditionID)
 	}
-	a.changed("plan", expID)
+	app.changed("plan", expeditionID)
 	return nil
 }
 
@@ -773,13 +773,13 @@ type RegionOptions struct {
 // GetRegionOptions returns regions ordered for a Region Header dropdown.
 // rowID is either the header being edited (editing = true) or the row after
 // which a new header will be inserted (0 = append at end, -1 = top).
-func (a *App) GetRegionOptions(expID, rowID int64, editing bool) (RegionOptions, error) {
-	if err := a.ready(); err != nil {
-		return RegionOptions{}, err
+func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (RegionOptions, error) {
+	if readyError := app.ready(); readyError != nil {
+		return RegionOptions{}, readyError
 	}
-	rows, err := expedition.ListRows(a.db, expID)
-	if err != nil {
-		return RegionOptions{}, err
+	rows, listRowsError := expedition.ListRows(app.db, expeditionID)
+	if listRowsError != nil {
+		return RegionOptions{}, listRowsError
 	}
 	// cut = index of the first row *after* the header position.
 	cut := len(rows)
@@ -787,38 +787,38 @@ func (a *App) GetRegionOptions(expID, rowID int64, editing bool) (RegionOptions,
 	case rowID == expedition.InsertAtTop:
 		cut = 0
 	case rowID > 0:
-		for i, r := range rows {
-			if r.ID == rowID {
+		for rowIndex, rowItem := range rows {
+			if rowItem.ID == rowID {
 				if editing {
-					cut = i
+					cut = rowIndex
 				} else {
-					cut = i + 1
+					cut = rowIndex + 1
 				}
 				break
 			}
 		}
 	}
 	anchor := 0
-	for i := 0; i < cut && i < len(rows); i++ {
-		if rows[i].RowType == expedition.RowRegion && rows[i].RegionID > 0 {
-			anchor = rows[i].RegionID
+	for rowIndex := 0; rowIndex < cut && rowIndex < len(rows); rowIndex++ {
+		if rows[rowIndex].RowType == expedition.RowRegion && rows[rowIndex].RegionID > 0 {
+			anchor = rows[rowIndex].RegionID
 		}
 	}
 	out := RegionOptions{AnchorIsDefault: anchor == 0}
 	if anchor == 0 {
 		anchor = ed.InnerOrionSpurID
 	}
-	reg, _ := ed.RegionByID(anchor)
-	out.AnchorID, out.AnchorName = anchor, reg.Name
+	regionRecord, _ := ed.RegionByID(anchor)
+	out.AnchorID, out.AnchorName = anchor, regionRecord.Name
 	out.Options = ed.PrioritizedRegions(anchor)
 	start := cut
 	if editing {
 		start = cut + 1
 	}
-	for i := start; i < len(rows); i++ {
-		if rows[i].IsWaypoint() && rows[i].HasCoords {
-			if r, ok := ed.RegionAt(rows[i].X, rows[i].Y, rows[i].Z); ok {
-				out.SuggestedRegionID = r.ID
+	for rowIndex := start; rowIndex < len(rows); rowIndex++ {
+		if rows[rowIndex].IsWaypoint() && rows[rowIndex].HasCoords {
+			if foundRegion, ok := ed.RegionAt(rows[rowIndex].X, rows[rowIndex].Y, rows[rowIndex].Z); ok {
+				out.SuggestedRegionID = foundRegion.ID
 			}
 			break
 		}
@@ -833,56 +833,56 @@ type StartCandidates struct {
 }
 
 // GetStartCandidates returns every recorded arrival at Waypoint #1 (newest first).
-func (a *App) GetStartCandidates(expID int64) (StartCandidates, error) {
-	if err := a.ready(); err != nil {
-		return StartCandidates{}, err
+func (app *App) GetStartCandidates(expeditionID int64) (StartCandidates, error) {
+	if readyError := app.ready(); readyError != nil {
+		return StartCandidates{}, readyError
 	}
-	sys, visits, err := expedition.StartCandidates(a.db, expID)
+	systemName, visits, startCandidatesError := expedition.StartCandidates(app.db, expeditionID)
 	if visits == nil {
 		visits = []expedition.Arrival{}
 	}
-	return StartCandidates{SystemName: sys, Visits: visits}, err
+	return StartCandidates{SystemName: systemName, Visits: visits}, startCandidatesError
 }
 
-func (a *App) lifecycle(expID int64, fn func(tx *sql.Tx) error) error {
-	if err := a.ready(); err != nil {
-		return err
+func (app *App) lifecycle(expeditionID int64, action func(transaction *sql.Tx) error) error {
+	if readyError := app.ready(); readyError != nil {
+		return readyError
 	}
-	if err := db.WithTx(a.db, fn); err != nil {
-		return err
+	if txError := db.WithTx(app.db, action); txError != nil {
+		return txError
 	}
-	a.changed("plan", expID)
+	app.changed("plan", expeditionID)
 	return nil
 }
 
 // StartExpedition starts the expedition at the given visit timestamp
 // (ISO-8601 UTC) and retroactively replays history from that moment.
-func (a *App) StartExpedition(expID int64, timestamp string) error {
-	return a.lifecycle(expID, func(tx *sql.Tx) error { return expedition.Start(tx, expID, timestamp) })
+func (app *App) StartExpedition(expeditionID int64, timestamp string) error {
+	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Start(transaction, expeditionID, timestamp) })
 }
 
 // StartExpeditionOnArrival activates the expedition and waits for the next
 // arrival at Waypoint #1 to set the start timestamp.
-func (a *App) StartExpeditionOnArrival(expID int64) error {
-	return a.lifecycle(expID, func(tx *sql.Tx) error { return expedition.Arm(tx, expID) })
+func (app *App) StartExpeditionOnArrival(expeditionID int64) error {
+	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Arm(transaction, expeditionID) })
 }
 
 // CompleteExpedition ends the expedition now.
-func (a *App) CompleteExpedition(expID int64) error {
-	return a.lifecycle(expID, func(tx *sql.Tx) error { return expedition.Complete(tx, expID, "") })
+func (app *App) CompleteExpedition(expeditionID int64) error {
+	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Complete(transaction, expeditionID, "") })
 }
 
 // ReopenExpedition makes a completed expedition active again.
-func (a *App) ReopenExpedition(expID int64) error {
-	return a.lifecycle(expID, func(tx *sql.Tx) error { return expedition.Reopen(tx, expID) })
+func (app *App) ReopenExpedition(expeditionID int64) error {
+	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Reopen(transaction, expeditionID) })
 }
 
 // GetWaypointDetails returns the expandable drawer content for a waypoint.
-func (a *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, error) {
-	if err := a.ready(); err != nil {
-		return expedition.WaypointDetails{}, err
+func (app *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, error) {
+	if readyError := app.ready(); readyError != nil {
+		return expedition.WaypointDetails{}, readyError
 	}
-	return expedition.Details(a.db, rowID)
+	return expedition.Details(app.db, rowID)
 }
 
 // ============================================================================
@@ -891,87 +891,93 @@ func (a *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, error
 
 // SidebarStats is the content of the Stats Sidebar.
 type SidebarStats struct {
-	ExpeditionID    int64         `json:"expeditionId"`
-	Status          string        `json:"status"`
-	Started         bool          `json:"started"`
-	Start           string        `json:"start"`
-	End             string        `json:"end"`
-	StartGalactic   string        `json:"startGalactic"`
-	EndGalactic     string        `json:"endGalactic"`
+	ExpeditionID        int64         `json:"expeditionId"`
+	Status              string        `json:"status"`
+	Started             bool          `json:"started"`
+	Start               string        `json:"start"`
+	End                 string        `json:"end"`
+	StartGalactic       string        `json:"startGalactic"`
+	EndGalactic         string        `json:"endGalactic"`
 	EndIsNow            bool          `json:"endIsNow"`
 	Duration            string        `json:"duration"`
 	CareerStart         string        `json:"careerStart"`
 	CareerStartGalactic string        `json:"careerStartGalactic"`
 	CareerDuration      string        `json:"careerDuration"`
 	FilterActive        bool          `json:"filterActive"`
-	Live            stats.Metrics `json:"live"`        // from journals (mode-filtered)
-	Adjustments     stats.Metrics `json:"adjustments"` // manual
-	Expedition      stats.Metrics `json:"expedition"`  // live + adjustments
-	AllJournals     stats.Metrics `json:"allJournals"` // all ingested journal events (mode-filtered)
-	BaselineEnabled bool          `json:"baselineEnabled"`
-	BaselineSource  string        `json:"baselineSource"`
-	Baseline        stats.Metrics `json:"baseline"`
-	Lifetime        stats.Metrics `json:"lifetime"` // baseline + expedition
+	Live                stats.Metrics `json:"live"`        // from journals (mode-filtered)
+	Adjustments         stats.Metrics `json:"adjustments"` // manual
+	Expedition          stats.Metrics `json:"expedition"`  // live + adjustments
+	AllJournals         stats.Metrics `json:"allJournals"` // all ingested journal events (mode-filtered)
+	BaselineEnabled     bool          `json:"baselineEnabled"`
+	BaselineSource      string        `json:"baselineSource"`
+	Baseline            stats.Metrics `json:"baseline"`
+	Lifetime            stats.Metrics `json:"lifetime"` // baseline + expedition
 }
 
 // GetSidebarStats computes the sidebar for an expedition with mode filters.
-func (a *App) GetSidebarStats(expID int64, filter stats.Filter) (SidebarStats, error) {
-	if err := a.ready(); err != nil {
-		return SidebarStats{}, err
+func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (SidebarStats, error) {
+	if readyError := app.ready(); readyError != nil {
+		return SidebarStats{}, readyError
 	}
-	e, err := expedition.Get(a.db, expID)
-	if err != nil {
-		return SidebarStats{}, err
+	expeditionRecord, getExpeditionError := expedition.Get(app.db, expeditionID)
+	if getExpeditionError != nil {
+		return SidebarStats{}, getExpeditionError
 	}
-	s := SidebarStats{
-		ExpeditionID: e.ID, Status: e.Status, Started: e.StartTimestamp != "",
-		Start: e.StartTimestamp, End: e.EndTimestamp, FilterActive: filter.Enabled,
-		Adjustments: e.Adjustments, BaselineEnabled: e.BaselineEnabled, BaselineSource: e.BaselineSource,
-		Baseline: e.Baseline,
+	sidebar := SidebarStats{
+		ExpeditionID:    expeditionRecord.ID,
+		Status:          expeditionRecord.Status,
+		Started:         expeditionRecord.StartTimestamp != "",
+		Start:           expeditionRecord.StartTimestamp,
+		End:             expeditionRecord.EndTimestamp,
+		FilterActive:    filter.Enabled,
+		Adjustments:     expeditionRecord.Adjustments,
+		BaselineEnabled: expeditionRecord.BaselineEnabled,
+		BaselineSource:  expeditionRecord.BaselineSource,
+		Baseline:        expeditionRecord.Baseline,
 	}
-	eng := stats.NewEngine(a.db)
+	statsEngine := stats.NewEngine(app.db)
 	// Mode filters apply only to the current expedition, never to All Time.
 	// All-time personal carrier data comes directly from Frontier's lifetime Statistics.
-	if all, err := a.getAllTimeMetrics(); err == nil {
-		s.AllJournals = all
+	if allTimeMetrics, allTimeMetricsError := app.getAllTimeMetrics(); allTimeMetricsError == nil {
+		sidebar.AllJournals = allTimeMetrics
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
 	var firstEvent sql.NullString
-	_ = a.db.QueryRow(`SELECT MIN(c.first_seen) FROM commanders c WHERE c.enabled = 1 AND c.first_seen IS NOT NULL AND c.first_seen != ''`).Scan(&firstEvent)
+	_ = app.db.QueryRow(`SELECT MIN(c.first_seen) FROM commanders c WHERE c.enabled = 1 AND c.first_seen IS NOT NULL AND c.first_seen != ''`).Scan(&firstEvent)
 	if !firstEvent.Valid || firstEvent.String == "" {
-		_ = a.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstEvent)
+		_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstEvent)
 	}
 	if firstEvent.Valid && firstEvent.String != "" {
-		s.CareerStart = firstEvent.String
-		s.CareerStartGalactic = ed.ToGalactic(firstEvent.String)
-		s.CareerDuration = expedition.Elapsed(firstEvent.String, "")
+		sidebar.CareerStart = firstEvent.String
+		sidebar.CareerStartGalactic = ed.ToGalactic(firstEvent.String)
+		sidebar.CareerDuration = expedition.Elapsed(firstEvent.String, "")
 	}
-	if s.Started {
-		if s.End == "" {
-			s.EndIsNow = true
-			s.EndGalactic = ed.TimeToGalactic(timeNow())
+	if sidebar.Started {
+		if sidebar.End == "" {
+			sidebar.EndIsNow = true
+			sidebar.EndGalactic = ed.TimeToGalactic(timeNow())
 		} else {
-			s.EndGalactic = ed.ToGalactic(s.End)
+			sidebar.EndGalactic = ed.ToGalactic(sidebar.End)
 		}
-		s.StartGalactic = ed.ToGalactic(s.Start)
-		s.Duration = expedition.Elapsed(s.Start, s.End)
-		live, err := eng.Compute(stats.Range{After: e.StartTimestamp, Until: e.EndTimestamp}, &filter)
-		if err != nil {
-			return s, err
+		sidebar.StartGalactic = ed.ToGalactic(sidebar.Start)
+		sidebar.Duration = expedition.Elapsed(sidebar.Start, sidebar.End)
+		liveMetrics, computeError := statsEngine.Compute(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
+		if computeError != nil {
+			return sidebar, computeError
 		}
 		// Carrier operations metrics (carrier jumps, carrier distance, and tritium) for the expedition
-		// come exclusively from the Spansh / manual route logger (e.Adjustments) to prevent duplication.
+		// come exclusively from the Spansh / manual route logger (expeditionRecord.Adjustments) to prevent duplication.
 		// Non-operation personal navigation metrics (CarrierPassengerLy and total DistanceLy)
 		// are preserved directly from journal events when the commander is aboard.
-		live.CarrierJumps = 0
-		live.CarrierDistanceLy = 0
-		live.TritiumUsed = nil
+		liveMetrics.CarrierJumps = 0
+		liveMetrics.CarrierDistanceLy = 0
+		liveMetrics.TritiumUsed = nil
 
-		s.Live = live
-		s.Expedition = live.Add(e.Adjustments)
+		sidebar.Live = liveMetrics
+		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
 	}
-	return s, nil
+	return sidebar, nil
 }
 
 

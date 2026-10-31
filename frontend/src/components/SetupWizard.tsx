@@ -98,10 +98,13 @@ export function SetupWizardModal({
   }, [initialIngest])
 
   async function refreshWizardState() {
-    const [st, ing] = await Promise.all([GetSettings(), GetIngestStatus()])
-    setLocalSettings(st)
-    setLocalIngest(ing)
-    return { st, ing }
+    const [currentSettings, currentIngestStatus] = await Promise.all([
+      GetSettings(),
+      GetIngestStatus(),
+    ])
+    setLocalSettings(currentSettings)
+    setLocalIngest(currentIngestStatus)
+    return { settings: currentSettings, ingestStatus: currentIngestStatus }
   }
 
   // Step 1 handlers
@@ -110,8 +113,8 @@ export function SetupWizardModal({
     try {
       const picked = await BrowseDBPath()
       if (picked) setDbPath(picked)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -126,8 +129,8 @@ export function SetupWizardModal({
     try {
       const picked = await BrowseJournalDir()
       if (picked) setJournalDir(picked)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -142,8 +145,8 @@ export function SetupWizardModal({
     try {
       const picked = await BrowseEDDiscoveryDB()
       if (picked) setEddPath(picked)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -161,8 +164,8 @@ export function SetupWizardModal({
       const count = await ImportEDDiscoveryHistory(eddPath)
       setEddImportedCount(count)
       await refreshWizardState()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     } finally {
       setEddBusy(false)
     }
@@ -174,8 +177,8 @@ export function SetupWizardModal({
     try {
       const next = await SetCommanderEnabled(name, enabled)
       setLocalSettings(next)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -185,8 +188,8 @@ export function SetupWizardModal({
     try {
       const next = await SetOnlineLookups(enabled)
       setLocalSettings(next)
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     }
   }
 
@@ -197,8 +200,8 @@ export function SetupWizardModal({
       const count = await RefreshGEC()
       setGecSyncedCount(count)
       await refreshWizardState()
-    } catch (e) {
-      setError(String(e))
+    } catch (error) {
+      setError(String(error))
     } finally {
       setGecBusy(false)
     }
@@ -217,8 +220,8 @@ export function SetupWizardModal({
           setJournalDir(nextSettings.journalDir || nextSettings.defaultJournalDir || '')
         }
         setStep(1)
-      } catch (e) {
-        setError(String(e))
+      } catch (error) {
+        setError(String(error))
       } finally {
         setBusyMessage(null)
       }
@@ -228,13 +231,13 @@ export function SetupWizardModal({
     if (step === 1) {
       setBusyMessage('SCANNING PLAYER JOURNALS…')
       try {
-        const ing = await SetupConfigureJournals(journalDir)
-        setLocalIngest(ing)
-        const st = await GetSettings()
-        setLocalSettings(st)
+        const currentIngestStatus = await SetupConfigureJournals(journalDir)
+        setLocalIngest(currentIngestStatus)
+        const currentSettings = await GetSettings()
+        setLocalSettings(currentSettings)
         setStep(2)
-      } catch (e) {
-        setError(String(e))
+      } catch (error) {
+        setError(String(error))
       } finally {
         setBusyMessage(null)
       }
@@ -251,8 +254,8 @@ export function SetupWizardModal({
       try {
         await CompleteSetup()
         onComplete()
-      } catch (e) {
-        setError(String(e))
+      } catch (error) {
+        setError(String(error))
       } finally {
         setBusyMessage(null)
       }
@@ -359,7 +362,7 @@ export function SetupWizardModal({
                   <input
                     type="text"
                     value={dbPath}
-                    onChange={(e) => setDbPath(e.target.value)}
+                    onChange={(event) => setDbPath(event.target.value)}
                     placeholder={localSettings?.defaultDbPath || `${APP_BINARY_NAME}.db`}
                     className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none"
                   />
@@ -422,7 +425,7 @@ export function SetupWizardModal({
                   <input
                     type="text"
                     value={journalDir}
-                    onChange={(e) => setJournalDir(e.target.value)}
+                    onChange={(event) => setJournalDir(event.target.value)}
                     placeholder={localSettings?.defaultJournalDir || ''}
                     className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none"
                   />
@@ -547,7 +550,7 @@ export function SetupWizardModal({
                       <input
                         type="text"
                         value={eddPath}
-                        onChange={(e) => setEddPath(e.target.value)}
+                        onChange={(event) => setEddPath(event.target.value)}
                         placeholder={localSettings?.defaultEdDiscoveryDbPath || 'EDDUser.sqlite'}
                         className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none"
                       />
@@ -635,33 +638,33 @@ export function SetupWizardModal({
 
                 {localSettings?.commanders && localSettings.commanders.length > 0 ? (
                   <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
-                    {localSettings.commanders.map((c) => (
+                    {localSettings.commanders.map((commander) => (
                       <label
-                        key={c.name}
+                        key={commander.name}
                         className="flex items-center justify-between p-2.5 border border-[#3d2816] bg-[#110c08] cursor-pointer hover:border-[#6e4726]"
                       >
                         <div className="flex items-center gap-2.5">
                           <input
                             type="checkbox"
-                            checked={c.enabled}
-                            onChange={(e) => handleToggleCmdr(c.name, e.target.checked)}
+                            checked={commander.enabled}
+                            onChange={(event) => handleToggleCmdr(commander.name, event.target.checked)}
                             className="accent-[#FF7100]"
                           />
                           <div>
                             <div className="font-bold text-[#F4ECE4] tracking-wider">
-                              CMDR {c.name}
+                              CMDR {commander.name}
                             </div>
                             <div className="text-[10px] font-mono-tabular text-[#a6907c]">
-                              {c.eventCount.toLocaleString()} journal events
+                              {commander.eventCount.toLocaleString()} journal events
                             </div>
                           </div>
                         </div>
                         <span
                           className={
-                            c.enabled ? 'ed-badge ed-badge-active' : 'ed-badge ed-badge-planned'
+                            commander.enabled ? 'ed-badge ed-badge-active' : 'ed-badge ed-badge-planned'
                           }
                         >
-                          {c.enabled ? 'TRACKING' : 'IGNORED'}
+                          {commander.enabled ? 'TRACKING' : 'IGNORED'}
                         </span>
                       </label>
                     ))}
@@ -680,7 +683,7 @@ export function SetupWizardModal({
                   <input
                     type="checkbox"
                     checked={onlineLookups}
-                    onChange={(e) => handleToggleOnline(e.target.checked)}
+                    onChange={(event) => handleToggleOnline(event.target.checked)}
                     className="mt-0.5 accent-[#FF7100]"
                   />
                   <div className="flex-1">
@@ -693,7 +696,6 @@ export function SetupWizardModal({
                     </p>
                   </div>
                 </label>
-
                 <div className="flex items-center justify-between pt-2 border-t border-[#2b1d11]">
                   <div className="text-[11px] font-mono-tabular text-[#a6907c]">
                     POI Catalog:{' '}
@@ -736,21 +738,21 @@ export function SetupWizardModal({
 
           {/* Dots Navigation */}
           <div className="flex items-center gap-2.5" aria-label="Setup progress">
-            {Array.from({ length: TOTAL_STEPS }).map((_, idx) => {
-              const isCurrent = idx === step
-              const isCompleted = idx < step
+            {Array.from({ length: TOTAL_STEPS }).map((_, stepIndex) => {
+              const isCurrent = stepIndex === step
+              const isCompleted = stepIndex < step
               return (
                 <button
-                  key={idx}
+                  key={stepIndex}
                   type="button"
-                  disabled={isBusy || idx > step}
+                  disabled={isBusy || stepIndex > step}
                   onClick={() => {
-                    if (idx < step && !isBusy) {
+                    if (stepIndex < step && !isBusy) {
                       setError('')
-                      setStep(idx)
+                      setStep(stepIndex)
                     }
                   }}
-                  title={stepTitles[idx]}
+                  title={stepTitles[stepIndex]}
                   className={`transition-all rounded-full ${
                     isCurrent
                       ? 'w-2.5 h-2.5 bg-[#FF7100] shadow-[0_0_8px_#FF7100]'

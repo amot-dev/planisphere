@@ -22,40 +22,40 @@ type Arrival struct {
 	SystemAddress int64  `json:"systemAddress"`
 }
 
-func loadArrivals(q db.Queryer, where string, args ...any) ([]Arrival, error) {
-	rs, err := q.Query(`SELECT event_uid, timestamp, event, COALESCE(system_name,''), COALESCE(system_address,0)
+func loadArrivals(queryer db.Queryer, where string, args ...any) ([]Arrival, error) {
+	rows, queryError := queryer.Query(`SELECT event_uid, timestamp, event, COALESCE(system_name,''), COALESCE(system_address,0)
 		FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND `+journal.CmdrFilterSQL+` AND `+where+` ORDER BY timestamp, id`, args...)
-	if err != nil {
-		return nil, err
+	if queryError != nil {
+		return nil, queryError
 	}
-	defer rs.Close()
-	var out []Arrival
-	for rs.Next() {
-		var a Arrival
-		if err := rs.Scan(&a.UID, &a.Timestamp, &a.Event, &a.SystemName, &a.SystemAddress); err != nil {
-			return nil, err
+	defer rows.Close()
+	var arrivals []Arrival
+	for rows.Next() {
+		var arrival Arrival
+		if scanError := rows.Scan(&arrival.UID, &arrival.Timestamp, &arrival.Event, &arrival.SystemName, &arrival.SystemAddress); scanError != nil {
+			return nil, scanError
 		}
-		a.Galactic = ed.ToGalactic(a.Timestamp)
-		out = append(out, a)
+		arrival.Galactic = ed.ToGalactic(arrival.Timestamp)
+		arrivals = append(arrivals, arrival)
 	}
-	return out, rs.Err()
+	return arrivals, rows.Err()
 }
 
 // matches reports whether an arrival is in the row's system (by name,
 // case-insensitive, or by SystemAddress when both are known).
-func matches(r Row, a Arrival) bool {
-	if r.RowType != RowWaypoint || strings.TrimSpace(r.SystemName) == "" {
+func matches(rowItem Row, arrival Arrival) bool {
+	if rowItem.RowType != RowWaypoint || strings.TrimSpace(rowItem.SystemName) == "" {
 		return false
 	}
-	if r.SystemAddress != 0 && a.SystemAddress != 0 && r.SystemAddress == a.SystemAddress {
+	if rowItem.SystemAddress != 0 && arrival.SystemAddress != 0 && rowItem.SystemAddress == arrival.SystemAddress {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(r.SystemName), strings.TrimSpace(a.SystemName))
+	return strings.EqualFold(strings.TrimSpace(rowItem.SystemName), strings.TrimSpace(arrival.SystemName))
 }
 
 func firstWaypoint(rows []Row) int {
-	for i, r := range rows {
-		if r.IsWaypoint() {
+	for i, rowItem := range rows {
+		if rowItem.IsWaypoint() {
 			return i
 		}
 	}
@@ -63,137 +63,139 @@ func firstWaypoint(rows []Row) int {
 }
 
 // StartCandidates lists every recorded visit to Waypoint #1's system, newest first.
-func StartCandidates(q db.Queryer, expID int64) (system string, out []Arrival, err error) {
-	rows, err := ListRows(q, expID)
-	if err != nil {
-		return "", nil, err
+func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, candidates []Arrival, loadError error) {
+	rows, listError := ListRows(queryer, expeditionID)
+	if listError != nil {
+		return "", nil, listError
 	}
 	i := firstWaypoint(rows)
 	if i < 0 || strings.TrimSpace(rows[i].SystemName) == "" {
 		return "", nil, errors.New("waypoint #1 needs a system name before the expedition can start")
 	}
-	w := rows[i]
-	var arr []Arrival
-	if w.SystemAddress != 0 {
-		arr, err = loadArrivals(q, `(system_name = ? COLLATE NOCASE OR system_address = ?)`, w.SystemName, w.SystemAddress)
+	waypoint := rows[i]
+	var arrivals []Arrival
+	var arrivalsError error
+	if waypoint.SystemAddress != 0 {
+		arrivals, arrivalsError = loadArrivals(queryer, `(system_name = ? COLLATE NOCASE OR system_address = ?)`, waypoint.SystemName, waypoint.SystemAddress)
 	} else {
-		arr, err = loadArrivals(q, `system_name = ? COLLATE NOCASE`, w.SystemName)
+		arrivals, arrivalsError = loadArrivals(queryer, `system_name = ? COLLATE NOCASE`, waypoint.SystemName)
 	}
-	if err != nil {
-		return w.SystemName, nil, err
+	if arrivalsError != nil {
+		return waypoint.SystemName, nil, arrivalsError
 	}
-	for l, r := 0, len(arr)-1; l < r; l, r = l+1, r-1 {
-		arr[l], arr[r] = arr[r], arr[l]
+	for left, right := 0, len(arrivals)-1; left < right; left, right = left+1, right-1 {
+		arrivals[left], arrivals[right] = arrivals[right], arrivals[left]
 	}
-	return w.SystemName, arr, nil
+	return waypoint.SystemName, arrivals, nil
 }
 
 // Start activates the expedition with startTimestamp as the arrival at
 // Waypoint #1, then replays all journal history from that moment.
-func Start(tx *sql.Tx, expID int64, startTimestamp string) error {
-	ts, err := ed.NormalizeISO(startTimestamp)
-	if err != nil {
-		return err
+func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error {
+	normalizedStartTimestamp, parseError := ed.NormalizeISO(startTimestamp)
+	if parseError != nil {
+		return parseError
 	}
-	rows, err := ListRows(tx, expID)
-	if err != nil {
-		return err
+	rows, listError := ListRows(transaction, expeditionID)
+	if listError != nil {
+		return listError
 	}
 	if i := firstWaypoint(rows); i < 0 || rows[i].SystemName == "" {
 		return errors.New("waypoint #1 needs a system name before the expedition can start")
 	}
-	if err := setLifecycle(tx, expID, StatusActive, ts, nil, nil); err != nil {
-		return err
+	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, normalizedStartTimestamp, nil, nil); lifecycleError != nil {
+		return lifecycleError
 	}
-	if err := initCarrierStops(tx, expID); err != nil {
-		return err
+	if initError := initCarrierStops(transaction, expeditionID); initError != nil {
+		return initError
 	}
-	_, err = Reevaluate(tx, expID)
-	return err
+	_, reevalError := Reevaluate(transaction, expeditionID)
+	return reevalError
 }
 
 // Arm activates the expedition in "waiting for first arrival" state: the next
 // arrival at Waypoint #1 (from now on) becomes the start timestamp.
-func Arm(tx *sql.Tx, expID int64) error {
-	if err := setLifecycle(tx, expID, StatusActive, nil, nil, ed.NowISO()); err != nil {
-		return err
+func Arm(transaction *sql.Tx, expeditionID int64) error {
+	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, nil, nil, ed.NowISO()); lifecycleError != nil {
+		return lifecycleError
 	}
-	if err := clearVisits(tx, expID); err != nil {
-		return err
+	if clearError := clearVisits(transaction, expeditionID); clearError != nil {
+		return clearError
 	}
-	if err := initCarrierStops(tx, expID); err != nil {
-		return err
+	if initError := initCarrierStops(transaction, expeditionID); initError != nil {
+		return initError
 	}
-	_, err := Reevaluate(tx, expID)
-	return err
+	_, reevalError := Reevaluate(transaction, expeditionID)
+	return reevalError
 }
 
 // initCarrierStops initializes carrier stops for an active expedition.
 // The first carrier stop serves as the carrier's origin/starting location,
 // so it starts as arrived; subsequent carrier stops start as pending.
-func initCarrierStops(q db.Queryer, expID int64) error {
-	if _, err := q.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE expedition_id = ?`, expID); err != nil {
-		return err
+func initCarrierStops(queryer db.Queryer, expeditionID int64) error {
+	if _, updateError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE expedition_id = ?`, expeditionID); updateError != nil {
+		return updateError
 	}
-	_, err := q.Exec(`UPDATE expedition_rows SET fc_arrived = 1
+	_, execError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 1
 		WHERE id = (
 			SELECT id FROM expedition_rows
 			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1
 			ORDER BY position ASC LIMIT 1
-		)`, expID)
-	return err
+		)`, expeditionID)
+	return execError
 }
 
 // Complete ends the expedition at endTimestamp (now when empty).
-func Complete(tx *sql.Tx, expID int64, endTimestamp string) error {
-	e, err := Get(tx, expID)
-	if err != nil {
-		return err
+func Complete(transaction *sql.Tx, expeditionID int64, endTimestamp string) error {
+	expeditionRecord, getError := Get(transaction, expeditionID)
+	if getError != nil {
+		return getError
 	}
-	if e.Status != StatusActive || e.StartTimestamp == "" {
+	if expeditionRecord.Status != StatusActive || expeditionRecord.StartTimestamp == "" {
 		return errors.New("only a started, active expedition can be completed")
 	}
-	end := ed.NowISO()
+	normalizedEndTimestamp := ed.NowISO()
 	if endTimestamp != "" {
-		if end, err = ed.NormalizeISO(endTimestamp); err != nil {
-			return err
+		var parseError error
+		if normalizedEndTimestamp, parseError = ed.NormalizeISO(endTimestamp); parseError != nil {
+			return parseError
 		}
 	}
-	if end <= e.StartTimestamp {
+	if normalizedEndTimestamp <= expeditionRecord.StartTimestamp {
 		return errors.New("end must be after the expedition start")
 	}
-	if err := PruneEmptyRows(tx, expID); err != nil {
-		return err
+	if pruneError := PruneEmptyRows(transaction, expeditionID); pruneError != nil {
+		return pruneError
 	}
-	if err := setLifecycle(tx, expID, StatusCompleted, e.StartTimestamp, end, nil); err != nil {
-		return err
+	if lifecycleError := setLifecycle(transaction, expeditionID, StatusCompleted, expeditionRecord.StartTimestamp, normalizedEndTimestamp, nil); lifecycleError != nil {
+		return lifecycleError
 	}
-	_, err = Reevaluate(tx, expID)
-	return err
+	_, reevalError := Reevaluate(transaction, expeditionID)
+	return reevalError
 }
 
 // Reopen turns a completed expedition back into an active one.
-func Reopen(tx *sql.Tx, expID int64) error {
-	e, err := Get(tx, expID)
-	if err != nil {
-		return err
+func Reopen(transaction *sql.Tx, expeditionID int64) error {
+	expeditionRecord, getError := Get(transaction, expeditionID)
+	if getError != nil {
+		return getError
 	}
-	if e.Status != StatusCompleted {
+	if expeditionRecord.Status != StatusCompleted {
 		return errors.New("expedition is not completed")
 	}
-	if err := setLifecycle(tx, expID, StatusActive, e.StartTimestamp, nil, nil); err != nil {
-		return err
+	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, expeditionRecord.StartTimestamp, nil, nil); lifecycleError != nil {
+		return lifecycleError
 	}
-	_, err = Reevaluate(tx, expID)
-	return err
+	_, reevalError := Reevaluate(transaction, expeditionID)
+	return reevalError
 }
 
 // ResetToPlanning clears the start timestamp and all visit state.
-func ResetToPlanning(tx *sql.Tx, expID int64) error {
-	if err := setLifecycle(tx, expID, StatusPlanning, nil, nil, nil); err != nil {
-		return err
+func ResetToPlanning(transaction *sql.Tx, expeditionID int64) error {
+	if lifecycleError := setLifecycle(transaction, expeditionID, StatusPlanning, nil, nil, nil); lifecycleError != nil {
+		return lifecycleError
 	}
-	return clearVisits(tx, expID)
+	return clearVisits(transaction, expeditionID)
 }
 
 // Reevaluate replays journal arrivals from the expedition start (in
@@ -210,160 +212,162 @@ func ResetToPlanning(tx *sql.Tx, expID int64) error {
 //
 // The replay is deterministic and idempotent: running it again over the
 // reordered plan yields the same result. It returns whether anything changed.
-func Reevaluate(tx db.Queryer, expID int64) (bool, error) {
-	e, err := Get(tx, expID)
-	if err != nil {
-		return false, err
+func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
+	expeditionRecord, getError := Get(queryer, expeditionID)
+	if getError != nil {
+		return false, getError
 	}
-	if e.Status == StatusPlanning {
+	if expeditionRecord.Status == StatusPlanning {
 		return false, nil
 	}
-	rows, err := ListRows(tx, expID)
-	if err != nil {
-		return false, err
+	rows, listError := ListRows(queryer, expeditionID)
+	if listError != nil {
+		return false, listError
 	}
-	w1 := firstWaypoint(rows)
-	if w1 < 0 {
+	firstWaypointIndex := firstWaypoint(rows)
+	if firstWaypointIndex < 0 {
 		return false, nil
 	}
 
 	// "Wait for first arrival": pick the first arrival at W1 after armed_at.
-	if e.StartTimestamp == "" {
-		if e.ArmedAt == "" {
+	if expeditionRecord.StartTimestamp == "" {
+		if expeditionRecord.ArmedAt == "" {
 			return false, nil
 		}
-		arr, err := loadArrivals(tx, `timestamp >= ?`, e.ArmedAt)
-		if err != nil {
-			return false, err
+		candidateArrivals, loadError := loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.ArmedAt)
+		if loadError != nil {
+			return false, loadError
 		}
-		for _, a := range arr {
-			if matches(rows[w1], a) {
-				e.StartTimestamp = a.Timestamp
+		for _, arrival := range candidateArrivals {
+			if matches(rows[firstWaypointIndex], arrival) {
+				expeditionRecord.StartTimestamp = arrival.Timestamp
 				break
 			}
 		}
-		if e.StartTimestamp == "" {
+		if expeditionRecord.StartTimestamp == "" {
 			return false, nil
 		}
-		if err := setLifecycle(tx, expID, StatusActive, e.StartTimestamp, nil, nil); err != nil {
-			return false, err
+		if lifecycleError := setLifecycle(queryer, expeditionID, StatusActive, expeditionRecord.StartTimestamp, nil, nil); lifecycleError != nil {
+			return false, lifecycleError
 		}
-		if err := initCarrierStops(tx, expID); err != nil {
-			return false, err
+		if initError := initCarrierStops(queryer, expeditionID); initError != nil {
+			return false, initError
 		}
-		rows, err = ListRows(tx, expID)
-		if err != nil {
-			return false, err
+		var listError error
+		rows, listError = ListRows(queryer, expeditionID)
+		if listError != nil {
+			return false, listError
 		}
 	}
 
-	orig := make(map[int64]Row, len(rows))
-	for _, r := range rows {
-		orig[r.ID] = r
+	originalRowsByID := make(map[int64]Row, len(rows))
+	for _, rowItem := range rows {
+		originalRowsByID[rowItem.ID] = rowItem
 	}
 	for i := range rows {
 		rows[i].VisitedAt, rows[i].VisitEventUID = "", ""
 	}
-	modeTL, _ := modes.LoadTimeline(tx)
+	modeTimeline, _ := modes.LoadTimeline(queryer)
 
 	var arrivals []Arrival
-	if e.EndTimestamp != "" {
-		arrivals, err = loadArrivals(tx, `timestamp >= ? AND timestamp <= ?`, e.StartTimestamp, e.EndTimestamp)
+	var arrivalsError error
+	if expeditionRecord.EndTimestamp != "" {
+		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ? AND timestamp <= ?`, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
 	} else {
-		arrivals, err = loadArrivals(tx, `timestamp >= ?`, e.StartTimestamp)
+		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.StartTimestamp)
 	}
-	if err != nil {
-		return false, err
+	if arrivalsError != nil {
+		return false, arrivalsError
 	}
 
 	// Waypoint #1 is visited at the start timestamp.
-	rows[w1].VisitedAt = e.StartTimestamp
-	lastSystem := strings.ToLower(strings.TrimSpace(rows[w1].SystemName))
-	for _, a := range arrivals {
-		if a.Timestamp == e.StartTimestamp && matches(rows[w1], a) {
-			rows[w1].VisitEventUID = a.UID
-			if a.SystemName != "" {
-				lastSystem = strings.ToLower(strings.TrimSpace(a.SystemName))
+	rows[firstWaypointIndex].VisitedAt = expeditionRecord.StartTimestamp
+	lastSystemName := strings.ToLower(strings.TrimSpace(rows[firstWaypointIndex].SystemName))
+	for _, arrival := range arrivals {
+		if arrival.Timestamp == expeditionRecord.StartTimestamp && matches(rows[firstWaypointIndex], arrival) {
+			rows[firstWaypointIndex].VisitEventUID = arrival.UID
+			if arrival.SystemName != "" {
+				lastSystemName = strings.ToLower(strings.TrimSpace(arrival.SystemName))
 			}
 			break
 		}
 	}
-	currentIdx := w1
+	currentIndex := firstWaypointIndex
 
-	for _, a := range arrivals {
-		if a.Timestamp == e.StartTimestamp && a.UID == rows[w1].VisitEventUID {
+	for _, arrival := range arrivals {
+		if arrival.Timestamp == expeditionRecord.StartTimestamp && arrival.UID == rows[firstWaypointIndex].VisitEventUID {
 			continue
 		}
-		sys := strings.ToLower(strings.TrimSpace(a.SystemName))
-		if sys == "" || sys == lastSystem {
+		systemName := strings.ToLower(strings.TrimSpace(arrival.SystemName))
+		if systemName == "" || systemName == lastSystemName {
 			continue // not an actual change of system
 		}
-		lastSystem = sys
-		target := -1
-		for i, r := range rows {
-			if r.IsWaypoint() && r.VisitedAt == "" && matches(r, a) {
-				target = i
+		lastSystemName = systemName
+		targetIndex := -1
+		for i, rowItem := range rows {
+			if rowItem.IsWaypoint() && rowItem.VisitedAt == "" && matches(rowItem, arrival) {
+				targetIndex = i
 				break
 			}
 		}
-		if target < 0 {
+		if targetIndex < 0 {
 			continue
 		}
-		rows[target].VisitedAt, rows[target].VisitEventUID = a.Timestamp, a.UID
-		if rows[target].LegModeID == 0 && modeTL != nil {
-			rows[target].LegModeID = modeTL.ModeAt(a.Timestamp)
+		rows[targetIndex].VisitedAt, rows[targetIndex].VisitEventUID = arrival.Timestamp, arrival.UID
+		if rows[targetIndex].LegModeID == 0 && modeTimeline != nil {
+			rows[targetIndex].LegModeID = modeTimeline.ModeAt(arrival.Timestamp)
 		}
-		nextUnvisitedWP := -1
-		for i := currentIdx + 1; i < len(rows); i++ {
-			if i == target || (rows[i].IsWaypoint() && rows[i].VisitedAt == "") {
-				nextUnvisitedWP = i
+		nextUnvisitedWaypoint := -1
+		for i := currentIndex + 1; i < len(rows); i++ {
+			if i == targetIndex || (rows[i].IsWaypoint() && rows[i].VisitedAt == "") {
+				nextUnvisitedWaypoint = i
 				break
 			}
 		}
-		if target != nextUnvisitedWP {
-			dest := currentIdx + 1
-			if target < currentIdx {
-				dest = currentIdx // removing target shifts current up by one
+		if targetIndex != nextUnvisitedWaypoint {
+			destinationIndex := currentIndex + 1
+			if targetIndex < currentIndex {
+				destinationIndex = currentIndex // removing target shifts current up by one
 			}
-			rows = moveTo(rows, target, dest)
-			target = dest
+			rows = moveTo(rows, targetIndex, destinationIndex)
+			targetIndex = destinationIndex
 		}
-		currentIdx = target
+		currentIndex = targetIndex
 	}
 
 	changed := false
 	for i := range rows {
-		r := rows[i]
-		o := orig[r.ID]
-		if o.Position != i+1 {
+		rowItem := rows[i]
+		originalRow := originalRowsByID[rowItem.ID]
+		if originalRow.Position != i+1 {
 			changed = true
-			if _, err := tx.Exec(`UPDATE expedition_rows SET position = ? WHERE id = ?`, i+1, r.ID); err != nil {
-				return false, err
+			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET position = ? WHERE id = ?`, i+1, rowItem.ID); updateError != nil {
+				return false, updateError
 			}
 		}
-		if o.VisitedAt != r.VisitedAt || o.VisitEventUID != r.VisitEventUID {
+		if originalRow.VisitedAt != rowItem.VisitedAt || originalRow.VisitEventUID != rowItem.VisitEventUID {
 			changed = true
-			var v, u any
-			if r.VisitedAt != "" {
-				v = r.VisitedAt
+			var visitedAtValue, visitUIDValue any
+			if rowItem.VisitedAt != "" {
+				visitedAtValue = rowItem.VisitedAt
 			}
-			if r.VisitEventUID != "" {
-				u = r.VisitEventUID
+			if rowItem.VisitEventUID != "" {
+				visitUIDValue = rowItem.VisitEventUID
 			}
-			if _, err := tx.Exec(`UPDATE expedition_rows SET visited_at = ?, visit_event_uid = ? WHERE id = ?`, v, u, r.ID); err != nil {
-				return false, fmt.Errorf("update visit: %w", err)
+			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET visited_at = ?, visit_event_uid = ? WHERE id = ?`, visitedAtValue, visitUIDValue, rowItem.ID); updateError != nil {
+				return false, fmt.Errorf("update visit: %w", updateError)
 			}
 		}
-		if o.FCArrived != r.FCArrived {
+		if originalRow.FCArrived != rowItem.FCArrived {
 			changed = true
-			if _, err := tx.Exec(`UPDATE expedition_rows SET fc_arrived = ? WHERE id = ?`, r.FCArrived, r.ID); err != nil {
-				return false, fmt.Errorf("update fc_arrived: %w", err)
+			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = ? WHERE id = ?`, rowItem.FCArrived, rowItem.ID); updateError != nil {
+				return false, fmt.Errorf("update fc_arrived: %w", updateError)
 			}
 		}
-		if o.LegModeID != r.LegModeID {
+		if originalRow.LegModeID != rowItem.LegModeID {
 			changed = true
-			if _, err := tx.Exec(`UPDATE expedition_rows SET leg_mode_id = ? WHERE id = ?`, r.LegModeID, r.ID); err != nil {
-				return false, fmt.Errorf("update leg_mode_id: %w", err)
+			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET leg_mode_id = ? WHERE id = ?`, rowItem.LegModeID, rowItem.ID); updateError != nil {
+				return false, fmt.Errorf("update leg_mode_id: %w", updateError)
 			}
 		}
 	}
@@ -372,20 +376,20 @@ func Reevaluate(tx db.Queryer, expID int64) (bool, error) {
 
 // ActiveExpeditionIDs returns expeditions that need re-evaluation on new
 // journal data (active, including those waiting for their first arrival).
-func ActiveExpeditionIDs(q db.Queryer) ([]int64, error) {
-	rs, err := q.Query(`SELECT id FROM expeditions WHERE status = ?`, StatusActive)
-	if err != nil {
-		return nil, err
+func ActiveExpeditionIDs(queryer db.Queryer) ([]int64, error) {
+	rows, queryError := queryer.Query(`SELECT id FROM expeditions WHERE status = ?`, StatusActive)
+	if queryError != nil {
+		return nil, queryError
 	}
-	defer rs.Close()
-	var out []int64
-	for rs.Next() {
+	defer rows.Close()
+	var expeditionIDs []int64
+	for rows.Next() {
 		var id int64
-		if err := rs.Scan(&id); err != nil {
-			return nil, err
+		if scanError := rows.Scan(&id); scanError != nil {
+			return nil, scanError
 		}
-		out = append(out, id)
+		expeditionIDs = append(expeditionIDs, id)
 	}
-	return out, rs.Err()
+	return expeditionIDs, rows.Err()
 }
 

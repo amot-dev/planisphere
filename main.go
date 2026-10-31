@@ -30,7 +30,7 @@ func main() {
 
 	application := app.New()
 
-	err := wails.Run(&options.App{
+	runError := wails.Run(&options.App{
 		Title:     fmt.Sprintf("%s — %s", version.ProductName, version.Tagline),
 		Width:     1600,
 		Height:    960,
@@ -50,8 +50,8 @@ func main() {
 			ProgramName:      version.BinaryName,
 		},
 	})
-	if err != nil {
-		log.Fatal(err)
+	if runError != nil {
+		log.Fatal(runError)
 	}
 }
 
