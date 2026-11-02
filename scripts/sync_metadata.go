@@ -351,10 +351,14 @@ func syncPKGBUILD(path string, appConfig Config) {
 		text = banner + text
 	}
 
+	pkgnameRegex := regexp.MustCompile(`(?m)^pkgname=.*$`)
 	versionRegex := regexp.MustCompile(`(?m)^pkgver=.*$`)
 	descRegex := regexp.MustCompile(`(?m)^pkgdesc=.*$`)
 
-	updated := versionRegex.ReplaceAll([]byte(text), []byte(fmt.Sprintf("pkgver=%s", appConfig.Version)))
+	pkgName := appConfig.BinaryName + "-bin"
+
+	updated := pkgnameRegex.ReplaceAll([]byte(text), []byte(fmt.Sprintf("pkgname=%s", pkgName)))
+	updated = versionRegex.ReplaceAll(updated, []byte(fmt.Sprintf("pkgver=%s", appConfig.Version)))
 	updated = descRegex.ReplaceAll(updated, []byte(fmt.Sprintf("pkgdesc=%q", appConfig.Description)))
 
 	changed, writeErr := writeFileIfChanged(path, updated, 0644)
@@ -363,6 +367,6 @@ func syncPKGBUILD(path string, appConfig Config) {
 		return
 	}
 	if changed {
-		fmt.Printf("  -> Updated %s (pkgver: %s)\n", filepath.Base(path), appConfig.Version)
+		fmt.Printf("  -> Updated %s (pkgname: %s, pkgver: %s)\n", filepath.Base(path), pkgName, appConfig.Version)
 	}
 }

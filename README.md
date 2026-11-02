@@ -43,12 +43,21 @@ Automatically flags systems listed in EDAstro's Galactic Exploration Catalog (GE
 
 ## Installation
 
+### Arch Linux (AUR)
+
+Planisphere is available on the Arch User Repository (AUR) as [`planisphere-bin`](https://aur.archlinux.org/packages/planisphere-bin):
+
+```bash
+yay -S planisphere-bin
+# or
+paru -S planisphere-bin
+```
+
 ### Prebuilt Packages
 
 Prebuilt binaries are available under [GitHub Releases](https://github.com/amot-dev/planisphere/releases):
 - **Linux**: Standalone AppImage and tarball
 - **Windows**: NSIS setup installer and portable zip
-
 
 ### Building from Source
 
