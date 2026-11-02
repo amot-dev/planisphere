@@ -30,6 +30,7 @@ build: sync-metadata install-frontend
 
 # Start live development server with hot reloading
 dev: sync-metadata install-frontend
+	@echo "==> Starting Wails live development server..."
 	$(WAILS) dev $(BUILD_TAGS)
 
 # Install frontend dependencies using npm ci (or npm install if lockfile missing)
@@ -88,18 +89,22 @@ package-appimage: build
 	@printf '#!/bin/sh\nHERE=$$(dirname "$$(readlink -f "$$0")")\nexport PATH="$$HERE/usr/bin:$$PATH"\nexec "$$HERE/usr/bin/planisphere" "$$@"\n' > dist/AppDir/AppRun
 	@chmod +x dist/AppDir/AppRun
 	@bash packaging/appimage/build.sh dist/AppDir "dist/Planisphere-v$(VERSION)-x86_64.AppImage"
+	@rm -rf dist/AppDir
+	@echo "==> Linux AppImage created: dist/Planisphere-v$(VERSION)-x86_64.AppImage"
 
 # Package DEB distribution via nfpm
 package-deb: build
 	@echo "==> Packaging DEB distribution (v$(VERSION))..."
 	@command -v nfpm >/dev/null 2>&1 || (echo "==> Installing nfpm..." && go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest)
 	@VERSION=$(VERSION) nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
+	@echo "==> Linux DEB package created in dist/"
 
 # Package RPM distribution via nfpm
 package-rpm: build
 	@echo "==> Packaging RPM distribution (v$(VERSION))..."
 	@command -v nfpm >/dev/null 2>&1 || (echo "==> Installing nfpm..." && go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest)
 	@VERSION=$(VERSION) nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/
+	@echo "==> Linux RPM package created in dist/"
 
 # Package Arch Linux package (.pkg.tar.zst) via makepkg
 package-arch: package-tarball
@@ -126,4 +131,5 @@ package-windows: sync-metadata install-frontend
 	@echo "==> Windows packages created in dist/"
 
 clean:
+	@echo "==> Cleaning build and distribution directories..."
 	rm -rf build/bin/ frontend/dist/ dist/
