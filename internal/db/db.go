@@ -138,6 +138,10 @@ func Open(path string) (*sql.DB, error) {
 	}
 	if path == ":memory:" {
 		dbConn.SetMaxOpenConns(1)
+	} else {
+		// Limit open connections to serialize writers in Go memory and avoid SQLite file-lock contention.
+		dbConn.SetMaxOpenConns(4)
+		dbConn.SetMaxIdleConns(4)
 	}
 	if _, pragmaError := dbConn.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-64000; PRAGMA temp_store=MEMORY;`); pragmaError != nil {
 		dbConn.Close()

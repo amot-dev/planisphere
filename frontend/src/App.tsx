@@ -184,7 +184,7 @@ export default function App() {
     const offChanged = EventsOn(
       'data:changed',
       (payload?: { scope?: string; kind?: string; expeditionId?: number; expId?: number }) => {
-        const kind = payload?.kind ?? ''
+        const scope = payload?.scope ?? payload?.kind ?? ''
         const currentActive = activeExpeditionIdRef.current
         const eventExpeditionId = payload?.expeditionId ?? payload?.expId
 
@@ -195,7 +195,7 @@ export default function App() {
           return
         }
 
-        if (kind === 'plan' || kind === 'coords') {
+        if (scope === 'plan' || scope === 'coords') {
           if (currentActive > 0) {
             loadPlanOnly(currentActive)
           }
@@ -232,16 +232,12 @@ export default function App() {
       } catch (setActiveError) {
         console.error('Failed to set active expedition:', setActiveError)
       }
-      const [expeditionList] = await Promise.all([
-        ListExpeditions(),
-        loadPlanOnly(selectedExpeditionId),
-        loadStatsOnly(selectedExpeditionId, filter),
-      ])
+      const expeditionList = await ListExpeditions()
       if (expeditionList && expeditionList.length > 0) {
         setExpeditions(expeditionList)
       }
     },
-    [filter, loadPlanOnly, loadStatsOnly],
+    [],
   )
 
   async function handleQuickSwitchMode(modeId: number) {

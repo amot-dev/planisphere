@@ -229,6 +229,53 @@ func (engine *Engine) lookupScan(key bodyKey, timestamp string) (*journal.ScanEv
 	return &scanEvent, nil
 }
 
+// preloadScans batch-loads the latest Scan event for multiple bodies in chunks to avoid N+1 queries.
+func (engine *Engine) preloadScans(keys []bodyKey, untilTimestamp string) (map[bodyKey]*journal.ScanEvent, error) {
+	if len(keys) == 0 {
+		return map[bodyKey]*journal.ScanEvent{}, nil
+	}
+	result := make(map[bodyKey]*journal.ScanEvent, len(keys))
+	chunkSize := 200
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[i:end]
+		var conds []string
+		var args []any
+		args = append(args, untilTimestamp)
+		for _, k := range chunk {
+			conds = append(conds, "(system_address = ? AND body_id = ?)")
+			args = append(args, k.systemAddress, k.bodyID)
+		}
+		query := `SELECT system_address, body_id, raw_json FROM (
+			SELECT system_address, body_id, raw_json,
+			       ROW_NUMBER() OVER (PARTITION BY system_address, body_id ORDER BY timestamp DESC) as rn
+			FROM journal_events
+			WHERE event = 'Scan' AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
+			  AND (` + strings.Join(conds, " OR ") + `)
+		) WHERE rn = 1`
+
+		rows, queryError := engine.DB.Query(query, args...)
+		if queryError != nil {
+			return nil, queryError
+		}
+		for rows.Next() {
+			var addr, body int64
+			var raw string
+			if scanErr := rows.Scan(&addr, &body, &raw); scanErr == nil {
+				var scanEvent journal.ScanEvent
+				if json.Unmarshal([]byte(raw), &scanEvent) == nil {
+					result[bodyKey{addr, body}] = &scanEvent
+				}
+			}
+		}
+		rows.Close()
+	}
+	return result, nil
+}
+
 func toBodyScan(scanEvent *journal.ScanEvent) ed.BodyScan {
 	return ed.BodyScan{
 		StarType: scanEvent.StarType, PlanetClass: scanEvent.PlanetClass, MassEM: scanEvent.MassEM, StellarMass: scanEvent.StellarMass,
@@ -250,8 +297,45 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 	}
 	var carrierLegs map[string]CarrierLeg
 	scans := map[bodyKey]*journal.ScanEvent{}
+	missingScans := map[bodyKey]bool{}
 	scannedBodies := map[bodyKey]bool{}
 	mappedBodies := map[bodyKey]bool{}
+
+	// Preload scans for any bodies mapped (SAAScanComplete) or sampled (ScanOrganic)
+	// that were scanned before the current timeRange.
+	scannedInEvents := make(map[bodyKey]bool, len(events))
+	var neededKeys []bodyKey
+	neededSet := make(map[bodyKey]bool)
+	for _, eventRow := range events {
+		if eventRow.eventType == "Scan" && eventRow.systemAddress.Valid && eventRow.bodyID.Valid {
+			scannedInEvents[bodyKey{eventRow.systemAddress.Int64, eventRow.bodyID.Int64}] = true
+		}
+	}
+	for _, eventRow := range events {
+		if (eventRow.eventType == "SAAScanComplete" || eventRow.eventType == "ScanOrganic") &&
+			eventRow.systemAddress.Valid && eventRow.bodyID.Valid {
+			k := bodyKey{eventRow.systemAddress.Int64, eventRow.bodyID.Int64}
+			if !scannedInEvents[k] && !neededSet[k] {
+				neededSet[k] = true
+				neededKeys = append(neededKeys, k)
+			}
+		}
+	}
+
+	if len(neededKeys) > 0 {
+		preloaded, preloadError := engine.preloadScans(neededKeys, until)
+		if preloadError != nil {
+			return metrics, preloadError
+		}
+		for k, scan := range preloaded {
+			scans[k] = scan
+		}
+		for _, k := range neededKeys {
+			if scans[k] == nil {
+				missingScans[k] = true
+			}
+		}
+	}
 
 	for _, eventRow := range events {
 		switch eventRow.eventType {
@@ -333,13 +417,15 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 			mappedBodies[key] = true
 			metrics.BodiesMapped++
 			scan := scans[key]
-			if scan == nil {
+			if scan == nil && !missingScans[key] {
 				var lookupError error
 				if scan, lookupError = engine.lookupScan(key, eventRow.timestamp); lookupError != nil {
 					return metrics, lookupError
 				}
 				if scan != nil {
 					scans[key] = scan
+				} else {
+					missingScans[key] = true
 				}
 			}
 			if scan == nil {
@@ -360,7 +446,7 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 			}
 			metrics.OrganicSamples++
 			baseValue := ed.SpeciesBaseValue(organicEvent.Species, organicEvent.SpeciesLocalised, organicEvent.Genus)
-			firstLoggedBonus, checkError := engine.firstLogged(&organicEvent, scans, eventRow.timestamp)
+			firstLoggedBonus, checkError := engine.firstLogged(&organicEvent, scans, missingScans, eventRow.timestamp)
 			if checkError != nil {
 				return metrics, checkError
 			}
@@ -376,19 +462,21 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 // firstLogged decides whether the first-logged (5x) bonus applies. The
 // ScanOrganic WasLogged flag is authoritative when the journal provides it;
 // older journals fall back to the parent body's Scan WasFootfalled == false.
-func (engine *Engine) firstLogged(organicEvent *journal.ScanOrganicEvent, scans map[bodyKey]*journal.ScanEvent, timestamp string) (bool, error) {
+func (engine *Engine) firstLogged(organicEvent *journal.ScanOrganicEvent, scans map[bodyKey]*journal.ScanEvent, missingScans map[bodyKey]bool, timestamp string) (bool, error) {
 	if organicEvent.WasLogged != nil {
 		return !*organicEvent.WasLogged, nil
 	}
 	key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}
 	scan := scans[key]
-	if scan == nil {
+	if scan == nil && !missingScans[key] {
 		var lookupError error
 		if scan, lookupError = engine.lookupScan(key, timestamp); lookupError != nil {
 			return false, lookupError
 		}
 		if scan != nil {
 			scans[key] = scan
+		} else {
+			missingScans[key] = true
 		}
 	}
 	if scan == nil || scan.WasFootfalled == nil {

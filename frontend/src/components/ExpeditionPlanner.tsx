@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   AddRow,
   ClearActiveCarrierRoute,
@@ -19,16 +19,15 @@ import {
 import { app, expedition } from '../../wailsjs/go/models'
 import { formatLy } from '../utils/galacticTime'
 import {
-  AutoExpandingTextarea,
   CarrierRouteBottomPanel,
-  CoordStatusIndicator,
-  HoverOpenInLinks,
   LegBanner,
   RegionHeaderDropdown,
   RowManipulationButtons,
   StatusBadge,
   WaypointDetailsDrawer,
 } from './PlannerWidgets'
+import { CarrierRouteModal, type CarrierRoutePromptState } from './CarrierRouteModal'
+import { WaypointRowItem } from './WaypointRowItem'
 
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
@@ -37,15 +36,6 @@ export interface ExpeditionPlannerProps {
   onRefreshPlan: () => void
   onRefreshAll: () => void
   onBusyChange: (busyMessage: string | null) => void
-}
-
-interface CarrierRoutePromptState {
-  targetRowId: number
-  origin: string
-  destination: string
-  capacityUsed: string
-  carrierType: 'player' | 'squadron'
-  loading: boolean
 }
 
 const rowStyle: CSSProperties = {
@@ -183,6 +173,9 @@ export function ExpeditionPlanner({
     }, 1500)
   }
 
+  // Keep track of which row currently has user focus so background updates don't clobber active typing
+  const editingRowIdRef = useRef<number | null>(null)
+
   // Local draft inputs so typing in spreadsheet cells is instantaneous
   const [drafts, setDrafts] = useState<
     Record<number, { systemName: string; poiName: string; notes: string }>
@@ -190,16 +183,24 @@ export function ExpeditionPlanner({
 
   useEffect(() => {
     if (!plan || !plan.rows) return
-    const next: Record<number, { systemName: string; poiName: string; notes: string }> = {}
-    for (const rowView of plan.rows ?? []) {
-      if (!rowView?.row) continue
-      next[rowView.row.id] = {
-        systemName: rowView.row.systemName ?? '',
-        poiName: rowView.row.poiName ?? '',
-        notes: rowView.row.notes ?? '',
+    setDrafts((prev) => {
+      const next: Record<number, { systemName: string; poiName: string; notes: string }> = { ...prev }
+      const activeEditingId = editingRowIdRef.current
+      for (const rowView of plan.rows ?? []) {
+        if (!rowView?.row) continue
+        const rowId = rowView.row.id
+        // Never clobber the row that is currently focused and being typed into
+        if (rowId === activeEditingId && prev[rowId]) {
+          continue
+        }
+        next[rowId] = {
+          systemName: rowView.row.systemName ?? '',
+          poiName: rowView.row.poiName ?? '',
+          notes: rowView.row.notes ?? '',
+        }
       }
-    }
-    setDrafts(next)
+      return next
+    })
   }, [plan])
 
   // Refresh open drawers when plan updates
@@ -256,7 +257,6 @@ export function ExpeditionPlanner({
           [field]: value,
         }),
       )
-      onRefreshPlan()
     } finally {
       onBusyChange(null)
     }
@@ -943,8 +943,8 @@ export function ExpeditionPlanner({
                             onToggleInsertMenu={() =>
                               setInsertMenuAfterId(insertMenuAfterId === row.id ? null : row.id)
                             }
-                            onInsert={(type) => handleInsert(row.id, type)}
-                            onMove={(targetIndex) => handleMoveRow(row.id, index, targetIndex)}
+                            onInsert={(insertType: 'waypoint' | 'region') => handleInsert(row.id, insertType)}
+                            onMove={(targetIndex: number) => handleMoveRow(row.id, index, targetIndex)}
                             onDelete={() => handleDeleteRow(row.id)}
                           />
                           <button
@@ -1002,329 +1002,65 @@ export function ExpeditionPlanner({
               }
 
               const isExpanded = Boolean(expandedRowIds[row.id])
-              const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
               const draft = drafts[row.id] ?? {
                 systemName: row.systemName ?? '',
                 poiName: row.poiName ?? '',
                 notes: row.notes ?? '',
               }
-
-              const isNextFcStop = row.fcStop && !row.fcArrived && row.id === plan.nextFcStopRowId
+              const isNextFcStop = Boolean(row.fcStop && !row.fcArrived && row.id === plan.nextFcStopRowId)
+              const hasActiveCarrierRoute = Boolean(activeCarrierRoute && activeCarrierTargetRowId === row.id)
 
               return (
-                <tr
+                <WaypointRowItem
                   key={item.key}
-                  style={rowStyle}
-                  {...getRowDropProps(index, isDraggable)}
-                  className={`group align-top ${
-                    isBeingDragged ? 'opacity-40' : ''
-                  } ${isDragTarget ? 'outline-2 outline-[#00D2FF]' : ''} ${
-                    isVisited
-                      ? 'bg-[#120e09] hover:bg-[#1b140d] text-[#F4ECE4]'
-                      : 'bg-[#090705] hover:bg-[#16100b] text-[#F4ECE4]'
-                  }`}
-                >
-                  {/* Expand Chevron */}
-                  {!isPlanning && (
-                    <td
-                      className={`px-1.5 py-1.5 text-center align-top border-b border-[#24180e] ${
-                        isVisited ? 'border-l-2 border-l-[#FF7100]' : ''
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleExpand(row.id)}
-                        title="Toggle per-waypoint leg telemetry / distance drawer"
-                        className={`p-1 hover:bg-[#24180e] cursor-pointer mt-0.5 ${
-                          isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
-                        }`}
-                      >
-                        <svg
-                          className={`w-3.5 h-3.5 transition-transform ${
-                            isExpanded ? 'rotate-90' : ''
-                          }`}
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.25 4.5a.75.75 0 01-1.06-.02z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      </button>
-                    </td>
-                  )}
-
-                  {/* Sequential Waypoint # (skips Region Headers) */}
-                  <td
-                    className={`px-2 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top border-b border-[#24180e] ${
-                      isPlanning && isVisited ? 'border-l-2 border-l-[#FF7100]' : ''
-                    }`}
-                  >
-                    <div className="py-1">
-                      {String(rowView.number).padStart(2, '0')}
-                    </div>
-                  </td>
-
-                  {/* System Name (EDSM indicator on left + system name + copy button) */}
-                  <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <CoordStatusIndicator rowView={rowView} />
-                      <div className="flex-1 min-w-0 flex items-center gap-1">
-                        {isLocked ? (
-                          <span
-                            title={row.systemName}
-                            className="font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-1 select-text cursor-text truncate block"
-                          >
-                            {row.systemName || '—'}
-                          </span>
-                        ) : (
-                          <input
-                            type="text"
-                            spellCheck={false}
-                            value={draft.systemName}
-                            placeholder="Star System"
-                            onChange={(event) =>
-                              setDrafts((previous) => ({
-                                ...previous,
-                                [row.id]: { ...draft, systemName: event.target.value },
-                              }))
-                            }
-                            onBlur={(event) => commitField(row, 'systemName', event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                ;(event.target as HTMLInputElement).blur()
-                              }
-                            }}
-                            className="w-full bg-transparent px-1.5 py-1 border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none font-mono-tabular font-bold text-[#F4ECE4] placeholder:text-[#6e5b4b] select-text"
-                          />
-                        )}
-                        {row.systemName && (
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleCopySystem(row.id, row.systemName)
-                            }}
-                            title={`Copy "${row.systemName}" to clipboard`}
-                            className="p-1 text-[#6e5b4b] hover:text-[#FF7100] hover:bg-[#1f150d] cursor-pointer shrink-0"
-                          >
-                            {copiedSystemRowId === row.id ? (
-                              <span className="text-[10px] font-mono-tabular font-bold text-[#00D2FF]">
-                                ✓
-                              </span>
-                            ) : (
-                              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M7 3.5A1.5 1.5 0 018.5 2h3.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0117 6.622V12.5a1.5 1.5 0 01-1.5 1.5h-1v-3.379a3 3 0 00-.879-2.121L10.5 5.379A3 3 0 008.379 4.5H7v-1z" />
-                                <path d="M4.5 6A1.5 1.5 0 003 7.5v9A1.5 1.5 0 004.5 18h7a1.5 1.5 0 001.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06L9.44 6.44A1.5 1.5 0 008.379 6H4.5z" />
-                              </svg>
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* POI Name (always editable, auto-expands up to 3 lines) */}
-                  <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
-                    <AutoExpandingTextarea
-                      value={draft.poiName}
-                      placeholder="POI Name"
-                      maxLines={3}
-                      onChange={(value) =>
-                        setDrafts((previous) => ({
-                          ...previous,
-                          [row.id]: { ...draft, poiName: value },
-                        }))
-                      }
-                      onBlur={(value) => commitField(row, 'poiName', value)}
-                      className="text-[#F4ECE4] placeholder:text-[#6e5b4b]"
-                    />
-                  </td>
-
-                  {/* Flight Notes (always editable, auto-expands up to 3 lines) */}
-                  <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
-                    <AutoExpandingTextarea
-                      value={draft.notes}
-                      placeholder="Flight notes, reminders..."
-                      maxLines={3}
-                      onChange={(value) =>
-                        setDrafts((previous) => ({
-                          ...previous,
-                          [row.id]: { ...draft, notes: value },
-                        }))
-                      }
-                      onBlur={(value) => commitField(row, 'notes', value)}
-                      className="text-[#d6c7b8] placeholder:text-[#6e5b4b]"
-                    />
-                  </td>
-
-                  {/* Carrier Stop (Moved here between notes and telemetry; no bare checkbox) */}
-                  <td className="px-2 py-1.5 text-center align-top border-b border-[#24180e]">
-                    <div className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap py-0.5">
-                      {row.fcStop ? (
-                        <>
-                          {isPlanning ? (
-                            <span
-                              title="Designated Fleet Carrier Stop for this expedition"
-                              className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#120d09] text-[#a6907c] border border-[#3d2816] select-none"
-                            >
-                              FC STOP
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setFcArrived(row.id, !row.fcArrived)}
-                              title={
-                                row.fcArrived
-                                  ? 'Carrier has arrived at this waypoint (click to mark pending)'
-                                  : 'Carrier has not yet arrived (click to mark arrived)'
-                              }
-                              className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border cursor-pointer ${
-                                row.fcArrived
-                                  ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70 hover:bg-[#FF7100] hover:text-[#050506]'
-                                  : 'bg-[#120d09] text-[#a6907c] border-[#3d2816] hover:border-[#FF7100] hover:text-[#F4ECE4]'
-                              }`}
-                            >
-                              {row.fcArrived ? '✓ ARRIVED' : 'PENDING'}
-                            </button>
-                          )}
-
-                          {!isPlanning && isNextFcStop && (
-                            activeCarrierRoute && activeCarrierTargetRowId === row.id ? (
-                              <span
-                                title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
-                                className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
-                              >
-                                ROUTING
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => openCarrierRoutePrompt(index, row)}
-                                title="Plot Fleet Carrier route to this next carrier waypoint"
-                                className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
-                              >
-                                ROUTE
-                              </button>
-                            )
-                          )}
-
-                          {!isLocked && (
-                            <button
-                              type="button"
-                              onClick={() => toggleFcStop(row)}
-                              title="Remove Fleet Carrier stop designation"
-                              className="h-5 w-4 inline-flex items-center justify-center text-xs text-[#6e5b4b] hover:text-[#ff3b2f] cursor-pointer"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </>
-                      ) : !isLocked ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleFcStop(row)}
-                          title="Designate this waypoint as a Fleet Carrier stop"
-                          className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-[#6e5b4b] hover:text-[#FF7100] border border-dashed border-[#2e1f12] hover:border-[#FF7100] bg-transparent hover:bg-[#16100b] cursor-pointer"
-                        >
-                          + FC STOP
-                        </button>
-                      ) : (
-                        <span className="text-[#6e5b4b] font-mono-tabular text-[10px]">—</span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Visit Status / Galactic Timestamp */}
-                  <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
-                    {isVisited ? (
-                      <div className="space-y-0.5 py-0.5">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-[#FF7100]">
-                          ■ LOGGED VISIT
-                        </span>
-                        <div className="font-mono-tabular text-[10px] text-[#a6907c]">
-                          {rowView.visitedAtGalactic}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="font-mono-tabular text-[11px] text-[#a6907c] py-0.5">
-                        {rowView.number === 1 ? (
-                          row.systemName?.trim() ? (
-                            <span
-                              className="text-[#00D2FF]"
-                              title="Starting Waypoint (Origin)"
-                            >
-                              +0 Ly
-                            </span>
-                          ) : (
-                            <span className="text-[#6e5b4b]">—</span>
-                          )
-                        ) : rowView.distFromPrevLy !== undefined ? (
-                          <span
-                            className="text-[#00D2FF]"
-                            title="Estimated straight-line distance from previous waypoint"
-                          >
-                            +{formatLy(rowView.distFromPrevLy, 1)}
-                          </span>
-                        ) : (
-                          <span
-                            className="text-[#6e5b4b] uppercase text-[10px]"
-                            title={
-                              row.systemName?.trim()
-                                ? 'Coordinates unknown for this waypoint or preceding waypoint'
-                                : undefined
-                            }
-                          >
-                            {row.systemName?.trim() ? 'UNKNOWN' : '—'}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </td>
-
-                  {/* External Links + Row Manipulation + Drag Handle on the far right */}
-                  <td className="px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
-                    <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap py-0.5">
-                      <HoverOpenInLinks rowView={rowView} />
-                      {!isLocked && (
-                        <>
-                          <RowManipulationButtons
-                            index={index}
-                            minIndex={lastVisitedIndex + 1}
-                            total={plan.rows?.length ?? 0}
-                            rowId={row.id}
-                            insertMenuOpen={insertMenuAfterId === row.id}
-                            onToggleInsertMenu={() =>
-                              setInsertMenuAfterId(insertMenuAfterId === row.id ? null : row.id)
-                            }
-                            onInsert={(type) => handleInsert(row.id, type)}
-                            onMove={(targetIndex) => handleMoveRow(row.id, index, targetIndex)}
-                            onDelete={() => handleDeleteRow(row.id)}
-                          />
-                          <button
-                            type="button"
-                            draggable={true}
-                            onDragStart={(event) => {
-                              setDraggedIndex(index)
-                              event.dataTransfer.effectAllowed = 'move'
-                              event.dataTransfer.setData('text/plain', String(row.id))
-                            }}
-                            onDragEnd={() => {
-                              setDraggedIndex(null)
-                              setDragOverIndex(null)
-                            }}
-                            title="Drag to reorder waypoint"
-                            className="h-5 px-1.5 inline-flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] cursor-grab active:cursor-grabbing font-mono-tabular select-none border border-[#2e1f12] bg-[#140e09] hover:bg-[#24180e] text-xs shrink-0"
-                          >
-                            ⋮⋮
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                  rowView={rowView}
+                  index={index}
+                  isPlanning={isPlanning}
+                  isLocked={isLocked}
+                  isBeingDragged={isBeingDragged}
+                  isDragTarget={isDragTarget}
+                  isExpanded={isExpanded}
+                  isNextFcStop={isNextFcStop}
+                  hasActiveCarrierRoute={hasActiveCarrierRoute}
+                  draft={draft}
+                  copiedSystemRowId={copiedSystemRowId}
+                  insertMenuOpen={insertMenuAfterId === row.id}
+                  lastVisitedIndex={lastVisitedIndex}
+                  totalRows={plan.rows?.length ?? 0}
+                  rowStyle={rowStyle}
+                  dropProps={getRowDropProps(index, isDraggable)}
+                  onToggleExpand={toggleExpand}
+                  onDraftChange={(id, field, val) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [id]: { ...(prev[id] ?? draft), [field]: val },
+                    }))
+                  }
+                  onFieldFocus={(id) => {
+                    editingRowIdRef.current = id
+                  }}
+                  onFieldBlur={(r, field, val) => {
+                    editingRowIdRef.current = null
+                    commitField(r, field, val)
+                  }}
+                  onCopySystem={handleCopySystem}
+                  onToggleFcStop={toggleFcStop}
+                  onSetFcArrived={setFcArrived}
+                  onOpenCarrierRoutePrompt={openCarrierRoutePrompt}
+                  onToggleInsertMenu={(id) => setInsertMenuAfterId(insertMenuAfterId === id ? null : id)}
+                  onInsert={handleInsert}
+                  onMove={(id, targetIndex) => handleMoveRow(id, index, targetIndex)}
+                  onDelete={handleDeleteRow}
+                  onDragStart={(idx, id, event) => {
+                    setDraggedIndex(idx)
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', String(id))
+                  }}
+                  onDragEnd={() => {
+                    setDraggedIndex(null)
+                    setDragOverIndex(null)
+                  }}
+                />
               )
             })}
           </tbody>
@@ -1424,139 +1160,14 @@ export function ExpeditionPlanner({
 
       {/* Carrier Route Setup Prompt Modal */}
       {routePrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md border border-[#3d2816] border-t-2 border-t-[#00D2FF] bg-[#0b0907] shadow-2xl overflow-hidden text-xs">
-            <div className="px-4 py-3 bg-[#140e09] border-b border-[#3d2816] flex items-center justify-between">
-              <h3 className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#00D2FF]">
-                Fleet Carrier Navigation Plotter
-              </h3>
-              <button
-                type="button"
-                disabled={routePrompt.loading}
-                onClick={() => setRoutePrompt(null)}
-                className="text-[#a6907c] hover:text-[#F4ECE4] text-base leading-none cursor-pointer"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3.5">
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
-                    Origin System
-                  </label>
-                  <input
-                    type="text"
-                    value={routePrompt.origin}
-                    onChange={(event) =>
-                      setRoutePrompt((previous) => (previous ? { ...previous, origin: event.target.value } : null))
-                    }
-                    placeholder="Origin system..."
-                    className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
-                    Destination Waypoint
-                  </label>
-                  <input
-                    type="text"
-                    value={routePrompt.destination}
-                    onChange={(event) =>
-                      setRoutePrompt((previous) => (previous ? { ...previous, destination: event.target.value } : null))
-                    }
-                    placeholder="Destination system..."
-                    className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
-                  Vessel Classification
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRoutePrompt((previous) => (previous ? { ...previous, carrierType: 'player' } : null))
-                    }
-                    className={`px-3 py-2 font-bold uppercase tracking-wider border transition cursor-pointer ${
-                      routePrompt.carrierType === 'player'
-                        ? 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] border-l-3'
-                        : 'bg-[#120d09] text-[#a6907c] border-[#2e1f12] hover:text-[#F4ECE4]'
-                    }`}
-                  >
-                    Personal Carrier
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRoutePrompt((previous) => (previous ? { ...previous, carrierType: 'squadron' } : null))
-                    }
-                    className={`px-3 py-2 font-bold uppercase tracking-wider border transition cursor-pointer ${
-                      routePrompt.carrierType === 'squadron'
-                        ? 'bg-[#211307] text-[#FF7100] border-[#FF7100] border-l-3'
-                        : 'bg-[#120d09] text-[#a6907c] border-[#2e1f12] hover:text-[#F4ECE4]'
-                    }`}
-                  >
-                    Squadron Carrier
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
-                  Carrier Used Capacity (Tonnes, 0 – 25,000)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={25000}
-                  value={routePrompt.capacityUsed}
-                  onChange={(event) =>
-                    setRoutePrompt((previous) => (previous ? { ...previous, capacityUsed: event.target.value } : null))
-                  }
-                  className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
-                />
-                <p className="text-[10px] text-[#a6907c] mt-1">
-                  Pre-filled from your latest CarrierStats event. Used by Spansh to compute per-jump
-                  Tritium consumption.
-                </p>
-              </div>
-            </div>
-
-            <div className="px-4 py-3 bg-[#140e09] border-t border-[#3d2816] flex items-center justify-between gap-2">
-              <button
-                type="button"
-                disabled={routePrompt.loading}
-                onClick={() => handleStartCarrierRoute(true)}
-                className="ed-btn"
-              >
-                Manual Entry Mode
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={routePrompt.loading}
-                  onClick={() => setRoutePrompt(null)}
-                  className="px-3 py-1.5 text-[#a6907c] hover:text-[#F4ECE4] uppercase font-bold tracking-wider cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={routePrompt.loading}
-                  onClick={() => handleStartCarrierRoute(false)}
-                  className="ed-btn-cyan"
-                >
-                  {routePrompt.loading ? 'QUERYING SPANSH...' : 'PLOT VIA SPANSH'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <CarrierRouteModal
+          prompt={routePrompt}
+          onClose={() => setRoutePrompt(null)}
+          onUpdate={(updater) =>
+            setRoutePrompt((prev) => (prev ? updater(prev) : null))
+          }
+          onStart={handleStartCarrierRoute}
+        />
       )}
     </div>
   )

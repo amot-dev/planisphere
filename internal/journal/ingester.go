@@ -148,21 +148,16 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 		_ = transaction.QueryRow(`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`, name).Scan(&prevCmdr)
 		currentCmdr = prevCmdr.String
 
+		// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
 		stmt, prepError := transaction.Prepare(`INSERT INTO journal_events
 			(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
 			 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(event_uid) DO UPDATE SET
-				commander = COALESCE(NULLIF(excluded.commander, ''), journal_events.commander)`)
+			ON CONFLICT(event_uid) DO NOTHING`)
 		if prepError != nil {
 			return prepError
 		}
 		defer stmt.Close()
-		existStmt, prepExistError := transaction.Prepare(`SELECT 1 FROM journal_events WHERE event_uid = ?`)
-		if prepExistError != nil {
-			return prepExistError
-		}
-		defer existStmt.Close()
 		cmdrStmt, prepCmdrError := transaction.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
 			VALUES(?, ?, 1, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
@@ -206,14 +201,13 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 			if parsedEvent.StarPos != nil {
 				xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
 			}
-			var existed int
-			_ = existStmt.QueryRow(parsedEvent.UID).Scan(&existed)
-			_, execError := stmt.Exec(parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event, nullStr(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
+			execResult, execError := stmt.Exec(parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event, nullStr(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
 				nullStr(parsedEvent.BodyName), xCoord, yCoord, zCoord, nullStr(parsedEvent.Commander), name, parsedEvent.Raw, now)
 			if execError != nil {
 				return execError
 			}
-			if existed == 0 {
+			rowsAffected, _ := execResult.RowsAffected()
+			if rowsAffected > 0 {
 				state.stored++
 				result.NewEvents = append(result.NewEvents, parsedEvent)
 				if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
@@ -390,6 +384,7 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 	reportProgress(0, total, 0, "Ingesting historical journal events into SQLite archive…")
 
 	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
+		// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
 		stmt, prepError := transaction.Prepare(`INSERT INTO journal_events
 			(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
 			 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)

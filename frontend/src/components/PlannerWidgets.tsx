@@ -1012,6 +1012,7 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
   placeholder,
   onChange,
   onBlur,
+  onFocus,
   className = '',
   maxLines = 3,
 }: {
@@ -1019,6 +1020,7 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
   placeholder: string
   onChange: (value: string) => void
   onBlur: (value: string) => void
+  onFocus?: () => void
   className?: string
   maxLines?: number
 }) {
@@ -1064,6 +1066,7 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
       onFocus={() => {
         setIsFocused(true)
         adjustHeight()
+        onFocus?.()
       }}
       onChange={(event) => {
         onChange(event.target.value)

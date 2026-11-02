@@ -74,9 +74,10 @@ type App struct {
 	scanning    atomic.Bool
 	lastErrorMu sync.Mutex
 	lastError   string
-	resolveMu   sync.Mutex
-	resolving  map[int64]bool
-	resolveSem chan struct{}
+	resolveMu            sync.Mutex
+	resolving            map[int64]bool
+	resolvingExpeditions map[int64]bool
+	resolveSem           chan struct{}
 
 	allTimeMu      sync.Mutex
 	allTimeValid   bool
@@ -88,7 +89,11 @@ type App struct {
 
 // New creates the application service.
 func New() *App {
-	return &App{resolving: map[int64]bool{}, resolveSem: make(chan struct{}, 1)}
+	return &App{
+		resolving:            map[int64]bool{},
+		resolvingExpeditions: map[int64]bool{},
+		resolveSem:           make(chan struct{}, 1),
+	}
 }
 
 var timeNow = func() time.Time { return time.Now().UTC() }
@@ -268,6 +273,7 @@ func (app *App) invalidateAllTimeCache() {
 	app.allTimeMu.Lock()
 	app.allTimeValid = false
 	app.allTimeMu.Unlock()
+	expedition.InvalidateShipCache()
 }
 
 func (app *App) getAllTimeMetrics() (stats.Metrics, error) {
@@ -338,81 +344,137 @@ func (app *App) maybeRefreshGEC() {
 // kickResolution resolves coordinates for waypoints of an expedition that
 // don't have them yet. allowRetry also retries rows previously marked
 // not-found (journal lookup first, so a visit fills them in offline).
+// Runs in a single sequential worker goroutine per expedition to avoid
+// goroutine explosion and excessive database re-evaluation spam.
 func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	if expeditionID == 0 {
 		return
 	}
-	rows, listError := expedition.ListRows(app.db, expeditionID)
-	if listError != nil {
-		return
-	}
-	for _, rowItem := range rows {
-		if !rowItem.IsWaypoint() || rowItem.SystemName == "" || rowItem.HasCoords {
-			continue
-		}
-		switch rowItem.CoordsSource {
-		case "":
-			app.resolveRowAsync(rowItem, true)
-		case "notfound", "error":
-			// Only retry against the local journal (cheap) unless asked.
-			app.resolveRowAsync(rowItem, allowRetry)
-		}
-	}
-}
-
-func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 	app.resolveMu.Lock()
-	if app.resolving[rowItem.ID] {
+	if app.resolvingExpeditions[expeditionID] {
 		app.resolveMu.Unlock()
 		return
 	}
-	app.resolving[rowItem.ID] = true
+	app.resolvingExpeditions[expeditionID] = true
 	app.resolveMu.Unlock()
 
 	go func() {
 		defer func() {
 			app.resolveMu.Lock()
-			delete(app.resolving, rowItem.ID)
+			delete(app.resolvingExpeditions, expeditionID)
 			app.resolveMu.Unlock()
 		}()
-		var systemInfo *systems.Info
-		var lookupError error
-		if online {
-			app.resolveSem <- struct{}{}
-			systemInfo, lookupError = app.resolver.Resolve(app.ctx, rowItem.SystemName)
-			<-app.resolveSem
-		} else {
-			systemInfo, lookupError = systems.FromJournal(app.db, rowItem.SystemName)
-			if systemInfo == nil && lookupError == nil {
-				return
-			}
-		}
-		source := "error"
-		var systemAddress, edsmID int64
-		var positionCoords *ed.Vec3
-		switch {
-		case systemInfo != nil && systemInfo.Pos != nil:
-			source, systemAddress, edsmID, positionCoords = systemInfo.Source, systemInfo.SystemAddress, systemInfo.EDSMID, systemInfo.Pos
-		case systemInfo != nil:
-			source = "notfound"
-		case lookupError != nil && strings.Contains(lookupError.Error(), systems.ErrorNotFound.Error()):
-			source = "notfound"
-		}
-		if setCoordsError := expedition.SetRowCoords(app.db, rowItem.ID, rowItem.SystemName, systemAddress, edsmID, positionCoords, source); setCoordsError != nil {
-			log.Printf("store coords: %v", setCoordsError)
+
+		rows, listError := expedition.ListRows(app.db, expeditionID)
+		if listError != nil {
 			return
 		}
-		// Populate POI name from EDAstro GEC/GMP if the waypoint does not already have one set
-		var curPOIName string
-		_ = app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&curPOIName)
-		if strings.TrimSpace(curPOIName) == "" {
-			if matchedPOIs := app.gec.Lookup(rowItem.SystemName, systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
-				poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-				_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID)
+		anyCoords := false
+		anyUpdated := false
+		lastEmit := time.Now()
+		for _, rowItem := range rows {
+			if app.ctx != nil && app.ctx.Err() != nil {
+				break
+			}
+			if !rowItem.IsWaypoint() || rowItem.SystemName == "" || rowItem.HasCoords {
+				continue
+			}
+			online := false
+			switch rowItem.CoordsSource {
+			case "":
+				online = true
+			case "notfound", "error":
+				online = allowRetry
+			default:
+				continue
+			}
+			resolvedCoords, updated := app.resolveRowSync(rowItem, online)
+			if updated {
+				anyUpdated = true
+				if resolvedCoords {
+					anyCoords = true
+				}
+				if time.Since(lastEmit) > 1*time.Second {
+					if anyCoords {
+						app.reevaluate(expeditionID)
+					}
+					app.changed("plan", expeditionID)
+					lastEmit = time.Now()
+				}
 			}
 		}
-		app.reevaluate(rowItem.ExpeditionID)
-		app.changed("plan", rowItem.ExpeditionID)
+		if anyUpdated {
+			if anyCoords {
+				app.reevaluate(expeditionID)
+			}
+			app.changed("plan", expeditionID)
+		}
+	}()
+}
+
+func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoords bool, updated bool) {
+	app.resolveMu.Lock()
+	if app.resolving[rowItem.ID] {
+		app.resolveMu.Unlock()
+		return false, false
+	}
+	app.resolving[rowItem.ID] = true
+	app.resolveMu.Unlock()
+
+	defer func() {
+		app.resolveMu.Lock()
+		delete(app.resolving, rowItem.ID)
+		app.resolveMu.Unlock()
+	}()
+
+	var systemInfo *systems.Info
+	var lookupError error
+	if online {
+		app.resolveSem <- struct{}{}
+		systemInfo, lookupError = app.resolver.Resolve(app.ctx, rowItem.SystemName)
+		<-app.resolveSem
+	} else {
+		systemInfo, lookupError = systems.FromJournal(app.db, rowItem.SystemName)
+		if systemInfo == nil && lookupError == nil {
+			return false, false
+		}
+	}
+	source := "error"
+	var systemAddress, edsmID int64
+	var positionCoords *ed.Vec3
+	switch {
+	case systemInfo != nil && systemInfo.Pos != nil:
+		source, systemAddress, edsmID, positionCoords = systemInfo.Source, systemInfo.SystemAddress, systemInfo.EDSMID, systemInfo.Pos
+	case systemInfo != nil:
+		source = "notfound"
+	case lookupError != nil && strings.Contains(lookupError.Error(), systems.ErrorNotFound.Error()):
+		source = "notfound"
+	}
+	if setCoordsError := expedition.SetRowCoords(app.db, rowItem.ID, rowItem.SystemName, systemAddress, edsmID, positionCoords, source); setCoordsError != nil {
+		log.Printf("store coords: %v", setCoordsError)
+		return false, false
+	}
+	// Populate POI name from EDAstro GEC/GMP if the waypoint does not already have one set
+	var curPOIName string
+	_ = app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&curPOIName)
+	if strings.TrimSpace(curPOIName) == "" {
+		if matchedPOIs := app.gec.Lookup(rowItem.SystemName, systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
+			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
+			_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID)
+		}
+	}
+	return positionCoords != nil, true
+}
+
+func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
+	go func() {
+		resolvedCoords, updated := app.resolveRowSync(rowItem, online)
+		if updated {
+			if resolvedCoords {
+				app.reevaluate(rowItem.ExpeditionID)
+			}
+			app.changed("plan", rowItem.ExpeditionID)
+		}
 	}()
 }
 

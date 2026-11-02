@@ -3,8 +3,10 @@ package expedition
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"planisphere/internal/db"
@@ -88,37 +90,130 @@ type shipState struct {
 	name      string
 }
 
-func loadShipTimeline(queryer db.Queryer) ([]shipState, error) {
-	rows, queryError := queryer.Query(`SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp, id`)
-	if queryError != nil {
-		return nil, queryError
+var (
+	shipCacheMu      sync.Mutex
+	shipCacheMap     = make(map[string][]shipState)
+	lastMaxJournalID int64 = -1
+)
+
+// InvalidateShipCache clears the cached ship timeline states.
+func InvalidateShipCache() {
+	shipCacheMu.Lock()
+	lastMaxJournalID = -1
+	shipCacheMap = make(map[string][]shipState)
+	shipCacheMu.Unlock()
+}
+
+func parseShipState(timestamp, eventType, rawJSON string) (shipState, bool) {
+	var state shipState
+	state.timestamp = timestamp
+	switch eventType {
+	case "LoadGame":
+		var loadGameEvent journal.LoadGameEvent
+		if json.Unmarshal([]byte(rawJSON), &loadGameEvent) != nil || loadGameEvent.Ship == "" || !isShip(loadGameEvent.Ship) {
+			return shipState{}, false
+		}
+		state.id, state.name = loadGameEvent.ShipID, ed.ShipDisplayName(loadGameEvent.Ship, loadGameEvent.ShipLocalised)
+	case "ShipyardSwap":
+		var swapEvent journal.ShipyardSwapEvent
+		if json.Unmarshal([]byte(rawJSON), &swapEvent) != nil || swapEvent.ShipType == "" {
+			return shipState{}, false
+		}
+		state.id, state.name = swapEvent.ShipID, ed.ShipDisplayName(swapEvent.ShipType, swapEvent.ShipTypeLocalised)
+	default:
+		return shipState{}, false
+	}
+	return state, true
+}
+
+// fetchShipStates clamps timeline scans to the expedition window plus the latest active ship beforehand.
+func fetchShipStates(queryer db.Queryer, startTimestamp, endTimestamp string) ([]shipState, error) {
+	var states []shipState
+
+	if startTimestamp != "" {
+		shipFilter := `(event = 'ShipyardSwap' OR (json_extract(raw_json, '$.Ship') IS NOT NULL AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%suit%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%buggy%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%srv%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%fighter%'))`
+		rows, err := queryer.Query(`SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND timestamp <= ? AND `+shipFilter+` AND `+journal.CmdrFilterSQL+` ORDER BY timestamp DESC, id DESC LIMIT 1`, startTimestamp)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var timestamp, eventType, rawJSON string
+			if scanErr := rows.Scan(&timestamp, &eventType, &rawJSON); scanErr != nil {
+				rows.Close()
+				return nil, scanErr
+			}
+			if state, ok := parseShipState(timestamp, eventType, rawJSON); ok {
+				states = append(states, state)
+			}
+		}
+		if closeErr := rows.Close(); closeErr != nil {
+			return nil, closeErr
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return nil, rowsErr
+		}
+	}
+
+	query := `SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap')`
+	var args []any
+	if startTimestamp != "" {
+		query += ` AND timestamp > ?`
+		args = append(args, startTimestamp)
+	}
+	if endTimestamp != "" {
+		query += ` AND timestamp <= ?`
+		args = append(args, endTimestamp)
+	}
+	query += ` AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp, id`
+	rows, err := queryer.Query(query, args...)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
-	var states []shipState
 	for rows.Next() {
 		var timestamp, eventType, rawJSON string
-		if scanError := rows.Scan(&timestamp, &eventType, &rawJSON); scanError != nil {
-			return nil, scanError
+		if scanErr := rows.Scan(&timestamp, &eventType, &rawJSON); scanErr != nil {
+			return nil, scanErr
 		}
-		var state shipState
-		state.timestamp = timestamp
-		switch eventType {
-		case "LoadGame":
-			var loadGameEvent journal.LoadGameEvent
-			if json.Unmarshal([]byte(rawJSON), &loadGameEvent) != nil || loadGameEvent.Ship == "" || !isShip(loadGameEvent.Ship) {
-				continue
-			}
-			state.id, state.name = loadGameEvent.ShipID, ed.ShipDisplayName(loadGameEvent.Ship, loadGameEvent.ShipLocalised)
-		case "ShipyardSwap":
-			var swapEvent journal.ShipyardSwapEvent
-			if json.Unmarshal([]byte(rawJSON), &swapEvent) != nil || swapEvent.ShipType == "" {
-				continue
-			}
-			state.id, state.name = swapEvent.ShipID, ed.ShipDisplayName(swapEvent.ShipType, swapEvent.ShipTypeLocalised)
+		if state, ok := parseShipState(timestamp, eventType, rawJSON); ok {
+			states = append(states, state)
 		}
-		states = append(states, state)
 	}
 	return states, rows.Err()
+}
+
+func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) ([]shipState, error) {
+	var maxID int64
+	err := queryer.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM journal_events`).Scan(&maxID)
+	if err != nil {
+		// Non-standard queryer or table not available; bypass cache
+		return fetchShipStates(queryer, startTimestamp, endTimestamp)
+	}
+
+	cacheKey := fmt.Sprintf("%s|%s", startTimestamp, endTimestamp)
+
+	shipCacheMu.Lock()
+	if maxID != lastMaxJournalID {
+		shipCacheMap = make(map[string][]shipState)
+		lastMaxJournalID = maxID
+	} else if cached, ok := shipCacheMap[cacheKey]; ok {
+		shipCacheMu.Unlock()
+		return cached, nil
+	}
+	shipCacheMu.Unlock()
+
+	states, err := fetchShipStates(queryer, startTimestamp, endTimestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	shipCacheMu.Lock()
+	if maxID == lastMaxJournalID {
+		shipCacheMap[cacheKey] = states
+	}
+	shipCacheMu.Unlock()
+
+	return states, nil
 }
 
 // isShip filters out on-foot suits, SRVs and fighters reported by LoadGame.
@@ -136,8 +231,15 @@ func shipAt(timeline []shipState, timestamp string) *shipState {
 	return &timeline[segmentIndex]
 }
 
-func loadJumpTimestamps(queryer db.Queryer, after string) ([]string, error) {
-	rows, queryError := queryer.Query(`SELECT timestamp FROM journal_events WHERE event = 'FSDJump' AND timestamp >= ? AND `+journal.CmdrFilterSQL+` ORDER BY timestamp, id`, after)
+func loadJumpTimestamps(queryer db.Queryer, after, until string) ([]string, error) {
+	query := `SELECT timestamp FROM journal_events WHERE event = 'FSDJump' AND timestamp >= ?`
+	args := []any{after}
+	if until != "" {
+		query += ` AND timestamp <= ?`
+		args = append(args, until)
+	}
+	query += ` AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp, id`
+	rows, queryError := queryer.Query(query, args...)
 	if queryError != nil {
 		return nil, queryError
 	}
@@ -233,10 +335,10 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 
 	if expeditionRecord.StartTimestamp != "" {
 		var shipError, jumpError error
-		if shipTimeline, shipError = loadShipTimeline(queryer); shipError != nil {
+		if shipTimeline, shipError = loadShipTimeline(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
 			return planView, shipError
 		}
-		if jumpTimestamps, jumpError = loadJumpTimestamps(queryer, expeditionRecord.StartTimestamp); jumpError != nil {
+		if jumpTimestamps, jumpError = loadJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); jumpError != nil {
 			return planView, jumpError
 		}
 	}

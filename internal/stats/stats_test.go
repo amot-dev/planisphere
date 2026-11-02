@@ -265,3 +265,47 @@ func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
 		t.Fatalf("expected 200.0 total distance Ly, got %.1f", computeResult.DistanceLy)
 	}
 }
+
+func TestPreloadScansForMappedBodies(t *testing.T) {
+	conn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer conn.Close()
+
+	tmpDir := t.TempDir()
+	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T180000.01.log")
+
+	// Scan at 18:00 (before expedition)
+	// Expedition range is 19:00 -> 20:00
+	// SAAScanComplete at 19:30 (during expedition)
+	lines := []string{
+		`{"timestamp":"2026-01-18T18:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T18:05:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Test Planet 1","BodyID":5,"StarSystem":"TestSys","SystemAddress":9999,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"SAAScanComplete","BodyName":"Test Planet 1","BodyID":5,"SystemAddress":9999,"ProbesUsed":4,"EfficiencyTarget":6}`,
+	}
+	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
+	}
+
+	ingester := journal.NewIngester(conn)
+	if _, err := ingester.ScanDir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := stats.NewEngine(conn)
+	// Compute strictly from 19:00 onward (Scan at 18:00 is outside timeRange)
+	res, err := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BodiesMapped != 1 {
+		t.Fatalf("expected 1 body mapped, got %d", res.BodiesMapped)
+	}
+	if res.FirstMapped != 1 {
+		t.Fatalf("expected 1 first mapped, got %d", res.FirstMapped)
+	}
+	if res.ScanValueTotal == 0 {
+		t.Fatalf("expected positive scan value total from preloaded scan, got %d", res.ScanValueTotal)
+	}
+}

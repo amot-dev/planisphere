@@ -261,3 +261,125 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 	}
 }
 
+func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer dbConn.Close()
+
+	expedition.InvalidateShipCache()
+
+	tmpDir := t.TempDir()
+	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
+	lines := []string{
+		// Historical ship swaps before expedition
+		`{"timestamp":"2026-01-01T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1}`,
+		// On-foot suit load game event (should be ignored by ship filter)
+		`{"timestamp":"2026-01-10T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		// Latest ship before expedition start
+		`{"timestamp":"2026-01-15T12:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"diamondbackxl","ShipType_Localised":"Diamondback Explorer","ShipID":10}`,
+		// 15 consecutive on-foot suit LoadGame events between ship swap and expedition start
+		`{"timestamp":"2026-01-16T01:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-16T02:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-16T03:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-16T04:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-16T05:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T01:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T02:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T03:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T04:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T05:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T06:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T07:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T08:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T09:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		// Expedition start & arrival at Sol
+		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":25.0}`,
+		// Mid-expedition ship swap
+		`{"timestamp":"2026-01-19T14:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"krait_phantom","ShipType_Localised":"Krait Phantom","ShipID":20}`,
+		// Arrival at Alpha Centauri
+		`{"timestamp":"2026-01-20T16:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
+		// Post-expedition ship swap (should be clamped out)
+		`{"timestamp":"2026-01-25T12:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"empire_trader","ShipType_Localised":"Imperial Cutter","ShipID":30}`,
+	}
+	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ingester := journal.NewIngester(dbConn)
+	if _, err := ingester.ScanDir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	exp, err := expedition.Create(dbConn, "Ship Clamping Test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialRows, err := expedition.ListRows(dbConn, exp.ID)
+	if err != nil || len(initialRows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(initialRows))
+	}
+	solName := "Sol"
+	if _, err := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: initialRows[0].ID, SystemName: &solName}); err != nil {
+		t.Fatal(err)
+	}
+	alpha := mustInsert(t, dbConn, exp.ID, initialRows[0].ID, expedition.RowWaypoint, 0)
+	alphaName := "Alpha Centauri"
+	if _, err := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: alpha.ID, SystemName: &alphaName}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start at 2026-01-18T10:00:00Z, complete at 2026-01-21T10:00:00Z
+	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
+		return expedition.Start(tx, exp.ID, "2026-01-18T10:00:00Z")
+	})
+	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
+		_, err := expedition.Reevaluate(tx, exp.ID)
+		return err
+	})
+	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
+		return expedition.Complete(tx, exp.ID, "2026-01-21T10:00:00Z")
+	})
+
+	// Build plan
+	plan, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	if err != nil {
+		t.Fatalf("BuildPlan failed: %v", err)
+	}
+
+	// Verify transitions on leg arriving at Alpha Centauri
+	var alphaTransitions []expedition.Transition
+	for _, r := range plan.Rows {
+		if r.Row.SystemName == "Alpha Centauri" {
+			alphaTransitions = r.Transitions
+		}
+	}
+	if len(alphaTransitions) == 0 {
+		t.Fatalf("expected transitions arriving at Alpha Centauri, got none")
+	}
+	// It should have Krait Phantom
+	foundPhantom := false
+	for _, tr := range alphaTransitions {
+		if tr.To == "Krait Phantom" {
+			foundPhantom = true
+		}
+		if tr.To == "Imperial Cutter" {
+			t.Errorf("Imperial Cutter should have been clamped out (occurred after expedition end)")
+		}
+	}
+	if !foundPhantom {
+		t.Errorf("expected Krait Phantom transition, got: %+v", alphaTransitions)
+	}
+
+	// Verify cache hit
+	plan2, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	if err != nil {
+		t.Fatalf("second BuildPlan failed: %v", err)
+	}
+	if len(plan2.Rows) != len(plan.Rows) {
+		t.Errorf("cache hit plan mismatch")
+	}
+}
+
+
