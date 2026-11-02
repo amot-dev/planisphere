@@ -105,17 +105,17 @@ Standalone releases (Linux AppImages and Windows installers) will be published u
 ### Commands
 
 ```bash
+# Build desktop binary (build/bin/planisphere)
+make build
+
+# Run complete test suite (backend Go tests + frontend Vitest + typecheck)
+make test
+
 # Start live development with hot reload
-wails dev
-
-# Run Go tests
-go test ./...
-
-# Run frontend tests
-npm --prefix frontend run test
+make dev
 
 # Re-sync app.config.json metadata
-npm --prefix frontend run sync-metadata
+make sync-metadata
 ```
 
 
