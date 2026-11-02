@@ -1,4 +1,4 @@
-.PHONY: all build dev test test-backend test-frontend typecheck sync-metadata clean \
+.PHONY: all build dev test test-backend test-frontend typecheck sync-metadata clean install-frontend \
         package-tarball package-appimage package-windows package-deb package-rpm package-arch
 
 VERSION := $(shell grep -o '"version": *"[^"]*"' app.config.json 2>/dev/null | cut -d'"' -f4)
@@ -24,18 +24,24 @@ endif
 all: build
 
 # Build the desktop binary into build/bin/planisphere
-build: sync-metadata
-	@if [ ! -d "frontend/node_modules" ]; then \
-		echo "==> Installing frontend dependencies..."; \
-		npm --prefix frontend install; \
-	fi
+build: sync-metadata install-frontend
 	@echo "==> Building with Wails ($(WAILS))..."
 	$(WAILS) build $(BUILD_TAGS)
 
 # Start live development server with hot reloading
-dev: sync-metadata
-	@if [ ! -d "frontend/node_modules" ]; then npm --prefix frontend install; fi
+dev: sync-metadata install-frontend
 	$(WAILS) dev $(BUILD_TAGS)
+
+# Install frontend dependencies using npm ci (or npm install if lockfile missing)
+install-frontend:
+	@if [ ! -d "frontend/node_modules" ]; then \
+		echo "==> Installing frontend dependencies..."; \
+		if [ -f "frontend/package-lock.json" ]; then \
+			(cd frontend && npm ci); \
+		else \
+			(cd frontend && npm install); \
+		fi; \
+	fi
 
 # Run full backend and frontend test suite
 test: test-backend test-frontend
@@ -48,11 +54,11 @@ test-backend:
 
 test-frontend: typecheck
 	@echo "==> Running frontend test suite..."
-	npm --prefix frontend run test
+	(cd frontend && npm test)
 
-typecheck:
+typecheck: install-frontend
 	@echo "==> Running frontend type check..."
-	npm --prefix frontend run typecheck
+	(cd frontend && npm run typecheck)
 
 sync-metadata:
 	@echo "==> Synchronizing metadata from app.config.json..."
@@ -107,8 +113,7 @@ package-arch: package-tarball
 	@echo "==> Arch Linux package created in dist/"
 
 # Package Windows distribution (portable zip + NSIS installer)
-package-windows: sync-metadata
-	@if [ ! -d "frontend/node_modules" ]; then npm --prefix frontend install; fi
+package-windows: sync-metadata install-frontend
 	@echo "==> Building Windows binary and NSIS installer..."
 	$(WAILS) build -platform windows/amd64 -nsis -installscope user -webview2 download -trimpath
 	@mkdir -p dist
