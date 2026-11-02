@@ -21,6 +21,7 @@ import {
 } from '../../wailsjs/go/app/App'
 import { app, expedition } from '../../wailsjs/go/models'
 import { fromGalacticTime, nowGalacticTime } from '../utils/galacticTime'
+import { SquareCheckbox } from './SquareCheckbox'
 
 function ModalShell({
   title,
@@ -577,11 +578,9 @@ export function SettingsModal({
                 className="px-3 py-2 flex items-center justify-between gap-3 cursor-pointer hover:bg-[#16100b]"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <input
-                    type="checkbox"
+                  <SquareCheckbox
                     checked={commanderItem.enabled}
-                    onChange={(event) => handleToggleCommander(commanderItem.name, event.target.checked)}
-                    className="w-4 h-4 accent-[#FF7100] cursor-pointer"
+                    onChange={(checked) => handleToggleCommander(commanderItem.name, checked)}
                   />
                   <div className="min-w-0">
                     <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
@@ -590,7 +589,7 @@ export function SettingsModal({
                   </div>
                 </div>
                 <span className="font-mono-tabular text-xs font-bold text-[#00D2FF] shrink-0">
-                  {commanderItem.eventCount.toLocaleString()} EV
+                  {commanderItem.eventCount.toLocaleString()} events
                 </span>
               </label>
             ))}
@@ -666,11 +665,9 @@ export function SettingsModal({
               Fetches coordinates for unvisited systems and downloads catalog POIs
             </div>
           </div>
-          <input
-            type="checkbox"
+          <SquareCheckbox
             checked={online}
-            onChange={(event) => handleToggleOnline(event.target.checked)}
-            className="w-4 h-4 accent-[#FF7100]"
+            onChange={(checked) => handleToggleOnline(checked)}
           />
         </label>
 

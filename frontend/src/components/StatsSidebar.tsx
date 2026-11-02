@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import { app, modes, stats } from '../../wailsjs/go/models'
 import { formatCredits, formatInt, formatLy } from '../utils/galacticTime'
+import { SquareCheckbox } from './SquareCheckbox'
 
 export interface StatsSidebarProps {
   sidebarStats: app.SidebarStats | null
@@ -155,17 +156,10 @@ export const StatsSidebar = memo(function StatsSidebar({
                   }`}
                 >
                   {/* Tri-state indicator badge */}
-                  <span
-                    className={`w-3.5 h-3.5 shrink-0 flex items-center justify-center font-mono-tabular font-bold text-[9px] border ${
-                      isFull
-                        ? 'bg-[#FF7100] text-[#050506] border-[#FF7100]'
-                        : isPartial
-                          ? 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF]'
-                          : 'bg-[#050506] text-[#6e5b4b] border-[#3d2816]'
-                    }`}
-                  >
-                    {isFull ? '✓' : isPartial ? '■' : ''}
-                  </span>
+                  <SquareCheckbox
+                    checked={isFull ? true : isPartial ? 'partial' : false}
+                    size="sm"
+                  />
 
                   <span
                     className="w-1.5 h-3 shrink-0"
@@ -180,16 +174,24 @@ export const StatsSidebar = memo(function StatsSidebar({
           </div>
 
           {/* Tri-state explanation */}
-          <div className="pt-1.5 border-t border-[#24180e] text-[10px] text-[#a6907c] leading-tight space-y-0.5">
-            <div className="flex items-center gap-1.5 font-mono-tabular text-[9px]">
-              <span className="text-[#FF7100] font-bold">[✓] ALL DATA</span>
+          <div className="pt-1.5 border-t border-[#24180e] text-[10px] text-[#a6907c] leading-tight space-y-1">
+            <div className="flex items-center gap-2 font-mono-tabular text-[9px]">
+              <span className="inline-flex items-center gap-1 text-[#FF7100] font-bold">
+                <SquareCheckbox checked={true} size="xs" /> ALL DATA
+              </span>
               <span>·</span>
-              <span className="text-[#00D2FF] font-bold">[■] SCANS ONLY</span>
+              <span className="inline-flex items-center gap-1 text-[#00D2FF] font-bold">
+                <SquareCheckbox checked="partial" size="xs" /> SCANS ONLY
+              </span>
               <span>·</span>
-              <span className="text-[#6e5b4b]">[ ] OFF</span>
+              <span className="inline-flex items-center gap-1 text-[#6e5b4b]">
+                <SquareCheckbox checked={false} size="xs" /> OFF
+              </span>
             </div>
-            <p className="text-[9px] text-[#6e5b4b]">
-              Partial <span className="text-[#00D2FF] font-bold">[■]</span> includes scans, mapping &amp; exobio, excluding travel distance/jumps.
+            <p className="text-[9px] text-[#6e5b4b] flex items-center gap-1 flex-wrap">
+              <span>Partial</span>
+              <SquareCheckbox checked="partial" size="xs" />
+              <span>includes scans, mapping &amp; exobio, excluding travel distance/jumps.</span>
             </p>
           </div>
         </div>

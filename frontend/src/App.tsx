@@ -11,7 +11,6 @@ import {
   GetSettings,
   GetSidebarStats,
   ListExpeditions,
-  RescanJournals,
   SetActiveExpedition,
   SwitchMode,
 } from '../wailsjs/go/app/App'
@@ -254,20 +253,6 @@ export default function App() {
     }
   }
 
-  async function handleRescanJournals() {
-    setBusyAction('SCANNING JOURNAL ARCHIVE')
-    try {
-      await RescanJournals()
-      await loadCoreState()
-      if (activeExpeditionId > 0) {
-        await loadPlanOnly(activeExpeditionId)
-        loadStatsOnly(activeExpeditionId, filter)
-      }
-    } finally {
-      setBusyAction(null)
-    }
-  }
-
   const refreshAll = useCallback(() => {
     loadCoreState()
     if (activeExpeditionIdRef.current > 0) {
@@ -350,12 +335,15 @@ export default function App() {
       {/* Top Cockpit Telemetry Header */}
       <header className="relative h-12 shrink-0 px-4 bg-[#0b0907] border-b border-[#3d2816] border-t-2 border-t-[#FF7100] flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          {/* ED Emblem + Title */}
+          {/* ED Emblem + Title & Shrunk Clock */}
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-2 h-5 bg-[#FF7100]" />
             <div className="leading-none">
-              <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#FF7100]">
-                {APP_PRODUCT_NAME}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#FF7100]">
+                  {APP_PRODUCT_NAME}
+                </span>
+                <GalacticClockBadge />
               </div>
               <div className="text-[9px] font-mono-tabular uppercase tracking-[0.14em] text-[#a6907c] mt-0.5">
                 {APP_TAGLINE}
@@ -374,7 +362,7 @@ export default function App() {
               value={activeExpeditionId}
               onChange={(event) => handleSelectExpedition(Number(event.target.value))}
               title="Select active expedition flight plan"
-              className="bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer"
+              className="bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
             >
               {expeditions.map((expeditionItem) => (
                 <option key={expeditionItem.id} value={expeditionItem.id} className="bg-[#0b0907] text-[#F4ECE4]">
@@ -414,7 +402,7 @@ export default function App() {
               }`}
             />
             <span className="font-bold">
-              {activeStatusMessage ? activeStatusMessage : 'READY'}
+              {activeStatusMessage ? 'BUSY' : 'READY'}
             </span>
           </div>
 
@@ -445,31 +433,6 @@ export default function App() {
               </span>
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={handleRescanJournals}
-            title={`${ingest?.eventsStored ?? 0} events stored across ${
-              ingest?.filesTracked ?? 0
-            } files. Click to rescan journals.`}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#120d09] hover:bg-[#24180e] border border-[#3d2816] cursor-pointer transition"
-          >
-            <span
-              className={`w-1.5 h-3 ${
-                ingest?.scanning
-                  ? 'bg-[#FF7100] animate-pulse'
-                  : ingest?.watcherActive
-                    ? 'bg-[#00D2FF]'
-                    : 'bg-[#a6907c]'
-              }`}
-            />
-            <span className="font-mono-tabular text-[11px] text-[#F4ECE4]">
-              {(ingest?.eventsStored ?? 0).toLocaleString()} EV
-            </span>
-          </button>
-
-          {/* In-Universe Galactic Standard Time (+1286 Years) */}
-          <GalacticClockBadge />
 
           <button
             type="button"

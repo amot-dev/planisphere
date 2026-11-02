@@ -14,7 +14,7 @@ import {
  * Isolated, self-updating Galactic Standard Time badge.
  * Updating here prevents 1Hz root re-renders of App, ExpeditionPlanner, and StatsSidebar.
  */
-export function GalacticClockBadge() {
+export function GalacticClockBadge({ className = '' }: { className?: string }) {
   const [time, setTime] = useState(() => nowGalacticTime())
   useEffect(() => {
     const clockTimer = setInterval(() => setTime(nowGalacticTime()), 1000)
@@ -22,7 +22,7 @@ export function GalacticClockBadge() {
   }, [])
   return (
     <div
-      className="px-2.5 py-1 bg-[#081318] border border-[#16485c] font-mono-tabular text-[11px] font-semibold text-[#00D2FF]"
+      className={`px-1.5 py-0.5 bg-[#081318] border border-[#16485c] font-mono-tabular text-[9px] font-semibold text-[#00D2FF] tracking-normal leading-tight select-none ${className}`}
       title="Galactic Standard Time (+1286 years)"
     >
       {time}
@@ -266,7 +266,6 @@ export function LegModeDropdown({
                       {mode.name}
                     </span>
                   </div>
-                  {isSelected && <span className="text-[10px] font-bold">✓</span>}
                 </button>
               )
             })}
@@ -329,6 +328,9 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
   const inara = inaraSystemUrl(systemName)
   const edsm = edsmSystemUrl(systemName)
 
+  const linkBtnClasses =
+    'h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#16485c] hover:border-[#00D2FF] cursor-pointer transition-colors'
+
   return (
     <div className="inline-flex items-center gap-1 opacity-85 group-hover:opacity-100 shrink-0 whitespace-nowrap">
       <button
@@ -338,7 +340,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
           OpenURL(inara).catch(console.error)
         }}
         title={`Open ${systemName} on Inara (${inara})`}
-        className="h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#16100b] hover:bg-[#FF7100] text-[#FF7100] hover:text-[#050506] border border-[#472e19] cursor-pointer"
+        className={linkBtnClasses}
       >
         INARA ↗
       </button>
@@ -349,7 +351,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
           OpenURL(edsm).catch(console.error)
         }}
         title={`Open ${systemName} on EDSM (${edsm})`}
-        className="h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#16485c] cursor-pointer"
+        className={linkBtnClasses}
       >
         EDSM ↗
       </button>
@@ -361,7 +363,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
             OpenURL(rowView.gec!.url).catch(console.error)
           }}
           title={`EDAstro GEC POI: ${rowView.gec.name} (${rowView.gec.type})`}
-          className="h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#211307] hover:bg-[#FF7100] text-[#FF7100] hover:text-[#050506] border border-[#FF7100] cursor-pointer"
+          className={linkBtnClasses}
         >
           GEC ↗
         </button>
@@ -589,7 +591,7 @@ export function StatusBadge({ status, armedAt }: { status: string; armedAt: stri
   if (status === 'completed') {
     return (
       <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.14em] bg-[#08151c] text-[#00D2FF] border border-[#00D2FF] border-l-3">
-        ■ COMPLETED
+        COMPLETED
       </span>
     )
   }
@@ -871,7 +873,7 @@ export function CarrierRouteBottomPanel({
                     title="Copy next jump system name to clipboard"
                     className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#140e09] hover:bg-[#FF7100] text-[#F4ECE4] hover:text-[#050506] border border-[#472e19] cursor-pointer"
                   >
-                    {copiedNextJump ? 'COPIED ✓' : 'COPY'}
+                    {copiedNextJump ? 'COPIED' : 'COPY'}
                   </button>
                   {nextHop.hasIcyRing && (
                     <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]/50">
@@ -918,7 +920,7 @@ export function CarrierRouteBottomPanel({
                 onClick={onCompleteSpanshJump}
                 className="ed-btn-primary"
               >
-                {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${jumpIndex + 1} ✓`}
+                {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${jumpIndex + 1}`}
               </button>
             ) : (
               <button
@@ -926,7 +928,7 @@ export function CarrierRouteBottomPanel({
                 onClick={onArrive}
                 className="ed-btn-cyan"
               >
-                ■ CARRIER ARRIVED — MARK ARRIVAL
+                CARRIER ARRIVED — MARK ARRIVAL
               </button>
             )}
           </div>
@@ -996,7 +998,7 @@ export function CarrierRouteBottomPanel({
             onClick={onArrive}
             className="ed-btn-cyan"
           >
-            ■ ARRIVE AT WAYPOINT
+            ARRIVE AT WAYPOINT
           </button>
         </div>
       )}

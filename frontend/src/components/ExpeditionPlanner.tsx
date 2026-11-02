@@ -852,7 +852,7 @@ export function ExpeditionPlanner({
                   !canComplete ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
                 }`}
               >
-                ✓ Complete
+                Complete
               </button>
             </div>
           )}
@@ -893,8 +893,8 @@ export function ExpeditionPlanner({
               >
                 Carrier Stop
               </th>
-              <th className="w-48 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Telemetry / Timestamp</th>
-              <th className="w-72 px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">Controls</th>
+              <th className="w-64 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Telemetry / Timestamp</th>
+              <th className="w-64 px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">Controls</th>
             </tr>
           </thead>
 

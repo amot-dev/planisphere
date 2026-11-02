@@ -172,19 +172,21 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   event.stopPropagation()
                   onCopySystem(row.id, row.systemName)
                 }}
-                title={`Copy "${row.systemName}" to clipboard`}
-                className="p-1 text-[#6e5b4b] hover:text-[#FF7100] hover:bg-[#1f150d] cursor-pointer shrink-0"
+                title={
+                  copiedSystemRowId === row.id
+                    ? `Copied "${row.systemName}"!`
+                    : `Copy "${row.systemName}" to clipboard`
+                }
+                className={`p-1 hover:bg-[#1f150d] cursor-pointer shrink-0 ${
+                  copiedSystemRowId === row.id
+                    ? 'text-[#00D2FF]'
+                    : 'text-[#6e5b4b] hover:text-[#FF7100]'
+                }`}
               >
-                {copiedSystemRowId === row.id ? (
-                  <span className="text-[10px] font-mono-tabular font-bold text-[#00D2FF]">
-                    ✓
-                  </span>
-                ) : (
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M7 3.5A1.5 1.5 0 018.5 2h3.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0117 6.622V12.5a1.5 1.5 0 01-1.5 1.5h-1v-3.379a3 3 0 00-.879-2.121L10.5 5.379A3 3 0 008.379 4.5H7v-1z" />
-                    <path d="M4.5 6A1.5 1.5 0 003 7.5v9A1.5 1.5 0 004.5 18h7a1.5 1.5 0 001.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06L9.44 6.44A1.5 1.5 0 008.379 6H4.5z" />
-                  </svg>
-                )}
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M7 3.5A1.5 1.5 0 018.5 2h3.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0117 6.622V12.5a1.5 1.5 0 01-1.5 1.5h-1v-3.379a3 3 0 00-.879-2.121L10.5 5.379A3 3 0 008.379 4.5H7v-1z" />
+                  <path d="M4.5 6A1.5 1.5 0 003 7.5v9A1.5 1.5 0 004.5 18h7a1.5 1.5 0 001.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06L9.44 6.44A1.5 1.5 0 008.379 6H4.5z" />
+                </svg>
               </button>
             )}
           </div>
@@ -244,7 +246,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                       : 'bg-[#120d09] text-[#a6907c] border-[#3d2816] hover:border-[#FF7100] hover:text-[#F4ECE4]'
                   }`}
                 >
-                  {row.fcArrived ? '✓ ARRIVED' : 'PENDING'}
+                  {row.fcArrived ? 'ARRIVED' : 'PENDING'}
                 </button>
               )}
 
@@ -295,15 +297,15 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       </td>
 
       {/* Visit Status / Galactic Timestamp */}
-      <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
+      <td className="px-3 py-1.5 align-top border-b border-[#24180e] whitespace-nowrap">
         {isVisited ? (
-          <div className="space-y-0.5 py-0.5">
-            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-[#FF7100]">
-              ■ LOGGED VISIT
+          <div className="py-0.5 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px]">
+            <span className="font-extrabold uppercase tracking-wider text-[#FF7100] shrink-0">
+              LOGGED VISIT
             </span>
-            <div className="font-mono-tabular text-[10px] text-[#a6907c]">
+            <span className="text-[#a6907c] shrink-0">
               {rowView.visitedAtGalactic}
-            </div>
+            </span>
           </div>
         ) : (
           <div className="font-mono-tabular text-[11px] text-[#a6907c] py-0.5">

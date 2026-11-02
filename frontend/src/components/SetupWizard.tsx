@@ -15,6 +15,7 @@ import {
 } from '../../wailsjs/go/app/App'
 import { app } from '../../wailsjs/go/models'
 import { APP_BINARY_NAME, APP_PRODUCT_NAME, APP_VERSION } from '../version'
+import { SquareCheckbox } from './SquareCheckbox'
 
 interface SetupWizardProps {
   settings: app.Settings | null
@@ -605,7 +606,7 @@ export function SetupWizardModal({
 
                   {eddImportedCount !== null && !eddProgress?.active && (
                     <div className="text-[11px] font-mono-tabular text-[#22e584]">
-                      ✓ Imported {eddImportedCount.toLocaleString()} historical journal events from
+                      Imported {eddImportedCount.toLocaleString()} historical journal events from
                       EDDiscovery.
                     </div>
                   )}
@@ -644,11 +645,9 @@ export function SetupWizardModal({
                         className="flex items-center justify-between p-2.5 border border-[#3d2816] bg-[#110c08] cursor-pointer hover:border-[#6e4726]"
                       >
                         <div className="flex items-center gap-2.5">
-                          <input
-                            type="checkbox"
+                          <SquareCheckbox
                             checked={commander.enabled}
-                            onChange={(event) => handleToggleCmdr(commander.name, event.target.checked)}
-                            className="accent-[#FF7100]"
+                            onChange={(checked) => handleToggleCmdr(commander.name, checked)}
                           />
                           <div>
                             <div className="font-bold text-[#F4ECE4] tracking-wider">
@@ -680,11 +679,10 @@ export function SetupWizardModal({
               {/* EDSM / GEC Online Sync */}
               <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-3">
                 <label className="flex items-start gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
+                  <SquareCheckbox
                     checked={onlineLookups}
-                    onChange={(event) => handleToggleOnline(event.target.checked)}
-                    className="mt-0.5 accent-[#FF7100]"
+                    onChange={(checked) => handleToggleOnline(checked)}
+                    className="mt-0.5"
                   />
                   <div className="flex-1">
                     <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
