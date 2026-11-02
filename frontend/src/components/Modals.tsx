@@ -476,10 +476,10 @@ export function SettingsModal({
         </div>
       </div>
 
-      {/* Environment Modes Management */}
+      {/* Flight Modes Management */}
       <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2.5">
         <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
-          Environment Modes
+          Flight Modes
         </div>
         <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#050506]">
           {(modesState?.modes ?? []).map((modeItem) => (
@@ -491,7 +491,8 @@ export function SettingsModal({
                   onChange={(event) =>
                     UpdateMode(modeItem.id, modeItem.name, modeItem.description, event.target.value).then(onRefresh)
                   }
-                  className="w-5 h-5 bg-transparent border border-[#3d2816] cursor-pointer shrink-0"
+                  title={`Change color for ${modeItem.name}`}
+                  className="w-5 h-5 ed-color-picker shrink-0 transition-colors"
                 />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -543,7 +544,8 @@ export function SettingsModal({
               type="color"
               value={newModeColor}
               onChange={(event) => setNewModeColor(event.target.value)}
-              className="w-7 h-7 bg-transparent border border-[#3d2816] cursor-pointer"
+              title="Select mode color"
+              className="w-7 h-7 ed-color-picker shrink-0 transition-colors"
             />
             <button
               type="button"

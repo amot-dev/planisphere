@@ -335,7 +335,7 @@ export function SetupWizardModal({
                   Database Location
                 </div>
                 <p className="text-[11px] text-[#c7b3a1] leading-relaxed">
-                  {APP_PRODUCT_NAME} stores your flight plans, environment timelines, star coordinates, and
+                  {APP_PRODUCT_NAME} stores your flight plans, flight mode timelines, star coordinates, and
                   journal history in a local SQLite database.
                 </p>
               </div>

@@ -1,7 +1,7 @@
 # DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json
 # Maintainer: Alexander Mot <alexander@amot.dev>
 pkgname=planisphere
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal"
 arch=('x86_64')

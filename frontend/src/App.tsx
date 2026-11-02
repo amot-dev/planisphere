@@ -240,7 +240,7 @@ export default function App() {
   )
 
   async function handleQuickSwitchMode(modeId: number) {
-    setBusyAction('SWITCHING ENVIRONMENT MODE')
+    setBusyAction('SWITCHING FLIGHT MODE')
     try {
       const nextModesState = await SwitchMode(modeId)
       setModesState(nextModesState)

@@ -47,6 +47,63 @@
     user-select: text;
     font-family: inherit;
   }
+
+  /* Crisp square color picker inputs matching Elite Dangerous cockpit HUD style */
+  input[type="color"] {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding: 0;
+    border: 1px solid var(--ed-border);
+    background-color: transparent;
+    cursor: pointer;
+    outline: none;
+    border-radius: 0;
+  }
+
+  input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+  input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 0;
+  }
+
+  input[type="color"]::-moz-color-swatch {
+    border: none;
+    border-radius: 0;
+  }
+}
+
+.ed-color-picker {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding: 0;
+  border: 1px solid #3d2816;
+  background-color: transparent;
+  cursor: pointer;
+  outline: none;
+  border-radius: 0;
+}
+
+.ed-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.ed-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 0;
+}
+
+.ed-color-picker::-moz-color-swatch {
+  border: none;
+  border-radius: 0;
+}
+
+.ed-color-picker:hover {
+  border-color: #ff7100;
 }
 
 .select-text {
