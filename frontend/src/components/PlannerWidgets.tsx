@@ -383,7 +383,7 @@ export function WaypointDetailsDrawer({
 }) {
   if (loading || !details) {
     return (
-      <div className="px-6 py-3 bg-[#0b0907] border-t border-[#3d2816] text-xs text-[#FF7100] font-mono-tabular uppercase tracking-wider">
+      <div className="px-6 py-3 bg-[#0b0907] border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816] text-xs text-[#FF7100] font-mono-tabular uppercase tracking-wider">
         [ COMPUTING WAYPOINT TELEMETRY... ]
       </div>
     )
@@ -391,7 +391,7 @@ export function WaypointDetailsDrawer({
 
   if (details.kind === 'future') {
     return (
-      <div className="px-6 py-3.5 bg-[#0b0907] border-t border-[#3d2816] border-l-3 border-l-[#00D2FF] flex flex-wrap items-center justify-between gap-4 text-xs">
+      <div className="px-6 py-3.5 bg-[#0b0907] border-l-2 border-l-[#00D2FF] shadow-[inset_0_1px_0_0_#3d2816] flex flex-wrap items-center justify-between gap-4 text-xs">
         <div className="flex flex-wrap items-center gap-6">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
@@ -445,7 +445,7 @@ export function WaypointDetailsDrawer({
   const isOrigin = details.kind === 'origin'
 
   return (
-    <div className="px-6 py-4 bg-[#0b0907] border-t border-[#3d2816] border-l-3 border-l-[#FF7100] text-xs space-y-3">
+    <div className="px-6 py-4 bg-[#0b0907] border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816] text-xs space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2e1f12] pb-2">
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 text-[10px] font-mono-tabular font-extrabold uppercase tracking-[0.14em] bg-[#211307] text-[#FF7100] border border-[#FF7100]">

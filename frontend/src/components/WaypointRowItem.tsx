@@ -90,8 +90,10 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* Expand Chevron */}
       {!isPlanning && (
         <td
-          className={`px-1.5 py-1.5 text-center align-top border-b border-[#24180e] ${
-            isVisited ? 'border-l-2 border-l-[#FF7100]' : ''
+          className={`px-1.5 py-1.5 text-center align-top ${
+            isVisited
+              ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
+              : 'border-b border-[#24180e]'
           }`}
         >
           <div className="h-7 flex items-center justify-center">
@@ -125,8 +127,10 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
       {/* Sequential Waypoint # */}
       <td
-        className={`px-2 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top border-b border-[#24180e] ${
-          isPlanning && isVisited ? 'border-l-2 border-l-[#FF7100]' : ''
+        className={`px-2 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top ${
+          isPlanning && isVisited
+            ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
+            : 'border-b border-[#24180e]'
         }`}
       >
         <div className="h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5">

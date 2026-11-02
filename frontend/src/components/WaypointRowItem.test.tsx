@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { WaypointRowItem } from './WaypointRowItem'
-import { AutoExpandingTextarea } from './PlannerWidgets'
+import { AutoExpandingTextarea, WaypointDetailsDrawer } from './PlannerWidgets'
 import { expedition } from '../../wailsjs/go/models'
 
 describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () => {
@@ -221,5 +221,106 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('ARRIVED')
     expect(html).toContain('h-5 px-1.5 inline-flex items-center justify-center')
     expect(html).toContain('h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap')
+  })
+
+  it('renders visited chevron cell with inset shadow to prevent bottom border from clipping the 2px orange left border', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 12,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Sol',
+        seq: 11,
+      },
+      number: 12,
+      visitState: 'visited',
+    })
+
+    const html = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(WaypointRowItem, {
+            rowView: mockRowView,
+            index: 11,
+            isPlanning: false,
+            isLocked: true,
+            isBeingDragged: false,
+            isDragTarget: false,
+            isExpanded: true,
+            isNextFcStop: false,
+            hasActiveCarrierRoute: false,
+            draft: { systemName: 'Sol', poiName: '', notes: '' },
+            copiedSystemRowId: null,
+            insertMenuOpen: false,
+            lastVisitedIndex: 11,
+            totalRows: 25,
+            rowStyle: {},
+            dropProps: {},
+            onToggleExpand: () => {},
+            onDraftChange: () => {},
+            onFieldFocus: () => {},
+            onFieldBlur: () => {},
+            onCopySystem: () => {},
+            onToggleFcStop: () => {},
+            onOpenCarrierRoutePrompt: () => {},
+            onToggleInsertMenu: () => {},
+            onInsert: () => {},
+            onMove: () => {},
+            onDelete: () => {},
+            onDragStart: () => {},
+            onDragEnd: () => {},
+          }),
+        ),
+      ),
+    )
+
+    // Chevron cell has border-l-2 and inset shadow bottom line so it never miters or clips the left border
+    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]')
+  })
+
+  it('renders WaypointDetailsDrawer with matching border-l-2 and inset shadow top line without clipping', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 12,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Sol',
+      },
+      number: 12,
+      visitState: 'visited',
+    })
+
+    const mockDetails = expedition.WaypointDetails.createFrom({
+      kind: 'historical',
+      number: 12,
+      metrics: {
+        distanceLy: 350.67,
+        shipDistanceLy: 350.67,
+        jumps: 15,
+        jetConeBoosts: 0,
+        premiumBoosts: 0,
+        standardBoosts: 0,
+        basicBoosts: 0,
+        bodiesScanned: 24,
+        bodiesMapped: 6,
+        firstDiscoveries: 0,
+        firstMapped: 0,
+        scanValueTotal: 1250000,
+        scanValueBase: 1000000,
+        scanValueBonus: 250000,
+      },
+    })
+
+    const html = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: mockDetails,
+        loading: false,
+        rowView: mockRowView,
+      }),
+    )
+
+    // Matches header 2px border and uses inset shadow top line
+    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816]')
+    expect(html).not.toContain('border-l-3')
   })
 })
