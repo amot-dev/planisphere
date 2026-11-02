@@ -43,82 +43,118 @@ Automatically flags systems listed in EDAstro's Galactic Exploration Catalog (GE
 
 ## Installation
 
+### Prebuilt Packages
+
+Prebuilt binaries are available under [GitHub Releases](https://github.com/amot-dev/planisphere/releases):
+- **Linux**: Standalone AppImage and tarball
+- **Windows**: NSIS setup installer and portable zip
+
+
 ### Building from Source
 
-Planisphere currently builds from source as a native desktop binary.
+Planisphere builds from source as a native desktop binary using Go, Wails, and React.
 
 #### Prerequisites
 
-- Go
-- Node.js and npm
-- Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
-- C compiler and development headers:
-  - **Debian / Ubuntu**: `libgtk-3-dev libwebkit2gtk-4.1-dev build-essential`
-  - **Fedora**: `gtk3-devel webkit2gtk4.1-devel gcc-c++`
-  - **Arch**: `gtk3 webkit2gtk-4.1 base-devel`
-  - **Windows**: Webview2 runtime and a C compiler (such as gcc via w64devkit)
+- **Go**: 1.24 or newer
+- **Node.js**: 20+ or 22+ and `npm`
+- **Wails CLI v2**:
+  ```bash
+  go install github.com/wailsapp/wails/v2/cmd/wails@latest
+  ```
+- **C compiler and development headers**:
+  - **Debian / Ubuntu**: `sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev build-essential`
+  - **Fedora**: `sudo dnf install gtk3-devel webkit2gtk4.1-devel gcc-c++`
+  - **Arch Linux**: `sudo pacman -S gtk3 webkit2gtk-4.1 base-devel`
+  - **Windows**: [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (preinstalled on Windows 10/11) and a C compiler (such as `gcc` via MinGW-w64 or [w64devkit](https://github.com/skeeto/w64devkit))
 
 #### Build Steps
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/planisphere.git
+   git clone https://github.com/amot-dev/planisphere.git
    cd planisphere
    ```
 
-2. Install frontend dependencies:
+2. Build the application:
    ```bash
-   cd frontend && npm install && cd ..
+   make build
    ```
 
-3. Build the binary:
+3. Run the application:
    ```bash
-   wails build -tags webkit2_41
+   make run
    ```
-   The executable will be generated at `build/bin/planisphere`.
-
-4. Run the app:
-   ```bash
-   ./build/bin/planisphere
-   ```
-
-### Prebuilt Packages
-
-Standalone releases (Linux AppImages and Windows installers) will be published under GitHub Releases so you can grab a binary without needing Go or Node installed.
 
 
 ## Development
 
 ### Stack
 
-- **Desktop Framework**: Go + Wails (native WebKit window, no Electron resource hogging)
-- **Frontend UI**: React, TypeScript, and Tailwind CSS
-- **Local Storage**: SQLite
-- **Build / Test**: Vite and Vitest
+- **Desktop Framework**: Go + Wails v2 (native WebKitGTK on Linux, WebView2 on Windows)
+- **Frontend UI**: React 19, TypeScript, and Tailwind CSS v4
+- **Local Storage**: Pure-Go SQLite (`modernc.org/sqlite`, zero CGo database dependencies)
+- **Build / Test**: Vite, Vitest, and Go standard testing
 
 ### Architecture
 
 - **Local-First**: Everything lives in a local SQLite database on your machine. Your journals, route waypoints, and cached coordinates stay local and work completely offline.
-- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly. It handles out-of-order writes safely and never touches your game files.
-- **Single Source of Truth Config**: Versioning, product name, and metadata live in `app.config.json`. The sync script (`npm run sync-metadata` or any build) keeps `wails.json`, `package.json`, `index.html`, `go.mod`, and version constants in sync.
+- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using fsnotify. It handles out-of-order writes safely and never touches your game files.
+- **Single Source of Truth Config**: Versioning, product name, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, and package manifests in sync.
 
 ### Commands
+
+Planisphere provides Makefile targets to manage development, testing, and packaging:
 
 ```bash
 # Build desktop binary (build/bin/planisphere)
 make build
 
-# Run complete test suite (backend Go tests + frontend Vitest + typecheck)
-make test
-
-# Start live development with hot reload
+# Start live development server with hot reload
 make dev
 
 # Build and run the desktop application
 make run
 
-# Re-sync app.config.json metadata
+# Run complete test suite (backend Go tests + frontend Vitest + typecheck)
+make test
+
+# Run backend Go tests only
+make test-backend
+
+# Run frontend test suite only
+make test-frontend
+
+# Run frontend TypeScript typecheck
+make typecheck
+
+# Re-sync app.config.json metadata across all targets
 make sync-metadata
+
+# Clean build and distribution directories
+make clean
+```
+
+### Packaging
+
+Distributable packages can be generated locally using the following targets:
+
+```bash
+# Package Linux AppImage (dist/Planisphere-v*-x86_64.AppImage)
+make package-appimage
+
+# Package Linux tarball (dist/planisphere-v*-linux-amd64.tar.gz)
+make package-tarball
+
+# Package Debian (.deb) and RPM (.rpm) packages via nfpm
+make package-deb
+make package-rpm
+
+# Package Arch Linux package (.pkg.tar.zst) via makepkg
+make package-arch
+
+# Package Windows portable zip and NSIS setup installer
+make package-windows
 ```
 
 
@@ -129,7 +165,6 @@ make sync-metadata
 
 ### Roadmap Features
 - **Death / "Hardcore" Telemetry Toggle**: A setting for commanders who want the harsh in-game reality reflected in their wallet stats. When enabled, dying before docking at a station or carrier would zero out or mark un-cashed cartography and exobiology payouts as lost in action, while still preserving the flight logs of where you went.
-- **Prebuilt Releases**: Packaged Linux AppImages and Windows installers distributed directly via GitHub Releases, removing the need to install Go, Node, or C compiler headers.
 - **Expedition Log Exports**: Export completed expedition stats, visited waypoints, and discoveries into clean markdown reports, flight log summaries, or CSV sheets.
 
 
