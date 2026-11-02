@@ -333,8 +333,9 @@ export default function App() {
   return (
     <div className="h-screen w-screen flex flex-col cockpit-grid-bg text-[#F4ECE4] overflow-hidden">
       {/* Top Cockpit Telemetry Header */}
-      <header className="relative h-12 shrink-0 px-4 bg-[#0b0907] border-b border-[#3d2816] border-t-2 border-t-[#FF7100] flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="relative h-12 shrink-0 bg-[#0b0907] border-b border-[#3d2816] border-t-2 border-t-[#FF7100] flex items-center">
+        {/* Telemetry Sidebar Header Column (390px, aligned with StatsSidebar below) */}
+        <div className="w-[390px] shrink-0 h-full px-4 flex items-center">
           {/* ED Emblem + Title and Shrunk Clock */}
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-2 h-5 bg-[#FF7100]" />
@@ -350,19 +351,25 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
 
-          <div className="h-5 w-px bg-[#2b1d11] shrink-0" />
-
+        {/* Expedition Planner Header Row (flex-1, px-5 aligned with ExpeditionPlanner section below) */}
+        <div className="flex-1 h-full px-5 flex items-center justify-between gap-4 min-w-0">
           {/* Expedition selector */}
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c] shrink-0">
-              Expedition
-            </span>
+            <button
+              type="button"
+              onClick={() => setActiveModal('expeditions')}
+              className="ed-btn shrink-0 h-[30px]"
+              title="Create, clone, rename, or manage expeditions"
+            >
+              Expeditions
+            </button>
             <select
               value={activeExpeditionId}
               onChange={(event) => handleSelectExpedition(Number(event.target.value))}
               title="Select active expedition flight plan"
-              className="bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
+              className="h-[30px] bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
             >
               {expeditions.map((expeditionItem) => (
                 <option key={expeditionItem.id} value={expeditionItem.id} className="bg-[#0b0907] text-[#F4ECE4]">
@@ -370,85 +377,77 @@ export default function App() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Right Telemetry Strip */}
+          <div className="flex items-center gap-2.5 text-xs shrink-0">
+            {/* System Status Readout */}
+            <div
+              className={`h-[30px] flex items-center gap-2 px-2.5 border font-mono-tabular text-[11px] uppercase tracking-wider ${
+                activeStatusMessage
+                  ? 'bg-[#211307] border-[#FF7100] text-[#FF7100]'
+                  : 'bg-[#081318] border-[#16485c] text-[#00D2FF]'
+              }`}
+              title={
+                activeStatusMessage
+                  ? `Background task: ${activeStatusMessage}`
+                  : 'Terminal idle and ready for input'
+              }
+            >
+              <span
+                className={`w-2 h-2 ${
+                  activeStatusMessage ? 'bg-[#FF7100] animate-ping' : 'bg-[#00D2FF]'
+                }`}
+              />
+              <span className="font-bold">
+                {activeStatusMessage ? 'BUSY' : 'READY'}
+              </span>
+            </div>
+
+            {ingest?.currentSystem && (
+              <div
+                title={`Current location: ${ingest.currentSystem}`}
+                className="h-[30px] hidden lg:flex items-center gap-1.5 px-2.5 bg-[#120d09] border border-[#2e1f12] border-l-2 border-l-[#FF7100]"
+              >
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c]">
+                  LOC
+                </span>
+                <span className="font-mono-tabular font-bold uppercase tracking-wider text-[#F4ECE4]">
+                  {ingest.currentSystem}
+                </span>
+              </div>
+            )}
+
+            {ingest?.currentShip && (
+              <div
+                title={`Current vessel: ${ingest.currentShip}`}
+                className="h-[30px] hidden xl:flex items-center gap-1.5 px-2.5 bg-[#120d09] border border-[#2e1f12] border-l-2 border-l-[#FF7100]"
+              >
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c]">
+                  VESSEL
+                </span>
+                <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+                  {ingest.currentShip}
+                </span>
+              </div>
+            )}
+
             <button
               type="button"
-              onClick={() => setActiveModal('expeditions')}
-              className="ed-btn"
-              title="Create, clone, rename, or manage expedition plans"
+              onClick={() => setActiveModal('settings')}
+              className="ed-btn h-[30px]"
+              title="Open terminal settings, environment modes, and journal configuration"
             >
-              Plans
+              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <span>Config</span>
             </button>
           </div>
-        </div>
-
-        {/* Right Telemetry Strip */}
-        <div className="flex items-center gap-2.5 text-xs shrink-0">
-          {/* System Status Readout */}
-          <div
-            className={`flex items-center gap-2 px-2.5 py-1 border font-mono-tabular text-[11px] uppercase tracking-wider ${
-              activeStatusMessage
-                ? 'bg-[#211307] border-[#FF7100] text-[#FF7100]'
-                : 'bg-[#081318] border-[#16485c] text-[#00D2FF]'
-            }`}
-            title={
-              activeStatusMessage
-                ? `Background task: ${activeStatusMessage}`
-                : 'Terminal idle and ready for input'
-            }
-          >
-            <span
-              className={`w-2 h-2 ${
-                activeStatusMessage ? 'bg-[#FF7100] animate-ping' : 'bg-[#00D2FF]'
-              }`}
-            />
-            <span className="font-bold">
-              {activeStatusMessage ? 'BUSY' : 'READY'}
-            </span>
-          </div>
-
-          {ingest?.currentSystem && (
-            <div
-              title={`Current location: ${ingest.currentSystem}`}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-[#120d09] border border-[#2e1f12] border-l-2 border-l-[#FF7100]"
-            >
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c]">
-                LOC
-              </span>
-              <span className="font-mono-tabular font-bold uppercase tracking-wider text-[#F4ECE4]">
-                {ingest.currentSystem}
-              </span>
-            </div>
-          )}
-
-          {ingest?.currentShip && (
-            <div
-              title={`Current vessel: ${ingest.currentShip}`}
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 bg-[#120d09] border border-[#2e1f12] border-l-2 border-l-[#FF7100]"
-            >
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c]">
-                VESSEL
-              </span>
-              <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-                {ingest.currentShip}
-              </span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setActiveModal('settings')}
-            className="ed-btn"
-            title="Open terminal settings, environment modes, and journal configuration"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <span>Config</span>
-          </button>
         </div>
 
         {/* Animated HUD activity scanline along bottom edge of header when busy */}
