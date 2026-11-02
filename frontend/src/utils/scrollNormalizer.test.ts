@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { findScrollable, initScrollSpeedNormalizer } from './scrollNormalizer'
 
 function createMockElement(classes: string[], dimensions: {
@@ -22,6 +22,7 @@ function createMockElement(classes: string[], dimensions: {
     scrollWidth: dimensions.scrollWidth ?? 600,
     scrollLeft: dimensions.scrollLeft ?? 0,
     parentElement: parent,
+    contains: (target: any) => target === mockElement || (parent && typeof parent.contains === 'function' && parent.contains(target)),
   }
   return mockElement as HTMLElement
 }
@@ -97,6 +98,186 @@ describe('Scroll Performance & Normalizer', () => {
     } finally {
       ;(globalThis as any).window = originalWindow
     }
+  })
+
+  describe('Wheel Event Normalization & Scaling', () => {
+    let mockWindow: any
+    let listeners: Record<string, Function>
+    let cleanup: () => void
+    let originalWindow: any
+
+    beforeEach(() => {
+      listeners = {}
+      originalWindow = (globalThis as any).window
+      mockWindow = {
+        addEventListener: (event: string, handler: Function) => {
+          listeners[event] = handler
+        },
+        removeEventListener: (event: string, handler: Function) => {
+          if (listeners[event] === handler) {
+            delete listeners[event]
+          }
+        },
+      }
+      ;(globalThis as any).window = mockWindow
+      cleanup = initScrollSpeedNormalizer()
+    })
+
+    afterEach(() => {
+      cleanup()
+      ;(globalThis as any).window = originalWindow
+    })
+
+    it('scales discrete mouse wheel deltas by 2.8x on scrollable containers and prevents default', () => {
+      const container = createMockElement(['overflow-y-auto'], {
+        clientHeight: 400,
+        scrollHeight: 1200,
+        scrollTop: 50,
+      })
+      let prevented = false
+      const wheelHandler = listeners['wheel']
+
+      wheelHandler({
+        target: container,
+        deltaY: 20,
+        deltaX: 0,
+        deltaMode: 0,
+        ctrlKey: false,
+        shiftKey: false,
+        cancelable: true,
+        preventDefault: () => {
+          prevented = true
+        },
+      })
+
+      expect(prevented).toBe(true)
+      // 50 + (20 * 2.8) = 106
+      expect(container.scrollTop).toBe(106)
+    })
+
+    it('bypasses continuous touchpad inputs (fractional or small deltas) to preserve hardware compositor momentum', () => {
+      const container = createMockElement(['overflow-y-auto'], {
+        clientHeight: 400,
+        scrollHeight: 1200,
+        scrollTop: 50,
+      })
+      let prevented = false
+      const wheelHandler = listeners['wheel']
+
+      // Fractional delta
+      wheelHandler({
+        target: container,
+        deltaY: 4.5,
+        deltaX: 0,
+        deltaMode: 0,
+        ctrlKey: false,
+        shiftKey: false,
+        cancelable: true,
+        preventDefault: () => {
+          prevented = true
+        },
+      })
+      expect(prevented).toBe(false)
+      expect(container.scrollTop).toBe(50)
+
+      // Small integer delta (|dy| < 12)
+      wheelHandler({
+        target: container,
+        deltaY: 8,
+        deltaX: 0,
+        deltaMode: 0,
+        ctrlKey: false,
+        shiftKey: false,
+        cancelable: true,
+        preventDefault: () => {
+          prevented = true
+        },
+      })
+      expect(prevented).toBe(false)
+      expect(container.scrollTop).toBe(50)
+    })
+
+    it('scales DOM_DELTA_LINE events (deltaMode: 1) by 35px per line', () => {
+      const container = createMockElement(['overflow-y-auto'], {
+        clientHeight: 400,
+        scrollHeight: 1200,
+        scrollTop: 50,
+      })
+      let prevented = false
+      const wheelHandler = listeners['wheel']
+
+      wheelHandler({
+        target: container,
+        deltaY: 2,
+        deltaX: 0,
+        deltaMode: 1,
+        ctrlKey: false,
+        shiftKey: false,
+        cancelable: true,
+        preventDefault: () => {
+          prevented = true
+        },
+      })
+
+      expect(prevented).toBe(true)
+      // 50 + (2 * 35) = 120
+      expect(container.scrollTop).toBe(120)
+    })
+
+    it('passes through browser zoom shortcuts when ctrlKey is pressed', () => {
+      const container = createMockElement(['overflow-y-auto'], {
+        clientHeight: 400,
+        scrollHeight: 1200,
+        scrollTop: 50,
+      })
+      let prevented = false
+      const wheelHandler = listeners['wheel']
+
+      wheelHandler({
+        target: container,
+        deltaY: 20,
+        deltaX: 0,
+        deltaMode: 0,
+        ctrlKey: true,
+        shiftKey: false,
+        cancelable: true,
+        preventDefault: () => {
+          prevented = true
+        },
+      })
+
+      expect(prevented).toBe(false)
+      expect(container.scrollTop).toBe(50)
+    })
+
+    it('converts vertical scroll into horizontal scroll when shiftKey is pressed', () => {
+      const container = createMockElement(['overflow-x-auto'], {
+        clientWidth: 400,
+        scrollWidth: 1200,
+        scrollLeft: 10,
+        clientHeight: 400,
+        scrollHeight: 400,
+      })
+      let prevented = false
+      const wheelHandler = listeners['wheel']
+
+      wheelHandler({
+        target: container,
+        deltaY: 20,
+        deltaX: 0,
+        deltaMode: 0,
+        ctrlKey: false,
+        shiftKey: true,
+        cancelable: true,
+        preventDefault: () => {
+          prevented = true
+        },
+      })
+
+      expect(prevented).toBe(true)
+      // 10 + (20 * 2.8) = 66
+      expect(container.scrollLeft).toBe(66)
+    })
   })
 })
 

@@ -293,11 +293,17 @@ describe('ExpeditionPlanner Hook Stability & Lifecycle', () => {
           },
           number: 2,
           visitState: 'visited',
+          legModeId: 1,
           legModeName: 'Travel',
           legModeColor: '#FF7100',
+          transitions: [
+            { kind: 'ship', to: 'Krait Phantom' },
+          ],
         },
       ],
-      modes: [],
+      modes: [
+        { id: 1, name: 'Travel', color: '#FF7100' } as any,
+      ],
       visitedCount: 2,
       waypointCount: 2,
       activeRowId: 402,
@@ -316,8 +322,13 @@ describe('ExpeditionPlanner Hook Stability & Lifecycle', () => {
 
     expect(html).toContain('Sol')
     expect(html).toContain('Alpha Centauri')
-    expect(html).toContain('content-visibility:auto')
-    expect(html).toContain('contain-intrinsic-size:44px')
+    // Verify that the leg banner itself is rendered with its transition and mode data
+    expect(html).toContain('[VESSEL FLOWN]:')
+    expect(html).toContain('Krait Phantom')
+    // Verify that the <tr> specifically wrapping the leg banner includes content-visibility and contain-intrinsic-size
+    expect(html).toMatch(
+      /<tr style="[^"]*content-visibility:auto[^"]*contain-intrinsic-size:44px[^"]*"><td colSpan="8"[^>]*>[\s\S]*?\[VESSEL FLOWN\]:/,
+    )
   })
 })
 

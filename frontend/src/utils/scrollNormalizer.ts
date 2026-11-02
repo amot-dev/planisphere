@@ -139,7 +139,8 @@ export function initScrollSpeedNormalizer(): () => void {
     // Continuous precision touchpads produce non-integer (fractional) deltas or very small pixel deltas (|dy| < 12).
     // Discrete mouse wheels produce integer deltas (e.g. 20, 24, 30, 33, 40) or deltaMode === 1 (lines).
     // Let touchpads scroll natively via hardware compositor for 60-144 FPS smoothness!
-    const isTouchpad = event.deltaMode === 0 && (!Number.isInteger(deltaY) || Math.abs(deltaY) < 12)
+    const effectiveDelta = deltaY !== 0 ? deltaY : deltaX
+    const isTouchpad = event.deltaMode === 0 && (!Number.isInteger(effectiveDelta) || Math.abs(effectiveDelta) < 12)
     if (isTouchpad) {
       return
     }
