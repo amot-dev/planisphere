@@ -118,18 +118,13 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Authentic Elite Dangerous Cockpit / Station Services background texture */
+/* Authentic Elite Dangerous Cockpit / Station Services background.
+   Note: Avoid procedural repeating-linear-gradient micro-textures (e.g. 3px scanlines)
+   here, as desktop WebViews (WebKitGTK) continuously re-rasterize repeating procedural patterns
+   behind scroll containers during rapid scrolling, causing frame stalls. */
 .cockpit-grid-bg {
   background-color: #050506;
-  background-image:
-    linear-gradient(180deg, rgba(255, 113, 0, 0.05) 0%, rgba(5, 5, 6, 0) 140px),
-    repeating-linear-gradient(
-      0deg,
-      rgba(255, 113, 0, 0.018) 0px,
-      rgba(255, 113, 0, 0.018) 1px,
-      transparent 1px,
-      transparent 3px
-    );
+  background-image: linear-gradient(180deg, rgba(255, 113, 0, 0.05) 0%, rgba(5, 5, 6, 0) 140px);
 }
 
 /* ED Holo-HUD structural panel with left or top accent rule */
@@ -298,4 +293,16 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #ff7100;
+}
+
+/* Compositor scroll layer promotion:
+   Promotes all scrollable containers into dedicated GPU compositor layers without creating
+   a new containing block for position: fixed elements (unlike transform: translateZ(0) or contain: paint).
+   This allows WebKitGTK and Chromium/WebView2 to scroll tables smoothly on the compositor thread
+   without triggering synchronous main-thread repaints. */
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-auto,
+[data-scrollable] {
+  will-change: scroll-position;
 }
