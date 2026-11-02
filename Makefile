@@ -1,4 +1,4 @@
-.PHONY: all build dev test test-backend test-frontend typecheck sync-metadata clean install-frontend \
+.PHONY: all build dev run test test-backend test-frontend typecheck sync-metadata clean install-frontend \
         package-tarball package-appimage package-windows package-deb package-rpm package-arch
 
 VERSION := $(shell grep -o '"version": *"[^"]*"' app.config.json 2>/dev/null | cut -d'"' -f4)
@@ -21,6 +21,14 @@ ifeq ($(UNAME_S),Linux)
   endif
 endif
 
+ifeq ($(OS),Windows_NT)
+  RUN_CMD := build/bin/planisphere.exe
+else ifeq ($(UNAME_S),Darwin)
+  RUN_CMD := open build/bin/Planisphere.app
+else
+  RUN_CMD := ./build/bin/planisphere
+endif
+
 all: build
 
 # Build the desktop binary into build/bin/planisphere
@@ -32,6 +40,11 @@ build: sync-metadata install-frontend
 dev: sync-metadata install-frontend
 	@echo "==> Starting Wails live development server..."
 	$(WAILS) dev $(BUILD_TAGS)
+
+# Build and run the desktop application
+run: build
+	@echo "==> Running Planisphere..."
+	$(RUN_CMD)
 
 # Install frontend dependencies using npm ci (or npm install if lockfile missing)
 install-frontend:

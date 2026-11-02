@@ -114,6 +114,9 @@ make test
 # Start live development with hot reload
 make dev
 
+# Build and run the desktop application
+make run
+
 # Re-sync app.config.json metadata
 make sync-metadata
 ```
