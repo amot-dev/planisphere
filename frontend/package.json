@@ -20,9 +20,7 @@
   "scripts": {
     "build": "tsc -b \u0026\u0026 vite build",
     "dev": "vite",
-    "prebuild": "npm run sync-metadata",
     "preview": "vite preview",
-    "sync-metadata": "go run ../scripts/sync_metadata.go",
     "test": "vitest run",
     "typecheck": "tsc -b --noEmit"
   },
