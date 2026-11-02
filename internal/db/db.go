@@ -3,7 +3,6 @@ package db
 
 import (
 	"database/sql"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,23 +18,11 @@ import (
 	"planisphere/internal/version"
 )
 
-//go:embed schema.sql
-var schemaSQL string
-
 // AppDirName is the per-user directory holding the database and bootstrap configuration.
 var AppDirName = version.ProductName
 
 // DefaultDBFileName is the default database file name.
 var DefaultDBFileName = version.BinaryName + ".db"
-
-// DefaultModes are seeded on first initialisation.
-var DefaultModes = []struct {
-	Name, Description, Color string
-}{
-	{"Exploration", "Dedicated deep-space surveying, system scanning, mapping, and exobiology in the black.", "#00B3FF"},
-	{"Tourism", "Visiting scenic POIs, galactic wonders, memorials, and sightseeing destinations.", "#C77DFF"},
-	{"Travel", "High-speed transit, neutron highway sprints, and Bubble commutes.", "#FF7100"},
-}
 
 // UserDataDir returns the standard OS directory for user application data (databases, persistent state):
 // - Linux/Unix: $XDG_DATA_HOME or ~/.local/share
@@ -161,112 +148,6 @@ func Open(path string) (*sql.DB, error) {
 		return nil, migrateError
 	}
 	return dbConn, nil
-}
-
-// Migrate applies the embedded schema and seeds default modes. Idempotent.
-func Migrate(dbConn *sql.DB) error {
-	// Ensure the `commander` column exists on existing `journal_events` tables
-	// before applying schema.sql (which creates idx_journal_events_cmdr).
-	_, _ = dbConn.Exec(`ALTER TABLE journal_events ADD COLUMN commander TEXT`)
-	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN fc_arrived INTEGER NOT NULL DEFAULT 0`)
-	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN leg_mode_id INTEGER NOT NULL DEFAULT 0`)
-	if _, schemaError := dbConn.Exec(schemaSQL); schemaError != nil {
-		return fmt.Errorf("apply schema: %w", schemaError)
-	}
-	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	seeded, seedCheckError := GetSetting(dbConn, "default_modes_seeded")
-	if seedCheckError != nil {
-		return seedCheckError
-	}
-	if seeded == "" {
-		for i, defaultMode := range DefaultModes {
-			if _, seedError := dbConn.Exec(`INSERT OR IGNORE INTO modes(name, description, color, is_default, sort_order, created_at)
-				VALUES(?, ?, ?, 1, ?, ?)`, defaultMode.Name, defaultMode.Description, defaultMode.Color, i, now); seedError != nil {
-				return fmt.Errorf("seed modes: %w", seedError)
-			}
-		}
-		if setSettingError := SetSetting(dbConn, "default_modes_seeded", "1"); setSettingError != nil {
-			return setSettingError
-		}
-	}
-	// Schema v2 migration: reset ingested_journals byte offsets once so files
-	// where FSDJump/LoadGame float64 FuelLevel lines were previously skipped
-	// are re-read idempotently (journal_events deduplicates via event_uid).
-	ingestV2, ingestCheckError := GetSetting(dbConn, "ingest_parser_v2")
-	if ingestCheckError != nil {
-		return ingestCheckError
-	}
-	if ingestV2 == "" {
-		if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
-			return updateError
-		}
-		if setSettingError := SetSetting(dbConn, "ingest_parser_v2", "1"); setSettingError != nil {
-			return setSettingError
-		}
-	}
-	// Schema v2 GEC cleanup: remove legacy GMP entries that lacked poiUrl or
-	// overwrote GEC entries with overlapping numeric IDs, and force a GEC refresh.
-	gecV2, gecCheckError := GetSetting(dbConn, "gec_schema_v2")
-	if gecCheckError != nil {
-		return gecCheckError
-	}
-	if gecV2 == "" {
-		_, _ = dbConn.Exec(`DELETE FROM gec_pois_cache`)
-		_ = SetSetting(dbConn, "gec_fetched_at", "")
-		if setSettingError := SetSetting(dbConn, "gec_schema_v2", "1"); setSettingError != nil {
-			return setSettingError
-		}
-	}
-	// Schema v3 commander tagging: reset ingested_journals byte offsets once so
-	// existing events get their commander column populated from each file's LoadGame/Commander event.
-	cmdrV3, cmdrCheckError := GetSetting(dbConn, "commander_schema_v3")
-	if cmdrCheckError != nil {
-		return cmdrCheckError
-	}
-	if cmdrV3 == "" {
-		_, _ = dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`)
-		_, _ = dbConn.Exec(`UPDATE expeditions SET baseline_json = json_set(baseline_json, '$.bodiesMapped', 0) WHERE baseline_source = 'statistics'`)
-		if setSettingError := SetSetting(dbConn, "commander_schema_v3", "1"); setSettingError != nil {
-			return setSettingError
-		}
-	}
-	// Schema v4 carrier arrival seeding: mark Waypoint #1 (first waypoint) as
-	// fc_arrived = 1 on already-started expeditions if it is an fc_stop.
-	fcArrivedSetting, fcArrivedCheckError := GetSetting(dbConn, "fc_arrived_v4")
-	if fcArrivedCheckError != nil {
-		return fcArrivedCheckError
-	}
-	if fcArrivedSetting == "" {
-		_, _ = dbConn.Exec(`UPDATE expedition_rows SET fc_arrived = 1
-			WHERE fc_stop = 1 AND visited_at IS NOT NULL AND visited_at != ''
-			AND id IN (
-				SELECT MIN(expedition_rows.id) FROM expedition_rows
-				JOIN expeditions ON expeditions.id = expedition_rows.expedition_id
-				WHERE expeditions.status IN ('active', 'completed') AND expedition_rows.row_type = 'waypoint'
-				GROUP BY expedition_rows.expedition_id
-			)`)
-		if setSettingError := SetSetting(dbConn, "fc_arrived_v4", "1"); setSettingError != nil {
-			return setSettingError
-		}
-	}
-	// Schema v5 GEC+GMP cache: support both GEC and GMP POIs from combined.json
-	// without ID collisions, storing GMP entries with source = 'GMP'.
-	gecSchemaSetting, gecSchemaCheckError := GetSetting(dbConn, "gec_schema_v5")
-	if gecSchemaCheckError != nil {
-		return gecSchemaCheckError
-	}
-	if gecSchemaSetting == "" {
-		_, _ = dbConn.Exec(`ALTER TABLE gec_pois_cache ADD COLUMN source TEXT NOT NULL DEFAULT 'GEC'`)
-		_, _ = dbConn.Exec(`DELETE FROM gec_pois_cache`)
-		_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&#39;', '''') WHERE poi_name LIKE '%&#39;%'`)
-		_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&amp;', '&') WHERE poi_name LIKE '%&amp;%'`)
-		_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&quot;', '"') WHERE poi_name LIKE '%&quot;%'`)
-		_ = SetSetting(dbConn, "gec_fetched_at", "")
-		if setSettingError := SetSetting(dbConn, "gec_schema_v5", "1"); setSettingError != nil {
-			return setSettingError
-		}
-	}
-	return nil
 }
 
 // Queryer is satisfied by *sql.DB and *sql.Tx.
