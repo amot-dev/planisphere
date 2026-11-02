@@ -1,4 +1,10 @@
-.PHONY: all build dev test test-backend test-frontend typecheck sync-metadata clean
+.PHONY: all build dev test test-backend test-frontend typecheck sync-metadata clean \
+        package-tarball package-appimage package-windows package-deb package-rpm package-arch
+
+VERSION := $(shell grep -o '"version": *"[^"]*"' app.config.json 2>/dev/null | cut -d'"' -f4)
+ifeq ($(VERSION),)
+  $(error Version not found in app.config.json)
+endif
 
 # Locate Wails CLI across PATH, GOPATH/bin, and ~/go/bin
 WAILS ?= $(shell command -v wails 2>/dev/null || \
@@ -37,6 +43,7 @@ test: test-backend test-frontend
 
 test-backend:
 	@echo "==> Running Go backend tests..."
+	@mkdir -p frontend/dist && touch frontend/dist/index.html
 	go test -count=1 ./...
 
 test-frontend: typecheck
@@ -51,5 +58,67 @@ sync-metadata:
 	@echo "==> Synchronizing metadata from app.config.json..."
 	go run scripts/sync_metadata.go
 
+# Package Linux tarball distribution
+package-tarball: build
+	@echo "==> Packaging Linux tarball distribution (v$(VERSION))..."
+	@mkdir -p dist/tarball
+	@cp build/bin/planisphere dist/tarball/
+	@cp build/linux/planisphere.desktop dist/tarball/
+	@cp build/appicon.png dist/tarball/planisphere.png
+	@cp LICENSE README.md dist/tarball/
+	@tar -czvf "dist/planisphere-v$(VERSION)-linux-amd64.tar.gz" -C dist/tarball .
+	@rm -rf dist/tarball
+	@echo "==> Linux tarball created: dist/planisphere-v$(VERSION)-linux-amd64.tar.gz"
+
+# Package AppImage distribution
+package-appimage: build
+	@echo "==> Packaging AppImage distribution (v$(VERSION))..."
+	@mkdir -p dist/AppDir/usr/bin dist/AppDir/usr/share/applications dist/AppDir/usr/share/icons/hicolor/512x512/apps
+	@cp -f build/bin/planisphere dist/AppDir/usr/bin/
+	@cp -f build/linux/planisphere.desktop dist/AppDir/
+	@cp -f build/linux/planisphere.desktop dist/AppDir/usr/share/applications/
+	@cp -f build/appicon.png dist/AppDir/planisphere.png
+	@cp -f build/appicon.png dist/AppDir/usr/share/icons/hicolor/512x512/apps/
+	@printf '#!/bin/sh\nHERE=$$(dirname "$$(readlink -f "$$0")")\nexport PATH="$$HERE/usr/bin:$$PATH"\nexec "$$HERE/usr/bin/planisphere" "$$@"\n' > dist/AppDir/AppRun
+	@chmod +x dist/AppDir/AppRun
+	@bash packaging/appimage/build.sh dist/AppDir "dist/Planisphere-v$(VERSION)-x86_64.AppImage"
+
+# Package DEB distribution via nfpm
+package-deb: build
+	@echo "==> Packaging DEB distribution (v$(VERSION))..."
+	@command -v nfpm >/dev/null 2>&1 || (echo "==> Installing nfpm..." && go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest)
+	@VERSION=$(VERSION) nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
+
+# Package RPM distribution via nfpm
+package-rpm: build
+	@echo "==> Packaging RPM distribution (v$(VERSION))..."
+	@command -v nfpm >/dev/null 2>&1 || (echo "==> Installing nfpm..." && go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest)
+	@VERSION=$(VERSION) nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/
+
+# Package Arch Linux package (.pkg.tar.zst) via makepkg
+package-arch: package-tarball
+	@echo "==> Packaging Arch Linux package (.pkg.tar.zst) via makepkg..."
+	@mkdir -p dist/arch-pkg
+	@cp packaging/arch/PKGBUILD dist/arch-pkg/
+	@cp "dist/planisphere-v$(VERSION)-linux-amd64.tar.gz" dist/arch-pkg/
+	@(cd dist/arch-pkg && makepkg -f --nodeps)
+	@mv -f dist/arch-pkg/*.pkg.tar.zst dist/
+	@rm -rf dist/arch-pkg
+	@echo "==> Arch Linux package created in dist/"
+
+# Package Windows distribution (portable zip + NSIS installer)
+package-windows: sync-metadata
+	@if [ ! -d "frontend/node_modules" ]; then npm --prefix frontend install; fi
+	@echo "==> Building Windows binary and NSIS installer..."
+	$(WAILS) build -platform windows/amd64 -nsis -installscope user -webview2 download -trimpath
+	@mkdir -p dist
+	@echo "==> Packaging Windows distribution files..."
+	@tar -a -cf "dist/planisphere-v$(VERSION)-windows-amd64-portable.zip" -C build/bin planisphere.exe 2>/dev/null || \
+	 (cd build/bin && zip -q -9 "../../dist/planisphere-v$(VERSION)-windows-amd64-portable.zip" planisphere.exe)
+	@if [ -f "build/bin/planisphere-amd64-installer.exe" ]; then \
+		cp -f "build/bin/planisphere-amd64-installer.exe" "dist/planisphere-v$(VERSION)-windows-amd64-setup.exe"; \
+	fi
+	@echo "==> Windows packages created in dist/"
+
 clean:
-	rm -rf build/bin/ frontend/dist/
+	rm -rf build/bin/ frontend/dist/ dist/

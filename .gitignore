@@ -1,5 +1,7 @@
 # Binaries and build outputs
 build/bin/
+dist/
+*.AppImage
 *.exe
 *.exe~
 *.dll

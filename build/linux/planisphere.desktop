@@ -1,0 +1,12 @@
+# DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json
+[Desktop Entry]
+Type=Application
+Name=Planisphere
+GenericName=Expedition Planner & Astrometric Telemetry Terminal
+Comment=Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal
+Exec=planisphere %u
+Icon=planisphere
+Terminal=false
+Categories=Game;Utility;
+StartupWMClass=planisphere
+Keywords=elite;dangerous;expedition;astrometry;spansh;carrier;

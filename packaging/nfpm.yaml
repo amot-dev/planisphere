@@ -1,0 +1,33 @@
+name: "planisphere"
+arch: "amd64"
+platform: "linux"
+version: "${VERSION}"
+section: "games"
+priority: "optional"
+maintainer: "Alexander Mot <alexander@amot.dev>"
+description: "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal"
+homepage: "https://github.com/amot-dev/planisphere"
+license: "GPL-3.0"
+
+contents:
+  - src: build/bin/planisphere
+    dst: /usr/bin/planisphere
+    file_info:
+      mode: 0755
+  - src: build/linux/planisphere.desktop
+    dst: /usr/share/applications/planisphere.desktop
+  - src: build/appicon.png
+    dst: /usr/share/icons/hicolor/512x512/apps/planisphere.png
+  - src: LICENSE
+    dst: /usr/share/licenses/planisphere/LICENSE
+
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0
+      - libwebkit2gtk-4.1-0
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+

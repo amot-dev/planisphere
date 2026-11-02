@@ -1,5 +1,5 @@
 {
-  "//": "DO NOT EDIT METADATA DIRECTLY: Synced from app.config.json via 'npm run sync-metadata'",
+  "//": "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json",
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
