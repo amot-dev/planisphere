@@ -56,6 +56,8 @@ export function ExpeditionPlanner({
   const [loadingDetails, setLoadingDetails] = useState<Record<number, boolean>>({})
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
 
+  const isPlanning = plan?.expedition?.status === 'planning'
+
   // Drag-and-drop state for unvisited / planning rows
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
@@ -205,19 +207,23 @@ export function ExpeditionPlanner({
 
   // Refresh open drawers when plan updates
   useEffect(() => {
-    if (!plan) return
+    if (!plan || isPlanning) return
     for (const idStr of Object.keys(expandedRowIds)) {
       const id = Number(idStr)
       if (expandedRowIds[id]) {
-        loadDetails(id)
+        const rowView = plan.rows?.find((r) => r.row.id === id)
+        const isVisited = rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')
+        if (isVisited) {
+          loadDetails(id)
+        }
       }
     }
-  }, [plan])
+  }, [plan, isPlanning])
 
   // Highest row index that has been visited; rows at or above this index are locked
   // against structural edits (reordering, deleting, or changing system name).
   const lastVisitedIndex = useMemo(() => {
-    if (!plan || !plan.rows || plan.expedition?.status === 'planning') return -1
+    if (!plan || !plan.rows || isPlanning) return -1
     let maxIndex = -1
     ;(plan.rows ?? []).forEach((rowView, index) => {
       if (rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')) {
@@ -225,7 +231,7 @@ export function ExpeditionPlanner({
       }
     })
     return maxIndex
-  }, [plan])
+  }, [plan, isPlanning])
 
   function loadDetails(rowId: number) {
     setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
@@ -236,6 +242,10 @@ export function ExpeditionPlanner({
   }
 
   function toggleExpand(rowId: number) {
+    const rowView = plan?.rows?.find((r) => r.row.id === rowId)
+    const isVisited = rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')
+    if (isPlanning || !isVisited) return
+
     const nextOpen = !expandedRowIds[rowId]
     setExpandedRowIds((previous) => ({ ...previous, [rowId]: nextOpen }))
     if (nextOpen) {
@@ -697,8 +707,6 @@ export function ExpeditionPlanner({
     | { kind: 'waypoint'; rowView: expedition.RowView; index: number; key: string }
     | { kind: 'drawer'; rowView: expedition.RowView; index: number; key: string }
 
-  const isPlanning = plan?.expedition?.status === 'planning'
-
   const tableItems: TableItem[] = useMemo(() => {
     if (!plan || !plan.rows) return []
     const items: TableItem[] = []
@@ -715,7 +723,7 @@ export function ExpeditionPlanner({
         }
         items.push({ kind: 'waypoint', rowView, index, key: `row-${row.id}` })
         const isExpanded = Boolean(expandedRowIds[row.id])
-        if (!isPlanning && isExpanded) {
+        if (!isPlanning && isVisited && isExpanded) {
           items.push({ kind: 'drawer', rowView, index, key: `drawer-${row.id}` })
         }
       }

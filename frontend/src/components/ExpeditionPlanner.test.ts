@@ -80,6 +80,10 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('WAYPOINTS VISITED')
     expect(html).toContain('Sol')
     expect(html).toContain('Colonia')
+    // Sol is visited, so it has the dropdown chevron button.
+    // Colonia is unvisited (not arrived at yet), so it must NOT have the dropdown chevron button.
+    const matches = html.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
+    expect(matches).toHaveLength(1)
   })
 
   it('renders safely when plan has empty rows array', () => {
@@ -329,6 +333,89 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toMatch(
       /<tr style="[^"]*content-visibility:auto[^"]*contain-intrinsic-size:44px[^"]*"><td colSpan="8"[^>]*>[\s\S]*?\[VESSEL FLOWN\]:/,
     )
+  })
+
+  it('does not render dropdown chevrons for unvisited waypoints or during planning', () => {
+    const activePlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 7,
+        name: 'Active Expedition',
+        status: 'active',
+      },
+      rows: [
+        {
+          row: { id: 701, expeditionId: 7, rowType: 'waypoint', systemName: 'Visited-1' },
+          number: 1,
+          visitState: 'visited',
+        },
+        {
+          row: { id: 702, expeditionId: 7, rowType: 'waypoint', systemName: 'Current-2' },
+          number: 2,
+          visitState: 'current',
+        },
+        {
+          row: { id: 703, expeditionId: 7, rowType: 'waypoint', systemName: 'Future-3' },
+          number: 3,
+          visitState: 'future',
+        },
+        {
+          row: { id: 704, expeditionId: 7, rowType: 'waypoint', systemName: 'Unvisited-4' },
+          number: 4,
+          visitState: 'unvisited',
+        },
+      ],
+      modes: [],
+      visitedCount: 2,
+      waypointCount: 4,
+    })
+
+    const activeHtml = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: activePlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    // Only Visited-1 and Current-2 should have dropdown chevrons
+    const activeChevrons = activeHtml.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
+    expect(activeChevrons).toHaveLength(2)
+
+    const planningPlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 8,
+        name: 'Planning Expedition',
+        status: 'planning',
+      },
+      rows: [
+        {
+          row: { id: 801, expeditionId: 8, rowType: 'waypoint', systemName: 'Planned-1' },
+          number: 1,
+          visitState: 'unvisited',
+        },
+      ],
+      modes: [],
+      visitedCount: 0,
+      waypointCount: 1,
+    })
+
+    const planningHtml = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: planningPlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    // Planning rows must not have dropdown chevrons
+    const planningChevrons = planningHtml.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
+    expect(planningChevrons).toBeNull()
   })
 })
 
