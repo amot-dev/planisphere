@@ -19,6 +19,12 @@ var DefaultModes = []struct {
 	{"Travel", "High-speed transit, neutron highway sprints, and Bubble commutes.", "#FF7100"},
 }
 
+// DefaultExpeditionName and DefaultExpeditionDescription are seeded on first initialisation.
+const (
+	DefaultExpeditionName        = "Deep Space Expedition I"
+	DefaultExpeditionDescription = "Deep Space Exploration & Scientific Survey Route"
+)
+
 type migration struct {
 	key         string
 	description string
@@ -30,6 +36,11 @@ var migrations = []migration{
 		key:         "default_modes_seeded",
 		description: "Seed default exploration, tourism, and travel modes",
 		apply:       migrateDefaultModesSeeded,
+	},
+	{
+		key:         "default_expedition_seeded",
+		description: "Seed initial default expedition if none exist",
+		apply:       migrateDefaultExpeditionSeeded,
 	},
 	{
 		key:         "ingest_parser_v2",
@@ -95,6 +106,32 @@ func migrateDefaultModesSeeded(dbConn *sql.DB) error {
 			VALUES(?, ?, ?, 1, ?, ?)`, defaultMode.Name, defaultMode.Description, defaultMode.Color, i, now); seedError != nil {
 			return fmt.Errorf("seed modes: %w", seedError)
 		}
+	}
+	return nil
+}
+
+func migrateDefaultExpeditionSeeded(dbConn *sql.DB) error {
+	var count int
+	if err := dbConn.QueryRow(`SELECT count(*) FROM expeditions`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+		insertResult, insertError := dbConn.Exec(`INSERT INTO expeditions(name, description, status, created_at, updated_at)
+			VALUES(?, ?, 'planning', ?, ?)`,
+			DefaultExpeditionName, DefaultExpeditionDescription, now, now)
+		if insertError != nil {
+			return fmt.Errorf("seed expedition: %w", insertError)
+		}
+		expeditionID, lastInsertError := insertResult.LastInsertId()
+		if lastInsertError != nil {
+			return fmt.Errorf("seed expedition id: %w", lastInsertError)
+		}
+		if _, rowError := dbConn.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, created_at, updated_at)
+			VALUES(?, 1, 'waypoint', ?, ?)`, expeditionID, now, now); rowError != nil {
+			return fmt.Errorf("seed expedition row: %w", rowError)
+		}
+		_ = SetSetting(dbConn, "active_expedition_id", fmt.Sprint(expeditionID))
 	}
 	return nil
 }

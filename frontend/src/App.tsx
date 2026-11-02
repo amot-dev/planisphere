@@ -5,7 +5,6 @@ import {
   APP_VERSION,
 } from './version'
 import {
-  CreateExpedition,
   GetIngestStatus,
   GetModesState,
   GetPlan,
@@ -84,14 +83,7 @@ export default function App() {
       setIngest(ingestStatus)
       setModesState(modesStateData)
 
-      let list = expeditionList
-      if (!list || list.length === 0) {
-        const seeded = await CreateExpedition(
-          'Deep Space Expedition I',
-          'Deep Space Exploration & Scientific Survey Route',
-        )
-        list = [seeded]
-      }
+      const list = expeditionList || []
       setExpeditions(list)
 
       let chosenId = 0

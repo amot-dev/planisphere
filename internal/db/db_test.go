@@ -47,6 +47,7 @@ func TestMigrateIdempotency(t *testing.T) {
 	// Verify expected migration keys were recorded in settings
 	expectedKeys := []string{
 		"default_modes_seeded",
+		"default_expedition_seeded",
 		"ingest_parser_v2",
 		"gec_schema_v2",
 		"commander_schema_v3",
@@ -62,5 +63,14 @@ func TestMigrateIdempotency(t *testing.T) {
 		if val != "1" {
 			t.Errorf("expected setting %q to be '1', got %q", key, val)
 		}
+	}
+
+	// Verify default expedition was seeded
+	var expName string
+	if err := dbConn.QueryRow("SELECT name FROM expeditions LIMIT 1").Scan(&expName); err != nil {
+		t.Fatalf("query default expedition: %v", err)
+	}
+	if expName != db.DefaultExpeditionName {
+		t.Errorf("expected expedition %q, got %q", db.DefaultExpeditionName, expName)
 	}
 }
