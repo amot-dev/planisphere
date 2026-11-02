@@ -1045,7 +1045,6 @@ export function ExpeditionPlanner({
                   }}
                   onCopySystem={handleCopySystem}
                   onToggleFcStop={toggleFcStop}
-                  onSetFcArrived={setFcArrived}
                   onOpenCarrierRoutePrompt={openCarrierRoutePrompt}
                   onToggleInsertMenu={(id) => setInsertMenuAfterId(insertMenuAfterId === id ? null : id)}
                   onInsert={handleInsert}

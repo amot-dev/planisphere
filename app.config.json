@@ -2,7 +2,7 @@
   "name": "planisphere",
   "productName": "Planisphere",
   "tagline": "Expedition Planner and Astrometric Telemetry Terminal",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Alexander Mot",
   "description": "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal",
   "binaryName": "planisphere"

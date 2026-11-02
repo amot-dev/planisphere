@@ -32,7 +32,6 @@ export interface WaypointRowItemProps {
   onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', val: string) => void
   onCopySystem: (id: number, name: string) => void
   onToggleFcStop: (row: expedition.Row) => void
-  onSetFcArrived: (id: number, arrived: boolean) => void
   onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void
   onToggleInsertMenu: (id: number) => void
   onInsert: (afterId: number, type: 'waypoint' | 'region') => void
@@ -65,7 +64,6 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   onFieldBlur,
   onCopySystem,
   onToggleFcStop,
-  onSetFcArrived,
   onOpenCarrierRoutePrompt,
   onToggleInsertMenu,
   onInsert,
@@ -232,22 +230,20 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   FC STOP
                 </span>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => onSetFcArrived(row.id, !row.fcArrived)}
+                <span
                   title={
                     row.fcArrived
-                      ? 'Carrier has arrived at this waypoint (click to mark pending)'
-                      : 'Carrier has not yet arrived (click to mark arrived)'
+                      ? 'Carrier has arrived at this waypoint'
+                      : 'Carrier arrival pending'
                   }
-                  className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border cursor-pointer ${
+                  className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border select-none ${
                     row.fcArrived
-                      ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70 hover:bg-[#FF7100] hover:text-[#050506]'
-                      : 'bg-[#120d09] text-[#a6907c] border-[#3d2816] hover:border-[#FF7100] hover:text-[#F4ECE4]'
+                      ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70'
+                      : 'bg-[#120d09] text-[#a6907c] border-[#3d2816]'
                   }`}
                 >
                   {row.fcArrived ? 'ARRIVED' : 'PENDING'}
-                </button>
+                </span>
               )}
 
               {!isPlanning && isNextFcStop && (
