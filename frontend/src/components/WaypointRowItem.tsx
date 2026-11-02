@@ -79,6 +79,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
     <tr
       style={rowStyle}
       {...dropProps}
+      data-row-id={row.id}
+      data-row-index={index}
+      data-last-visited={!isPlanning && index === lastVisitedIndex ? 'true' : undefined}
       className={`group align-top ${
         isBeingDragged ? 'opacity-40' : ''
       } ${isDragTarget ? 'outline-2 outline-[#00D2FF]' : ''} ${

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   AddRow,
   ClearActiveCarrierRoute,
@@ -42,6 +42,8 @@ const rowStyle: CSSProperties = {
   contentVisibility: 'auto',
   containIntrinsicSize: '44px',
 }
+
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
 
 export function ExpeditionPlanner({
   plan,
@@ -232,6 +234,83 @@ export function ExpeditionPlanner({
     })
     return maxIndex
   }, [plan, isPlanning])
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const lastOpenedKeyRef = useRef<string | null>(null)
+
+  // Configure starting scroll position on initial open or expedition stage change:
+  // - Planning: fully scrolled to the bottom
+  // - Active: last visited waypoint centered in the viewport
+  // - Completed: top of the list (scrollTop 0)
+  useIsomorphicLayoutEffect(() => {
+    if (!plan?.expedition) return
+    const expeditionId = plan.expedition.id
+    const status = plan.expedition.status
+    const openKey = `${expeditionId}:${status}`
+
+    if (lastOpenedKeyRef.current === openKey) {
+      return
+    }
+
+    const applyScroll = () => {
+      const el = scrollContainerRef.current
+      if (!el || el.clientHeight === 0) return false
+
+      if (status === 'planning') {
+        el.scrollTop = el.scrollHeight
+        return true
+      }
+
+      if (status === 'active') {
+        const targetRow =
+          el.querySelector<HTMLElement>('[data-last-visited="true"]') ??
+          el.querySelector<HTMLElement>('tr[data-row-index="0"]')
+
+        if (targetRow) {
+          targetRow.scrollIntoView({ block: 'center', behavior: 'instant' })
+          const thead = el.querySelector('thead')
+          const theadHeight = thead ? thead.offsetHeight : 0
+          const visibleHeight = el.clientHeight - theadHeight
+          const visibleCenter = theadHeight + visibleHeight / 2
+
+          const containerRect = el.getBoundingClientRect()
+          const rowRect = targetRow.getBoundingClientRect()
+          const rowCenter = rowRect.top - containerRect.top + rowRect.height / 2
+          const delta = rowCenter - visibleCenter
+          if (Math.abs(delta) > 1) {
+            el.scrollTop += delta
+          }
+          return true
+        }
+        el.scrollTop = 0
+        return true
+      }
+
+      if (status === 'completed') {
+        el.scrollTop = 0
+        return true
+      }
+
+      return false
+    }
+
+    const initialApplied = applyScroll()
+    if (initialApplied) {
+      lastOpenedKeyRef.current = openKey
+    }
+
+    // Micro-adjustment on the next animation frame in case content-visibility: auto,
+    // table layout reflow, or initial container measurement adjusted row heights
+    const rafId = requestAnimationFrame(() => {
+      if (applyScroll()) {
+        lastOpenedKeyRef.current = openKey
+      }
+    })
+
+    return () => {
+      cancelAnimationFrame(rafId)
+    }
+  }, [plan?.expedition?.id, plan?.expedition?.status, lastVisitedIndex])
 
   function loadDetails(rowId: number) {
     setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
@@ -882,7 +961,7 @@ export function ExpeditionPlanner({
       </div>
 
       {/* Main Waypoint Table + Bottom Add Row Bar */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden bg-[#070605]">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-[#070605]">
         <table className="w-full table-fixed border-separate border-spacing-0 text-left">
           <thead className="sticky top-0 z-20 bg-[#120d09] border-b-2 border-[#FF7100]/70 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#a6907c] select-none">
             <tr className="align-top">

@@ -417,5 +417,92 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const planningChevrons = planningHtml.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
     expect(planningChevrons).toBeNull()
   })
+
+  it('marks the last visited waypoint with data-last-visited="true" for active expeditions to support middle centering', () => {
+    const activePlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 9,
+        name: 'Deep Space Active',
+        status: 'active',
+      },
+      rows: [
+        {
+          row: { id: 901, expeditionId: 9, rowType: 'waypoint', systemName: 'Start-1' },
+          number: 1,
+          visitState: 'visited',
+        },
+        {
+          row: { id: 902, expeditionId: 9, rowType: 'waypoint', systemName: 'Visited-2' },
+          number: 2,
+          visitState: 'visited',
+        },
+        {
+          row: { id: 903, expeditionId: 9, rowType: 'waypoint', systemName: 'Next-3' },
+          number: 3,
+          visitState: 'unvisited',
+        },
+      ],
+      modes: [],
+      visitedCount: 2,
+      waypointCount: 3,
+    })
+
+    const html = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: activePlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    // Waypoint 2 is the last visited waypoint (index 1), so it must have data-last-visited="true"
+    expect(html).toContain('data-row-id="902"')
+    expect(html).toContain('data-row-index="1"')
+    expect(html).toMatch(/data-row-id="902"[^>]*data-last-visited="true"/)
+
+    // Waypoint 1 (index 0) was visited earlier, so it must not have data-last-visited="true"
+    expect(html).not.toMatch(/data-row-id="901"[^>]*data-last-visited="true"/)
+  })
+
+  it('renders planning expedition with bottom add buttons and breathing room for scrolling to the bottom', () => {
+    const planningPlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 10,
+        name: 'Planning Survey',
+        status: 'planning',
+      },
+      rows: [
+        {
+          row: { id: 1001, expeditionId: 10, rowType: 'waypoint', systemName: 'WP-1' },
+          number: 1,
+          visitState: 'unvisited',
+        },
+      ],
+      modes: [],
+      visitedCount: 0,
+      waypointCount: 1,
+    })
+
+    const html = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: planningPlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    // Planning must not mark rows as data-last-visited
+    expect(html).not.toContain('data-last-visited="true"')
+    // Must contain Add Waypoint button and breathing room spacer at bottom
+    expect(html).toContain('Add Waypoint')
+    expect(html).toContain('Add Galactic Region Header')
+    expect(html).toContain('h-48 shrink-0 pointer-events-none')
+  })
 })
 
