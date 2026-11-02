@@ -93,6 +93,15 @@ jobs:
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
+      - name: Configure NSIS
+        run: |
+          if [ -d "/c/Program Files (x86)/NSIS" ]; then
+            echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
+          elif ! command -v makensis >/dev/null 2>&1; then
+            choco install nsis -y
+            echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
+          fi
+
       - name: Package Windows Artifacts
         run: make package-windows
 
@@ -169,7 +178,7 @@ jobs:
       - name: Generate SHA256 Checksums
         working-directory: release-assets
         run: |
-          find . -maxdepth 1 -type f ! -name "sha256sums.txt" -exec sha256sum {} + | sed 's| \./| |' > sha256sums.txt
+          find . -maxdepth 1 -type f ! -name "sha256sums.txt" -exec sha256sum {} + | sed 's|  \./|  |' > sha256sums.txt
           cat sha256sums.txt
 
       - name: Publish Release to GitHub

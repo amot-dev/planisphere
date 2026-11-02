@@ -125,10 +125,13 @@ package-windows: sync-metadata install-frontend
 	@echo "==> Packaging Windows distribution files..."
 	@tar -a -cf "dist/planisphere-v$(VERSION)-windows-amd64-portable.zip" -C build/bin planisphere.exe 2>/dev/null || \
 	 (cd build/bin && zip -q -9 "../../dist/planisphere-v$(VERSION)-windows-amd64-portable.zip" planisphere.exe)
+	@echo "==> Windows portable zip created: dist/planisphere-v$(VERSION)-windows-amd64-portable.zip"
 	@if [ -f "build/bin/planisphere-amd64-installer.exe" ]; then \
 		cp -f "build/bin/planisphere-amd64-installer.exe" "dist/planisphere-v$(VERSION)-windows-amd64-setup.exe"; \
+		echo "==> Windows setup installer created: dist/planisphere-v$(VERSION)-windows-amd64-setup.exe"; \
+	else \
+		echo "Warning: build/bin/planisphere-amd64-installer.exe not found (makensis may not be installed or in PATH)"; \
 	fi
-	@echo "==> Windows packages created in dist/"
 
 clean:
 	@echo "==> Cleaning build and distribution directories..."
