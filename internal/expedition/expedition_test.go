@@ -246,7 +246,7 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 	// 1. Sol (waypoint)
 	// 2. Region 1 (header1)
 	// 3. Alpha Centauri (waypoint)
-	// All empty waypoints and headers 2 & 3 must be deleted.
+	// All empty waypoints and headers 2 and 3 must be deleted.
 	if len(survivingRows) != 3 {
 		t.Fatalf("expected 3 surviving rows, got %d: %+v", len(survivingRows), survivingRows)
 	}
@@ -295,7 +295,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		`{"timestamp":"2026-01-17T08:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		`{"timestamp":"2026-01-17T09:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		`{"timestamp":"2026-01-17T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		// Expedition start & arrival at Sol
+		// Expedition start and arrival at Sol
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":25.0}`,
 		// Mid-expedition ship swap
 		`{"timestamp":"2026-01-19T14:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"krait_phantom","ShipType_Localised":"Krait Phantom","ShipID":20}`,

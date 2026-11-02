@@ -339,7 +339,7 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 		return result, fmt.Errorf("EDDiscovery database not found: %s", eddPath)
 	}
 
-	reportProgress(0, 0, 0, "Opening EDDiscovery database & reading journal entries…")
+	reportProgress(0, 0, 0, "Opening EDDiscovery database and reading journal entries…")
 	eddConn, openError := sql.Open("sqlite", "file:"+eddPath+"?mode=ro&_pragma=busy_timeout(5000)")
 	if openError != nil {
 		return result, fmt.Errorf("open EDDiscovery DB: %w", openError)

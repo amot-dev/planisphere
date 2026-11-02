@@ -301,7 +301,7 @@ export default function App() {
               Initializing Exploration Terminal…
             </div>
             <div className="text-xs text-[#a6907c]">
-              Mounting journal archive &amp; stellar coordinate index
+              Mounting journal archive and stellar coordinate index
             </div>
           </div>
           <div className="w-full h-1.5 bg-[#16100b] border border-[#3d2816] overflow-hidden">
@@ -335,7 +335,7 @@ export default function App() {
       {/* Top Cockpit Telemetry Header */}
       <header className="relative h-12 shrink-0 px-4 bg-[#0b0907] border-b border-[#3d2816] border-t-2 border-t-[#FF7100] flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          {/* ED Emblem + Title & Shrunk Clock */}
+          {/* ED Emblem + Title and Shrunk Clock */}
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-2 h-5 bg-[#FF7100]" />
             <div className="leading-none">

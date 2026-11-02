@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build and Release
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
       - name: Install Desktop Validation Tools
         run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
 
-      - name: Validate Version & Git Tag
+      - name: Validate Version and Git Tag
         run: |
           CONFIG_VERSION=$(grep -o '"version": *"[^"]*"' app.config.json | cut -d'"' -f4)
           if [ -z "$CONFIG_VERSION" ]; then
@@ -150,7 +150,7 @@ jobs:
         run: make package-appimage
 
       # Uncomment to publish .deb and .rpm assets directly to GitHub Releases:
-      # - name: Package DEB & RPM
+      # - name: Package DEB and RPM
       #   run: make package-deb package-rpm
 
       - name: Upload Linux Artifacts

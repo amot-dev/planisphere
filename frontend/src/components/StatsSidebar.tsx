@@ -56,7 +56,7 @@ export const StatsSidebar = memo(function StatsSidebar({
   function cycleModeSelection(modeId: number) {
     const selection = getSelection(modeId)
     if (selection.travel && selection.discovery) {
-      // Full -> Partial (Scans & Exobio only)
+      // Full -> Partial (Scans and Exobio only)
       setModeSelection(modeId, false, true)
     } else if (!selection.travel && selection.discovery) {
       // Partial -> Excluded (None)
@@ -90,7 +90,7 @@ export const StatsSidebar = memo(function StatsSidebar({
 
   return (
     <aside className="w-[390px] shrink-0 h-full bg-[#090705] border-r border-[#3d2816] flex flex-col overflow-hidden">
-      {/* Active Mode Switcher & Mode Filter */}
+      {/* Active Mode Switcher and Mode Filter */}
       <div className="p-3 border-b border-[#3d2816] bg-[#110c08] space-y-2">
         {/* Live Mode Quick Switcher */}
         <div className="flex items-center gap-2 text-xs">
@@ -136,9 +136,9 @@ export const StatsSidebar = memo(function StatsSidebar({
               const isPartial = !selection.travel && selection.discovery
 
               const titleText = isFull
-                ? `${mode.name}: All telemetry included. Click to switch to Scans & Exobio only.`
+                ? `${mode.name}: All telemetry included. Click to switch to Scans and Exobio only.`
                 : isPartial
-                  ? `${mode.name}: Scans & Exobio only (jumps/Ly hidden). Click to exclude.`
+                  ? `${mode.name}: Scans and Exobio only (jumps/Ly hidden). Click to exclude.`
                   : `${mode.name}: Excluded from metrics. Click to include all.`
 
               return (
@@ -191,7 +191,7 @@ export const StatsSidebar = memo(function StatsSidebar({
             <p className="text-[9px] text-[#6e5b4b] flex items-center gap-1 flex-wrap">
               <span>Partial</span>
               <SquareCheckbox checked="partial" size="xs" />
-              <span>includes scans, mapping &amp; exobio, excluding travel distance/jumps.</span>
+              <span>includes scans, mapping and exobio, excluding travel distance/jumps.</span>
             </p>
           </div>
         </div>
@@ -292,7 +292,7 @@ export const StatsSidebar = memo(function StatsSidebar({
           )}
         </div>
 
-        {/* Personal Navigation Metrics (Ship & Carrier Passenger Travel) */}
+        {/* Personal Navigation Metrics (Ship and Carrier Passenger Travel) */}
         <div className="border border-[#3d2816] bg-[#0e0a07] divide-y divide-[#24180e]">
           {/* Distance Travelled (Ly) — Total + Breakdown */}
           <div className="p-2.5">
@@ -381,7 +381,7 @@ export const StatsSidebar = memo(function StatsSidebar({
           </div>
         </div>
 
-        {/* Exploration Cartographics & Exobiology */}
+        {/* Exploration Cartographics and Exobiology */}
         <div className="border border-[#3d2816] bg-[#0e0a07] divide-y divide-[#24180e]">
           <StatRow
             label="Bodies Scanned"
@@ -424,7 +424,7 @@ export const StatsSidebar = memo(function StatsSidebar({
             {scanExpanded && (
               <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#00D2FF]/50 text-[11px]">
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-                  <span className="truncate">Base Scans &amp; Mapping</span>
+                  <span className="truncate">Base Scans and Mapping</span>
                   <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
                     {formatCredits(displayedMetrics.scanValueBase)}
                   </span>

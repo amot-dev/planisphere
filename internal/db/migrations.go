@@ -22,7 +22,7 @@ var DefaultModes = []struct {
 // DefaultExpeditionName and DefaultExpeditionDescription are seeded on first initialisation.
 const (
 	DefaultExpeditionName        = "Deep Space Expedition I"
-	DefaultExpeditionDescription = "Deep Space Exploration & Scientific Survey Route"
+	DefaultExpeditionDescription = "Deep Space Exploration and Scientific Survey Route"
 )
 
 type migration struct {

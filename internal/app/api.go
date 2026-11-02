@@ -35,7 +35,7 @@ func (app *App) ready() error {
 }
 
 // ============================================================================
-// Settings & journal ingestion
+// Settings and journal ingestion
 // ============================================================================
 
 // Settings is the user-configurable application state.
@@ -516,7 +516,7 @@ func (app *App) DeleteModeWindow(id int64) (ModesState, error) {
 }
 
 // ============================================================================
-// Expeditions & planner rows
+// Expeditions and planner rows
 // ============================================================================
 
 // ListExpeditions returns all expeditions (newest first).

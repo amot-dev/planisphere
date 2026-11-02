@@ -183,7 +183,7 @@ export function StartExpeditionModal({
           />
           <div className="flex-1">
             <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-              Arm &amp; Wait for First Arrival at Waypoint #1
+              Arm and Wait for First Arrival at Waypoint #1
             </div>
             <p className="text-[11px] text-[#a6907c] mt-0.5">
               The moment your ship or carrier arrives in{' '}
@@ -236,7 +236,7 @@ export function StartExpeditionModal({
           onClick={handleConfirm}
           className="ed-btn-primary"
         >
-          {busy ? 'ENGAGING...' : 'Confirm & Engage'}
+          {busy ? 'ENGAGING...' : 'Confirm and Engage'}
         </button>
       </div>
     </ModalShell>
@@ -436,11 +436,11 @@ export function SettingsModal({
         </div>
       </div>
 
-      {/* Database Storage Location & Live Watcher */}
+      {/* Database Storage Location and Live Watcher */}
       <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#00D2FF]">
-            Database &amp; Event Archive
+            Database and Event Archive
           </span>
           <button
             type="button"
@@ -659,7 +659,7 @@ export function SettingsModal({
         <label className="flex items-center justify-between cursor-pointer">
           <div>
             <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-              Enable Online EDSM Coordinates &amp; EDAstro GEC Sync
+              Enable Online EDSM Coordinates and EDAstro GEC Sync
             </div>
             <div className="text-[11px] text-[#a6907c]">
               Fetches coordinates for unvisited systems and downloads catalog POIs
@@ -762,7 +762,7 @@ export function ExpeditionManageModal({
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Expedition Name (e.g. Colonia & Sagittarius A*)"
+            placeholder="Expedition Name (e.g. Colonia and Sagittarius A*)"
             className="bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 text-[#F4ECE4]"
           />
           <input

@@ -63,7 +63,7 @@ export function SetupWizardModal({
   const [eddImportedCount, setEddImportedCount] = useState<number | null>(null)
   const [eddBusy, setEddBusy] = useState<boolean>(false)
 
-  // Step 4 state: Commanders & Online Sync
+  // Step 4 state: Commanders and Online Sync
   const [onlineLookups, setOnlineLookups] = useState<boolean>(
     initialSettings?.onlineLookups ?? true,
   )
@@ -283,7 +283,7 @@ export function SetupWizardModal({
     'Step 1 of 4 — Database Location',
     'Step 2 of 4 — Journal Folder',
     'Step 3 of 4 — Historical Import',
-    'Step 4 of 4 — Commanders & Online Sync',
+    'Step 4 of 4 — Commanders and Online Sync',
   ]
 
   return (
@@ -327,7 +327,7 @@ export function SetupWizardModal({
             </div>
           )}
 
-          {/* STEP 1: WELCOME & DATABASE PATH */}
+          {/* STEP 1: WELCOME AND DATABASE PATH */}
           {step === 0 && (
             <div className="space-y-4">
               <div className="space-y-1">
@@ -620,7 +620,7 @@ export function SetupWizardModal({
             </div>
           )}
 
-          {/* STEP 4: COMMANDERS & ONLINE SYNC */}
+          {/* STEP 4: COMMANDERS AND ONLINE SYNC */}
           {step === 3 && (
             <div className="space-y-4">
               {/* Commander Selection (always shown even if 0 or 1 CMDR) */}
@@ -686,7 +686,7 @@ export function SetupWizardModal({
                   />
                   <div className="flex-1">
                     <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-                      EDSM &amp; EDAstro GEC Online Sync
+                      EDSM and EDAstro GEC Online Sync
                     </div>
                     <p className="text-[11px] text-[#a6907c] mt-0.5 leading-relaxed">
                       Resolves coordinates for unvisited waypoint systems and downloads the

@@ -60,7 +60,7 @@ export function ExpeditionPlanner({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
-  // Carrier Route Setup Modal & Bottom Panel state
+  // Carrier Route Setup Modal and Bottom Panel state
   const [routePrompt, setRoutePrompt] = useState<CarrierRoutePromptState | null>(null)
   const [activeCarrierRoute, setActiveCarrierRoute] = useState<app.CarrierRouteResult | null>(null)
   const [activeCarrierTargetRowId, setActiveCarrierTargetRowId] = useState<number>(0)
@@ -816,7 +816,7 @@ export function ExpeditionPlanner({
             </div>
           </div>
 
-          {/* Lifecycle action buttons (Start Time & Reset to Planning removed; use Clone in Plans menu) */}
+          {/* Lifecycle action buttons (Start Time and Reset to Planning removed; use Clone in Plans menu) */}
           {isPlanning && (
             <button
               type="button"
@@ -889,7 +889,7 @@ export function ExpeditionPlanner({
               <th className="px-3 py-2.5 align-top border-b border-[#FF7100]/70">Flight Notes</th>
               <th
                 className="w-44 px-2 py-2.5 text-center align-top border-b border-[#FF7100]/70"
-                title="Fleet Carrier Stop, Arrival Status & Spansh Router"
+                title="Fleet Carrier Stop, Arrival Status and Spansh Router"
               >
                 Carrier Stop
               </th>
@@ -1106,7 +1106,7 @@ export function ExpeditionPlanner({
 
             <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-[#a6907c]">
               {isPlanning
-                ? 'DRAG (⋮⋮) OR USE ARROWS TO REORDER WAYPOINTS & SECTORS'
+                ? 'DRAG (⋮⋮) OR USE ARROWS TO REORDER WAYPOINTS AND SECTORS'
                 : 'UNVISITED WAYPOINTS DRAGGABLE · CLONE IN PLANS MENU TO RE-PLAN'}
             </div>
           </div>

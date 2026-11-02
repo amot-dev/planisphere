@@ -78,7 +78,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleReset}
                 className="ed-btn"
               >
-                Dismiss &amp; Retry
+                Dismiss and Retry
               </button>
               <button
                 type="button"

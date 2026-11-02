@@ -119,7 +119,7 @@ make sync-metadata
 ```
 
 
-## Improvements & Future Ideas
+## Improvements and Future Ideas
 
 ### Possible Improvements
 - **Expedition Table Virtualization (Option B)**: The expedition flight planner currently relies on native CSS scrolling combined with engine-level `content-visibility: auto; contain-intrinsic-size: 44px;` (Option A) for zero JavaScript execution during scrolling and smooth 60fps performance on typical journeys. As a possible future enhancement if support for massive expeditions (>100 waypoints) is ever needed, isolated, memoized windowed virtualization with localized cell state (Option B) can be introduced to cap active DOM nodes without triggering parent-level table re-renders on scroll.

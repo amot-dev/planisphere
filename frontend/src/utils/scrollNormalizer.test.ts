@@ -27,7 +27,7 @@ function createMockElement(classes: string[], dimensions: {
   return mockElement as HTMLElement
 }
 
-describe('Scroll Performance & Normalizer', () => {
+describe('Scroll Performance and Normalizer', () => {
   it('detects declared scrollable containers via class without forcing full style recalculation', () => {
     const parent = createMockElement(['flex-1', 'overflow-y-auto'], {
       clientHeight: 400,
@@ -100,7 +100,7 @@ describe('Scroll Performance & Normalizer', () => {
     }
   })
 
-  describe('Wheel Event Normalization & Scaling', () => {
+  describe('Wheel Event Normalization and Scaling', () => {
     let mockWindow: any
     let listeners: Record<string, Function>
     let cleanup: () => void

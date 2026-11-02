@@ -47,7 +47,7 @@ describe('ErrorBoundary', () => {
     expect(html).toContain('Subsystem Sensor Malfunction')
     expect(html).toContain('Critical telemetry failure')
     expect(html).toContain('Reboot Terminal')
-    expect(html).toContain('Dismiss &amp; Retry')
+    expect(html).toContain('Dismiss and Retry')
   })
 
   it('logs caught errors to console via componentDidCatch', () => {

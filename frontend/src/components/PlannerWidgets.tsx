@@ -501,7 +501,7 @@ export function WaypointDetailsDrawer({
           </div>
           <div className="mt-1.5 grid grid-cols-2 gap-2 pt-1.5 border-t border-[#2e1f12] text-[11px]">
             <div className="flex justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">Base Scans &amp; Mapping:</span>
+              <span className="truncate">Base Scans and Mapping:</span>
               <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
                 {formatCredits(metrics.scanValueBase)}
               </span>

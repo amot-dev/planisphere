@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { expedition } from '../../wailsjs/go/models'
 
-describe('ExpeditionPlanner Hook Stability & Lifecycle', () => {
+describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
   it('renders safely when plan is null without throwing hook mismatch or null access', () => {
     const html = renderToString(
       createElement(ExpeditionPlanner, {

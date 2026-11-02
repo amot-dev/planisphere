@@ -58,7 +58,7 @@ func main() {
 	// Sync frontend/index.html
 	syncIndexHTML(filepath.Join(rootDir, "frontend", "index.html"), appConfig)
 
-	// Generate internal/version/version.go (consumed directly by main.go & backend)
+	// Generate internal/version/version.go (consumed directly by main.go and backend)
 	generateGoVersion(filepath.Join(rootDir, "internal", "version", "version.go"), appConfig)
 
 	// Generate frontend/src/version.ts (consumed by frontend UI)

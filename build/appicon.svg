@@ -49,7 +49,7 @@
   <line x1="256" y1="140" x2="256" y2="220" stroke="url(#reticleGrad)" stroke-width="3"/>
   <line x1="256" y1="292" x2="256" y2="372" stroke="url(#reticleGrad)" stroke-width="3"/>
 
-  <!-- Inner Reticle & Compass Hub -->
+  <!-- Inner Reticle and Compass Hub -->
   <circle cx="256" cy="256" r="48" fill="#120c08" stroke="#FF7100" stroke-width="3.5" filter="url(#glow)"/>
   <circle cx="256" cy="256" r="32" fill="none" stroke="#FF9D3B" stroke-width="2" stroke-dasharray="4 4"/>
 
