@@ -94,30 +94,32 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             isVisited ? 'border-l-2 border-l-[#FF7100]' : ''
           }`}
         >
-          {isVisited && (
-            <button
-              type="button"
-              onClick={() => onToggleExpand(row.id)}
-              title="Toggle per-waypoint leg telemetry / distance drawer"
-              className={`p-1 hover:bg-[#24180e] cursor-pointer mt-0.5 ${
-                isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
-              }`}
-            >
-              <svg
-                className={`w-3.5 h-3.5 transition-transform ${
-                  isExpanded ? 'rotate-90' : ''
+          <div className="h-7 flex items-center justify-center">
+            {isVisited && (
+              <button
+                type="button"
+                onClick={() => onToggleExpand(row.id)}
+                title="Toggle per-waypoint leg telemetry / distance drawer"
+                className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
+                  isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
                 }`}
-                viewBox="0 0 20 20"
-                fill="currentColor"
               >
-                <path
-                  fillRule="evenodd"
-                  d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.25 4.5a.75.75 0 01-1.06-.02z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-          )}
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${
+                    isExpanded ? 'rotate-90' : ''
+                  }`}
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.25 4.5a.75.75 0 01-1.06-.02z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         </td>
       )}
 
@@ -127,20 +129,20 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           isPlanning && isVisited ? 'border-l-2 border-l-[#FF7100]' : ''
         }`}
       >
-        <div className="py-1">
+        <div className="h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5">
           {String(rowView.number).padStart(2, '0')}
         </div>
       </td>
 
       {/* System Name (EDSM indicator on left + system name + copy button) */}
       <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="h-7 flex items-center gap-2 min-w-0">
           <CoordStatusIndicator rowView={rowView} />
-          <div className="flex-1 min-w-0 flex items-center gap-1">
+          <div className="flex-1 min-w-0 flex items-center gap-1 h-7">
             {isLocked ? (
               <span
                 title={row.systemName}
-                className="font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-1 select-text cursor-text truncate block"
+                className="w-full h-7 flex items-center font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5"
               >
                 {row.systemName || '—'}
               </span>
@@ -162,7 +164,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                     ;(event.target as HTMLInputElement).blur()
                   }
                 }}
-                className="w-full bg-transparent px-1.5 py-1 border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none font-mono-tabular font-bold text-[#F4ECE4] placeholder:text-[#6e5b4b] select-text"
+                className="w-full h-7 bg-transparent px-1.5 py-[3px] border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none font-mono-tabular font-bold text-[#F4ECE4] placeholder:text-[#6e5b4b] select-text text-xs leading-5"
               />
             )}
             {row.systemName && (
@@ -177,7 +179,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                     ? `Copied "${row.systemName}"!`
                     : `Copy "${row.systemName}" to clipboard`
                 }
-                className={`p-1 hover:bg-[#1f150d] cursor-pointer shrink-0 ${
+                className={`h-5 w-5 flex items-center justify-center hover:bg-[#1f150d] cursor-pointer shrink-0 ${
                   copiedSystemRowId === row.id
                     ? 'text-[#00D2FF]'
                     : 'text-[#6e5b4b] hover:text-[#FF7100]'
@@ -221,7 +223,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
       {/* Carrier Stop */}
       <td className="px-2 py-1.5 text-center align-top border-b border-[#24180e]">
-        <div className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap py-0.5">
+        <div className="h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
           {row.fcStop ? (
             <>
               {isPlanning ? (
@@ -289,7 +291,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
               + FC STOP
             </button>
           ) : (
-            <span className="text-[#6e5b4b] font-mono-tabular text-[10px]">—</span>
+            <span className="h-5 inline-flex items-center justify-center text-[#6e5b4b] font-mono-tabular text-[10px]">—</span>
           )}
         </div>
       </td>
@@ -297,7 +299,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* Visit Status / Galactic Timestamp */}
       <td className="px-3 py-1.5 align-top border-b border-[#24180e] whitespace-nowrap">
         {isVisited ? (
-          <div className="py-0.5 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px]">
+          <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
             <span className="font-extrabold uppercase tracking-wider text-[#FF7100] shrink-0">
               LOGGED VISIT
             </span>
@@ -306,7 +308,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             </span>
           </div>
         ) : (
-          <div className="font-mono-tabular text-[11px] text-[#a6907c] py-0.5">
+          <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-[#a6907c] leading-5">
             {rowView.number === 1 ? (
               row.systemName?.trim() ? (
                 <span
@@ -343,7 +345,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
       {/* External Links + Row Manipulation + Drag Handle */}
       <td className="px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
-        <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap py-0.5">
+        <div className="h-7 inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
           <HoverOpenInLinks rowView={rowView} />
           {!isLocked && (
             <>

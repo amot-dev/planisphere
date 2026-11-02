@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { GetRegionOptions, OpenURL, RetryResolve } from '../../wailsjs/go/app/App'
 import { app, expedition, modes } from '../../wailsjs/go/models'
 import {
@@ -1007,7 +1007,7 @@ export function CarrierRouteBottomPanel({
 }
 
 const TEXTAREA_LINE_HEIGHT = 20 // 1.25rem = 20px (leading-5)
-const TEXTAREA_VERTICAL_PAD = 10 // py-1 (8px) + border (2px)
+const TEXTAREA_VERTICAL_PAD = 8 // py-[3px] (6px) + border (2px) = 8px; total 1-line height = 28px (h-7)
 
 export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
   value,
@@ -1027,15 +1027,7 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
   maxLines?: number
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [isFocused, setIsFocused] = useState(false)
-
-  // Compute native HTML rows attribute so the browser layout handles height natively in C++ layout without JS reflows
-  const rows = useMemo(() => {
-    if (!value) return 1
-    const explicit = value.split('\n').length
-    const wrap = Math.ceil(value.length / 36)
-    return Math.min(maxLines, Math.max(1, explicit, wrap))
-  }, [value, maxLines])
+  const [, setIsFocused] = useState(false)
 
   const adjustHeight = useCallback(() => {
     const textareaElement = textareaRef.current
@@ -1045,22 +1037,58 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
     const maxHeight = TEXTAREA_LINE_HEIGHT * maxLines + TEXTAREA_VERTICAL_PAD
 
     textareaElement.style.height = 'auto'
-    const targetHeight = Math.min(Math.max(textareaElement.scrollHeight, minHeight), maxHeight)
+    const borderHeight = Math.max(textareaElement.offsetHeight - textareaElement.clientHeight, 2)
+    const targetHeight = Math.min(
+      Math.max(textareaElement.scrollHeight + borderHeight, minHeight),
+      maxHeight,
+    )
     textareaElement.style.height = `${targetHeight}px`
-    textareaElement.style.overflowY = textareaElement.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    textareaElement.style.overflowY =
+      textareaElement.scrollHeight + borderHeight > maxHeight ? 'auto' : 'hidden'
   }, [maxLines])
 
-  // Only measure scrollHeight when actively focused and user is typing
+  // Synchronously measure and size on value change (including initial mount)
   useLayoutEffect(() => {
-    if (isFocused) {
+    adjustHeight()
+  }, [value, adjustHeight])
+
+  // Recalculate on viewport/container resize so wrapping reflows correctly
+  useEffect(() => {
+    const textareaElement = textareaRef.current
+    if (!textareaElement) return
+
+    let lastWidth = textareaElement.getBoundingClientRect().width
+
+    const handleResize = () => {
       adjustHeight()
     }
-  }, [value, isFocused, adjustHeight])
+
+    window.addEventListener('resize', handleResize)
+
+    let observer: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const newWidth = entry.contentRect.width
+          if (newWidth !== lastWidth) {
+            lastWidth = newWidth
+            adjustHeight()
+          }
+        }
+      })
+      observer.observe(textareaElement)
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      observer?.disconnect()
+    }
+  }, [adjustHeight])
 
   return (
     <textarea
       ref={textareaRef}
-      rows={rows}
+      rows={1}
       spellCheck={false}
       autoComplete="off"
       value={value}
@@ -1072,9 +1100,11 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
       }}
       onChange={(event) => {
         onChange(event.target.value)
+        adjustHeight()
       }}
       onBlur={(event) => {
         setIsFocused(false)
+        adjustHeight()
         onBlur(event.target.value)
       }}
       onKeyDown={(event) => {
@@ -1083,7 +1113,7 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
           event.currentTarget.blur()
         }
       }}
-      className={`w-full bg-transparent px-1.5 py-1 border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none resize-none leading-5 text-xs block ${className}`}
+      className={`w-full bg-transparent px-1.5 py-[3px] border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none resize-none leading-5 text-xs block min-h-[28px] ${className}`}
     />
   )
 })
