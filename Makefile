@@ -22,40 +22,64 @@ ifeq ($(UNAME_S),Linux)
 endif
 
 ifeq ($(OS),Windows_NT)
-  RUN_CMD := build/bin/planisphere.exe
+  TARGET_BIN := build/bin/planisphere.exe
+  RUN_CMD := $(TARGET_BIN)
 else ifeq ($(UNAME_S),Darwin)
-  RUN_CMD := open build/bin/Planisphere.app
+  TARGET_BIN := build/bin/Planisphere.app
+  RUN_CMD := open $(TARGET_BIN)
 else
-  RUN_CMD := ./build/bin/planisphere
+  TARGET_BIN := build/bin/planisphere
+  RUN_CMD := ./$(TARGET_BIN)
 endif
 
-all: build
+# Source file dependencies for incremental compilation
+GO_SOURCES := $(shell find internal -name "*.go" 2>/dev/null) main.go go.mod go.sum
+FRONTEND_SOURCES := $(shell find frontend/src -type f 2>/dev/null) frontend/index.html frontend/vite.config.ts
 
-# Build the desktop binary into build/bin/planisphere
-build: sync-metadata install-frontend
+# Synchronize metadata only when app.config.json or the generator script changes
+internal/version/version.go: app.config.json scripts/sync_metadata.go
+	@echo "==> Synchronizing metadata from app.config.json..."
+	go run scripts/sync_metadata.go
+	@touch $@
+
+sync-metadata:
+	@echo "==> Synchronizing metadata from app.config.json..."
+	go run scripts/sync_metadata.go
+	@touch internal/version/version.go
+
+# Install frontend dependencies only when package manifests change or node_modules is missing
+NODE_MODULES_STAMP := frontend/node_modules/.package-lock.json
+
+$(NODE_MODULES_STAMP): frontend/package.json frontend/package-lock.json
+	@echo "==> Installing frontend dependencies..."
+	@if [ -f "frontend/package-lock.json" ]; then \
+		(cd frontend && npm ci); \
+	else \
+		(cd frontend && npm install); \
+	fi
+	@touch $@
+
+install-frontend: $(NODE_MODULES_STAMP)
+
+# Compile desktop binary only when sources, metadata, dependencies, or config change
+$(TARGET_BIN): $(GO_SOURCES) $(FRONTEND_SOURCES) internal/version/version.go $(NODE_MODULES_STAMP) wails.json
 	@echo "==> Building with Wails ($(WAILS))..."
 	$(WAILS) build $(BUILD_TAGS)
 
+all: build
+
+# Build the desktop binary
+build: $(TARGET_BIN)
+
 # Start live development server with hot reloading
-dev: sync-metadata install-frontend
+dev: internal/version/version.go $(NODE_MODULES_STAMP)
 	@echo "==> Starting Wails live development server..."
 	$(WAILS) dev $(BUILD_TAGS)
 
-# Build and run the desktop application
-run: build
+# Run the desktop application (smart incremental execution)
+run: $(TARGET_BIN)
 	@echo "==> Running Planisphere..."
 	$(RUN_CMD)
-
-# Install frontend dependencies using npm ci (or npm install if lockfile missing)
-install-frontend:
-	@if [ ! -d "frontend/node_modules" ]; then \
-		echo "==> Installing frontend dependencies..."; \
-		if [ -f "frontend/package-lock.json" ]; then \
-			(cd frontend && npm ci); \
-		else \
-			(cd frontend && npm install); \
-		fi; \
-	fi
 
 # Run full backend and frontend test suite
 test: test-backend test-frontend
@@ -73,10 +97,6 @@ test-frontend: typecheck
 typecheck: install-frontend
 	@echo "==> Running frontend type check..."
 	(cd frontend && npm run typecheck)
-
-sync-metadata:
-	@echo "==> Synchronizing metadata from app.config.json..."
-	go run scripts/sync_metadata.go
 
 # Package Linux tarball distribution
 package-tarball: build
