@@ -66,12 +66,20 @@ export function GetActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['GetActiveCarrierRoute'](arg1);
 }
 
+export function GetCarrierDepotInfo() {
+  return window['go']['app']['App']['GetCarrierDepotInfo']();
+}
+
 export function GetCarrierLastLocation() {
   return window['go']['app']['App']['GetCarrierLastLocation']();
 }
 
 export function GetDefaultCarrierCapacity() {
   return window['go']['app']['App']['GetDefaultCarrierCapacity']();
+}
+
+export function GetDefaultCarrierDepot() {
+  return window['go']['app']['App']['GetDefaultCarrierDepot']();
 }
 
 export function GetIngestStatus() {
@@ -122,8 +130,8 @@ export function OpenURL(arg1) {
   return window['go']['app']['App']['OpenURL'](arg1);
 }
 
-export function PlotCarrierRoute(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['PlotCarrierRoute'](arg1, arg2, arg3, arg4);
+export function PlotCarrierRoute(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['PlotCarrierRoute'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function RecordCarrierJump(arg1, arg2, arg3) {

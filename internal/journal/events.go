@@ -21,6 +21,7 @@ var RelevantEvents = map[string]bool{
 	"FSDJump":                  true,
 	"CarrierJump":              true,
 	"CarrierStats":             true,
+	"CarrierDepositFuel":        true,
 	"FSDTarget":                true,
 	"Scan":                     true,
 	"SAAScanComplete":          true,
@@ -71,6 +72,7 @@ type commonFields struct {
 	FID           string          `json:"FID"`
 	CarrierID     *int64          `json:"CarrierID"`
 	FuelLevel     *float64        `json:"FuelLevel"`
+	Total         *int64          `json:"Total"`
 	TotalEarnings *int64          `json:"TotalEarnings"`
 	MarketID      *int64          `json:"MarketID"`
 }
@@ -145,6 +147,8 @@ func keyIdentifiers(fields *commonFields, raw []byte) []string {
 		return []string{optInt(fields.ShipID), optInt(fields.StoreShipID)}
 	case "CarrierStats":
 		return []string{optInt(fields.CarrierID), optFloat(fields.FuelLevel)}
+	case "CarrierDepositFuel":
+		return []string{optInt(fields.CarrierID), optInt(fields.Total)}
 	case "MultiSellExplorationData", "SellExplorationData":
 		return []string{optInt(fields.TotalEarnings)}
 	case "Statistics":

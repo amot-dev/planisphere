@@ -5,6 +5,7 @@ import {
   CompleteExpedition,
   DeleteRow,
   GetActiveCarrierRoute,
+  GetCarrierDepotInfo,
   GetDefaultCarrierCapacity,
   GetWaypointDetails,
   MoveRow,
@@ -18,6 +19,7 @@ import {
 } from '../../wailsjs/go/app/App'
 import { app, expedition } from '../../wailsjs/go/models'
 import { formatLy } from '../utils/galacticTime'
+import { calculateCarrierJumpFuel } from '../utils/carrierRouting'
 import {
   CarrierRouteBottomPanel,
   LegBanner,
@@ -633,16 +635,27 @@ export function ExpeditionPlanner({
       }
     }
     let defaultCapacity = 5000
+    let defaultDepot = 1000
     try {
-      defaultCapacity = await GetDefaultCarrierCapacity()
+      const depotInfo = await GetCarrierDepotInfo()
+      if (depotInfo) {
+        if (depotInfo.usedCapacity > 0) defaultCapacity = depotInfo.usedCapacity
+        if (depotInfo.depotTritium > 0) defaultDepot = depotInfo.depotTritium
+      }
     } catch {
-      defaultCapacity = 5000
+      try {
+        defaultCapacity = await GetDefaultCarrierCapacity()
+      } catch {
+        defaultCapacity = 5000
+      }
+      defaultDepot = 1000
     }
     setRoutePrompt({
       targetRowId: targetRow.id,
       origin: prevSystem,
       destination: (drafts[targetRow.id]?.systemName ?? targetRow.systemName ?? '').trim(),
       capacityUsed: String(defaultCapacity),
+      depotTritium: String(defaultDepot),
       carrierType: 'player',
       loading: false,
     })
@@ -651,13 +664,16 @@ export function ExpeditionPlanner({
   async function handleStartCarrierRoute(forceManual: boolean) {
     if (!routePrompt) return
     const targetId = routePrompt.targetRowId
-    const carrierCapacity = Math.max(0, Math.min(25000, parseInt(routePrompt.capacityUsed, 10) || 0))
+    const maxCap = routePrompt.carrierType === 'squadron' ? 60000 : 25000
+    const carrierCapacity = Math.max(0, Math.min(maxCap, parseInt(routePrompt.capacityUsed, 10) || 0))
+    const carrierDepot = Math.max(0, Math.min(1000, parseInt(routePrompt.depotTritium, 10) || 1000))
     if (forceManual) {
       const manualRoute = app.CarrierRouteResult.createFrom({
         origin: routePrompt.origin.trim(),
         destination: routePrompt.destination.trim(),
         carrierType: routePrompt.carrierType,
         capacityUsed: carrierCapacity,
+        depotTritium: carrierDepot,
         manualMode: true,
         totalJumps: 0,
         totalDistLy: 0,
@@ -696,6 +712,7 @@ export function ExpeditionPlanner({
         routePrompt.destination.trim(),
         carrierCapacity,
         routePrompt.carrierType,
+        carrierDepot,
       )
       setActiveCarrierTargetRowId(targetId)
       setActiveCarrierRoute(routeResult)
@@ -724,6 +741,7 @@ export function ExpeditionPlanner({
         destination: routePrompt.destination.trim(),
         carrierType: routePrompt.carrierType,
         capacityUsed: carrierCapacity,
+        depotTritium: carrierDepot,
         manualMode: true,
         error: routeError?.message || String(routeError),
         totalJumps: 0,
@@ -755,6 +773,69 @@ export function ExpeditionPlanner({
     }
   }
 
+  function handleUpdateCarrierDepot(newDepot: number, newCapacityUsed?: number) {
+    if (!activeCarrierRoute) return
+    const clampedDepot = Math.max(0, Math.min(1000, newDepot))
+    const maxCap = activeCarrierRoute.carrierType === 'squadron' ? 60000 : 25000
+    const updatedCapacity =
+      newCapacityUsed !== undefined
+        ? Math.max(0, Math.min(maxCap, newCapacityUsed))
+        : (activeCarrierRoute.capacityUsed || 0)
+
+    const currentJumps = activeCarrierRoute.jumps || []
+    const recalculatedJumps = currentJumps.map((jump, idx) => {
+      if (idx < carrierJumpIndex) {
+        return jump
+      }
+      const recalculatedCost = calculateCarrierJumpFuel(
+        jump.distanceLy,
+        updatedCapacity,
+        clampedDepot,
+        maxCap
+      )
+      return {
+        ...jump,
+        tritiumUsed: recalculatedCost,
+        fuelInTank: clampedDepot,
+      }
+    })
+
+    const newTotalTritium = recalculatedJumps.reduce(
+      (sum, j) => sum + (j.tritiumUsed || 0),
+      0
+    )
+
+    const updatedRoute = app.CarrierRouteResult.createFrom({
+      ...activeCarrierRoute,
+      depotTritium: clampedDepot,
+      capacityUsed: updatedCapacity,
+      jumps: recalculatedJumps,
+      totalTritium: newTotalTritium,
+    })
+
+    setActiveCarrierRoute(updatedRoute)
+    persistRouteState({ route: updatedRoute })
+  }
+
+  function handleRefillDepot() {
+    if (!activeCarrierRoute) return
+    const currentDepot =
+      activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
+        ? activeCarrierRoute.depotTritium
+        : 1000
+    const needed = 1000 - currentDepot
+    if (needed <= 0) return
+
+    const currentCap = activeCarrierRoute.capacityUsed || 0
+    // Refill depot to full (1000 or max possible) from storage.
+    // If storage (used capacity) is available, transfer up to needed tonnes from storage into depot.
+    const transfer = currentCap > 0 ? Math.min(needed, currentCap) : needed
+    const newDepot = currentDepot + transfer
+    const newCap = currentCap > 0 ? Math.max(0, currentCap - transfer) : currentCap
+
+    handleUpdateCarrierDepot(newDepot, newCap)
+  }
+
   async function handleCompleteSpanshJump() {
     if (!plan || !activeCarrierRoute || loggingJump) return
     const hop = activeCarrierRoute.jumps?.[carrierJumpIndex]
@@ -765,7 +846,45 @@ export function ExpeditionPlanner({
       await RecordCarrierJump(plan.expedition.id, hop.distanceLy, hop.tritiumUsed)
       const nextJumpIndex = carrierJumpIndex + 1
       setCarrierJumpIndex(nextJumpIndex)
-      persistRouteState({ jumpIdx: nextJumpIndex })
+
+      // Deduct consumed fuel from the depot
+      const currentDepot =
+        activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
+          ? activeCarrierRoute.depotTritium
+          : 1000
+      const nextDepot = Math.max(0, currentDepot - hop.tritiumUsed)
+
+      // Recalculate remaining hops based on the updated depot fuel level
+      const currentJumps = activeCarrierRoute.jumps || []
+      const recalculatedJumps = currentJumps.map((jump, idx) => {
+        if (idx < nextJumpIndex) {
+          return jump
+        }
+        const recalculatedCost = calculateCarrierJumpFuel(
+          jump.distanceLy,
+          activeCarrierRoute.capacityUsed || 0,
+          nextDepot
+        )
+        return {
+          ...jump,
+          tritiumUsed: recalculatedCost,
+          fuelInTank: nextDepot,
+        }
+      })
+      const newTotalTritium = recalculatedJumps.reduce(
+        (sum, j) => sum + (j.tritiumUsed || 0),
+        0
+      )
+
+      const updatedRoute = app.CarrierRouteResult.createFrom({
+        ...activeCarrierRoute,
+        depotTritium: nextDepot,
+        jumps: recalculatedJumps,
+        totalTritium: newTotalTritium,
+      })
+
+      setActiveCarrierRoute(updatedRoute)
+      persistRouteState({ route: updatedRoute, jumpIdx: nextJumpIndex })
       onRefreshAll()
     } catch (error) {
       console.error(error)
@@ -1392,6 +1511,8 @@ export function ExpeditionPlanner({
             setTimeout(() => setCopiedNextJump(false), 1500)
           }}
           onArrive={handleCarrierArriveAtWaypoint}
+          depotTritium={activeCarrierRoute.depotTritium !== undefined ? activeCarrierRoute.depotTritium : 1000}
+          onRefillDepot={handleRefillDepot}
         />
       )}
 

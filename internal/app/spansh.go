@@ -33,6 +33,7 @@ type CarrierRouteResult struct {
 	Destination  string             `json:"destination"`
 	CarrierType  string             `json:"carrierType"` // "player" | "squadron"
 	CapacityUsed int                `json:"capacityUsed"`
+	DepotTritium int                `json:"depotTritium"`
 	ManualMode   bool               `json:"manualMode"`
 	Error        string             `json:"error,omitempty"`
 	TotalJumps   int                `json:"totalJumps"`
@@ -115,26 +116,85 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 	return systemName, nil
 }
 
+// CarrierDepotInfo contains carrier mass and tritium depot telemetry from journal events.
+type CarrierDepotInfo struct {
+	UsedCapacity int `json:"usedCapacity"`
+	DepotTritium int `json:"depotTritium"`
+	Cargo        int `json:"cargo"`
+}
+
+// GetCarrierDepotInfo returns the latest Fleet Carrier capacity, depot tritium level, and cargo storage.
+// It retrieves the actual in-game values from CarrierStats or CarrierDepositFuel journal events,
+// defaulting DepotTritium to 1000 (full depot tank) and UsedCapacity to 5000 if not recorded.
+func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
+	info := CarrierDepotInfo{
+		UsedCapacity: 5000,
+		DepotTritium: 1000,
+		Cargo:        0,
+	}
+	if readyError := app.ready(); readyError != nil {
+		return info, readyError
+	}
+
+	var rawCarrierStats string
+	var statsTimestamp string
+	statsQueryError := app.db.QueryRow(`SELECT raw_json, timestamp FROM journal_events
+		WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawCarrierStats, &statsTimestamp)
+	if statsQueryError == nil && rawCarrierStats != "" {
+		var carrierStats journal.CarrierStatsEvent
+		if json.Unmarshal([]byte(rawCarrierStats), &carrierStats) == nil {
+			if used := carrierStats.UsedCapacity(); used > 0 {
+				info.UsedCapacity = used
+			}
+			if carrierStats.FuelLevel > 0 {
+				info.DepotTritium = carrierStats.FuelLevel
+			}
+			info.Cargo = carrierStats.SpaceUsage.Cargo
+		}
+	}
+
+	var rawDeposit string
+	var depositTimestamp string
+	depositQueryError := app.db.QueryRow(`SELECT raw_json, timestamp FROM journal_events
+		WHERE event = 'CarrierDepositFuel' AND ` + journal.CmdrFilterSQL + `
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawDeposit, &depositTimestamp)
+	if depositQueryError == nil && rawDeposit != "" {
+		var depositEvent journal.CarrierDepositFuelEvent
+		if json.Unmarshal([]byte(rawDeposit), &depositEvent) == nil && depositEvent.Total > 0 {
+			if statsTimestamp == "" || depositTimestamp >= statsTimestamp {
+				info.DepotTritium = depositEvent.Total
+			}
+		}
+	}
+
+	if info.DepotTritium <= 0 {
+		info.DepotTritium = 1000
+	}
+	if info.DepotTritium > 1000 {
+		info.DepotTritium = 1000
+	}
+	return info, nil
+}
+
 // GetDefaultCarrierCapacity returns the most recently logged Fleet Carrier used capacity in tonnes,
 // or 5000 if no CarrierStats event exists in the journal archive.
 func (app *App) GetDefaultCarrierCapacity() int {
-	if readyError := app.ready(); readyError != nil {
+	info, err := app.GetCarrierDepotInfo()
+	if err != nil || info.UsedCapacity <= 0 {
 		return 5000
 	}
-	var rawJSON string
-	queryError := app.db.QueryRow(`SELECT raw_json FROM journal_events WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawJSON)
-	if queryError != nil || rawJSON == "" {
-		return 5000
+	return info.UsedCapacity
+}
+
+// GetDefaultCarrierDepot returns the most recently logged Fleet Carrier depot tritium in tonnes,
+// or 1000 (full tank) if no CarrierStats or CarrierDepositFuel event exists in the journal archive.
+func (app *App) GetDefaultCarrierDepot() int {
+	info, err := app.GetCarrierDepotInfo()
+	if err != nil || info.DepotTritium <= 0 {
+		return 1000
 	}
-	var carrierStats journal.CarrierStatsEvent
-	if json.Unmarshal([]byte(rawJSON), &carrierStats) != nil {
-		return 5000
-	}
-	if usedCapacity := carrierStats.UsedCapacity(); usedCapacity > 0 {
-		return usedCapacity
-	}
-	return 5000
+	return info.DepotTritium
 }
 
 // RecordCarrierJump logs a single completed expedition carrier jump (from Spansh hop completion or Manual Mode)
@@ -184,25 +244,43 @@ func (app *App) canonicalSystemName(name string) string {
 }
 
 // PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination.
+// It intercepts Spansh's native routing response, strips out its native fuel consumption estimates,
+// and replaces them with in-house calculations reflecting accurate in-game mass mechanics
+// (including the user's actual DepotTritium value, defaulting to 1000 tonnes for a full tank).
 // If Spansh cannot plot a route (e.g. unknown system, offline, or timeout), it returns a
 // CarrierRouteResult with ManualMode=true so the UI smoothly opens the bottom panel in manual mode.
-func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string) (CarrierRouteResult, error) {
+func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string, depotTritium int) (CarrierRouteResult, error) {
 	source = app.canonicalSystemName(source)
 	destination = app.canonicalSystemName(destination)
+	if carrierType == "" {
+		carrierType = "player"
+	}
+	maxCap := 25000
+	if carrierType == "squadron" {
+		maxCap = 60000
+	}
 	if capacityUsed < 0 {
 		capacityUsed = 0
 	}
-	if capacityUsed > 25000 {
-		capacityUsed = 25000
+	if capacityUsed > maxCap {
+		capacityUsed = maxCap
 	}
-	if carrierType == "" {
-		carrierType = "player"
+	if depotTritium <= 0 {
+		depotInfo, _ := app.GetCarrierDepotInfo()
+		depotTritium = depotInfo.DepotTritium
+	}
+	if depotTritium <= 0 {
+		depotTritium = 1000
+	}
+	if depotTritium > 1000 {
+		depotTritium = 1000
 	}
 	routeResult := CarrierRouteResult{
 		Origin:       source,
 		Destination:  destination,
 		CarrierType:  carrierType,
 		CapacityUsed: capacityUsed,
+		DepotTritium: depotTritium,
 		Jumps:        []CarrierRouteJump{},
 	}
 	if source == "" || destination == "" {
@@ -223,7 +301,7 @@ func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, c
 	reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	jumps, queryError := querySpanshCarrierRoute(reqCtx, source, destination, capacityUsed)
+	jumps, queryError := querySpanshCarrierRoute(reqCtx, source, destination, capacityUsed, depotTritium)
 	if queryError != nil || len(jumps) == 0 {
 		routeResult.ManualMode = true
 		if queryError != nil {
@@ -250,24 +328,70 @@ type spanshJobResp struct {
 	Error  string `json:"error"`
 }
 
+// SpanshRawJump represents one hop in the raw Spansh Fleet Carrier route response.
+type SpanshRawJump struct {
+	Name                  string  `json:"name"`
+	Distance              float64 `json:"distance"`
+	DistanceToDestination float64 `json:"distance_to_destination"`
+	FuelUsed              int     `json:"fuel_used"`
+	TritiumUsed           int     `json:"tritium_used"`
+	FuelInTank            int     `json:"fuel_in_tank"`
+	HasIcyRing            bool    `json:"has_icy_ring"`
+}
+
+// ReconcileSpanshJumps parses the incoming Spansh routing data to extract Distance and UsedCapacity,
+// discards Spansh's native tritium consumption estimates (which artificially assume minimum depot fuel),
+// and overrides each jump with the in-house in-game formula:
+//
+//	Calculated_Fuel = ceil(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
+func ReconcileSpanshJumps(rawJumps []SpanshRawJump, capacityUsed int, depotTritium int) []CarrierRouteJump {
+	if depotTritium <= 0 {
+		depotTritium = 1000
+	}
+	if depotTritium > 1000 {
+		depotTritium = 1000
+	}
+	if capacityUsed < 0 {
+		capacityUsed = 0
+	}
+	if capacityUsed > 60000 {
+		capacityUsed = 60000
+	}
+
+	var carrierRouteJumps []CarrierRouteJump
+	for index, jumpItem := range rawJumps {
+		// Index 0 in Spansh fleet carrier results is the origin system with distance 0.
+		if index == 0 && jumpItem.Distance <= 0 {
+			continue
+		}
+
+		// Discard Spansh's native fuel estimates because Spansh assumes an artificially low depot mass.
+		// Calculate correct in-game fuel consumption using:
+		// Calculated_Fuel = ceil(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
+		calculatedFuel := ed.CarrierTritiumCost(jumpItem.Distance, capacityUsed, depotTritium)
+
+		carrierRouteJumps = append(carrierRouteJumps, CarrierRouteJump{
+			SystemName:       jumpItem.Name,
+			DistanceLy:       jumpItem.Distance,
+			DistanceToDestLy: jumpItem.DistanceToDestination,
+			TritiumUsed:      calculatedFuel,
+			FuelInTank:       depotTritium,
+			HasIcyRing:       jumpItem.HasIcyRing,
+		})
+	}
+	return carrierRouteJumps
+}
+
 type spanshPollResp struct {
 	Job    string `json:"job"`
 	Status string `json:"status"`
 	Error  string `json:"error"`
 	Result struct {
-		Jumps []struct {
-			Name                  string  `json:"name"`
-			Distance              float64 `json:"distance"`
-			DistanceToDestination float64 `json:"distance_to_destination"`
-			FuelUsed              int     `json:"fuel_used"`
-			TritiumUsed           int     `json:"tritium_used"`
-			FuelInTank            int     `json:"fuel_in_tank"`
-			HasIcyRing            bool    `json:"has_icy_ring"`
-		} `json:"jumps"`
+		Jumps []SpanshRawJump `json:"jumps"`
 	} `json:"result"`
 }
 
-func querySpanshCarrierRoute(ctx context.Context, source, destination string, capacityUsed int) ([]CarrierRouteJump, error) {
+func querySpanshCarrierRoute(ctx context.Context, source, destination string, capacityUsed int, depotTritium int) ([]CarrierRouteJump, error) {
 	form := url.Values{}
 	form.Set("source", source)
 	form.Set("destinations", destination)
@@ -339,33 +463,7 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 				continue
 			}
 			if poll.Status == "ok" {
-				var carrierRouteJumps []CarrierRouteJump
-				for index, jumpItem := range poll.Result.Jumps {
-					// Index 0 in Spansh fleet carrier results is the origin system with distance 0.
-					if index == 0 && jumpItem.Distance <= 0 {
-						continue
-					}
-					tritiumAmount := jumpItem.FuelUsed
-					if tritiumAmount <= 0 {
-						tritiumAmount = jumpItem.TritiumUsed
-					}
-					if tritiumAmount <= 0 && jumpItem.Distance > 0 {
-						tankFuel := jumpItem.FuelInTank
-						if tankFuel <= 0 {
-							tankFuel = 1000
-						}
-						tritiumAmount = ed.CarrierTritiumCost(jumpItem.Distance, capacityUsed, tankFuel)
-					}
-					carrierRouteJumps = append(carrierRouteJumps, CarrierRouteJump{
-						SystemName:       jumpItem.Name,
-						DistanceLy:       jumpItem.Distance,
-						DistanceToDestLy: jumpItem.DistanceToDestination,
-						TritiumUsed:      tritiumAmount,
-						FuelInTank:       jumpItem.FuelInTank,
-						HasIcyRing:       jumpItem.HasIcyRing,
-					})
-				}
-				return carrierRouteJumps, nil
+				return ReconcileSpanshJumps(poll.Result.Jumps, capacityUsed, depotTritium), nil
 			}
 		}
 	}

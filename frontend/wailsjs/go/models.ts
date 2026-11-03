@@ -27,6 +27,7 @@ export namespace app {
 	    destination: string;
 	    carrierType: string;
 	    capacityUsed: number;
+	    depotTritium: number;
 	    manualMode: boolean;
 	    error?: string;
 	    totalJumps: number;
@@ -44,6 +45,7 @@ export namespace app {
 	        this.destination = source["destination"];
 	        this.carrierType = source["carrierType"];
 	        this.capacityUsed = source["capacityUsed"];
+	        this.depotTritium = source["depotTritium"];
 	        this.manualMode = source["manualMode"];
 	        this.error = source["error"];
 	        this.totalJumps = source["totalJumps"];
@@ -119,6 +121,22 @@ export namespace app {
 		    }
 		    return a;
 		}
+	}
+	export class CarrierDepotInfo {
+	    usedCapacity: number;
+	    depotTritium: number;
+	    cargo: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierDepotInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.usedCapacity = source["usedCapacity"];
+	        this.depotTritium = source["depotTritium"];
+	        this.cargo = source["cargo"];
+	    }
 	}
 	
 	

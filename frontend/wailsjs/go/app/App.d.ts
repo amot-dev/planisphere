@@ -37,9 +37,13 @@ export function FromGalactic(arg1:string):Promise<string>;
 
 export function GetActiveCarrierRoute(arg1:number):Promise<app.ActiveCarrierRouteState>;
 
+export function GetCarrierDepotInfo():Promise<app.CarrierDepotInfo>;
+
 export function GetCarrierLastLocation():Promise<string>;
 
 export function GetDefaultCarrierCapacity():Promise<number>;
+
+export function GetDefaultCarrierDepot():Promise<number>;
 
 export function GetIngestStatus():Promise<app.IngestStatus>;
 
@@ -65,7 +69,7 @@ export function MoveRow(arg1:number,arg2:number):Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
-export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string):Promise<app.CarrierRouteResult>;
+export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string,arg5:number):Promise<app.CarrierRouteResult>;
 
 export function RecordCarrierJump(arg1:number,arg2:number,arg3:number):Promise<void>;
 

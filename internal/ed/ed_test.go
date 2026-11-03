@@ -72,11 +72,28 @@ func TestExobiologyValuation(t *testing.T) {
 }
 
 func TestCarrierTritiumCost(t *testing.T) {
-	// 500 Ly jump at empty load (used=0, fuel=1000): round(5 + 500*(26000)/200000) = round(5 + 65) = 70
+	// 500 Ly jump at empty load (used=0, fuel=1000): ceil(5 + 500*(26000)/200000) = ceil(5 + 65) = 70
 	calculatedCost := CarrierTritiumCost(500, 0, 1000)
 	if calculatedCost != 70 {
 		t.Fatalf("CarrierTritiumCost(500, 0, 1000) = %d, want 70", calculatedCost)
 	}
+
+	// Discrepancy test case: 494.89 Ly jump with 8,548 tonnes used capacity.
+	// Actual game registers full 1,000-ton depot:
+	// Mass = 25000 + 8548 + 1000 = 34548
+	// 5 + 494.89 * 34548 / 200000 = 90.487... -> ceil = 91 tonnes
+	gameCost := CarrierTritiumCost(494.89, 8548, 1000)
+	if gameCost != 91 {
+		t.Fatalf("CarrierTritiumCost(494.89, 8548, 1000) = %d, want 91", gameCost)
+	}
+
+	// Spansh's artificially low depot assumption (437 tonnes depot, mass 33,985):
+	// Truncated integer division: floor(5 + 494.89 * 33985 / 200000) = 89 tonnes (Spansh estimate)
+	spanshTruncated := int(math.Floor(5.0 + (494.89*(8548.0+437.0+25000.0))/200000.0))
+	if spanshTruncated != 89 {
+		t.Fatalf("spanshTruncated = %d, want 89", spanshTruncated)
+	}
+
 	if math.Abs(Distance(Vec3{0, 0, 0}, Vec3{3, 4, 12})-13) > 1e-9 {
 		t.Fatalf("Distance failed")
 	}

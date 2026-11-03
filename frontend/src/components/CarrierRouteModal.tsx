@@ -3,6 +3,7 @@ export interface CarrierRoutePromptState {
   origin: string
   destination: string
   capacityUsed: string
+  depotTritium: string
   carrierType: 'player' | 'squadron'
   loading: boolean
 }
@@ -103,24 +104,43 @@ export function CarrierRouteModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
-              Carrier Used Capacity (Tonnes, 0 – 25,000)
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={25000}
-              value={prompt.capacityUsed}
-              onChange={(event) =>
-                onUpdate((prev) => ({ ...prev, capacityUsed: event.target.value }))
-              }
-              className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
-            />
-            <p className="text-[10px] text-[#a6907c] mt-1">
-              Pre-filled from your latest CarrierStats event. Used by Spansh to compute per-jump
-              Tritium consumption.
-            </p>
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
+                Used Capacity (Tonnes, 0 – {prompt.carrierType === 'squadron' ? '60,000' : '25,000'})
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={prompt.carrierType === 'squadron' ? 60000 : 25000}
+                value={prompt.capacityUsed}
+                onChange={(event) =>
+                  onUpdate((prev) => ({ ...prev, capacityUsed: event.target.value }))
+                }
+                className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+              />
+              <p className="text-[10px] text-[#a6907c] mt-1">
+                Found in Carrier Management in top right (Capacity).
+              </p>
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
+                Depot Tritium (Tonnes, 0 – 1,000)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1000}
+                value={prompt.depotTritium}
+                onChange={(event) =>
+                  onUpdate((prev) => ({ ...prev, depotTritium: event.target.value }))
+                }
+                className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+              />
+              <p className="text-[10px] text-[#a6907c] mt-1">
+                Found in Carrier Management under Navigation.
+              </p>
+            </div>
           </div>
         </div>
 

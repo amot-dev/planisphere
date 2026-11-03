@@ -53,7 +53,16 @@ type CarrierStatsEvent struct {
 	SpaceUsage struct {
 		TotalCapacity int `json:"TotalCapacity"`
 		FreeSpace     int `json:"FreeSpace"`
+		Cargo         int `json:"Cargo"`
 	} `json:"SpaceUsage"`
+}
+
+// CarrierDepositFuelEvent is written when donating fuel to a carrier depot.
+type CarrierDepositFuelEvent struct {
+	Timestamp string `json:"timestamp"`
+	CarrierID int64  `json:"CarrierID"`
+	Amount    int    `json:"Amount"`
+	Total     int    `json:"Total"`
 }
 
 // UsedCapacity returns occupied carrier capacity in tonnes.

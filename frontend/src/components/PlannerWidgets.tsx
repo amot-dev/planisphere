@@ -797,6 +797,8 @@ export interface CarrierRouteBottomPanelProps {
   copiedNextJump: boolean
   onCopySystem: (systemName: string) => void
   onArrive: () => void
+  depotTritium?: number
+  onRefillDepot?: () => void
 }
 
 /**
@@ -822,9 +824,17 @@ export function CarrierRouteBottomPanel({
   copiedNextJump,
   onCopySystem,
   onArrive,
+  depotTritium,
+  onRefillDepot,
 }: CarrierRouteBottomPanelProps) {
   const jumps = route.jumps ?? []
   const hasSpanshJumps = jumps.length > 0
+  const currentDepot =
+    depotTritium !== undefined
+      ? depotTritium
+      : route.depotTritium !== undefined && route.depotTritium > 0
+        ? route.depotTritium
+        : 1000
   const currentSystem =
     jumpIndex === 0
       ? route.origin || 'Origin'
@@ -853,6 +863,9 @@ export function CarrierRouteBottomPanel({
           </span>
           <span className="text-[11px] font-mono-tabular text-[#a6907c]">
             [{formatInt(route.capacityUsed)} t USED CAP]
+          </span>
+          <span className="text-[11px] font-mono-tabular text-[#00D2FF]">
+            [{formatInt(currentDepot)} / 1,000 t DEPOT]
           </span>
           {route.error && (
             <span className="text-[11px] text-[#FF7100] bg-[#211307] border border-[#FF7100] px-2 py-0.5 font-mono-tabular">
@@ -940,6 +953,32 @@ export function CarrierRouteBottomPanel({
 
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+                Fuel Depot
+              </span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="font-mono-tabular text-xs font-bold text-[#00D2FF]">
+                  {formatInt(currentDepot)} / 1,000 t
+                </span>
+                {onRefillDepot && (
+                  <button
+                    type="button"
+                    onClick={onRefillDepot}
+                    disabled={currentDepot >= 1000}
+                    title="Refill fuel depot to 1,000 t from carrier storage and recalculate jump costs"
+                    className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border cursor-pointer transition ${
+                      currentDepot >= 1000
+                        ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
+                        : 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506]'
+                    }`}
+                  >
+                    {currentDepot >= 1000 ? 'FULL' : 'REFILL'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
                 Remaining to Waypoint
               </span>
               <span className="font-mono-tabular text-xs text-[#F4ECE4]">
@@ -1016,6 +1055,32 @@ export function CarrierRouteBottomPanel({
                   placeholder="e.g. 68"
                   className="w-28 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block mb-0.5">
+                  Depot
+                </span>
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="font-mono-tabular text-xs font-bold text-[#00D2FF]">
+                    {formatInt(currentDepot)} / 1,000 t
+                  </span>
+                  {onRefillDepot && (
+                    <button
+                      type="button"
+                      onClick={onRefillDepot}
+                      disabled={currentDepot >= 1000}
+                      title="Refill fuel depot to 1,000 t from carrier storage"
+                      className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border cursor-pointer transition ${
+                        currentDepot >= 1000
+                          ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
+                          : 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506]'
+                      }`}
+                    >
+                      {currentDepot >= 1000 ? 'FULL' : 'REFILL'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="pt-4">
