@@ -258,19 +258,22 @@ export default function App() {
     [],
   )
 
-  async function handleQuickSwitchMode(modeId: number) {
-    setBusyAction('SWITCHING FLIGHT MODE')
-    try {
-      const nextModesState = await SwitchMode(modeId)
-      setModesState(nextModesState)
-      if (activeExpeditionId > 0) {
-        loadPlanOnly(activeExpeditionId)
-        loadStatsOnly(activeExpeditionId, filter)
+  const handleQuickSwitchMode = useCallback(
+    async (modeId: number) => {
+      setBusyAction('SWITCHING FLIGHT MODE')
+      try {
+        const nextModesState = await SwitchMode(modeId)
+        setModesState(nextModesState)
+        if (activeExpeditionId > 0) {
+          loadPlanOnly(activeExpeditionId)
+          loadStatsOnly(activeExpeditionId, filter)
+        }
+      } finally {
+        setBusyAction(null)
       }
-    } finally {
-      setBusyAction(null)
-    }
-  }
+    },
+    [activeExpeditionId, filter, loadPlanOnly, loadStatsOnly],
+  )
 
   const refreshAll = useCallback(() => {
     loadCoreState()

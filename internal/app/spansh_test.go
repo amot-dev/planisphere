@@ -1,7 +1,14 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"planisphere/internal/db"
 )
@@ -175,4 +182,145 @@ func TestGetCarrierLastLocation(t *testing.T) {
 		t.Fatalf("expected System C from latest CarrierJumpRequest, got '%s'", loc)
 	}
 }
+
+func TestQuerySpanshCarrierRoute_ContextCanceledDuringPollDo(t *testing.T) {
+	originalURL := spanshBaseURL
+	originalInterval := spanshPollInterval
+	t.Cleanup(func() {
+		spanshBaseURL = originalURL
+		spanshPollInterval = originalInterval
+	})
+	spanshPollInterval = 5 * time.Millisecond
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	pollStartedChannel := make(chan struct{})
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		if httpRequest.URL.Path == "/api/fleetcarrier/route" {
+			responseWriter.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-cancel-do"})
+			return
+		}
+		if strings.HasPrefix(httpRequest.URL.Path, "/api/results/") {
+			close(pollStartedChannel)
+			<-httpRequest.Context().Done()
+			return
+		}
+		http.NotFound(responseWriter, httpRequest)
+	}))
+	defer testServer.Close()
+
+	spanshBaseURL = testServer.URL
+
+	go func() {
+		<-pollStartedChannel
+		cancelFunc()
+	}()
+
+	jumps, queryError := querySpanshCarrierRoute(ctx, "Sol", "Colonia", 0, 1000)
+	if jumps != nil {
+		t.Fatalf("expected nil jumps, got %v", jumps)
+	}
+	if queryError == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(queryError, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got: %v", queryError)
+	}
+	if !strings.Contains(queryError.Error(), "Spansh route calculation canceled or timed out") {
+		t.Errorf("expected error message to contain cancellation text, got: %v", queryError)
+	}
+}
+
+func TestQuerySpanshCarrierRoute_ContextCanceledDuringTickerWait(t *testing.T) {
+	originalURL := spanshBaseURL
+	originalInterval := spanshPollInterval
+	t.Cleanup(func() {
+		spanshBaseURL = originalURL
+		spanshPollInterval = originalInterval
+	})
+	// Long poll interval so select case <-ctx.Done() fires while waiting for ticker
+	spanshPollInterval = 1 * time.Second
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		if httpRequest.URL.Path == "/api/fleetcarrier/route" {
+			responseWriter.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-cancel-wait"})
+			return
+		}
+		http.NotFound(responseWriter, httpRequest)
+	}))
+	defer testServer.Close()
+
+	spanshBaseURL = testServer.URL
+
+	// Cancel after short delay so initial route creation completes and loop enters ticker wait
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancelFunc()
+	}()
+
+	jumps, queryError := querySpanshCarrierRoute(ctx, "Sol", "Colonia", 0, 1000)
+	if jumps != nil {
+		t.Fatalf("expected nil jumps, got %v", jumps)
+	}
+	if queryError == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(queryError, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got: %v", queryError)
+	}
+	if !strings.Contains(queryError.Error(), "Spansh route calculation canceled or timed out") {
+		t.Errorf("expected error message to contain cancellation text, got: %v", queryError)
+	}
+}
+
+func TestQuerySpanshCarrierRoute_ContextDeadlineExceeded(t *testing.T) {
+	originalURL := spanshBaseURL
+	originalInterval := spanshPollInterval
+	t.Cleanup(func() {
+		spanshBaseURL = originalURL
+		spanshPollInterval = originalInterval
+	})
+	spanshPollInterval = 5 * time.Millisecond
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelFunc()
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		if httpRequest.URL.Path == "/api/fleetcarrier/route" {
+			responseWriter.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-deadline"})
+			return
+		}
+		if strings.HasPrefix(httpRequest.URL.Path, "/api/results/") {
+			<-httpRequest.Context().Done()
+			return
+		}
+		http.NotFound(responseWriter, httpRequest)
+	}))
+	defer testServer.Close()
+
+	spanshBaseURL = testServer.URL
+
+	jumps, queryError := querySpanshCarrierRoute(ctx, "Sol", "Colonia", 0, 1000)
+	if jumps != nil {
+		t.Fatalf("expected nil jumps, got %v", jumps)
+	}
+	if queryError == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(queryError, context.DeadlineExceeded) {
+		t.Errorf("expected context.DeadlineExceeded error, got: %v", queryError)
+	}
+	if !strings.Contains(queryError.Error(), "Spansh route calculation canceled or timed out") {
+		t.Errorf("expected error message to contain cancellation text, got: %v", queryError)
+	}
+}
+
 

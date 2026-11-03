@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -481,6 +482,11 @@ type spanshPollResp struct {
 	} `json:"result"`
 }
 
+var (
+	spanshBaseURL      = "https://spansh.co.uk"
+	spanshPollInterval = 750 * time.Millisecond
+)
+
 func querySpanshCarrierRoute(ctx context.Context, source, destination string, capacityUsed int, depotTritium int) ([]CarrierRouteJump, error) {
 	form := url.Values{}
 	form.Set("source", source)
@@ -488,7 +494,7 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 	form.Set("capacity_used", strconv.Itoa(capacityUsed))
 	form.Set("calculate_tritium", "1")
 
-	httpRequest, requestError := http.NewRequestWithContext(ctx, http.MethodPost, "https://spansh.co.uk/api/fleetcarrier/route", strings.NewReader(form.Encode()))
+	httpRequest, requestError := http.NewRequestWithContext(ctx, http.MethodPost, spanshBaseURL+"/api/fleetcarrier/route", strings.NewReader(form.Encode()))
 	if requestError != nil {
 		return nil, requestError
 	}
@@ -516,15 +522,15 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 		return nil, fmt.Errorf("Spansh did not return a job ID (HTTP %d)", httpResponse.StatusCode)
 	}
 
-	pollURL := "https://spansh.co.uk/api/results/" + url.PathEscape(job.Job)
-	ticker := time.NewTicker(750 * time.Millisecond)
+	pollURL := spanshBaseURL + "/api/results/" + url.PathEscape(job.Job)
+	ticker := time.NewTicker(spanshPollInterval)
 	defer ticker.Stop()
 	startTime := time.Now()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("Spansh route calculation timed out")
+			return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", ctx.Err())
 		case <-ticker.C:
 			pollRequest, pollRequestError := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
 			if pollRequestError != nil {
@@ -533,12 +539,21 @@ func querySpanshCarrierRoute(ctx context.Context, source, destination string, ca
 			pollRequest.Header.Set("User-Agent", version.UserAgent)
 			pollResponse, pollResponseError := client.Do(pollRequest)
 			if pollResponseError != nil {
+				if ctx.Err() != nil {
+					return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", ctx.Err())
+				}
+				if errors.Is(pollResponseError, context.Canceled) || errors.Is(pollResponseError, context.DeadlineExceeded) {
+					return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", pollResponseError)
+				}
 				continue
 			}
 			var poll spanshPollResp
 			decodePollError := json.NewDecoder(pollResponse.Body).Decode(&poll)
 			pollResponse.Body.Close()
 			if decodePollError != nil {
+				if ctx.Err() != nil {
+					return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", ctx.Err())
+				}
 				continue
 			}
 			if poll.Error != "" {
