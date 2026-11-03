@@ -11,7 +11,7 @@
   "info": {
     "comments": "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal",
     "productName": "Planisphere",
-    "productVersion": "0.3.0"
+    "productVersion": "0.3.1"
   },
   "name": "planisphere",
   "outputfilename": "planisphere"

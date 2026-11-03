@@ -878,6 +878,16 @@ export function ExpeditionPlanner({
     if (!plan || !activeCarrierRoute || loggingJump) return
     const hop = activeCarrierRoute.jumps?.[carrierJumpIndex]
     if (!hop) return
+
+    // Verify depot has sufficient tritium for this jump before proceeding
+    const currentDepot =
+      activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
+        ? activeCarrierRoute.depotTritium
+        : 1000
+    if (currentDepot < hop.tritiumUsed) {
+      return
+    }
+
     setLoggingJump(true)
     onBusyChange('LOGGING CARRIER JUMP')
     try {
@@ -886,10 +896,6 @@ export function ExpeditionPlanner({
       setCarrierJumpIndex(nextJumpIndex)
 
       // Deduct consumed fuel from the depot
-      const currentDepot =
-        activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
-          ? activeCarrierRoute.depotTritium
-          : 1000
       const nextDepot = Math.max(0, currentDepot - hop.tritiumUsed)
 
       // Recalculate remaining hops based on the updated depot fuel level
@@ -1522,9 +1528,31 @@ export function ExpeditionPlanner({
           }
           onCancelRoute={handleCancelCarrierRoute}
           onToggleManualMode={() => {
-            const next = !manualModeOverride
-            setManualModeOverride(next)
-            persistRouteState({ manualMode: next })
+            // Once in manual mode, always in manual mode: in manual mode the user can go
+            // wherever they want. After even just one jump, the Spansh route is completely
+            // invalid. Do not allow reverting to Spansh mode once switched.
+            setManualModeOverride(true)
+            let dist = ''
+            let trit = ''
+            if (
+              activeCarrierRoute?.jumps &&
+              carrierJumpIndex < activeCarrierRoute.jumps.length
+            ) {
+              const currentHop = activeCarrierRoute.jumps[carrierJumpIndex]
+              if (currentHop?.distanceLy !== undefined && currentHop.distanceLy > 0) {
+                dist = String(Math.round(currentHop.distanceLy * 100) / 100)
+              }
+              if (currentHop?.tritiumUsed !== undefined && currentHop.tritiumUsed > 0) {
+                trit = String(currentHop.tritiumUsed)
+              }
+            }
+            setManualDistanceInput(dist)
+            setManualTritiumInput(trit)
+            persistRouteState({
+              manualMode: true,
+              manualDistInput: dist,
+              manualTritInput: trit,
+            })
           }}
           onCompleteSpanshJump={handleCompleteSpanshJump}
           manualDistanceInput={manualDistanceInput}

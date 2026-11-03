@@ -832,7 +832,7 @@ export function CarrierRouteBottomPanel({
   const currentDepot =
     depotTritium !== undefined
       ? depotTritium
-      : route.depotTritium !== undefined && route.depotTritium > 0
+      : route.depotTritium !== undefined
         ? route.depotTritium
         : 1000
   const currentSystem =
@@ -840,6 +840,8 @@ export function CarrierRouteBottomPanel({
       ? route.origin || 'Origin'
       : jumps[Math.min(jumpIndex - 1, jumps.length - 1)]?.systemName || route.destination
   const nextHop = jumpIndex < jumps.length ? jumps[jumpIndex] : null
+  const hopTritiumRequired = nextHop?.tritiumUsed ?? 0
+  const isDepotInsufficient = nextHop !== null && currentDepot < hopTritiumRequired
   const remainingJumps = Math.max(0, jumps.length - jumpIndex)
   const remainingDistLy = jumps
     .slice(jumpIndex)
@@ -861,12 +863,16 @@ export function CarrierRouteBottomPanel({
             {route.origin || 'Origin'} <span className="text-[#a6907c]">→</span>{' '}
             <span className="text-[#FF7100]">{route.destination || 'Target Waypoint'}</span>
           </span>
-          <span className="text-[11px] font-mono-tabular text-[#a6907c]">
-            [{formatInt(route.capacityUsed)} t USED CAP]
-          </span>
-          <span className="text-[11px] font-mono-tabular text-[#00D2FF]">
-            [{formatInt(currentDepot)} / 1,000 t DEPOT]
-          </span>
+          {!manualMode && (
+            <>
+              <span className="text-[11px] font-mono-tabular text-[#a6907c]">
+                [{formatInt(route.capacityUsed)} t USED CAP]
+              </span>
+              <span className="text-[11px] font-mono-tabular text-[#00D2FF]">
+                [{formatInt(currentDepot)} / 1,000 t DEPOT]
+              </span>
+            </>
+          )}
           {route.error && (
             <span className="text-[11px] text-[#FF7100] bg-[#211307] border border-[#FF7100] px-2 py-0.5 font-mono-tabular">
               {route.error}
@@ -875,6 +881,9 @@ export function CarrierRouteBottomPanel({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Once in manual mode, always in manual mode: in manual mode the user can go
+              wherever they want. After even just one jump, the Spansh route is completely
+              invalid. Do not provide a button or path to revert to Spansh mode. */}
           {!manualMode && hasSpanshJumps && (
             <button
               type="button"
@@ -956,7 +965,11 @@ export function CarrierRouteBottomPanel({
                 Fuel Depot
               </span>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="font-mono-tabular text-xs font-bold text-[#00D2FF]">
+                <span
+                  className={`font-mono-tabular text-xs font-bold ${
+                    isDepotInsufficient ? 'text-[#FF7100]' : 'text-[#00D2FF]'
+                  }`}
+                >
                   {formatInt(currentDepot)} / 1,000 t
                 </span>
                 {onRefillDepot && (
@@ -968,7 +981,9 @@ export function CarrierRouteBottomPanel({
                     className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border cursor-pointer transition ${
                       currentDepot >= 1000
                         ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
-                        : 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506]'
+                        : isDepotInsufficient
+                          ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] hover:bg-[#ff9436] font-extrabold animate-pulse'
+                          : 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506]'
                     }`}
                   >
                     {currentDepot >= 1000 ? 'FULL' : 'REFILL'}
@@ -993,8 +1008,13 @@ export function CarrierRouteBottomPanel({
             {nextHop ? (
               <button
                 type="button"
-                disabled={loggingJump}
+                disabled={loggingJump || isDepotInsufficient}
                 onClick={onCompleteSpanshJump}
+                title={
+                  isDepotInsufficient
+                    ? `Refill required: Tritium depot (${formatInt(currentDepot)} t) is insufficient for this jump (${formatInt(hopTritiumRequired)} t)`
+                    : undefined
+                }
                 className="ed-btn-primary"
               >
                 {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${jumpIndex + 1}`}
@@ -1055,32 +1075,6 @@ export function CarrierRouteBottomPanel({
                   placeholder="e.g. 68"
                   className="w-28 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />
-              </div>
-
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block mb-0.5">
-                  Depot
-                </span>
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="font-mono-tabular text-xs font-bold text-[#00D2FF]">
-                    {formatInt(currentDepot)} / 1,000 t
-                  </span>
-                  {onRefillDepot && (
-                    <button
-                      type="button"
-                      onClick={onRefillDepot}
-                      disabled={currentDepot >= 1000}
-                      title="Refill fuel depot to 1,000 t from carrier storage"
-                      className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border cursor-pointer transition ${
-                        currentDepot >= 1000
-                          ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
-                          : 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506]'
-                      }`}
-                    >
-                      {currentDepot >= 1000 ? 'FULL' : 'REFILL'}
-                    </button>
-                  )}
-                </div>
               </div>
 
               <div className="pt-4">
