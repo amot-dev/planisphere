@@ -92,7 +92,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('w-full h-7 flex items-center font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5') // Star system locked
     expect(html).toContain('h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap') // Carrier stop container
     expect(html).toContain('h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5') // Telemetry container (visited)
-    expect(html).toContain('h-7 inline-flex items-center justify-end gap-1.5 whitespace-nowrap') // Controls container
+    expect(html).toContain('h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap') // Controls container
 
     // Textareas have min-h-[28px] and rows=1
     expect(html).toContain('min-h-[28px]')
@@ -162,7 +162,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     // Telemetry for unvisited has h-7 flex items-center
     expect(html).toContain('h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px]')
     // Controls for unvisited has h-7 inline-flex items-center
-    expect(html).toContain('h-7 inline-flex items-center justify-end gap-1.5 whitespace-nowrap')
+    expect(html).toContain('h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap')
   })
 
   it('renders carrier stop elements with uniform h-5 height inside h-7 container for both active stop and add button', () => {
@@ -322,5 +322,148 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     // Matches header 2px border and uses inset shadow top line
     expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816]')
     expect(html).not.toContain('border-l-3')
+  })
+
+  it('renders WaypointDetailsDrawer with Vessel Flown and 1-Click Mode toggle for leg waypoints (number > 1)', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 15,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Alpha Centauri',
+      },
+      number: 2,
+      visitState: 'visited',
+      legModeId: 10,
+      legModeName: 'Exploration',
+      legModeColor: '#00D2FF',
+      transitions: [
+        { kind: 'ship', to: 'Anaconda' },
+      ],
+    })
+
+    const mockDetails = expedition.WaypointDetails.createFrom({
+      kind: 'historical',
+      number: 2,
+      metrics: {
+        distanceLy: 120.5,
+        shipDistanceLy: 120.5,
+        jumps: 3,
+      } as any,
+    })
+
+    const mockModes = [
+      { id: 10, name: 'Exploration', color: '#00D2FF' } as any,
+      { id: 20, name: 'Travel', color: '#FF7100' } as any,
+    ]
+
+    const html = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: mockDetails,
+        loading: false,
+        rowView: mockRowView,
+        modeId: 10,
+        modeColor: '#00D2FF',
+        modesList: mockModes,
+        onChangeMode: () => {},
+      }),
+    )
+
+    expect(html).toContain('[VESSEL FLOWN]:')
+    expect(html).toContain('Anaconda')
+    expect(html).toContain('[MODE]:')
+    expect(html).toContain('Exploration')
+    expect(html).toContain('Active mode for this leg (click to change)')
+  })
+
+  it('omits Vessel Flown and Mode toggle in WaypointDetailsDrawer for origin baseline waypoint #1', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 1,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Sol',
+      },
+      number: 1,
+      visitState: 'visited',
+    })
+
+    const mockDetails = expedition.WaypointDetails.createFrom({
+      kind: 'origin',
+      number: 1,
+      metrics: {} as any,
+    })
+
+    const html = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: mockDetails,
+        loading: false,
+        rowView: mockRowView,
+      }),
+    )
+
+    expect(html).toContain('WAYPOINT #1 // HISTORICAL BASELINE')
+    expect(html).not.toContain('[VESSEL FLOWN]:')
+    expect(html).not.toContain('[MODE]:')
+  })
+
+  it('supports collapsible columns: hides notes or carrier stop when toggled off', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 99,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Col 285 Sector',
+        poiName: 'Planet 1',
+        notes: 'Secret mining location',
+      },
+      number: 3,
+      visitState: 'unvisited',
+    })
+
+    const htmlHidden = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(WaypointRowItem, {
+            rowView: mockRowView,
+            index: 2,
+            isPlanning: true,
+            isLocked: false,
+            isBeingDragged: false,
+            isDragTarget: false,
+            isExpanded: false,
+            isNextFcStop: false,
+            hasActiveCarrierRoute: false,
+            draft: { systemName: 'Col 285 Sector', poiName: 'Planet 1', notes: 'Secret mining location' },
+            copiedSystemRowId: null,
+            insertMenuOpen: false,
+            lastVisitedIndex: 0,
+            totalRows: 5,
+            rowStyle: {},
+            dropProps: {},
+            showNotes: false,
+            showCarrierStop: false,
+            onToggleExpand: () => {},
+            onDraftChange: () => {},
+            onFieldFocus: () => {},
+            onFieldBlur: () => {},
+            onCopySystem: () => {},
+            onToggleFcStop: () => {},
+            onOpenCarrierRoutePrompt: () => {},
+            onToggleInsertMenu: () => {},
+            onInsert: () => {},
+            onMove: () => {},
+            onDelete: () => {},
+            onDragStart: () => {},
+            onDragEnd: () => {},
+          }),
+        ),
+      ),
+    )
+
+    // Secret mining location and FC Stop should not be present
+    expect(htmlHidden).not.toContain('Secret mining location')
+    expect(htmlHidden).not.toContain('+ FC STOP')
+    expect(htmlHidden).toContain('Col 285 Sector')
   })
 })

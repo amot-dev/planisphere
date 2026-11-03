@@ -26,6 +26,7 @@ import {
   StatusBadge,
   WaypointDetailsDrawer,
 } from './PlannerWidgets'
+import { SquareCheckbox } from './SquareCheckbox'
 import { CarrierRouteModal, type CarrierRoutePromptState } from './CarrierRouteModal'
 import { WaypointRowItem } from './WaypointRowItem'
 
@@ -78,6 +79,46 @@ export function ExpeditionPlanner({
   const [loggingJump, setLoggingJump] = useState(false)
   const [copiedNextJump, setCopiedNextJump] = useState(false)
   const [copiedSystemRowId, setCopiedSystemRowId] = useState<number | null>(null)
+
+  const [showNotes, setShowNotes] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('planisphere_show_notes')
+      return saved !== null ? saved === 'true' : true
+    } catch {
+      return true
+    }
+  })
+
+  const [showCarrierStop, setShowCarrierStop] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('planisphere_show_carrier')
+      return saved !== null ? saved === 'true' : true
+    } catch {
+      return true
+    }
+  })
+
+  const toggleShowNotes = useCallback(() => {
+    setShowNotes((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('planisphere_show_notes', String(next))
+      } catch {}
+      return next
+    })
+  }, [])
+
+  const toggleShowCarrierStop = useCallback(() => {
+    setShowCarrierStop((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('planisphere_show_carrier', String(next))
+      } catch {}
+      return next
+    })
+  }, [])
+
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false)
 
   // Load persisted carrier route state on mount or when active expedition changes
   useEffect(() => {
@@ -782,9 +823,28 @@ export function ExpeditionPlanner({
 
   type TableItem =
     | { kind: 'region'; rowView: expedition.RowView; index: number; key: string }
-    | { kind: 'leg-banner'; rowView: expedition.RowView; index: number; key: string }
     | { kind: 'waypoint'; rowView: expedition.RowView; index: number; key: string }
     | { kind: 'drawer'; rowView: expedition.RowView; index: number; key: string }
+
+  const visibleColumnCount =
+    (isPlanning ? 0 : 1) +
+    1 +
+    1 +
+    1 +
+    (showNotes ? 1 : 0) +
+    (showCarrierStop ? 1 : 0) +
+    1 +
+    1
+
+  const tableMinW =
+    (isPlanning ? 0 : 32) +
+    40 +
+    240 +
+    192 +
+    (showNotes ? 224 : 0) +
+    (showCarrierStop ? 160 : 0) +
+    240 +
+    380
 
   const tableItems: TableItem[] = useMemo(() => {
     if (!plan || !plan.rows) return []
@@ -796,10 +856,6 @@ export function ExpeditionPlanner({
         items.push({ kind: 'region', rowView, index, key: `region-${row.id}` })
       } else {
         const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
-        const showLegBanner = rowView.number > 1 && isVisited
-        if (showLegBanner) {
-          items.push({ kind: 'leg-banner', rowView, index, key: `banner-${row.id}` })
-        }
         items.push({ kind: 'waypoint', rowView, index, key: `row-${row.id}` })
         const isExpanded = Boolean(expandedRowIds[row.id])
         if (!isPlanning && isVisited && isExpanded) {
@@ -957,12 +1013,16 @@ export function ExpeditionPlanner({
               </button>
             </div>
           )}
+
         </div>
       </div>
 
       {/* Main Waypoint Table + Bottom Add Row Bar */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden bg-[#070605]">
-        <table className="w-full table-fixed border-separate border-spacing-0 text-left">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-auto bg-[#070605]">
+        <table
+          style={{ minWidth: `${tableMinW}px` }}
+          className="w-full table-fixed border-separate border-spacing-0 text-left"
+        >
           <thead className="sticky top-0 z-20 bg-[#120d09] border-b-2 border-[#FF7100]/70 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#a6907c] select-none">
             <tr className="align-top">
               {!isPlanning && (
@@ -970,18 +1030,119 @@ export function ExpeditionPlanner({
                   Leg
                 </th>
               )}
-              <th className="w-11 px-2 py-2.5 text-right font-mono-tabular align-top border-b border-[#FF7100]/70">#</th>
-              <th className="w-64 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Star System</th>
-              <th className="w-52 px-3 py-2.5 align-top border-b border-[#FF7100]/70">POI / Body</th>
-              <th className="px-3 py-2.5 align-top border-b border-[#FF7100]/70">Flight Notes</th>
-              <th
-                className="w-44 px-2 py-2.5 text-center align-top border-b border-[#FF7100]/70"
-                title="Fleet Carrier Stop, Arrival Status and Spansh Router"
-              >
-                Carrier Stop
+              <th className="w-10 px-1.5 py-2.5 text-right font-mono-tabular align-top border-b border-[#FF7100]/70">#</th>
+              <th className="w-60 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Star System</th>
+              <th className="w-48 px-3 py-2.5 align-top border-b border-[#FF7100]/70">POI / Body</th>
+              {showNotes && (
+                <th className="w-56 px-3 py-2.5 align-top border-b border-[#FF7100]/70">
+                  Flight Notes
+                </th>
+              )}
+              {showCarrierStop && (
+                <th
+                  className="w-40 px-2 py-2.5 text-center align-top border-b border-[#FF7100]/70"
+                  title="Fleet Carrier Stop, Arrival Status and Spansh Router"
+                >
+                  Carrier Stop
+                </th>
+              )}
+              <th className="w-60 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Telemetry / Timestamp</th>
+              <th className="w-[380px] px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">
+                <div className="inline-flex items-center justify-end gap-2">
+                  <span>Controls</span>
+                  <div className="relative inline-block text-left">
+                    <button
+                      type="button"
+                      onClick={() => setColumnMenuOpen((prev) => !prev)}
+                      title="Customize visible columns"
+                      className="h-5 w-5 inline-flex items-center justify-center p-0 cursor-pointer bg-transparent transition-colors group"
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        className="w-4 h-4 pointer-events-none shrink-0"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        {/* Outer outline border matching SquareCheckbox */}
+                        <rect
+                          x="1"
+                          y="1"
+                          width="14"
+                          height="14"
+                          fill="#050506"
+                          stroke={columnMenuOpen ? '#FF7100' : '#3d2816'}
+                          strokeWidth="1.5"
+                          className="group-hover:stroke-[#FF7100] transition-colors"
+                        />
+                        {/* Inner 4-square grid matching the 8x8 active footprint and ratio of SquareCheckbox */}
+                        <rect
+                          x="4"
+                          y="4"
+                          width="3.5"
+                          height="3.5"
+                          fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
+                          className="group-hover:fill-[#FF7100] transition-colors"
+                        />
+                        <rect
+                          x="8.5"
+                          y="4"
+                          width="3.5"
+                          height="3.5"
+                          fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
+                          className="group-hover:fill-[#FF7100] transition-colors"
+                        />
+                        <rect
+                          x="4"
+                          y="8.5"
+                          width="3.5"
+                          height="3.5"
+                          fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
+                          className="group-hover:fill-[#FF7100] transition-colors"
+                        />
+                        <rect
+                          x="8.5"
+                          y="8.5"
+                          width="3.5"
+                          height="3.5"
+                          fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
+                          className="group-hover:fill-[#FF7100] transition-colors"
+                        />
+                      </svg>
+                    </button>
+                    {columnMenuOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-30 cursor-default"
+                          onClick={() => setColumnMenuOpen(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-1 w-48 border border-[#FF7100] bg-[#140e09] shadow-2xl shadow-black z-40 p-2.5 text-left text-xs space-y-2 font-normal">
+                          <div className="text-[9px] font-extrabold uppercase tracking-wider text-[#a6907c] pb-1 border-b border-[#2e1f12]">
+                            Visible Columns
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer text-[#F4ECE4] hover:text-[#FF7100] py-0.5 select-none">
+                            <SquareCheckbox
+                              checked={showCarrierStop}
+                              onChange={toggleShowCarrierStop}
+                              size="sm"
+                              color="#FF7100"
+                            />
+                            <span className="text-[11px] font-mono-tabular uppercase">Carrier Stop</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer text-[#F4ECE4] hover:text-[#FF7100] py-0.5 select-none">
+                            <SquareCheckbox
+                              checked={showNotes}
+                              onChange={toggleShowNotes}
+                              size="sm"
+                              color="#FF7100"
+                            />
+                            <span className="text-[11px] font-mono-tabular uppercase">Flight Notes</span>
+                          </label>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
               </th>
-              <th className="w-64 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Telemetry / Timestamp</th>
-              <th className="w-64 px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">Controls</th>
             </tr>
           </thead>
 
@@ -1007,7 +1168,7 @@ export function ExpeditionPlanner({
                     } ${isDragTarget ? 'outline-2 outline-[#00D2FF]' : ''}`}
                   >
                     {/* Just the Region Name and nothing else */}
-                    <td colSpan={isPlanning ? 6 : 7} className="px-3 py-2 border-b border-[#3a2615]">
+                    <td colSpan={visibleColumnCount - 1} className="px-3 py-2 border-b border-[#3a2615]">
                       <RegionHeaderDropdown
                         expeditionId={currentExpedition.id}
                         rowId={row.id}
@@ -1018,9 +1179,9 @@ export function ExpeditionPlanner({
                       />
                     </td>
 
-                    <td className="px-3 py-2 text-right whitespace-nowrap border-b border-[#3a2615]">
+                    <td className="w-[380px] px-3 py-2 text-right whitespace-nowrap border-b border-[#3a2615]">
                       {!isLocked && (
-                        <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
                           <RowManipulationButtons
                             index={index}
                             minIndex={lastVisitedIndex + 1}
@@ -1058,30 +1219,18 @@ export function ExpeditionPlanner({
                 )
               }
 
-              if (item.kind === 'leg-banner') {
-                return (
-                  <tr key={item.key} style={rowStyle}>
-                    <td colSpan={isPlanning ? 7 : 8} className="p-0 border-b border-[#24180e]">
-                      <LegBanner
-                        transitions={rowView.transitions}
-                        modeId={rowView.legModeId}
-                        modeColor={rowView.legModeColor}
-                        modesList={modesList}
-                        onChangeMode={(nextModeId) => handleLegModeChange(row.id, nextModeId)}
-                      />
-                    </td>
-                  </tr>
-                )
-              }
-
               if (item.kind === 'drawer') {
                 return (
                   <tr key={item.key} style={rowStyle}>
-                    <td colSpan={8} className="p-0 border-b border-[#24180e]">
+                    <td colSpan={visibleColumnCount} className="p-0 border-b border-[#24180e]">
                       <WaypointDetailsDrawer
                         details={detailsById[row.id] ?? null}
                         loading={Boolean(loadingDetails[row.id])}
                         rowView={rowView}
+                        modeId={rowView.legModeId}
+                        modeColor={rowView.legModeColor}
+                        modesList={modesList}
+                        onChangeMode={(nextModeId) => handleLegModeChange(row.id, nextModeId)}
                       />
                     </td>
                   </tr>
@@ -1116,6 +1265,8 @@ export function ExpeditionPlanner({
                   totalRows={plan.rows?.length ?? 0}
                   rowStyle={rowStyle}
                   dropProps={getRowDropProps(index, isDraggable)}
+                  showNotes={showNotes}
+                  showCarrierStop={showCarrierStop}
                   onToggleExpand={toggleExpand}
                   onDraftChange={(id, field, val) =>
                     setDrafts((prev) => ({

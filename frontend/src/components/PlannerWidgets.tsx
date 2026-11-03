@@ -376,10 +376,18 @@ export function WaypointDetailsDrawer({
   details,
   loading,
   rowView,
+  modeId,
+  modeColor,
+  modesList,
+  onChangeMode,
 }: {
   details: expedition.WaypointDetails | null
   loading: boolean
   rowView: expedition.RowView
+  modeId?: number
+  modeColor?: string
+  modesList?: modes.Mode[]
+  onChangeMode?: (nextModeId: number) => void
 }) {
   if (loading || !details) {
     return (
@@ -444,6 +452,14 @@ export function WaypointDetailsDrawer({
   const metrics = details.metrics
   const isOrigin = details.kind === 'origin'
 
+  const shipsUsed = Array.from(
+    new Set(
+      (rowView.transitions ?? [])
+        .filter((transition) => transition.kind === 'ship' && transition.to)
+        .map((transition) => transition.to),
+    ),
+  )
+
   return (
     <div className="px-6 py-4 bg-[#0b0907] border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816] text-xs space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2e1f12] pb-2">
@@ -466,6 +482,28 @@ export function WaypointDetailsDrawer({
           {details.elapsed && <span className="ml-2 text-[#F4ECE4]">[{details.elapsed}]</span>}
         </div>
       </div>
+
+      {!isOrigin && (
+        <div className="flex flex-wrap items-center gap-3 pt-0.5 pb-0.5">
+          <div className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular uppercase tracking-wider border border-[#472e19] border-l-2 border-l-[#FF7100] bg-[#16100b] text-[#FF7100]">
+            <span className="font-bold">
+              {shipsUsed.length > 1 ? '[VESSELS FLOWN]:' : '[VESSEL FLOWN]:'}
+            </span>
+            <span className={`font-bold ${shipsUsed.length > 0 ? 'text-[#F4ECE4]' : 'text-[#a6907c]'}`}>
+              {shipsUsed.length > 0 ? shipsUsed.join(' // ') : 'None'}
+            </span>
+          </div>
+
+          {modesList && modesList.length > 0 && onChangeMode && (
+            <LegModeDropdown
+              modeId={modeId || 0}
+              modeColor={modeColor}
+              modesList={modesList}
+              onChangeMode={onChangeMode}
+            />
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <MetricMiniCard
@@ -801,9 +839,9 @@ export function CarrierRouteBottomPanel({
     .reduce((totalTritium, jump) => totalTritium + (jump.tritiumUsed || 0), 0)
 
   return (
-    <div className="border-t-2 border-[#00D2FF] bg-[#0b0907] px-5 py-3 shadow-2xl text-xs">
+    <div className="border-t-2 border-[#00D2FF] bg-[#0b0907] px-3 sm:px-5 py-2.5 sm:py-3 shadow-2xl text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#2e1f12]">
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.14em] bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]">
             {route.carrierType === 'squadron'
               ? 'SQUADRON CARRIER PLOTTER'
@@ -847,8 +885,8 @@ export function CarrierRouteBottomPanel({
       </div>
 
       {!manualMode && hasSpanshJumps ? (
-        <div className="pt-2.5 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-6">
+        <div className="pt-2.5 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-6">
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
                 Current System

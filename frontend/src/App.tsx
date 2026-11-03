@@ -57,6 +57,25 @@ export default function App() {
     files: number
   } | null>(null)
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('planisphere_sidebar_collapsed')
+      return saved !== null ? saved === 'true' : false
+    } catch {
+      return false
+    }
+  })
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('planisphere_sidebar_collapsed', String(next))
+      } catch {}
+      return next
+    })
+  }, [])
+
   const activeExpeditionIdRef = useRef(0)
   const planReqSeq = useRef(0)
   const statsReqSeq = useRef(0)
@@ -334,8 +353,12 @@ export default function App() {
     <div className="h-screen w-screen flex flex-col cockpit-grid-bg text-[#F4ECE4] overflow-hidden">
       {/* Top Cockpit Telemetry Header */}
       <header className="relative h-12 shrink-0 bg-[#0b0907] border-b border-[#3d2816] border-t-2 border-t-[#FF7100] flex items-center">
-        {/* Telemetry Sidebar Header Column (390px, aligned with StatsSidebar below) */}
-        <div className="w-[390px] shrink-0 h-full px-4 flex items-center">
+        {/* Telemetry Sidebar Header Column */}
+        <div
+          className={`${
+            sidebarCollapsed ? 'w-auto' : 'w-[390px]'
+          } px-4 shrink-0 h-full flex items-center transition-all`}
+        >
           {/* ED Emblem + Title and Shrunk Clock */}
           <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-2 h-5 bg-[#FF7100]" />
@@ -466,8 +489,10 @@ export default function App() {
             statsLoading={statsLoading}
             modesState={modesState}
             filter={filter}
+            collapsed={sidebarCollapsed}
             onFilterChange={setFilter}
             onQuickSwitchMode={handleQuickSwitchMode}
+            onToggleCollapse={toggleSidebarCollapsed}
             onRefreshStats={handleRefreshStats}
           />
         </ErrorBoundary>

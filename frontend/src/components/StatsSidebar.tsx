@@ -8,8 +8,10 @@ export interface StatsSidebarProps {
   statsLoading: boolean
   modesState: app.ModesState | null
   filter: stats.Filter
+  collapsed?: boolean
   onFilterChange: (next: stats.Filter) => void
   onQuickSwitchMode: (modeId: number) => void
+  onToggleCollapse?: () => void
   onRefreshStats?: () => void
 }
 
@@ -18,8 +20,10 @@ export const StatsSidebar = memo(function StatsSidebar({
   statsLoading,
   modesState,
   filter,
+  collapsed = false,
   onFilterChange,
   onQuickSwitchMode,
+  onToggleCollapse,
 }: StatsSidebarProps) {
   const [scanExpanded, setScanExpanded] = useState(true)
   const [organicExpanded, setOrganicExpanded] = useState(true)
@@ -88,6 +92,21 @@ export const StatsSidebar = memo(function StatsSidebar({
     return sidebarStats.expedition ?? new stats.Metrics()
   })()
 
+  if (collapsed) {
+    return (
+      <aside className="w-8 shrink-0 h-full bg-[#090705] border-r border-[#3d2816] flex flex-col items-center pt-3 select-none">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          title="Expand Telemetry Sidebar"
+          className="h-6 w-6 flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] bg-[#140e09] border border-[#3d2816] hover:bg-[#1f150d] cursor-pointer"
+        >
+          ▶
+        </button>
+      </aside>
+    )
+  }
+
   return (
     <aside className="w-[390px] shrink-0 h-full bg-[#090705] border-r border-[#3d2816] flex flex-col overflow-hidden">
       {/* Active Mode Switcher and Mode Filter */}
@@ -109,6 +128,16 @@ export const StatsSidebar = memo(function StatsSidebar({
               </option>
             ))}
           </select>
+          {onToggleCollapse && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              title="Collapse Telemetry Sidebar"
+              className="h-[26px] w-[26px] flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] bg-[#140e09] border border-[#3d2816] hover:bg-[#1f150d] cursor-pointer shrink-0"
+            >
+              ◀
+            </button>
+          )}
         </div>
 
         {/* Mode Filter Checkboxes (Tri-state: All -> Scans Only -> Off) */}

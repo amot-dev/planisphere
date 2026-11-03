@@ -264,7 +264,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('Supermassive Black Hole')
   })
 
-  it('applies CSS content-visibility: auto on leg banners in active expeditions', () => {
+  it('renders visited waypoints consecutively without inter-waypoint lines', () => {
     const mockPlan = expedition.PlanView.createFrom({
       expedition: {
         id: 6,
@@ -326,13 +326,9 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     expect(html).toContain('Sol')
     expect(html).toContain('Alpha Centauri')
-    // Verify that the leg banner itself is rendered with its transition and mode data
-    expect(html).toContain('[VESSEL FLOWN]:')
-    expect(html).toContain('Krait Phantom')
-    // Verify that the <tr> specifically wrapping the leg banner includes content-visibility and contain-intrinsic-size
-    expect(html).toMatch(
-      /<tr style="[^"]*content-visibility:auto[^"]*contain-intrinsic-size:44px[^"]*"><td colSpan="8"[^>]*>[\s\S]*?\[VESSEL FLOWN\]:/,
-    )
+    // Verify that visited waypoints are rendered without intermediate lines or banners
+    expect(html).not.toContain('h-[3px]')
+    expect(html).not.toContain('title="Leg Mode:')
   })
 
   it('does not render dropdown chevrons for unvisited waypoints or during planning', () => {

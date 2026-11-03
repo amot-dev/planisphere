@@ -26,6 +26,8 @@ export interface WaypointRowItemProps {
   totalRows: number
   rowStyle: CSSProperties
   dropProps: any
+  showNotes?: boolean
+  showCarrierStop?: boolean
   onToggleExpand: (id: number) => void
   onDraftChange: (id: number, field: 'systemName' | 'poiName' | 'notes', val: string) => void
   onFieldFocus: (id: number) => void
@@ -58,6 +60,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   totalRows,
   rowStyle,
   dropProps,
+  showNotes = true,
+  showCarrierStop = true,
   onToggleExpand,
   onDraftChange,
   onFieldFocus,
@@ -93,7 +97,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* Expand Chevron */}
       {!isPlanning && (
         <td
-          className={`px-1.5 py-1.5 text-center align-top ${
+          className={`px-1 py-1.5 text-center align-top ${
             isVisited
               ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
               : 'border-b border-[#24180e]'
@@ -130,7 +134,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
       {/* Sequential Waypoint # */}
       <td
-        className={`px-2 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top ${
+        className={`px-1.5 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top ${
           isPlanning && isVisited
             ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
             : 'border-b border-[#24180e]'
@@ -216,92 +220,96 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       </td>
 
       {/* Flight Notes (always editable, auto-expands up to 3 lines) */}
-      <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
-        <AutoExpandingTextarea
-          value={draft.notes}
-          placeholder="Flight notes, reminders..."
-          maxLines={3}
-          onFocus={() => onFieldFocus(row.id)}
-          onChange={(value) => onDraftChange(row.id, 'notes', value)}
-          onBlur={(value) => onFieldBlur(row, 'notes', value)}
-          className="text-[#d6c7b8] placeholder:text-[#6e5b4b]"
-        />
-      </td>
+      {showNotes && (
+        <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
+          <AutoExpandingTextarea
+            value={draft.notes}
+            placeholder="Flight notes, reminders..."
+            maxLines={3}
+            onFocus={() => onFieldFocus(row.id)}
+            onChange={(value) => onDraftChange(row.id, 'notes', value)}
+            onBlur={(value) => onFieldBlur(row, 'notes', value)}
+            className="text-[#d6c7b8] placeholder:text-[#6e5b4b]"
+          />
+        </td>
+      )}
 
       {/* Carrier Stop */}
-      <td className="px-2 py-1.5 text-center align-top border-b border-[#24180e]">
-        <div className="h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
-          {row.fcStop ? (
-            <>
-              {isPlanning ? (
-                <span
-                  title="Designated Fleet Carrier Stop for this expedition"
-                  className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#120d09] text-[#a6907c] border border-[#3d2816] select-none"
-                >
-                  FC STOP
-                </span>
-              ) : (
-                <span
-                  title={
-                    row.fcArrived
-                      ? 'Carrier has arrived at this waypoint'
-                      : 'Carrier arrival pending'
-                  }
-                  className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border select-none ${
-                    row.fcArrived
-                      ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70'
-                      : 'bg-[#120d09] text-[#a6907c] border-[#3d2816]'
-                  }`}
-                >
-                  {row.fcArrived ? 'ARRIVED' : 'PENDING'}
-                </span>
-              )}
-
-              {!isPlanning && isNextFcStop && (
-                hasActiveCarrierRoute ? (
+      {showCarrierStop && (
+        <td className="px-2 py-1.5 text-center align-top border-b border-[#24180e]">
+          <div className="h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            {row.fcStop ? (
+              <>
+                {isPlanning ? (
                   <span
-                    title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
-                    className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
+                    title="Designated Fleet Carrier Stop for this expedition"
+                    className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#120d09] text-[#a6907c] border border-[#3d2816] select-none"
                   >
-                    ROUTING
+                    FC STOP
                   </span>
                 ) : (
+                  <span
+                    title={
+                      row.fcArrived
+                        ? 'Carrier has arrived at this waypoint'
+                        : 'Carrier arrival pending'
+                    }
+                    className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border select-none ${
+                      row.fcArrived
+                        ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70'
+                        : 'bg-[#120d09] text-[#a6907c] border-[#3d2816]'
+                    }`}
+                  >
+                    {row.fcArrived ? 'ARRIVED' : 'PENDING'}
+                  </span>
+                )}
+
+                {!isPlanning && isNextFcStop && (
+                  hasActiveCarrierRoute ? (
+                    <span
+                      title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
+                      className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
+                    >
+                      ROUTING
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCarrierRoutePrompt(index, row)}
+                      title="Plot Fleet Carrier route to this next carrier waypoint"
+                      className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
+                    >
+                      ROUTE
+                    </button>
+                  )
+                )}
+
+                {!isLocked && (
                   <button
                     type="button"
-                    onClick={() => onOpenCarrierRoutePrompt(index, row)}
-                    title="Plot Fleet Carrier route to this next carrier waypoint"
-                    className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
+                    onClick={() => onToggleFcStop(row)}
+                    title="Remove Fleet Carrier stop designation"
+                    className="h-5 w-4 inline-flex items-center justify-center text-xs text-[#6e5b4b] hover:text-[#ff3b2f] cursor-pointer"
                   >
-                    ROUTE
+                    ×
                   </button>
-                )
-              )}
-
-              {!isLocked && (
-                <button
-                  type="button"
-                  onClick={() => onToggleFcStop(row)}
-                  title="Remove Fleet Carrier stop designation"
-                  className="h-5 w-4 inline-flex items-center justify-center text-xs text-[#6e5b4b] hover:text-[#ff3b2f] cursor-pointer"
-                >
-                  ×
-                </button>
-              )}
-            </>
-          ) : !isLocked ? (
-            <button
-              type="button"
-              onClick={() => onToggleFcStop(row)}
-              title="Designate this waypoint as a Fleet Carrier stop"
-              className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-[#6e5b4b] hover:text-[#FF7100] border border-dashed border-[#2e1f12] hover:border-[#FF7100] bg-transparent hover:bg-[#16100b] cursor-pointer"
-            >
-              + FC STOP
-            </button>
-          ) : (
-            <span className="h-5 inline-flex items-center justify-center text-[#6e5b4b] font-mono-tabular text-[10px]">—</span>
-          )}
-        </div>
-      </td>
+                )}
+              </>
+            ) : !isLocked ? (
+              <button
+                type="button"
+                onClick={() => onToggleFcStop(row)}
+                title="Designate this waypoint as a Fleet Carrier stop"
+                className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-[#6e5b4b] hover:text-[#FF7100] border border-dashed border-[#2e1f12] hover:border-[#FF7100] bg-transparent hover:bg-[#16100b] cursor-pointer"
+              >
+                + FC STOP
+              </button>
+            ) : (
+              <span className="h-5 inline-flex items-center justify-center text-[#6e5b4b] font-mono-tabular text-[10px]">—</span>
+            )}
+          </div>
+        </td>
+      )}
 
       {/* Visit Status / Galactic Timestamp */}
       <td className="px-3 py-1.5 align-top border-b border-[#24180e] whitespace-nowrap">
@@ -351,8 +359,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       </td>
 
       {/* External Links + Row Manipulation + Drag Handle */}
-      <td className="px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
-        <div className="h-7 inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
+      <td className="w-[380px] px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
+        <div className="h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap">
           <HoverOpenInLinks rowView={rowView} />
           {!isLocked && (
             <>
