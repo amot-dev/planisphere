@@ -15,21 +15,21 @@ This fucks the stats.
 
 How do you reconcile tens of thousands of light years tacked onto the stats just from trips back and forth from the bubble? Want to know your average jump range on the expedition and see just how well economical routing did slowing you down? Too bad, because the average is inflated by your dipping of the Caspian in the jet cones for hours.
 
-The solution to that problem was different travel modes with different stats, and even allowing scan data to bleed over (what, you've never stopped to check out an interesting system while buckyballing?) while travel stats stay in isolation. The problem with this solution is it suddenly becomes so tedious to set up that exploration is no longer fun.
+The solution to that problem was different flight modes with different stats, and even allowing scan data to bleed over (what, you've never stopped to check out an interesting system while buckyballing?) while flight stats stay in isolation. The problem with this solution is it suddenly becomes so tedious to set up that exploration is no longer fun.
 
 That's where Planisphere comes in.
 
 
 ## Features
 
-### Keep your expedition stats pure with travel modes
-Separate your travel stats across different styles of transport. If you take a high-speed detour back to the Bubble, switch modes so thousands of buckyballing light years don't ruin your expedition's jump averages and distance logs. You can even use partial filtering to let scan values and exobiology bio-data count toward your wallet totals while keeping the travel mileage strictly isolated.
+### Keep your expedition stats pure with flight modes
+Separate your flight stats across different styles of transport. If you take a high-speed detour back to the Bubble, switch modes so thousands of buckyballing light years don't ruin your expedition's jump averages and distance logs. You can even use partial filtering to let scan values and exobiology bio-data count toward your wallet totals while keeping the travel mileage strictly isolated.
 
 ### Waypoint flight planning without the spreadsheet
 Build your flight plan stop by stop with system names, coordinates, and personal notes. Planisphere watches your journal logs in the background; the moment you jump into a destination system, it marks the waypoint as visited and automatically steps forward to the next leg.
 
 ### Fleet carrier routing that isn't a chore
-Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router to plot out 500 Ly jumps and calculate tritium consumption on the fly, with support for manual hop adjustments when you want to chart your own course.
+Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router to plot out 500 Ly jumps with accurate tritium calculations on the fly, tracks your carrier's current location from journal events, and supports manual hop adjustments when you want to chart your own course.
 
 ### Real-time cartography and exobiology payouts
 Get estimated credit values for bodies you scan (FSS, DSS, first discovery, first mapped, and terraformable bonuses) and plants you sample in your Artemis suit (base species value plus the massive first-logged multiplier) right as they hit your journal.
@@ -65,7 +65,7 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 
 #### Prerequisites
 
-- **Go**: 1.24 or newer
+- **Go**: 1.26 or newer
 - **Node.js**: 20+ or 22+ and `npm`
 - **Wails CLI v2**:
   ```bash
@@ -116,6 +116,9 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 Planisphere provides Makefile targets to manage development, testing, and packaging:
 
 ```bash
+# Install frontend dependencies
+make install-frontend
+
 # Build desktop binary (build/bin/planisphere)
 make build
 
