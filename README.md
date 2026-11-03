@@ -166,17 +166,6 @@ make package-arch
 make package-windows
 ```
 
-
-## Improvements and Future Ideas
-
-### Possible Improvements
-- **Expedition Table Virtualization (Option B)**: The expedition flight planner currently relies on native CSS scrolling combined with engine-level `content-visibility: auto; contain-intrinsic-size: 44px;` (Option A) for zero JavaScript execution during scrolling and smooth 60fps performance on typical journeys. As a possible future enhancement if support for massive expeditions (>100 waypoints) is ever needed, isolated, memoized windowed virtualization with localized cell state (Option B) can be introduced to cap active DOM nodes without triggering parent-level table re-renders on scroll.
-
-### Roadmap Features
-- **Death / "Hardcore" Telemetry Toggle**: A setting for commanders who want the harsh in-game reality reflected in their wallet stats. When enabled, dying before docking at a station or carrier would zero out or mark un-cashed cartography and exobiology payouts as lost in action, while still preserving the flight logs of where you went.
-- **Expedition Log Exports**: Export completed expedition stats, visited waypoints, and discoveries into clean markdown reports, flight log summaries, or CSV sheets.
-
-
 ## Disclaimer
 
 Planisphere is an independent fan-made tool. It is not affiliated with, endorsed by, or sponsored by Frontier Developments plc. Elite Dangerous is a registered trademark of Frontier Developments plc.
