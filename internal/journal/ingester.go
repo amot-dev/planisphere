@@ -354,7 +354,7 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 		LEFT JOIN TravelLogUnit travelUnit ON travelUnit.Id = journalEntry.TravelLogId
 		WHERE journalEntry.EventType IN (
 			'Commander','LoadGame','Statistics','Location','FSDJump','CarrierJump',
-			'CarrierStats','CarrierDepositFuel','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
+			'CarrierStats','CarrierDepositFuel','CarrierJumpRequest','Docked','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
 			'ScanOrganic','MultiSellExplorationData','SellOrganicData','ShipyardSwap'
 		)
 		ORDER BY journalEntry.TravelLogId ASC, journalEntry.Id ASC`)

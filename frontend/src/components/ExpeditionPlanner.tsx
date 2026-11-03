@@ -6,6 +6,7 @@ import {
   DeleteRow,
   GetActiveCarrierRoute,
   GetCarrierDepotInfo,
+  GetCarrierLastLocation,
   GetDefaultCarrierCapacity,
   GetWaypointDetails,
   MoveRow,
@@ -615,25 +616,40 @@ export function ExpeditionPlanner({
 
   async function openCarrierRoutePrompt(rowIndex: number, targetRow: expedition.Row) {
     if (!plan) return
-    // Prefer the most recent preceding FC stop as the carrier's origin, falling
-    // back to the immediately preceding waypoint if no earlier FC stop exists.
-    let prevSystem = ''
-    for (let i = rowIndex - 1; i >= 0; i--) {
-      const candidate = plan.rows[i].row
-      if (candidate.rowType === 'waypoint' && candidate.fcStop && candidate.systemName?.trim()) {
-        prevSystem = candidate.systemName.trim()
-        break
+
+    // Primary: use the latest known carrier location from the journal archive
+    let startSystem = ''
+    try {
+      const lastKnownCarrierLocation = await GetCarrierLastLocation()
+      if (lastKnownCarrierLocation && lastKnownCarrierLocation.trim()) {
+        startSystem = lastKnownCarrierLocation.trim()
       }
+    } catch {
+      startSystem = ''
     }
-    if (!prevSystem) {
+
+    // Fallback: most recent preceding Fleet Carrier stop in the expedition plan
+    if (!startSystem) {
       for (let i = rowIndex - 1; i >= 0; i--) {
         const candidate = plan.rows[i].row
-        if (candidate.rowType === 'waypoint' && candidate.systemName?.trim()) {
-          prevSystem = candidate.systemName.trim()
+        if (candidate.rowType === 'waypoint' && candidate.fcStop && candidate.systemName?.trim()) {
+          startSystem = candidate.systemName.trim()
           break
         }
       }
     }
+
+    // Secondary fallback: immediately preceding waypoint in the plan
+    if (!startSystem) {
+      for (let i = rowIndex - 1; i >= 0; i--) {
+        const candidate = plan.rows[i].row
+        if (candidate.rowType === 'waypoint' && candidate.systemName?.trim()) {
+          startSystem = candidate.systemName.trim()
+          break
+        }
+      }
+    }
+
     let defaultCapacity = 5000
     let defaultDepot = 1000
     try {
@@ -652,7 +668,7 @@ export function ExpeditionPlanner({
     }
     setRoutePrompt({
       targetRowId: targetRow.id,
-      origin: prevSystem,
+      origin: startSystem,
       destination: (drafts[targetRow.id]?.systemName ?? targetRow.systemName ?? '').trim(),
       capacityUsed: String(defaultCapacity),
       depotTritium: String(defaultDepot),

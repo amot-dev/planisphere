@@ -101,19 +101,93 @@ func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
 	return deleteError
 }
 
-// GetCarrierLastLocation returns the system name of the most recent CarrierJump event.
+// GetCarrierLastLocation returns the system name of the most recent known Fleet Carrier location.
+// It checks CarrierJump events, docking and location events aboard the fleet carrier,
+// and CarrierJumpRequest events, choosing whichever candidate has the most recent timestamp.
 func (app *App) GetCarrierLastLocation() (string, error) {
 	if readyError := app.ready(); readyError != nil {
 		return "", readyError
 	}
-	var systemName string
-	queryError := app.db.QueryRow(`SELECT system_name FROM journal_events
-		WHERE event = 'CarrierJump' AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&systemName)
-	if queryError != nil {
-		return "", nil
+
+	// Identify player carrier ID and callsign from the latest CarrierStats
+	var playerCarrierID int64
+	var playerCallsign string
+	var rawStats string
+	if err := app.db.QueryRow(`SELECT raw_json FROM journal_events
+		WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawStats); err == nil && rawStats != "" {
+		var stats journal.CarrierStatsEvent
+		if json.Unmarshal([]byte(rawStats), &stats) == nil {
+			playerCarrierID = stats.CarrierID
+			playerCallsign = strings.TrimSpace(stats.Callsign)
+		}
 	}
-	return systemName, nil
+
+	// Candidate from CarrierJump events
+	var jumpSystem, jumpTimestamp string
+	_ = app.db.QueryRow(`SELECT system_name, timestamp FROM journal_events
+		WHERE event = 'CarrierJump' AND system_name != '' AND `+journal.CmdrFilterSQL+`
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&jumpSystem, &jumpTimestamp)
+
+	// Candidate from Docked or Location events aboard a fleet carrier
+	var dockedSystem, dockedTimestamp string
+	rows, err := app.db.Query(`SELECT system_name, timestamp, raw_json FROM journal_events
+		WHERE event IN ('Docked', 'Location') AND system_name != '' AND `+journal.CmdrFilterSQL+`
+		AND raw_json LIKE '%FleetCarrier%'
+		ORDER BY timestamp DESC, id DESC LIMIT 20`)
+	if err == nil {
+		for rows.Next() {
+			var sys, ts, raw string
+			if rows.Scan(&sys, &ts, &raw) == nil {
+				var dockInfo struct {
+					StationType string `json:"StationType"`
+					MarketID    int64  `json:"MarketID"`
+					StationName string `json:"StationName"`
+					Docked      *bool  `json:"Docked"`
+				}
+				if json.Unmarshal([]byte(raw), &dockInfo) == nil {
+					if strings.EqualFold(dockInfo.StationType, "FleetCarrier") {
+						isDocked := dockInfo.Docked == nil || *dockInfo.Docked
+						if isDocked {
+							matchesCarrier := true
+							if playerCarrierID > 0 && dockInfo.MarketID > 0 {
+								matchesCarrier = (dockInfo.MarketID == playerCarrierID)
+							} else if playerCallsign != "" && dockInfo.StationName != "" {
+								matchesCarrier = strings.Contains(strings.ToUpper(dockInfo.StationName), strings.ToUpper(playerCallsign))
+							}
+							if matchesCarrier {
+								dockedSystem = strings.TrimSpace(sys)
+								dockedTimestamp = ts
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		rows.Close()
+	}
+
+	// Candidate from CarrierJumpRequest (remote jump orders)
+	var requestSystem, requestTimestamp string
+	_ = app.db.QueryRow(`SELECT system_name, timestamp FROM journal_events
+		WHERE event = 'CarrierJumpRequest' AND system_name != '' AND `+journal.CmdrFilterSQL+`
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&requestSystem, &requestTimestamp)
+
+	// Pick whichever candidate has the most recent timestamp
+	bestSystem := jumpSystem
+	bestTimestamp := jumpTimestamp
+
+	if dockedTimestamp != "" && (bestTimestamp == "" || dockedTimestamp >= bestTimestamp) {
+		bestSystem = dockedSystem
+		bestTimestamp = dockedTimestamp
+	}
+	if requestTimestamp != "" && (bestTimestamp == "" || requestTimestamp >= bestTimestamp) {
+		bestSystem = requestSystem
+		bestTimestamp = requestTimestamp
+	}
+
+	return strings.TrimSpace(bestSystem), nil
 }
 
 // CarrierDepotInfo contains carrier mass and tritium depot telemetry from journal events.
@@ -360,7 +434,7 @@ func ReconcileSpanshJumps(rawJumps []SpanshRawJump, capacityUsed int, depotTriti
 
 	var carrierRouteJumps []CarrierRouteJump
 	for index, jumpItem := range rawJumps {
-		// Index 0 in Spansh fleet carrier results is the origin system with distance 0.
+		// The initial entry in Spansh fleet carrier results is the origin system with zero distance.
 		if index == 0 && jumpItem.Distance <= 0 {
 			continue
 		}

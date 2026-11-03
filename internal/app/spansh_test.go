@@ -2,13 +2,14 @@ package app
 
 import (
 	"testing"
+
+	"planisphere/internal/db"
 )
 
 func TestReconcileSpanshJumps(t *testing.T) {
-	// Raw jumps simulating Spansh API output
-	// Index 0: origin system with distance 0
-	// Index 1: 494.89 Ly jump where Spansh calculated 89 tonnes assuming 437 depot
-	// Index 2: 120.00 Ly jump
+	// Raw jumps simulating Spansh API output: origin system with zero distance,
+	// followed by a jump where Spansh calculated 89 tonnes assuming a 437 depot,
+	// and a subsequent jump.
 	rawJumps := []SpanshRawJump{
 		{
 			Name:                  "Origin System",
@@ -46,7 +47,7 @@ func TestReconcileSpanshJumps(t *testing.T) {
 		t.Fatalf("expected 2 jumps, got %d", len(reconciled))
 	}
 
-	// Jump 1: 494.89 Ly, UsedCapacity=8548, Depot=1000
+	// First jump: 494.89 Ly, UsedCapacity=8548, Depot=1000
 	// Mass = 25000 + 8548 + 1000 = 34548
 	// 5 + 494.89 * 34548 / 200000 = 90.487... -> ceil = 91
 	hop1 := reconciled[0]
@@ -63,7 +64,7 @@ func TestReconcileSpanshJumps(t *testing.T) {
 		t.Errorf("expected FuelInTank = 1000 (overriding Spansh's 437), got %d", hop1.FuelInTank)
 	}
 
-	// Jump 2: 120.00 Ly, UsedCapacity=8548, Depot=1000
+	// Second jump: 120.00 Ly, UsedCapacity=8548, Depot=1000
 	// Mass = 34548
 	// 5 + 120.0 * 34548 / 200000 = 5 + 20.7288 = 25.7288 -> ceil = 26
 	hop2 := reconciled[1]
@@ -113,6 +114,65 @@ func TestReconcileSpanshJumpsSquadronCarrier(t *testing.T) {
 	jumps := ReconcileSpanshJumps(rawJumps, 60000, 1000)
 	if jumps[0].TritiumUsed != 220 {
 		t.Errorf("expected 220 tonnes for 60,000t squadron carrier, got %d", jumps[0].TritiumUsed)
+	}
+}
+
+func TestGetCarrierLastLocation(t *testing.T) {
+	testDB, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open :memory: db: %v", err)
+	}
+	defer testDB.Close()
+
+	testApp := &App{db: testDB}
+
+	// Initially no events
+	loc, err := testApp.GetCarrierLastLocation()
+	if err != nil || loc != "" {
+		t.Fatalf("expected empty location, got '%s', err: %v", loc, err)
+	}
+
+	// Old CarrierJump in System A
+	_, err = testDB.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at)
+		VALUES ('uid1', '2026-01-01T00:00:00Z', 'CarrierJump', 'System A', '{"event":"CarrierJump","StarSystem":"System A"}', '2026-01-01T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert uid1: %v", err)
+	}
+
+	loc, err = testApp.GetCarrierLastLocation()
+	if err != nil || loc != "System A" {
+		t.Fatalf("expected System A from CarrierJump, got '%s'", loc)
+	}
+
+	// CarrierStats identifying carrier ID 98765
+	_, err = testDB.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at)
+		VALUES ('uid2', '2026-01-01T01:00:00Z', 'CarrierStats', 'System A', '{"event":"CarrierStats","CarrierID":98765,"Callsign":"ABC-123"}', '2026-01-01T01:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert uid2: %v", err)
+	}
+
+	// Newer docking event on player's fleet carrier in System B
+	_, err = testDB.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at)
+		VALUES ('uid3', '2026-01-05T00:00:00Z', 'Docked', 'System B', '{"event":"Docked","StarSystem":"System B","StationType":"FleetCarrier","MarketID":98765,"StationName":"ABC-123"}', '2026-01-05T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert uid3: %v", err)
+	}
+
+	loc, err = testApp.GetCarrierLastLocation()
+	if err != nil || loc != "System B" {
+		t.Fatalf("expected System B from newer Docked event, got '%s'", loc)
+	}
+
+	// Even newer remote jump request to System C
+	_, err = testDB.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at)
+		VALUES ('uid4', '2026-01-10T00:00:00Z', 'CarrierJumpRequest', 'System C', '{"event":"CarrierJumpRequest","SystemName":"System C","CarrierID":98765}', '2026-01-10T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert uid4: %v", err)
+	}
+
+	loc, err = testApp.GetCarrierLastLocation()
+	if err != nil || loc != "System C" {
+		t.Fatalf("expected System C from latest CarrierJumpRequest, got '%s'", loc)
 	}
 }
 

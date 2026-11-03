@@ -20,8 +20,10 @@ var RelevantEvents = map[string]bool{
 	"Location":                 true,
 	"FSDJump":                  true,
 	"CarrierJump":              true,
+	"CarrierJumpRequest":       true,
 	"CarrierStats":             true,
-	"CarrierDepositFuel":        true,
+	"CarrierDepositFuel":       true,
+	"Docked":                   true,
 	"FSDTarget":                true,
 	"Scan":                     true,
 	"SAAScanComplete":          true,
@@ -149,6 +151,10 @@ func keyIdentifiers(fields *commonFields, raw []byte) []string {
 		return []string{optInt(fields.CarrierID), optFloat(fields.FuelLevel)}
 	case "CarrierDepositFuel":
 		return []string{optInt(fields.CarrierID), optInt(fields.Total)}
+	case "CarrierJumpRequest":
+		return []string{optInt(fields.CarrierID), optInt(fields.SystemAddress)}
+	case "Docked":
+		return []string{optInt(fields.SystemAddress), optInt(fields.MarketID)}
 	case "MultiSellExplorationData", "SellExplorationData":
 		return []string{optInt(fields.TotalEarnings)}
 	case "Statistics":
