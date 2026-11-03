@@ -24,6 +24,7 @@ import (
 
 var errorNotReady = errors.New("database is not available — check the startup error in Settings")
 
+// ready checks if the database is available. Caller must hold app.dbMu.RLock.
 func (app *App) ready() error {
 	if app.db == nil {
 		if startupError := app.getError(); startupError != "" {
@@ -58,6 +59,8 @@ type Settings struct {
 
 // GetSettings returns the current settings.
 func (app *App) GetSettings() (Settings, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return Settings{}, readyError
 	}
@@ -69,6 +72,12 @@ func (app *App) GetSettings() (Settings, error) {
 	defaultDBPath, _ := db.DefaultPath()
 	defaultEDDPath := journal.DefaultEDDiscoveryDBPath()
 	discoveredEDDPath := journal.DiscoverEDDiscoveryDBPath()
+	var gecCount int
+	var gecFetched string
+	if app.gec != nil {
+		gecCount = app.gec.Count()
+		gecFetched = app.gec.LastFetched()
+	}
 	return Settings{
 		SetupCompleted:           app.setupCompleted(),
 		JournalDir:               dir,
@@ -78,8 +87,8 @@ func (app *App) GetSettings() (Settings, error) {
 		DBPath:                   app.dbPath,
 		DefaultDBPath:            defaultDBPath,
 		ActiveExpeditionID:       app.activeExpeditionID(),
-		GECCount:                 app.gec.Count(),
-		GECFetchedAt:             app.gec.LastFetched(),
+		GECCount:                 gecCount,
+		GECFetchedAt:             gecFetched,
 		Commanders:               commanders,
 		EDDiscoveryDBPath:        discoveredEDDPath,
 		DefaultEDDiscoveryDBPath: defaultEDDPath,
@@ -91,9 +100,12 @@ func (app *App) GetSettings() (Settings, error) {
 func (app *App) BrowseDBPath() (string, error) {
 	defaultDir := ""
 	defaultFilename := db.DefaultDBFileName
-	if app.dbPath != "" {
-		defaultDir = filepath.Dir(app.dbPath)
-		defaultFilename = filepath.Base(app.dbPath)
+	app.dbMu.RLock()
+	currentDBPath := app.dbPath
+	app.dbMu.RUnlock()
+	if currentDBPath != "" {
+		defaultDir = filepath.Dir(currentDBPath)
+		defaultFilename = filepath.Base(currentDBPath)
 	}
 	return runtime.SaveFileDialog(app.ctx, runtime.SaveDialogOptions{
 		Title:                fmt.Sprintf("Select %s Database Location", version.ProductName),
@@ -120,9 +132,22 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 		dbPath = filepath.Join(dbPath, db.DefaultDBFileName)
 	}
 	dbPath = filepath.Clean(dbPath)
-	if dbPath != app.dbPath {
+
+	app.dbMu.RLock()
+	currentPath := app.dbPath
+	app.dbMu.RUnlock()
+
+	if dbPath != currentPath {
 		if openError := app.openAndWireDB(dbPath); openError != nil {
 			return Settings{}, openError
+		}
+		app.dbMu.RLock()
+		setupDone := app.setupCompleted()
+		watcher := app.watcher
+		jDir := app.journalDir()
+		app.dbMu.RUnlock()
+		if setupDone && watcher != nil {
+			watcher.Start(app.ctx, jDir)
 		}
 	}
 	if saveError := db.SaveConfiguredPath(dbPath); saveError != nil {
@@ -136,18 +161,28 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 // initial scan of local .log files, starts the live watcher, and returns the
 // resulting archive status (including oldest journal date and discovered CMDRs).
 func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
-	if readyError := app.ready(); readyError != nil {
-		return IngestStatus{}, readyError
-	}
-	dir = strings.TrimSpace(dir)
-	if dir != "" && !journal.DirExists(dir) {
-		return IngestStatus{}, fmt.Errorf("directory does not exist: %s", dir)
-	}
-	if saveError := db.SetSetting(app.db, settingJournalDir, dir); saveError != nil {
-		return IngestStatus{}, saveError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		dir = strings.TrimSpace(dir)
+		if dir != "" && !journal.DirExists(dir) {
+			return fmt.Errorf("directory does not exist: %s", dir)
+		}
+		return db.SetSetting(app.db, settingJournalDir, dir)
+	}(); err != nil {
+		return IngestStatus{}, err
 	}
 	app.runScan()
-	app.watcher.Start(app.ctx, app.journalDir())
+	app.dbMu.RLock()
+	watcher := app.watcher
+	jDir := app.journalDir()
+	app.dbMu.RUnlock()
+	if watcher != nil {
+		watcher.Start(app.ctx, jDir)
+	}
 	app.changed("journal", 0)
 	return app.GetIngestStatus()
 }
@@ -155,14 +190,27 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 // CompleteSetup marks the first-time setup wizard as finished and triggers
 // any deferred startup tasks (watcher and GEC catalog sync).
 func (app *App) CompleteSetup() (Settings, error) {
-	if readyError := app.ready(); readyError != nil {
-		return Settings{}, readyError
+	var shouldRefresh bool
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		if saveError := db.SetSetting(app.db, settingSetupCompleted, "1"); saveError != nil {
+			return saveError
+		}
+		if app.watcher != nil {
+			app.watcher.Start(app.ctx, app.journalDir())
+		}
+		if app.onlineEnabled() && app.gec != nil && app.gec.Count() == 0 {
+			shouldRefresh = true
+		}
+		return nil
+	}(); err != nil {
+		return Settings{}, err
 	}
-	if saveError := db.SetSetting(app.db, settingSetupCompleted, "1"); saveError != nil {
-		return Settings{}, saveError
-	}
-	app.watcher.Start(app.ctx, app.journalDir())
-	if app.onlineEnabled() && app.gec.Count() == 0 {
+	if shouldRefresh {
 		go app.maybeRefreshGEC()
 	}
 	app.changed("settings", 0)
@@ -171,11 +219,15 @@ func (app *App) CompleteSetup() (Settings, error) {
 
 // SetCommanderEnabled enables or disables a commander in statistics and plans.
 func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error) {
-	if readyError := app.ready(); readyError != nil {
-		return Settings{}, readyError
-	}
-	if saveError := journal.SetCommanderEnabled(app.db, name, enabled); saveError != nil {
-		return Settings{}, saveError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return journal.SetCommanderEnabled(app.db, name, enabled)
+	}(); err != nil {
+		return Settings{}, err
 	}
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
@@ -197,7 +249,9 @@ func (app *App) BrowseEDDiscoveryDB() (string, error) {
 // EDDiscovery SQLite database (EDDUser.sqlite) into our self-contained SQLite
 // archive so deleted older .log files are permanently recovered.
 func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
+	app.dbMu.RLock()
 	if readyError := app.ready(); readyError != nil {
+		app.dbMu.RUnlock()
 		return 0, readyError
 	}
 	eddPath = strings.TrimSpace(eddPath)
@@ -205,13 +259,21 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 		eddPath = journal.DefaultEDDiscoveryDBPath()
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
-	importResult, importError := app.ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
+	ingester := app.ingester
+	if ingester == nil {
+		app.dbMu.RUnlock()
+		return 0, errorNotReady
+	}
+	importResult, importError := ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError != nil {
+		app.dbMu.RUnlock()
 		return 0, importError
 	}
 	_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
+	app.dbMu.RUnlock()
+
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
 	app.changed("journal", 0)
@@ -221,42 +283,59 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 // SetJournalDir changes the journal directory, restarts the watcher and
 // performs a catch-up scan in the background. Pass "" to restore the default.
 func (app *App) SetJournalDir(dir string) (Settings, error) {
-	if readyError := app.ready(); readyError != nil {
-		return Settings{}, readyError
-	}
-	dir = strings.TrimSpace(dir)
-	if dir != "" && !journal.DirExists(dir) {
-		return Settings{}, fmt.Errorf("directory does not exist: %s", dir)
-	}
-	if saveError := db.SetSetting(app.db, settingJournalDir, dir); saveError != nil {
-		return Settings{}, saveError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		dir = strings.TrimSpace(dir)
+		if dir != "" && !journal.DirExists(dir) {
+			return fmt.Errorf("directory does not exist: %s", dir)
+		}
+		return db.SetSetting(app.db, settingJournalDir, dir)
+	}(); err != nil {
+		return Settings{}, err
 	}
 	go func() {
 		app.runScan()
-		app.watcher.Start(app.ctx, app.journalDir())
+		app.dbMu.RLock()
+		watcher := app.watcher
+		jDir := app.journalDir()
+		app.dbMu.RUnlock()
+		if watcher != nil {
+			watcher.Start(app.ctx, jDir)
+		}
 	}()
 	return app.GetSettings()
 }
 
 // BrowseJournalDir opens a native directory picker and returns the choice ("" if cancelled).
 func (app *App) BrowseJournalDir() (string, error) {
+	app.dbMu.RLock()
+	defaultDir := app.journalDir()
+	app.dbMu.RUnlock()
 	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
 		Title:            "Select Elite Dangerous journal folder",
-		DefaultDirectory: app.journalDir(),
+		DefaultDirectory: defaultDir,
 	})
 }
 
 // SetOnlineLookups enables/disables EDSM and EDAstro network requests.
 func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
-	if readyError := app.ready(); readyError != nil {
-		return Settings{}, readyError
-	}
-	settingVal := "1"
-	if !enabled {
-		settingVal = "0"
-	}
-	if saveError := db.SetSetting(app.db, settingOnline, settingVal); saveError != nil {
-		return Settings{}, saveError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		settingVal := "1"
+		if !enabled {
+			settingVal = "0"
+		}
+		return db.SetSetting(app.db, settingOnline, settingVal)
+	}(); err != nil {
+		return Settings{}, err
 	}
 	if enabled {
 		go app.maybeRefreshGEC()
@@ -284,10 +363,14 @@ type IngestStatus struct {
 // GetIngestStatus returns the journal ingestion status.
 func (app *App) GetIngestStatus() (IngestStatus, error) {
 	status := IngestStatus{Scanning: app.scanning.Load(), LastError: app.getError()}
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return status, nil
 	}
-	status.WatcherActive, status.WatcherError = app.watcher.Active()
+	if app.watcher != nil {
+		status.WatcherActive, status.WatcherError = app.watcher.Active()
+	}
 	status.LastScanAt, _ = db.GetSetting(app.db, settingLastScanAt)
 	archiveStatus, archiveError := journal.ArchiveStatus(app.db)
 	if archiveError != nil {
@@ -298,7 +381,7 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	status.FirstEventGalactic = ed.ToGalactic(archiveStatus.FirstEventAt)
 	status.LastEventGalactic = ed.ToGalactic(archiveStatus.LastEventAt)
 	var sys sql.NullString
-	_ = app.db.QueryRow(`SELECT system_name FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND `+journal.CmdrFilterSQL+`
+	_ = app.db.QueryRow(`SELECT system_name FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND ` + journal.CmdrFilterSQL + `
 		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&sys)
 	status.CurrentSystem = sys.String
 	var rawJSON, eventName string
@@ -324,19 +407,29 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 
 // RescanJournals starts a full idempotent catch-up scan in the background.
 func (app *App) RescanJournals() error {
+	app.dbMu.RLock()
 	if readyError := app.ready(); readyError != nil {
+		app.dbMu.RUnlock()
 		return readyError
 	}
+	app.dbMu.RUnlock()
 	go app.runScan()
 	return nil
 }
 
 // RefreshGEC re-downloads the EDAstro Galactic Exploration Catalog.
 func (app *App) RefreshGEC() (int, error) {
+	app.dbMu.RLock()
 	if readyError := app.ready(); readyError != nil {
+		app.dbMu.RUnlock()
 		return 0, readyError
 	}
-	refreshCount, refreshError := app.gec.Refresh(app.ctx)
+	gecCat := app.gec
+	app.dbMu.RUnlock()
+	if gecCat == nil {
+		return 0, errors.New("GEC catalog not initialized")
+	}
+	refreshCount, refreshError := gecCat.Refresh(app.ctx)
 	if refreshError != nil {
 		return 0, refreshError
 	}
@@ -389,6 +482,8 @@ type ModesState struct {
 
 // GetModesState returns modes, the active mode and all windows (newest first).
 func (app *App) GetModesState() (ModesState, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return ModesState{}, readyError
 	}
@@ -433,6 +528,8 @@ func (app *App) GetModesState() (ModesState, error) {
 
 // CreateMode adds a custom mode.
 func (app *App) CreateMode(name, description, color string) (modes.Mode, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return modes.Mode{}, readyError
 	}
@@ -445,6 +542,8 @@ func (app *App) CreateMode(name, description, color string) (modes.Mode, error) 
 
 // UpdateMode edits a mode.
 func (app *App) UpdateMode(id int64, name, description, color string) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return readyError
 	}
@@ -457,6 +556,8 @@ func (app *App) UpdateMode(id int64, name, description, color string) error {
 
 // DeleteMode deletes a custom mode and its windows.
 func (app *App) DeleteMode(id int64) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return readyError
 	}
@@ -469,11 +570,15 @@ func (app *App) DeleteMode(id int64) error {
 
 // SwitchMode makes modeID the active mode from now (0 = stop tracking a mode).
 func (app *App) SwitchMode(modeID int64) (ModesState, error) {
-	if readyError := app.ready(); readyError != nil {
-		return ModesState{}, readyError
-	}
-	if switchError := db.WithTx(app.db, func(tx *sql.Tx) error { return modes.Switch(tx, modeID, "") }); switchError != nil {
-		return ModesState{}, switchError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.WithTx(app.db, func(tx *sql.Tx) error { return modes.Switch(tx, modeID, "") })
+	}(); err != nil {
+		return ModesState{}, err
 	}
 	app.changed("modes", 0)
 	return app.GetModesState()
@@ -491,13 +596,17 @@ type ModeWindowInput struct {
 // SaveModeWindow writes a window retroactively; overlapping windows are
 // trimmed/split so that windows never overlap.
 func (app *App) SaveModeWindow(in ModeWindowInput) (ModesState, error) {
-	if readyError := app.ready(); readyError != nil {
-		return ModesState{}, readyError
-	}
-	if saveError := db.WithTx(app.db, func(tx *sql.Tx) error {
-		return modes.SetWindow(tx, in.ID, in.ModeID, in.Start, in.End)
-	}); saveError != nil {
-		return ModesState{}, saveError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.WithTx(app.db, func(tx *sql.Tx) error {
+			return modes.SetWindow(tx, in.ID, in.ModeID, in.Start, in.End)
+		})
+	}(); err != nil {
+		return ModesState{}, err
 	}
 	app.changed("modes", 0)
 	return app.GetModesState()
@@ -505,11 +614,15 @@ func (app *App) SaveModeWindow(in ModeWindowInput) (ModesState, error) {
 
 // DeleteModeWindow removes a window.
 func (app *App) DeleteModeWindow(id int64) (ModesState, error) {
-	if readyError := app.ready(); readyError != nil {
-		return ModesState{}, readyError
-	}
-	if deleteError := modes.DeleteWindow(app.db, id); deleteError != nil {
-		return ModesState{}, deleteError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return modes.DeleteWindow(app.db, id)
+	}(); err != nil {
+		return ModesState{}, err
 	}
 	app.changed("modes", 0)
 	return app.GetModesState()
@@ -521,6 +634,8 @@ func (app *App) DeleteModeWindow(id int64) (ModesState, error) {
 
 // ListExpeditions returns all expeditions (newest first).
 func (app *App) ListExpeditions() ([]expedition.Expedition, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return nil, readyError
 	}
@@ -533,6 +648,8 @@ func (app *App) ListExpeditions() ([]expedition.Expedition, error) {
 
 // CreateExpedition adds an expedition and makes it the active one.
 func (app *App) CreateExpedition(name, description string) (expedition.Expedition, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return expedition.Expedition{}, readyError
 	}
@@ -548,14 +665,22 @@ func (app *App) CreateExpedition(name, description string) (expedition.Expeditio
 // CloneExpedition duplicates an expedition (and its waypoints/region headers)
 // into a new expedition in the planning state, and makes the clone active.
 func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
-	if readyError := app.ready(); readyError != nil {
-		return expedition.Expedition{}, readyError
+	var clonedExpedition expedition.Expedition
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		var cloneError error
+		clonedExpedition, cloneError = expedition.Clone(app.db, id)
+		if cloneError != nil {
+			return cloneError
+		}
+		return db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(clonedExpedition.ID, 10))
+	}(); err != nil {
+		return clonedExpedition, err
 	}
-	clonedExpedition, cloneError := expedition.Clone(app.db, id)
-	if cloneError != nil {
-		return clonedExpedition, cloneError
-	}
-	_ = db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(clonedExpedition.ID, 10))
 	go app.kickResolution(clonedExpedition.ID, false)
 	app.changed("plan", clonedExpedition.ID)
 	return clonedExpedition, nil
@@ -563,6 +688,8 @@ func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 
 // UpdateExpedition renames an expedition.
 func (app *App) UpdateExpedition(id int64, name, description string) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return readyError
 	}
@@ -575,6 +702,8 @@ func (app *App) UpdateExpedition(id int64, name, description string) error {
 
 // DeleteExpedition deletes an expedition plan (journal history is kept).
 func (app *App) DeleteExpedition(id int64) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return readyError
 	}
@@ -590,11 +719,15 @@ func (app *App) DeleteExpedition(id int64) error {
 
 // SetActiveExpedition selects the expedition shown in the planner.
 func (app *App) SetActiveExpedition(id int64) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	if saveError := db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(id, 10)); saveError != nil {
-		return saveError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(id, 10))
+	}(); err != nil {
+		return err
 	}
 	go app.kickResolution(id, false)
 	return nil
@@ -602,13 +735,19 @@ func (app *App) SetActiveExpedition(id int64) error {
 
 // GetPlan returns the planner sheet for an expedition.
 func (app *App) GetPlan(id int64) (expedition.PlanView, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return expedition.PlanView{}, readyError
 	}
 	return expedition.BuildPlan(app.db, id, app.gecLookup)
 }
 
+// gecLookup searches the GEC catalog for POIs matching a system. Caller must hold app.dbMu.RLock.
 func (app *App) gecLookup(name string, addr int64) *expedition.GECRef {
+	if app.gec == nil {
+		return nil
+	}
 	pois := app.gec.Lookup(name, addr)
 	if len(pois) == 0 {
 		return nil
@@ -619,44 +758,63 @@ func (app *App) gecLookup(name string, addr int64) *expedition.GECRef {
 // AddRow inserts a row after afterRowID (0 = append, -1 = top). rowType is
 // "waypoint" or "region"; regionID is used for region headers.
 func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID int) (expedition.Row, error) {
-	if readyError := app.ready(); readyError != nil {
-		return expedition.Row{}, readyError
-	}
 	var newRow expedition.Row
-	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
-		var insertError error
-		newRow, insertError = expedition.InsertRow(tx, expeditionID, afterRowID, rowType, regionID)
-		return insertError
-	})
-	if txError == nil {
-		app.changed("plan", expeditionID)
+	var txError error
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		txError = db.WithTx(app.db, func(tx *sql.Tx) error {
+			var insertError error
+			newRow, insertError = expedition.InsertRow(tx, expeditionID, afterRowID, rowType, regionID)
+			return insertError
+		})
+		return txError
+	}(); err != nil {
+		return newRow, err
 	}
-	return newRow, txError
+	app.changed("plan", expeditionID)
+	return newRow, nil
 }
 
 // UpdateRow applies a partial update to a row. Changing the system name
 // triggers asynchronous coordinate resolution and visit re-evaluation.
 func (app *App) UpdateRow(patch expedition.RowPatch) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	changed, updateError := expedition.UpdateRow(app.db, patch)
-	if updateError != nil {
-		return updateError
-	}
-	rowItem, getError := expedition.GetRow(app.db, patch.ID)
-	if getError != nil {
-		return getError
-	}
-	if changed {
-		if rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
-			if pois := app.gec.Lookup(rowItem.SystemName, rowItem.SystemAddress); len(pois) > 0 && strings.TrimSpace(pois[0].Name) != "" {
-				poiName := html.UnescapeString(strings.TrimSpace(pois[0].Name))
-				if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID); execError == nil {
-					rowItem.POIName = poiName
+	var changed bool
+	var rowItem expedition.Row
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		var updateError error
+		changed, updateError = expedition.UpdateRow(app.db, patch)
+		if updateError != nil {
+			return updateError
+		}
+		var getError error
+		rowItem, getError = expedition.GetRow(app.db, patch.ID)
+		if getError != nil {
+			return getError
+		}
+		if changed {
+			if rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" && app.gec != nil {
+				if pois := app.gec.Lookup(rowItem.SystemName, rowItem.SystemAddress); len(pois) > 0 && strings.TrimSpace(pois[0].Name) != "" {
+					poiName := html.UnescapeString(strings.TrimSpace(pois[0].Name))
+					if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID); execError == nil {
+						rowItem.POIName = poiName
+					}
 				}
 			}
 		}
+		return nil
+	}(); err != nil {
+		return err
+	}
+	if changed {
 		app.reevaluate(rowItem.ExpeditionID)
 		if rowItem.SystemName != "" {
 			app.resolveRowAsync(rowItem, true)
@@ -669,17 +827,20 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 // SetLegMode assigns a mode to the leg arriving at rowID and updates the
 // corresponding time window in mode_windows when the waypoint has been visited.
 func (app *App) SetLegMode(rowID, modeID int64) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
 	var expeditionID int64
-	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
-		var setModeError error
-		expeditionID, setModeError = expedition.SetLegMode(tx, rowID, modeID)
-		return setModeError
-	})
-	if txError != nil {
-		return txError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.WithTx(app.db, func(tx *sql.Tx) error {
+			var setModeError error
+			expeditionID, setModeError = expedition.SetLegMode(tx, rowID, modeID)
+			return setModeError
+		})
+	}(); err != nil {
+		return err
 	}
 	app.invalidateAllTimeCache()
 	app.changed("modes", expeditionID)
@@ -689,14 +850,17 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 // SetActiveLegMode sets the mode for the current in-progress leg (since the
 // latest visited waypoint).
 func (app *App) SetActiveLegMode(expeditionID, modeID int64) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
-		return expedition.SetActiveLegMode(tx, expeditionID, modeID)
-	})
-	if txError != nil {
-		return txError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.WithTx(app.db, func(tx *sql.Tx) error {
+			return expedition.SetActiveLegMode(tx, expeditionID, modeID)
+		})
+	}(); err != nil {
+		return err
 	}
 	app.invalidateAllTimeCache()
 	app.changed("modes", expeditionID)
@@ -705,34 +869,48 @@ func (app *App) SetActiveLegMode(expeditionID, modeID int64) error {
 
 // RetryResolve re-runs coordinate resolution for a waypoint.
 func (app *App) RetryResolve(rowID int64) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	rowItem, getError := expedition.GetRow(app.db, rowID)
-	if getError != nil {
-		return getError
-	}
-	if rowItem.SystemName == "" {
+	var rowItem expedition.Row
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		var getError error
+		rowItem, getError = expedition.GetRow(app.db, rowID)
+		if getError != nil {
+			return getError
+		}
+		if rowItem.SystemName == "" {
+			return nil
+		}
+		_, _ = app.db.Exec(`DELETE FROM system_cache WHERE name_key = ? AND source = 'notfound'`, strings.ToLower(rowItem.SystemName))
 		return nil
+	}(); err != nil {
+		return err
 	}
-	_, _ = app.db.Exec(`DELETE FROM system_cache WHERE name_key = ? AND source = 'notfound'`, strings.ToLower(rowItem.SystemName))
-	app.resolveRowAsync(rowItem, true)
+	if rowItem.SystemName != "" {
+		app.resolveRowAsync(rowItem, true)
+	}
 	return nil
 }
 
 // DeleteRow removes a row.
 func (app *App) DeleteRow(rowID int64) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
 	var expeditionID int64
-	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
-		var deleteRowError error
-		expeditionID, deleteRowError = expedition.DeleteRow(tx, rowID)
-		return deleteRowError
-	})
-	if txError != nil {
-		return txError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.WithTx(app.db, func(tx *sql.Tx) error {
+			var deleteRowError error
+			expeditionID, deleteRowError = expedition.DeleteRow(tx, rowID)
+			return deleteRowError
+		})
+	}(); err != nil {
+		return err
 	}
 	app.reevaluate(expeditionID)
 	app.changed("plan", expeditionID)
@@ -741,18 +919,22 @@ func (app *App) DeleteRow(rowID int64) error {
 
 // MoveRow moves a row to the zero-based index toIndex.
 func (app *App) MoveRow(rowID int64, toIndex int) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	rowItem, _ := expedition.GetRow(app.db, rowID)
 	var expeditionID int64
-	txError := db.WithTx(app.db, func(tx *sql.Tx) error {
-		var moveRowError error
-		expeditionID, moveRowError = expedition.MoveRow(tx, rowID, toIndex)
-		return moveRowError
-	})
-	if txError != nil {
-		return txError
+	var rowItem expedition.Row
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		rowItem, _ = expedition.GetRow(app.db, rowID)
+		return db.WithTx(app.db, func(tx *sql.Tx) error {
+			var moveRowError error
+			expeditionID, moveRowError = expedition.MoveRow(tx, rowID, toIndex)
+			return moveRowError
+		})
+	}(); err != nil {
+		return err
 	}
 	if rowItem.RowType == expedition.RowWaypoint {
 		app.reevaluate(expeditionID)
@@ -774,6 +956,8 @@ type RegionOptions struct {
 // rowID is either the header being edited (editing = true) or the row after
 // which a new header will be inserted (0 = append at end, -1 = top).
 func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (RegionOptions, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return RegionOptions{}, readyError
 	}
@@ -834,6 +1018,8 @@ type StartCandidates struct {
 
 // GetStartCandidates returns every recorded arrival at Waypoint #1 (newest first).
 func (app *App) GetStartCandidates(expeditionID int64) (StartCandidates, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return StartCandidates{}, readyError
 	}
@@ -845,12 +1031,17 @@ func (app *App) GetStartCandidates(expeditionID int64) (StartCandidates, error) 
 }
 
 func (app *App) lifecycle(expeditionID int64, action func(transaction *sql.Tx) error) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.WithTx(app.db, action)
+	}(); err != nil {
+		return err
 	}
-	if txError := db.WithTx(app.db, action); txError != nil {
-		return txError
-	}
+	app.reevaluate(expeditionID)
 	app.changed("plan", expeditionID)
 	return nil
 }
@@ -879,6 +1070,8 @@ func (app *App) ReopenExpedition(expeditionID int64) error {
 
 // GetWaypointDetails returns the expandable drawer content for a waypoint.
 func (app *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return expedition.WaypointDetails{}, readyError
 	}
@@ -916,6 +1109,8 @@ type SidebarStats struct {
 
 // GetSidebarStats computes the sidebar for an expedition with mode filters.
 func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (SidebarStats, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return SidebarStats{}, readyError
 	}
@@ -979,5 +1174,3 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	}
 	return sidebar, nil
 }
-
-

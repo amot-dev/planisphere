@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"database/sql"
 	"testing"
 
 	"planisphere/internal/db"
@@ -56,5 +57,58 @@ func TestMigrateIdempotency(t *testing.T) {
 	}
 	if expName != db.DefaultExpeditionName {
 		t.Errorf("expected expedition %q, got %q", db.DefaultExpeditionName, expName)
+	}
+}
+
+func TestWithTxRollbackOnPanic(t *testing.T) {
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatalf("Open: %v", openError)
+	}
+	defer dbConn.Close()
+
+	var recoveredPanic any
+	func() {
+		defer func() {
+			recoveredPanic = recover()
+		}()
+		_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+			if setError := db.SetSetting(transaction, "panic_rollback_key", "uncommitted_value"); setError != nil {
+				return setError
+			}
+			panic("simulated panic")
+		})
+	}()
+
+	if recoveredPanic == nil {
+		t.Fatalf("expected panic to propagate, but none occurred")
+	}
+	if recoveredPanic != "simulated panic" {
+		t.Fatalf("unexpected panic value: %v", recoveredPanic)
+	}
+
+	// Verify that the uncommitted change was rolled back
+	persistedValue, getSettingError := db.GetSetting(dbConn, "panic_rollback_key")
+	if getSettingError != nil {
+		t.Fatalf("GetSetting after panic: %v", getSettingError)
+	}
+	if persistedValue != "" {
+		t.Fatalf("expected uncommitted setting to be rolled back, got %q", persistedValue)
+	}
+
+	// Verify that the connection is not locked and subsequent transactions succeed
+	secondTransactionError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return db.SetSetting(transaction, "panic_rollback_key", "committed_value")
+	})
+	if secondTransactionError != nil {
+		t.Fatalf("subsequent WithTx failed: %v", secondTransactionError)
+	}
+
+	finalValue, getFinalSettingError := db.GetSetting(dbConn, "panic_rollback_key")
+	if getFinalSettingError != nil {
+		t.Fatalf("GetSetting after subsequent transaction: %v", getFinalSettingError)
+	}
+	if finalValue != "committed_value" {
+		t.Fatalf("expected setting to be %q, got %q", "committed_value", finalValue)
 	}
 }

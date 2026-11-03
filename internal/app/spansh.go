@@ -60,6 +60,8 @@ type ActiveCarrierRouteState struct {
 
 // GetActiveCarrierRoute retrieves the persisted active carrier route for an expedition.
 func (app *App) GetActiveCarrierRoute(expeditionID int64) (*ActiveCarrierRouteState, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return nil, readyError
 	}
@@ -77,6 +79,8 @@ func (app *App) GetActiveCarrierRoute(expeditionID int64) (*ActiveCarrierRouteSt
 
 // SaveActiveCarrierRoute persists the active carrier route state for an expedition.
 func (app *App) SaveActiveCarrierRoute(state ActiveCarrierRouteState) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return readyError
 	}
@@ -93,6 +97,8 @@ func (app *App) SaveActiveCarrierRoute(state ActiveCarrierRouteState) error {
 
 // ClearActiveCarrierRoute deletes the active carrier route for an expedition.
 func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return readyError
 	}
@@ -105,6 +111,8 @@ func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
 // It checks CarrierJump events, docking and location events aboard the fleet carrier,
 // and CarrierJumpRequest events, choosing whichever candidate has the most recent timestamp.
 func (app *App) GetCarrierLastLocation() (string, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return "", readyError
 	}
@@ -132,7 +140,7 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 	// Candidate from Docked or Location events aboard a fleet carrier
 	var dockedSystem, dockedTimestamp string
 	rows, err := app.db.Query(`SELECT system_name, timestamp, raw_json FROM journal_events
-		WHERE event IN ('Docked', 'Location') AND system_name != '' AND `+journal.CmdrFilterSQL+`
+		WHERE event IN ('Docked', 'Location') AND system_name != '' AND ` + journal.CmdrFilterSQL + `
 		AND raw_json LIKE '%FleetCarrier%'
 		ORDER BY timestamp DESC, id DESC LIMIT 20`)
 	if err == nil {
@@ -206,6 +214,8 @@ func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 		DepotTritium: 1000,
 		Cargo:        0,
 	}
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return info, readyError
 	}
@@ -213,7 +223,7 @@ func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 	var rawCarrierStats string
 	var statsTimestamp string
 	statsQueryError := app.db.QueryRow(`SELECT raw_json, timestamp FROM journal_events
-		WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
+		WHERE event = 'CarrierStats' AND `+journal.CmdrFilterSQL+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawCarrierStats, &statsTimestamp)
 	if statsQueryError == nil && rawCarrierStats != "" {
 		var carrierStats journal.CarrierStatsEvent
@@ -231,7 +241,7 @@ func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 	var rawDeposit string
 	var depositTimestamp string
 	depositQueryError := app.db.QueryRow(`SELECT raw_json, timestamp FROM journal_events
-		WHERE event = 'CarrierDepositFuel' AND ` + journal.CmdrFilterSQL + `
+		WHERE event = 'CarrierDepositFuel' AND `+journal.CmdrFilterSQL+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawDeposit, &depositTimestamp)
 	if depositQueryError == nil && rawDeposit != "" {
 		var depositEvent journal.CarrierDepositFuelEvent
@@ -274,28 +284,32 @@ func (app *App) GetDefaultCarrierDepot() int {
 // RecordCarrierJump logs a single completed expedition carrier jump (from Spansh hop completion or Manual Mode)
 // into the expedition's manual carrier adjustments.
 func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritium int) error {
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	expeditionRecord, getError := expedition.Get(app.db, expeditionID)
-	if getError != nil {
-		return getError
-	}
-	adjustments := expeditionRecord.Adjustments
-	adjustments.CarrierJumps++
-	if distanceLy > 0 {
-		adjustments.CarrierDistanceLy += distanceLy
-	}
-	if tritium > 0 {
-		currentTritium := 0
-		if adjustments.TritiumUsed != nil {
-			currentTritium = *adjustments.TritiumUsed
+	if err := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
 		}
-		nextTritium := currentTritium + tritium
-		adjustments.TritiumUsed = &nextTritium
-	}
-	if saveError := expedition.SaveAdjustments(app.db, expeditionID, adjustments); saveError != nil {
-		return saveError
+		expeditionRecord, getError := expedition.Get(app.db, expeditionID)
+		if getError != nil {
+			return getError
+		}
+		adjustments := expeditionRecord.Adjustments
+		adjustments.CarrierJumps++
+		if distanceLy > 0 {
+			adjustments.CarrierDistanceLy += distanceLy
+		}
+		if tritium > 0 {
+			currentTritium := 0
+			if adjustments.TritiumUsed != nil {
+				currentTritium = *adjustments.TritiumUsed
+			}
+			nextTritium := currentTritium + tritium
+			adjustments.TritiumUsed = &nextTritium
+		}
+		return expedition.SaveAdjustments(app.db, expeditionID, adjustments)
+	}(); err != nil {
+		return err
 	}
 	app.changed("all", expeditionID)
 	return nil
@@ -303,6 +317,8 @@ func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritiu
 
 func (app *App) canonicalSystemName(name string) string {
 	name = strings.TrimSpace(name)
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	if name == "" || app.db == nil {
 		return name
 	}

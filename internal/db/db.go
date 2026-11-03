@@ -179,13 +179,21 @@ func SetSetting(queryer Queryer, key, value string) error {
 }
 
 // WithTx runs txFunc inside a transaction.
-func WithTx(dbConn *sql.DB, txFunc func(transaction *sql.Tx) error) error {
+func WithTx(dbConn *sql.DB, txFunc func(transaction *sql.Tx) error) (returnedError error) {
 	transaction, beginError := dbConn.Begin()
 	if beginError != nil {
 		return beginError
 	}
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			_ = transaction.Rollback()
+			panic(panicValue)
+		} else if returnedError != nil {
+			_ = transaction.Rollback()
+		}
+	}()
+
 	if txError := txFunc(transaction); txError != nil {
-		_ = transaction.Rollback()
 		return txError
 	}
 	return transaction.Commit()

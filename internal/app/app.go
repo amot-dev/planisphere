@@ -64,6 +64,7 @@ type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	dbMu     sync.RWMutex
 	db       *sql.DB
 	dbPath   string
 	ingester *journal.Ingester
@@ -71,9 +72,9 @@ type App struct {
 	resolver *systems.Resolver
 	gec      *gec.Catalog
 
-	scanning    atomic.Bool
-	lastErrorMu sync.Mutex
-	lastError   string
+	scanning             atomic.Bool
+	lastErrorMu          sync.Mutex
+	lastError            string
 	resolveMu            sync.Mutex
 	resolving            map[int64]bool
 	resolvingExpeditions map[int64]bool
@@ -136,6 +137,10 @@ func (app *App) openAndWireDB(dbPath string) error {
 	if openError != nil {
 		return fmt.Errorf("open database %s: %w", dbPath, openError)
 	}
+
+	app.dbMu.Lock()
+	defer app.dbMu.Unlock()
+
 	if app.watcher != nil {
 		app.watcher.Stop()
 	}
@@ -152,6 +157,9 @@ func (app *App) openAndWireDB(dbPath string) error {
 }
 
 func (app *App) shutdown(ctx context.Context) {
+	app.dbMu.Lock()
+	defer app.dbMu.Unlock()
+
 	if app.watcher != nil {
 		app.watcher.Stop()
 	}
@@ -164,11 +172,20 @@ func (app *App) shutdown(ctx context.Context) {
 }
 
 func (app *App) backgroundStart() {
-	if !app.setupCompleted() {
+	app.dbMu.RLock()
+	setupDone := app.setupCompleted()
+	app.dbMu.RUnlock()
+	if !setupDone {
 		return
 	}
 	app.runScan()
-	app.watcher.Start(app.ctx, app.journalDir())
+	app.dbMu.RLock()
+	watcher := app.watcher
+	jDir := app.journalDir()
+	app.dbMu.RUnlock()
+	if watcher != nil {
+		watcher.Start(app.ctx, jDir)
+	}
 	app.maybeRefreshGEC()
 }
 
@@ -206,7 +223,11 @@ func (app *App) emitEDDProgress(active bool, current, total, files int, stage st
 	})
 }
 
+// journalDir returns the configured or default journal directory. Caller must hold app.dbMu.RLock.
 func (app *App) journalDir() string {
+	if app.db == nil {
+		return journal.DefaultJournalDir()
+	}
 	settingValue, _ := db.GetSetting(app.db, settingJournalDir)
 	if strings.TrimSpace(settingValue) == "" {
 		return journal.DefaultJournalDir()
@@ -214,18 +235,27 @@ func (app *App) journalDir() string {
 	return settingValue
 }
 
+// onlineEnabled reports whether online lookups are enabled. Caller must hold app.dbMu.RLock.
 func (app *App) onlineEnabled() bool {
+	if app.db == nil {
+		return false
+	}
 	settingValue, _ := db.GetSetting(app.db, settingOnline)
 	return settingValue != "0"
 }
 
+// activeExpeditionID returns the currently active expedition ID. Caller must hold app.dbMu.RLock.
 func (app *App) activeExpeditionID() int64 {
+	if app.db == nil {
+		return 0
+	}
 	settingValue, _ := db.GetSetting(app.db, settingActiveExp)
 	var expeditionID int64
 	fmt.Sscan(settingValue, &expeditionID)
 	return expeditionID
 }
 
+// setupCompleted reports whether initial onboarding setup has finished. Caller must hold app.dbMu.RLock.
 func (app *App) setupCompleted() bool {
 	if app.db == nil {
 		return false
@@ -242,8 +272,15 @@ func (app *App) runScan() {
 	}
 	defer app.scanning.Store(false)
 	app.emit(EventIngest, nil)
+	app.dbMu.RLock()
 	dir := app.journalDir()
-	scanResult, scanError := app.ingester.ScanDir(dir)
+	ingester := app.ingester
+	database := app.db
+	app.dbMu.RUnlock()
+	if ingester == nil || database == nil {
+		return
+	}
+	scanResult, scanError := ingester.ScanDir(dir)
 	if scanError != nil {
 		app.setError(scanError.Error())
 	} else if len(scanResult.Errors) > 0 {
@@ -251,7 +288,11 @@ func (app *App) runScan() {
 	} else {
 		app.setError("")
 	}
-	_ = db.SetSetting(app.db, settingLastScanAt, ed.NowISO())
+	app.dbMu.RLock()
+	if app.db != nil {
+		_ = db.SetSetting(app.db, settingLastScanAt, ed.NowISO())
+	}
+	app.dbMu.RUnlock()
 	if scanResult.LinesRead > 0 {
 		app.invalidateAllTimeCache()
 	}
@@ -276,11 +317,15 @@ func (app *App) invalidateAllTimeCache() {
 	expedition.InvalidateShipCache()
 }
 
+// getAllTimeMetrics computes or retrieves cached lifetime statistics across all journals. Caller must hold app.dbMu.RLock.
 func (app *App) getAllTimeMetrics() (stats.Metrics, error) {
 	app.allTimeMu.Lock()
 	defer app.allTimeMu.Unlock()
 	if app.allTimeValid {
 		return app.allTimeMetrics, nil
+	}
+	if app.db == nil {
+		return stats.Metrics{}, errorNotReady
 	}
 	statsEngine := stats.NewEngine(app.db)
 	allMetrics, computeError := statsEngine.Compute(stats.Range{}, nil)
@@ -302,7 +347,13 @@ func (app *App) getAllTimeMetrics() (stats.Metrics, error) {
 }
 
 func (app *App) reevaluateActive() {
+	app.dbMu.RLock()
+	if app.db == nil {
+		app.dbMu.RUnlock()
+		return
+	}
 	expeditionIDs, getIDsError := expedition.ActiveExpeditionIDs(app.db)
+	app.dbMu.RUnlock()
 	if getIDsError != nil {
 		log.Printf("reevaluate: %v", getIDsError)
 		return
@@ -314,6 +365,11 @@ func (app *App) reevaluateActive() {
 }
 
 func (app *App) reevaluate(expeditionID int64) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil {
+		return
+	}
 	txError := db.WithTx(app.db, func(transaction *sql.Tx) error {
 		_, reevalError := expedition.Reevaluate(transaction, expeditionID)
 		return reevalError
@@ -324,16 +380,23 @@ func (app *App) reevaluate(expeditionID int64) {
 }
 
 func (app *App) maybeRefreshGEC() {
-	if !app.onlineEnabled() {
+	app.dbMu.RLock()
+	online := app.onlineEnabled()
+	gecCat := app.gec
+	app.dbMu.RUnlock()
+	if !online {
 		return
 	}
-	lastFetched := app.gec.LastFetched()
+	if gecCat == nil {
+		return
+	}
+	lastFetched := gecCat.LastFetched()
 	if lastFetched != "" {
-		if parsedTime, parseError := ed.ParseISO(lastFetched); parseError == nil && time.Since(parsedTime) < gecRefreshInterval && app.gec.Count() > 0 {
+		if parsedTime, parseError := ed.ParseISO(lastFetched); parseError == nil && time.Since(parsedTime) < gecRefreshInterval && gecCat.Count() > 0 {
 			return
 		}
 	}
-	if _, refreshError := app.gec.Refresh(app.ctx); refreshError != nil {
+	if _, refreshError := gecCat.Refresh(app.ctx); refreshError != nil {
 		log.Printf("gec refresh: %v", refreshError)
 		return
 	}
@@ -365,7 +428,13 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 			app.resolveMu.Unlock()
 		}()
 
+		app.dbMu.RLock()
+		if app.db == nil {
+			app.dbMu.RUnlock()
+			return
+		}
 		rows, listError := expedition.ListRows(app.db, expeditionID)
+		app.dbMu.RUnlock()
 		if listError != nil {
 			return
 		}
@@ -373,8 +442,12 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 		anyUpdated := false
 		lastEmit := time.Now()
 		for _, rowItem := range rows {
-			if app.ctx != nil && app.ctx.Err() != nil {
-				break
+			if app.ctx != nil {
+				select {
+				case <-app.ctx.Done():
+					return
+				default:
+				}
 			}
 			if !rowItem.IsWaypoint() || rowItem.SystemName == "" || rowItem.HasCoords {
 				continue
@@ -430,11 +503,33 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 	var systemInfo *systems.Info
 	var lookupError error
 	if online {
-		app.resolveSem <- struct{}{}
-		systemInfo, lookupError = app.resolver.Resolve(app.ctx, rowItem.SystemName)
-		<-app.resolveSem
+		if app.ctx != nil {
+			select {
+			case <-app.ctx.Done():
+				return false, false
+			case app.resolveSem <- struct{}{}:
+			}
+		} else {
+			app.resolveSem <- struct{}{}
+		}
+		func() {
+			defer func() {
+				<-app.resolveSem
+			}()
+			app.dbMu.RLock()
+			res := app.resolver
+			app.dbMu.RUnlock()
+			if res != nil {
+				systemInfo, lookupError = res.Resolve(app.ctx, rowItem.SystemName)
+			}
+		}()
 	} else {
-		systemInfo, lookupError = systems.FromJournal(app.db, rowItem.SystemName)
+		app.dbMu.RLock()
+		database := app.db
+		if database != nil {
+			systemInfo, lookupError = systems.FromJournal(database, rowItem.SystemName)
+		}
+		app.dbMu.RUnlock()
 		if systemInfo == nil && lookupError == nil {
 			return false, false
 		}
@@ -450,6 +545,11 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 	case lookupError != nil && strings.Contains(lookupError.Error(), systems.ErrorNotFound.Error()):
 		source = "notfound"
 	}
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil {
+		return false, false
+	}
 	if setCoordsError := expedition.SetRowCoords(app.db, rowItem.ID, rowItem.SystemName, systemAddress, edsmID, positionCoords, source); setCoordsError != nil {
 		log.Printf("store coords: %v", setCoordsError)
 		return false, false
@@ -457,7 +557,7 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 	// Populate POI name from EDAstro GEC/GMP if the waypoint does not already have one set
 	var curPOIName string
 	_ = app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&curPOIName)
-	if strings.TrimSpace(curPOIName) == "" {
+	if strings.TrimSpace(curPOIName) == "" && app.gec != nil {
 		if matchedPOIs := app.gec.Lookup(rowItem.SystemName, systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
 			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
 			_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID)
@@ -479,6 +579,11 @@ func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 }
 
 func (app *App) populateMissingPOIs() {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil || app.gec == nil {
+		return
+	}
 	rows, queryError := app.db.Query(`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`)
 	if queryError != nil {
 		return
