@@ -335,40 +335,39 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		currentIndex = targetIndex
 	}
 
+	var stmt *sql.Stmt
 	changed := false
 	for i := range rows {
 		rowItem := rows[i]
 		originalRow := originalRowsByID[rowItem.ID]
-		if originalRow.Position != i+1 {
-			changed = true
-			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET position = ? WHERE id = ?`, i+1, rowItem.ID); updateError != nil {
-				return false, updateError
-			}
+		newPosition := i + 1
+		if originalRow.Position == newPosition &&
+			originalRow.VisitedAt == rowItem.VisitedAt &&
+			originalRow.VisitEventUID == rowItem.VisitEventUID &&
+			originalRow.FCArrived == rowItem.FCArrived &&
+			originalRow.LegModeID == rowItem.LegModeID {
+			continue
 		}
-		if originalRow.VisitedAt != rowItem.VisitedAt || originalRow.VisitEventUID != rowItem.VisitEventUID {
-			changed = true
-			var visitedAtValue, visitUIDValue any
-			if rowItem.VisitedAt != "" {
-				visitedAtValue = rowItem.VisitedAt
+
+		changed = true
+		if stmt == nil {
+			var prepError error
+			stmt, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ?, visited_at = ?, visit_event_uid = ?, fc_arrived = ?, leg_mode_id = ? WHERE id = ?`)
+			if prepError != nil {
+				return false, fmt.Errorf("prepare update row: %w", prepError)
 			}
-			if rowItem.VisitEventUID != "" {
-				visitUIDValue = rowItem.VisitEventUID
-			}
-			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET visited_at = ?, visit_event_uid = ? WHERE id = ?`, visitedAtValue, visitUIDValue, rowItem.ID); updateError != nil {
-				return false, fmt.Errorf("update visit: %w", updateError)
-			}
+			defer stmt.Close()
 		}
-		if originalRow.FCArrived != rowItem.FCArrived {
-			changed = true
-			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = ? WHERE id = ?`, rowItem.FCArrived, rowItem.ID); updateError != nil {
-				return false, fmt.Errorf("update fc_arrived: %w", updateError)
-			}
+
+		var visitedAtValue, visitUIDValue any
+		if rowItem.VisitedAt != "" {
+			visitedAtValue = rowItem.VisitedAt
 		}
-		if originalRow.LegModeID != rowItem.LegModeID {
-			changed = true
-			if _, updateError := queryer.Exec(`UPDATE expedition_rows SET leg_mode_id = ? WHERE id = ?`, rowItem.LegModeID, rowItem.ID); updateError != nil {
-				return false, fmt.Errorf("update leg_mode_id: %w", updateError)
-			}
+		if rowItem.VisitEventUID != "" {
+			visitUIDValue = rowItem.VisitEventUID
+		}
+		if _, updateError := stmt.Exec(newPosition, visitedAtValue, visitUIDValue, rowItem.FCArrived, rowItem.LegModeID, rowItem.ID); updateError != nil {
+			return false, fmt.Errorf("update row %d: %w", rowItem.ID, updateError)
 		}
 	}
 	return changed, nil

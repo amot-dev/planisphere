@@ -58,7 +58,17 @@ export function ExpeditionPlanner({
   onBusyChange,
 }: ExpeditionPlannerProps) {
   const [expandedRowIds, setExpandedRowIds] = useState<Record<number, boolean>>({})
+  const expandedRowIdsRef = useRef<Record<number, boolean>>(expandedRowIds)
+  expandedRowIdsRef.current = expandedRowIds
+  useEffect(() => {
+    expandedRowIdsRef.current = expandedRowIds
+  }, [expandedRowIds])
   const [detailsById, setDetailsById] = useState<Record<number, expedition.WaypointDetails>>({})
+  const detailsByIdRef = useRef<Record<number, expedition.WaypointDetails>>(detailsById)
+  detailsByIdRef.current = detailsById
+  useEffect(() => {
+    detailsByIdRef.current = detailsById
+  }, [detailsById])
   const [loadingDetails, setLoadingDetails] = useState<Record<number, boolean>>({})
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
 
@@ -254,12 +264,17 @@ export function ExpeditionPlanner({
   // Refresh open drawers when plan updates
   useEffect(() => {
     if (!plan || isPlanning) return
-    for (const idStr of Object.keys(expandedRowIds)) {
+    const currentExpandedRowIds = expandedRowIdsRef.current
+    for (const idStr of Object.keys(currentExpandedRowIds)) {
       const id = Number(idStr)
-      if (expandedRowIds[id]) {
+      if (currentExpandedRowIds[id]) {
         const rowView = plan.rows?.find((r) => r.row.id === id)
         const isVisited = rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')
         if (isVisited) {
+          const loadedDetails = detailsByIdRef.current[id]
+          if (loadedDetails && loadedDetails.to === (rowView.row.visitedAt ?? '')) {
+            continue
+          }
           loadDetails(id)
         }
       }
@@ -369,8 +384,12 @@ export function ExpeditionPlanner({
     const isVisited = rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')
     if (isPlanning || !isVisited) return
 
-    const nextOpen = !expandedRowIds[rowId]
-    setExpandedRowIds((previous) => ({ ...previous, [rowId]: nextOpen }))
+    const nextOpen = !expandedRowIdsRef.current[rowId]
+    setExpandedRowIds((previous) => {
+      const nextExpanded = { ...previous, [rowId]: nextOpen }
+      expandedRowIdsRef.current = nextExpanded
+      return nextExpanded
+    })
     if (nextOpen) {
       loadDetails(rowId)
     }
@@ -568,41 +587,44 @@ export function ExpeditionPlanner({
     }
   }
 
-  async function handleMoveRow(rowId: number, fromIndex: number, toIndex: number) {
-    if (!plan) return
-    const minAllowed = lastVisitedIndex + 1
-    if (fromIndex < minAllowed || toIndex < minAllowed || toIndex >= plan.rows.length) {
-      return
-    }
-    if (fromIndex === toIndex) return
-
-    const nextRows = [...plan.rows]
-    const [moved] = nextRows.splice(fromIndex, 1)
-    nextRows.splice(toIndex, 0, moved)
-    let wpNum = 0
-    const renumbered = nextRows.map((rowView, i) => {
-      const updatedRow = { ...rowView.row, sortOrder: i }
-      if (rowView.row.rowType === 'waypoint') {
-        wpNum++
-        return expedition.RowView.createFrom({ ...rowView, row: updatedRow, number: wpNum })
+  const handleMoveRow = useCallback(
+    async (rowId: number, fromIndex: number, toIndex: number) => {
+      if (!plan) return
+      const minAllowed = lastVisitedIndex + 1
+      if (fromIndex < minAllowed || toIndex < minAllowed || toIndex >= plan.rows.length) {
+        return
       }
-      return expedition.RowView.createFrom({ ...rowView, row: updatedRow })
-    })
-    onPlanOptimisticUpdate(
-      expedition.PlanView.createFrom({
-        ...plan,
-        rows: renumbered,
-      }),
-    )
+      if (fromIndex === toIndex) return
 
-    onBusyChange('REORDERING ROUTE')
-    try {
-      await MoveRow(rowId, toIndex)
-      onRefreshPlan()
-    } finally {
-      onBusyChange(null)
-    }
-  }
+      const nextRows = [...plan.rows]
+      const [moved] = nextRows.splice(fromIndex, 1)
+      nextRows.splice(toIndex, 0, moved)
+      let wpNum = 0
+      const renumbered = nextRows.map((rowView, i) => {
+        const updatedRow = { ...rowView.row, sortOrder: i }
+        if (rowView.row.rowType === 'waypoint') {
+          wpNum++
+          return expedition.RowView.createFrom({ ...rowView, row: updatedRow, number: wpNum })
+        }
+        return expedition.RowView.createFrom({ ...rowView, row: updatedRow })
+      })
+      onPlanOptimisticUpdate(
+        expedition.PlanView.createFrom({
+          ...plan,
+          rows: renumbered,
+        }),
+      )
+
+      onBusyChange('REORDERING ROUTE')
+      try {
+        await MoveRow(rowId, toIndex)
+        onRefreshPlan()
+      } finally {
+        onBusyChange(null)
+      }
+    },
+    [lastVisitedIndex, onBusyChange, onPlanOptimisticUpdate, onRefreshPlan, plan],
+  )
 
   async function handleLifecycleAction(label: string, actionFunction: () => Promise<void>) {
     onBusyChange(label)
@@ -1028,7 +1050,7 @@ export function ExpeditionPlanner({
         },
       }
     },
-    [lastVisitedIndex, dragOverIndex, draggedIndex, plan],
+    [lastVisitedIndex, dragOverIndex, draggedIndex, plan, handleMoveRow],
   )
 
   // Conditional early return is now placed strictly AFTER all React hooks

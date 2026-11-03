@@ -382,4 +382,294 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 	}
 }
 
+func TestDetailsLightweightAndOriginCache(t *testing.T) {
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer dbConn.Close()
 
+	expedition.InvalidateShipCache()
+
+	tmpDir := t.TempDir()
+	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
+	lines := []string{
+		`{"timestamp":"2026-01-01T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
+		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":20.0}`,
+		`{"timestamp":"2026-01-19T12:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	}
+	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ingester := journal.NewIngester(dbConn)
+	if _, err := ingester.ScanDir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	exp, err := expedition.Create(dbConn, "Details Test Expedition", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := expedition.ListRows(dbConn, exp.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	wp1 := rows[0]
+	solName := "Sol"
+	solVis := "2026-01-18T10:00:00Z"
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, solVis, wp1.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert region header row
+	regionRow := mustInsert(t, dbConn, exp.ID, wp1.ID, expedition.RowRegion, 1)
+
+	// Insert WP2 (visited leg)
+	wp2 := mustInsert(t, dbConn, exp.ID, regionRow.ID, expedition.RowWaypoint, 0)
+	alphaName := "Alpha Centauri"
+	alphaVis := "2026-01-19T12:00:00Z"
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, x = 10, y = 0, z = 0 WHERE id = ?`, alphaName, alphaVis, wp2.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert WP3 (future waypoint)
+	wp3 := mustInsert(t, dbConn, exp.ID, wp2.ID, expedition.RowWaypoint, 0)
+	barnardName := "Barnard's Star"
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 16, y = 0, z = 0 WHERE id = ?`, barnardName, wp3.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Details for region header: should return empty details
+	regDetails, err := expedition.Details(dbConn, regionRow.ID)
+	if err != nil {
+		t.Fatalf("Details on region row returned error: %v", err)
+	}
+	if regDetails.Number != 0 || regDetails.Kind != "" {
+		t.Errorf("expected empty details for region row, got %+v", regDetails)
+	}
+
+	// 2. Details for WP1 (origin)
+	wp1Details, err := expedition.Details(dbConn, wp1.ID)
+	if err != nil {
+		t.Fatalf("Details for wp1 failed: %v", err)
+	}
+	if wp1Details.Kind != "origin" {
+		t.Errorf("expected wp1 kind 'origin', got %q", wp1Details.Kind)
+	}
+	if wp1Details.Number != 1 {
+		t.Errorf("expected wp1 number 1, got %d", wp1Details.Number)
+	}
+	if wp1Details.To != solVis {
+		t.Errorf("expected wp1 To %q, got %q", solVis, wp1Details.To)
+	}
+	if wp1Details.From != "2026-01-01T10:00:00Z" {
+		t.Errorf("expected wp1 From '2026-01-01T10:00:00Z', got %q", wp1Details.From)
+	}
+
+	// 3. Second call for WP1 should hit origin metrics cache
+	wp1DetailsCached, err := expedition.Details(dbConn, wp1.ID)
+	if err != nil {
+		t.Fatalf("cached Details for wp1 failed: %v", err)
+	}
+	if wp1DetailsCached.Metrics != wp1Details.Metrics {
+		t.Errorf("expected cached metrics to match, got %+v vs %+v", wp1DetailsCached.Metrics, wp1Details.Metrics)
+	}
+
+	// Invalidate cache and verify it still succeeds
+	expedition.InvalidateOriginMetricsCache()
+	wp1DetailsRecomputed, err := expedition.Details(dbConn, wp1.ID)
+	if err != nil {
+		t.Fatalf("Details after cache invalidation failed: %v", err)
+	}
+	if wp1DetailsRecomputed.Metrics != wp1Details.Metrics {
+		t.Errorf("metrics mismatch after recomputing: %+v vs %+v", wp1DetailsRecomputed.Metrics, wp1Details.Metrics)
+	}
+
+	// 4. Details for WP2 (leg)
+	wp2Details, err := expedition.Details(dbConn, wp2.ID)
+	if err != nil {
+		t.Fatalf("Details for wp2 failed: %v", err)
+	}
+	if wp2Details.Kind != "leg" {
+		t.Errorf("expected wp2 kind 'leg', got %q", wp2Details.Kind)
+	}
+	if wp2Details.Number != 2 {
+		t.Errorf("expected wp2 number 2, got %d", wp2Details.Number)
+	}
+	if wp2Details.From != solVis {
+		t.Errorf("expected wp2 leg start %q, got %q", solVis, wp2Details.From)
+	}
+	if wp2Details.To != alphaVis {
+		t.Errorf("expected wp2 leg end %q, got %q", alphaVis, wp2Details.To)
+	}
+	if wp2Details.PrevSystem != solName {
+		t.Errorf("expected wp2 prev system %q, got %q", solName, wp2Details.PrevSystem)
+	}
+	if wp2Details.Elapsed == "" {
+		t.Errorf("expected non-empty elapsed duration for wp2 leg")
+	}
+
+	// 5. Details for WP3 (future)
+	wp3Details, err := expedition.Details(dbConn, wp3.ID)
+	if err != nil {
+		t.Fatalf("Details for wp3 failed: %v", err)
+	}
+	if wp3Details.Kind != "future" {
+		t.Errorf("expected wp3 kind 'future', got %q", wp3Details.Kind)
+	}
+	if wp3Details.Number != 3 {
+		t.Errorf("expected wp3 number 3, got %d", wp3Details.Number)
+	}
+	if wp3Details.PrevSystem != alphaName {
+		t.Errorf("expected wp3 prev system %q, got %q", alphaName, wp3Details.PrevSystem)
+	}
+	if wp3Details.CurrentSystem != alphaName {
+		t.Errorf("expected wp3 current active system %q, got %q", alphaName, wp3Details.CurrentSystem)
+	}
+	if wp3Details.EstDistFromPrevLy == nil || *wp3Details.EstDistFromPrevLy != 6.0 {
+		t.Errorf("expected wp3 dist from prev ly 6.0, got %v", wp3Details.EstDistFromPrevLy)
+	}
+	if wp3Details.EstDistFromCurrentLy == nil || *wp3Details.EstDistFromCurrentLy != 6.0 {
+		t.Errorf("expected wp3 dist from current ly 6.0, got %v", wp3Details.EstDistFromCurrentLy)
+	}
+}
+
+func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer dbConn.Close()
+
+	expeditionRecord, createError := expedition.Create(dbConn, "Batch Test", "Test position updates")
+	if createError != nil {
+		t.Fatal(createError)
+	}
+
+	rows, listError := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listError != nil || len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	wp1 := rows[0]
+
+	// Insert at end
+	wp2 := mustInsert(t, dbConn, expeditionRecord.ID, expedition.InsertAtEnd, expedition.RowWaypoint, 0)
+	if wp2.Position != 2 {
+		t.Errorf("expected wp2 position 2, got %d", wp2.Position)
+	}
+	wp3 := mustInsert(t, dbConn, expeditionRecord.ID, wp2.ID, expedition.RowWaypoint, 0)
+	if wp3.Position != 3 {
+		t.Errorf("expected wp3 position 3, got %d", wp3.Position)
+	}
+
+	// Verify all 3 positions
+	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if len(rows) != 3 || rows[0].Position != 1 || rows[1].Position != 2 || rows[2].Position != 3 {
+		t.Fatalf("unexpected rows after end inserts: %+v", rows)
+	}
+
+	// Insert in middle (after wp1, before wp2)
+	wpMid := mustInsert(t, dbConn, expeditionRecord.ID, wp1.ID, expedition.RowWaypoint, 0)
+	if wpMid.Position != 2 {
+		t.Errorf("expected wpMid position 2, got %d", wpMid.Position)
+	}
+
+	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(rows))
+	}
+	if rows[0].ID != wp1.ID || rows[0].Position != 1 {
+		t.Errorf("wp1 position altered: %+v", rows[0])
+	}
+	if rows[1].ID != wpMid.ID || rows[1].Position != 2 {
+		t.Errorf("wpMid position mismatch: %+v", rows[1])
+	}
+	if rows[2].ID != wp2.ID || rows[2].Position != 3 {
+		t.Errorf("wp2 position should shift to 3: %+v", rows[2])
+	}
+	if rows[3].ID != wp3.ID || rows[3].Position != 4 {
+		t.Errorf("wp3 position should shift to 4: %+v", rows[3])
+	}
+
+	// Insert at top
+	wpTop := mustInsert(t, dbConn, expeditionRecord.ID, expedition.InsertAtTop, expedition.RowWaypoint, 0)
+	if wpTop.Position != 1 {
+		t.Errorf("expected wpTop position 1, got %d", wpTop.Position)
+	}
+
+	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if len(rows) != 5 {
+		t.Fatalf("expected 5 rows, got %d", len(rows))
+	}
+	for i, r := range rows {
+		if r.Position != i+1 {
+			t.Errorf("row %d position is %d, want %d", i, r.Position, i+1)
+		}
+	}
+
+	// Test Reevaluate consolidated updates
+	// Setup systems
+	setSys := func(rowID int64, name string) {
+		if _, updateError := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: rowID, SystemName: &name}); updateError != nil {
+			t.Fatal(updateError)
+		}
+	}
+	setSys(wpTop.ID, "Alpha")
+	setSys(wp1.ID, "Beta")
+	setSys(wpMid.ID, "Gamma")
+	setSys(wp2.ID, "Delta")
+	setSys(wp3.ID, "Epsilon")
+
+	// Start expedition
+	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
+		return expedition.Start(tx, expeditionRecord.ID, "2026-02-01T10:00:00Z")
+	})
+
+	// Add an arrival that skips Beta and visits Gamma directly, triggering out-of-order reordering,
+	// position updates, visited_at, visit_event_uid, leg_mode_id all in one evaluation.
+	_, err := dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at)
+		VALUES ('ev-start', '2026-02-01T10:00:00Z', 'FSDJump', 'Alpha', '{}', '2026-02-01T10:00:00Z'),
+		       ('ev-gamma', '2026-02-01T12:00:00Z', 'FSDJump', 'Gamma', '{}', '2026-02-01T12:00:00Z')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed, reevalErr := expedition.Reevaluate(dbConn, expeditionRecord.ID)
+	if reevalErr != nil {
+		t.Fatalf("Reevaluate failed: %v", reevalErr)
+	}
+	if !changed {
+		t.Fatalf("expected Reevaluate to report changes")
+	}
+
+	// Verify rows after reevaluation:
+	// Alpha (visited, pos 1) -> Gamma (visited, moved to pos 2) -> Beta (unvisited, pos 3) -> Delta (pos 4) -> Epsilon (pos 5)
+	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if len(rows) != 5 {
+		t.Fatalf("expected 5 rows, got %d", len(rows))
+	}
+	expectedOrder := []string{"Alpha", "Gamma", "Beta", "Delta", "Epsilon"}
+	for i, expectedSys := range expectedOrder {
+		if rows[i].SystemName != expectedSys {
+			t.Errorf("row %d system %s, want %s", i, rows[i].SystemName, expectedSys)
+		}
+		if rows[i].Position != i+1 {
+			t.Errorf("row %d position %d, want %d", i, rows[i].Position, i+1)
+		}
+	}
+	if rows[0].VisitedAt != "2026-02-01T10:00:00Z" {
+		t.Errorf("Alpha visited_at mismatch: %q", rows[0].VisitedAt)
+	}
+	if rows[1].VisitedAt != "2026-02-01T12:00:00Z" || rows[1].VisitEventUID != "ev-gamma" {
+		t.Errorf("Gamma visit mismatch: %q / %q", rows[1].VisitedAt, rows[1].VisitEventUID)
+	}
+
+	// Second reevaluation with no new events should be a no-op (changed = false)
+	changedAgain, reevalErr2 := expedition.Reevaluate(dbConn, expeditionRecord.ID)
+	if reevalErr2 != nil {
+		t.Fatalf("second Reevaluate failed: %v", reevalErr2)
+	}
+	if changedAgain {
+		t.Errorf("expected second Reevaluate to be idempotent (changed = false), got true")
+	}
+}

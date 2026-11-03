@@ -159,3 +159,22 @@ func TestResolveRowSync_SemaphoreReleased(t *testing.T) {
 	}
 }
 
+func TestMoveRow_NonexistentRow(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.sqlite")
+
+	testApp := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := testApp.initialize(ctx, dbPath); err != nil {
+		t.Fatalf("initialize db: %v", err)
+	}
+	defer testApp.shutdown(ctx)
+
+	err := testApp.MoveRow(99999, 0)
+	if err == nil {
+		t.Fatalf("expected error when moving nonexistent row, got nil")
+	}
+}
+

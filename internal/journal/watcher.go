@@ -103,6 +103,7 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 	tryWatch()
 	pending := map[string]bool{}
 	debounce := time.NewTimer(time.Hour)
+	defer debounce.Stop()
 	debounce.Stop()
 	poll := time.NewTicker(pollInterval)
 	defer poll.Stop()

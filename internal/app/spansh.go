@@ -140,11 +140,16 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 
 	// Candidate from Docked or Location events aboard a fleet carrier
 	var dockedSystem, dockedTimestamp string
-	rows, err := app.db.Query(`SELECT system_name, timestamp, raw_json FROM journal_events
+	func() {
+		rows, err := app.db.Query(`SELECT system_name, timestamp, raw_json FROM journal_events
 		WHERE event IN ('Docked', 'Location') AND system_name != '' AND ` + journal.CmdrFilterSQL + `
 		AND raw_json LIKE '%FleetCarrier%'
 		ORDER BY timestamp DESC, id DESC LIMIT 20`)
-	if err == nil {
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
 		for rows.Next() {
 			var sys, ts, raw string
 			if rows.Scan(&sys, &ts, &raw) == nil {
@@ -167,15 +172,14 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 							if matchesCarrier {
 								dockedSystem = strings.TrimSpace(sys)
 								dockedTimestamp = ts
-								break
+								return
 							}
 						}
 					}
 				}
 			}
 		}
-		rows.Close()
-	}
+	}()
 
 	// Candidate from CarrierJumpRequest (remote jump orders)
 	var requestSystem, requestTimestamp string

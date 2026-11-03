@@ -296,12 +296,21 @@ func GetRow(queryer db.Queryer, rowID int64) (Row, error) {
 
 // writePositions persists the order of rows as positions 1..n.
 func writePositions(queryer db.Queryer, rows []Row) error {
+	var stmt *sql.Stmt
 	for i := range rows {
 		if rows[i].Position == i+1 {
 			continue
 		}
+		if stmt == nil {
+			var prepError error
+			stmt, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ? WHERE id = ?`)
+			if prepError != nil {
+				return prepError
+			}
+			defer stmt.Close()
+		}
 		rows[i].Position = i + 1
-		if _, execError := queryer.Exec(`UPDATE expedition_rows SET position = ? WHERE id = ?`, i+1, rows[i].ID); execError != nil {
+		if _, execError := stmt.Exec(i+1, rows[i].ID); execError != nil {
 			return execError
 		}
 	}
@@ -358,14 +367,13 @@ func InsertRow(transaction *sql.Tx, expeditionID, afterRowID int64, rowType stri
 	if getError != nil {
 		return Row{}, getError
 	}
-	ordered := append([]Row{}, rows[:insertIndex]...)
-	ordered = append(ordered, newRow)
-	ordered = append(ordered, rows[insertIndex:]...)
-	for i := range ordered {
-		ordered[i].Position = -1 // force rewrite
-	}
-	if writeError := writePositions(transaction, ordered); writeError != nil {
-		return Row{}, writeError
+	if insertIndex < len(rows) {
+		ordered := append([]Row{}, rows[:insertIndex]...)
+		ordered = append(ordered, newRow)
+		ordered = append(ordered, rows[insertIndex:]...)
+		if writeError := writePositions(transaction, ordered); writeError != nil {
+			return Row{}, writeError
+		}
 	}
 	touch(transaction, expeditionID)
 	return GetRow(transaction, id)

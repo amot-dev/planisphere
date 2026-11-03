@@ -500,5 +500,35 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('Add Galactic Region Header')
     expect(html).toContain('h-48 shrink-0 pointer-events-none')
   })
+
+  it('skips reloading details for visited open drawers when visitedAt has not changed', () => {
+    const existingDetails: Record<number, { to: string }> = {
+      101: { to: '3310-01-01T12:00:00Z' },
+    }
+    const currentExpanded: Record<number, boolean> = { 101: true, 102: true }
+    const rows = [
+      { row: { id: 101, visitedAt: '3310-01-01T12:00:00Z' }, visitState: 'visited' },
+      { row: { id: 102, visitedAt: '3310-01-02T15:00:00Z' }, visitState: 'visited' },
+    ]
+
+    const toLoad: number[] = []
+    for (const id of [101, 102]) {
+      if (currentExpanded[id]) {
+        const rowView = rows.find((r) => r.row.id === id)
+        const isVisited = rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')
+        if (isVisited) {
+          const loaded = existingDetails[id]
+          if (loaded && loaded.to === (rowView.row.visitedAt ?? '')) {
+            continue
+          }
+          toLoad.push(id)
+        }
+      }
+    }
+
+    // Row 101's visitedAt has not changed, so it is skipped.
+    // Row 102 is not in existingDetails, so it must be loaded.
+    expect(toLoad).toEqual([102])
+  })
 })
 

@@ -927,7 +927,11 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		rowItem, _ = expedition.GetRow(app.db, rowID)
+		var getError error
+		rowItem, getError = expedition.GetRow(app.db, rowID)
+		if getError != nil {
+			return getError
+		}
 		return db.WithTx(app.db, func(tx *sql.Tx) error {
 			var moveRowError error
 			expeditionID, moveRowError = expedition.MoveRow(tx, rowID, toIndex)

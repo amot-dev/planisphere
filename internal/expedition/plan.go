@@ -94,14 +94,25 @@ var (
 	shipCacheMu      sync.Mutex
 	shipCacheMap     = make(map[string][]shipState)
 	lastMaxJournalID int64 = -1
+
+	originMetricsMu    sync.Mutex
+	originMetricsCache = make(map[string]stats.Metrics)
 )
 
-// InvalidateShipCache clears the cached ship timeline states.
+// InvalidateOriginMetricsCache clears the cached origin waypoint metrics.
+func InvalidateOriginMetricsCache() {
+	originMetricsMu.Lock()
+	originMetricsCache = make(map[string]stats.Metrics)
+	originMetricsMu.Unlock()
+}
+
+// InvalidateShipCache clears the cached ship timeline states and origin metrics.
 func InvalidateShipCache() {
 	shipCacheMu.Lock()
 	lastMaxJournalID = -1
 	shipCacheMap = make(map[string][]shipState)
 	shipCacheMu.Unlock()
+	InvalidateOriginMetricsCache()
 }
 
 func parseShipState(timestamp, eventType, rawJSON string) (shipState, bool) {
@@ -136,18 +147,15 @@ func fetchShipStates(queryer db.Queryer, startTimestamp, endTimestamp string) ([
 		if err != nil {
 			return nil, err
 		}
+		defer rows.Close()
 		for rows.Next() {
 			var timestamp, eventType, rawJSON string
 			if scanErr := rows.Scan(&timestamp, &eventType, &rawJSON); scanErr != nil {
-				rows.Close()
 				return nil, scanErr
 			}
 			if state, ok := parseShipState(timestamp, eventType, rawJSON); ok {
 				states = append(states, state)
 			}
-		}
-		if closeErr := rows.Close(); closeErr != nil {
-			return nil, closeErr
 		}
 		if rowsErr := rows.Err(); rowsErr != nil {
 			return nil, rowsErr
@@ -536,76 +544,116 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 	if rowError != nil {
 		return WaypointDetails{}, rowError
 	}
-	planView, planError := BuildPlan(conn, targetRow.ExpeditionID, nil)
-	if planError != nil {
-		return WaypointDetails{}, planError
-	}
-	var selfView *RowView
-	var prevView *RowView
-	var currentView *RowView
-	for i := range planView.Rows {
-		rowViewItem := &planView.Rows[i]
-		if rowViewItem.Row.RowType != RowWaypoint {
-			continue
-		}
-		if rowViewItem.Row.ID == planView.CurrentRowID {
-			currentView = rowViewItem
-		}
-		if rowViewItem.Row.ID == rowID {
-			selfView = rowViewItem
-		} else if selfView == nil {
-			prevView = rowViewItem
-		}
-	}
-	if selfView == nil {
+	if !targetRow.IsWaypoint() {
 		return WaypointDetails{}, nil
 	}
-	waypointDetails := WaypointDetails{RowID: rowID, Number: selfView.Number}
-	if prevView != nil {
-		waypointDetails.PrevSystem = prevView.Row.SystemName
-	}
-	engine := stats.NewEngine(conn)
 
-	if selfView.Row.VisitedAt == "" {
-		waypointDetails.Kind = "future"
-		waypointDetails.EstDistFromPrevLy = selfView.DistFromPrevLy
-		waypointDetails.EstDistFromCurrentLy = selfView.DistFromCurrentLy
-		if currentView != nil {
-			waypointDetails.CurrentSystem = currentView.Row.SystemName
+	rows, listError := ListRows(conn, targetRow.ExpeditionID)
+	if listError != nil {
+		return WaypointDetails{}, listError
+	}
+
+	var (
+		waypointNumber  int
+		selfNumber      int
+		prevWaypoint    *Row
+		currentWaypoint *Row
+	)
+
+	for i := range rows {
+		rowItem := &rows[i]
+		if !rowItem.IsWaypoint() {
+			continue
 		}
-		waypointDetails.MissingCoords = !selfView.Row.HasCoords || (prevView != nil && !prevView.Row.HasCoords)
+		waypointNumber++
+		if rowItem.ID == rowID {
+			selfNumber = waypointNumber
+		} else if selfNumber == 0 {
+			prevCopy := *rowItem
+			prevWaypoint = &prevCopy
+		}
+		if rowItem.VisitedAt != "" && (currentWaypoint == nil || rowItem.VisitedAt > currentWaypoint.VisitedAt) {
+			currentWaypoint = rowItem
+		}
+	}
+
+	if selfNumber == 0 {
+		return WaypointDetails{}, nil
+	}
+
+	waypointDetails := WaypointDetails{
+		RowID:  rowID,
+		Number: selfNumber,
+	}
+	if prevWaypoint != nil {
+		waypointDetails.PrevSystem = prevWaypoint.SystemName
+	}
+
+	if targetRow.VisitedAt == "" {
+		waypointDetails.Kind = "future"
+		if prevWaypoint != nil && prevWaypoint.HasCoords && targetRow.HasCoords {
+			startPos, _ := prevWaypoint.Coords()
+			endPos, _ := targetRow.Coords()
+			dist := ed.Distance(startPos, endPos)
+			waypointDetails.EstDistFromPrevLy = &dist
+		}
+		if currentWaypoint != nil && currentWaypoint.HasCoords && targetRow.HasCoords {
+			currentPos, _ := currentWaypoint.Coords()
+			endPos, _ := targetRow.Coords()
+			dist := ed.Distance(currentPos, endPos)
+			waypointDetails.EstDistFromCurrentLy = &dist
+		}
+		if currentWaypoint != nil {
+			waypointDetails.CurrentSystem = currentWaypoint.SystemName
+		}
+		waypointDetails.MissingCoords = !targetRow.HasCoords || (prevWaypoint != nil && !prevWaypoint.HasCoords)
 		return waypointDetails, nil
 	}
 
-	if selfView.Number == 1 {
+	engine := stats.NewEngine(conn)
+
+	if selfNumber == 1 {
 		waypointDetails.Kind = "origin"
-		waypointDetails.To, waypointDetails.ToGalactic = selfView.Row.VisitedAt, ed.ToGalactic(selfView.Row.VisitedAt)
+		waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, ed.ToGalactic(targetRow.VisitedAt)
 		var first sql.NullString
-		_ = conn.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE `+journal.CmdrFilterSQL).Scan(&first)
+		_ = conn.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&first)
 		waypointDetails.From, waypointDetails.FromGalactic = first.String, ed.ToGalactic(first.String)
-		var computeError error
-		waypointDetails.Metrics, computeError = engine.Compute(stats.Range{After: "", Until: selfView.Row.VisitedAt}, nil)
-		if computeError != nil {
-			return waypointDetails, computeError
+
+		cacheKey := fmt.Sprintf("%d|%s|%s", targetRow.ExpeditionID, first.String, targetRow.VisitedAt)
+		originMetricsMu.Lock()
+		cached, ok := originMetricsCache[cacheKey]
+		originMetricsMu.Unlock()
+		if ok {
+			waypointDetails.Metrics = cached
+		} else {
+			computed, computeError := engine.Compute(stats.Range{After: "", Until: targetRow.VisitedAt}, nil)
+			if computeError != nil {
+				return waypointDetails, computeError
+			}
+			waypointDetails.Metrics = computed
+			originMetricsMu.Lock()
+			originMetricsCache[cacheKey] = computed
+			originMetricsMu.Unlock()
 		}
 	} else {
 		waypointDetails.Kind = "leg"
 		// The leg starts at the visit of the waypoint visited immediately before this one.
 		afterTimestamp := ""
-		for i := range planView.Rows {
-			rowViewItem := planView.Rows[i]
-			if rowViewItem.Row.RowType == RowWaypoint && rowViewItem.Row.VisitedAt != "" && rowViewItem.Row.VisitedAt < selfView.Row.VisitedAt && rowViewItem.Row.VisitedAt > afterTimestamp {
-				afterTimestamp = rowViewItem.Row.VisitedAt
-				waypointDetails.PrevSystem = rowViewItem.Row.SystemName
+		for _, rowItem := range rows {
+			if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && rowItem.VisitedAt < targetRow.VisitedAt && rowItem.VisitedAt > afterTimestamp {
+				afterTimestamp = rowItem.VisitedAt
+				waypointDetails.PrevSystem = rowItem.SystemName
 			}
 		}
 		if afterTimestamp == "" {
-			afterTimestamp = planView.Expedition.StartTimestamp
+			var startTs sql.NullString
+			_ = conn.QueryRow(`SELECT COALESCE(start_timestamp, '') FROM expeditions WHERE id = ?`, targetRow.ExpeditionID).Scan(&startTs)
+			afterTimestamp = startTs.String
 		}
 		waypointDetails.From, waypointDetails.FromGalactic = afterTimestamp, ed.ToGalactic(afterTimestamp)
-		waypointDetails.To, waypointDetails.ToGalactic = selfView.Row.VisitedAt, ed.ToGalactic(selfView.Row.VisitedAt)
+		waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, ed.ToGalactic(targetRow.VisitedAt)
 		var computeError error
-		waypointDetails.Metrics, computeError = engine.Compute(stats.Range{After: afterTimestamp, Until: selfView.Row.VisitedAt}, nil)
+		waypointDetails.Metrics, computeError = engine.Compute(stats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, nil)
 		if computeError != nil {
 			return waypointDetails, computeError
 		}
