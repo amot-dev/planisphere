@@ -27,9 +27,9 @@ const (
 // CarrierTritiumCost estimates the tritium consumed by a fleet carrier jump
 // using the standard in-game formula:
 //
-//	ceil(5 + dist * (usedCapacity + fuelLevel + 25000) / 200000)
+//	round(5 + dist * (usedCapacity + fuelLevel + 25000) / 200000)
 //
-// Elite Dangerous always rounds fuel cost up to the next whole number (ceiling).
+// Elite Dangerous rounds fuel cost to the nearest whole number (round).
 // usedCapacity is the occupied cargo/module/ship-pack capacity in tonnes
 // (TotalCapacity - FreeSpace from CarrierStats) and fuelLevel is the tritium
 // currently in the carrier's fuel tank (depot).
@@ -43,5 +43,5 @@ func CarrierTritiumCost(distLy float64, usedCapacity, fuelLevel int) int {
 	if fuelLevel < 0 {
 		fuelLevel = 0
 	}
-	return int(math.Ceil(carrierFixedJumpTonnes + distLy*(float64(usedCapacity)+float64(fuelLevel)+carrierBaseMassTonnes)/carrierFuelDivisor))
+	return int(math.Round(carrierFixedJumpTonnes + distLy*(float64(usedCapacity)+float64(fuelLevel)+carrierBaseMassTonnes)/carrierFuelDivisor))
 }

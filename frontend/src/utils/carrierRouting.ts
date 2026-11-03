@@ -10,9 +10,9 @@ export const CARRIER_MAX_SQUADRON_CAPACITY_TONNES = 60000
 
 /**
  * Calculate Fleet Carrier tritium consumption for a jump using standard in-game formula:
- * ceil(5 + (distance * (usedCapacity + depotTritium + 25000)) / 200000)
+ * round(5 + (distance * (usedCapacity + depotTritium + 25000)) / 200000)
  *
- * Elite Dangerous always rounds fuel cost up to the next whole number (ceiling).
+ * Elite Dangerous rounds fuel cost to the nearest whole number (round).
  * Supports both personal carriers (up to 25,000 t) and squadron carriers (up to 60,000 t).
  */
 export function calculateCarrierJumpFuel(
@@ -25,6 +25,6 @@ export function calculateCarrierJumpFuel(
   const clampedCap = Math.max(0, Math.min(maxCapacity, usedCapacity || 0))
   const clampedDepot = Math.max(0, Math.min(CARRIER_MAX_DEPOT_TONNES, depotTritium || 0))
   const totalMass = CARRIER_BASE_MASS_TONNES + clampedCap + clampedDepot
-  return Math.ceil(CARRIER_FIXED_JUMP_TONNES + (distanceLy * totalMass) / CARRIER_FUEL_DIVISOR)
+  return Math.round(CARRIER_FIXED_JUMP_TONNES + (distanceLy * totalMass) / CARRIER_FUEL_DIVISOR)
 }
 

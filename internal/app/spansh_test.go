@@ -56,7 +56,7 @@ func TestReconcileSpanshJumps(t *testing.T) {
 
 	// First jump: 494.89 Ly, UsedCapacity=8548, Depot=1000
 	// Mass = 25000 + 8548 + 1000 = 34548
-	// 5 + 494.89 * 34548 / 200000 = 90.487... -> ceil = 91
+	// 5 + 494.89 * 34548 / 200000 = 90.487... -> round = 90
 	hop1 := reconciled[0]
 	if hop1.SystemName != "Waypoint 1" {
 		t.Errorf("expected SystemName 'Waypoint 1', got %s", hop1.SystemName)
@@ -64,8 +64,8 @@ func TestReconcileSpanshJumps(t *testing.T) {
 	if hop1.DistanceLy != 494.89 {
 		t.Errorf("expected DistanceLy 494.89, got %f", hop1.DistanceLy)
 	}
-	if hop1.TritiumUsed != 91 {
-		t.Errorf("reconciliation failed: expected TritiumUsed = 91 (overriding Spansh's 89), got %d", hop1.TritiumUsed)
+	if hop1.TritiumUsed != 90 {
+		t.Errorf("reconciliation failed: expected TritiumUsed = 90 (overriding Spansh's 89), got %d", hop1.TritiumUsed)
 	}
 	if hop1.FuelInTank != 1000 {
 		t.Errorf("expected FuelInTank = 1000 (overriding Spansh's 437), got %d", hop1.FuelInTank)
@@ -73,10 +73,37 @@ func TestReconcileSpanshJumps(t *testing.T) {
 
 	// Second jump: 120.00 Ly, UsedCapacity=8548, Depot=1000
 	// Mass = 34548
-	// 5 + 120.0 * 34548 / 200000 = 5 + 20.7288 = 25.7288 -> ceil = 26
+	// 5 + 120.0 * 34548 / 200000 = 5 + 20.7288 = 25.7288 -> round = 26
 	hop2 := reconciled[1]
 	if hop2.TritiumUsed != 26 {
 		t.Errorf("expected hop2 TritiumUsed = 26, got %d", hop2.TritiumUsed)
+	}
+}
+
+func TestReconcileSpanshJumpsInGameVerification(t *testing.T) {
+	// In-game test case:
+	// NGC 7789 Sector MH-W b31-0 -> Slegoae NS-U d2-2 is 495.27ly.
+	// Capacity: 8548/25000, Depot: 818/1000.
+	// Mass = 25000 + 8548 + 818 = 34366.
+	// 5 + 495.27 * 34366 / 200000 = 90.1022... -> round = 90 tonnes.
+	rawJumps := []SpanshRawJump{
+		{
+			Name:                  "NGC 7789 Sector MH-W b31-0",
+			Distance:              0,
+			DistanceToDestination: 495.27,
+		},
+		{
+			Name:                  "Slegoae NS-U d2-2",
+			Distance:              495.27,
+			DistanceToDestination: 0,
+		},
+	}
+	reconciled := ReconcileSpanshJumps(rawJumps, 8548, 818)
+	if len(reconciled) != 1 {
+		t.Fatalf("expected 1 jump, got %d", len(reconciled))
+	}
+	if reconciled[0].TritiumUsed != 90 {
+		t.Errorf("expected TritiumUsed = 90, got %d", reconciled[0].TritiumUsed)
 	}
 }
 

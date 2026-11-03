@@ -438,7 +438,7 @@ type SpanshRawJump struct {
 // discards Spansh's native tritium consumption estimates (which artificially assume minimum depot fuel),
 // and overrides each jump with the in-house in-game formula:
 //
-//	Calculated_Fuel = ceil(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
+//	Calculated_Fuel = round(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
 func ReconcileSpanshJumps(rawJumps []SpanshRawJump, capacityUsed int, depotTritium int) []CarrierRouteJump {
 	if depotTritium <= 0 {
 		depotTritium = 1000
@@ -462,7 +462,7 @@ func ReconcileSpanshJumps(rawJumps []SpanshRawJump, capacityUsed int, depotTriti
 
 		// Discard Spansh's native fuel estimates because Spansh assumes an artificially low depot mass.
 		// Calculate correct in-game fuel consumption using:
-		// Calculated_Fuel = ceil(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
+		// Calculated_Fuel = round(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
 		calculatedFuel := ed.CarrierTritiumCost(jumpItem.Distance, capacityUsed, depotTritium)
 
 		carrierRouteJumps = append(carrierRouteJumps, CarrierRouteJump{

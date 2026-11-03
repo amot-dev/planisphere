@@ -72,19 +72,27 @@ func TestExobiologyValuation(t *testing.T) {
 }
 
 func TestCarrierTritiumCost(t *testing.T) {
-	// 500 Ly jump at empty load (used=0, fuel=1000): ceil(5 + 500*(26000)/200000) = ceil(5 + 65) = 70
+	// 500 Ly jump at empty load (used=0, fuel=1000): round(5 + 500*(26000)/200000) = round(5 + 65) = 70
 	calculatedCost := CarrierTritiumCost(500, 0, 1000)
 	if calculatedCost != 70 {
 		t.Fatalf("CarrierTritiumCost(500, 0, 1000) = %d, want 70", calculatedCost)
 	}
 
-	// Discrepancy test case: 494.89 Ly jump with 8,548 tonnes used capacity.
-	// Actual game registers full 1,000-ton depot:
+	// In-game verified case: NGC 7789 Sector MH-W b31-0 -> Slegoae NS-U d2-2 is 495.27ly,
+	// with capacity 8,548 tonnes and 818 tonnes depot fuel.
+	// Mass = 25000 + 8548 + 818 = 34366
+	// 5 + 495.27 * 34366 / 200000 = 90.102... -> round = 90 tonnes (Elite Dangerous in-game cost)
+	inGameCost := CarrierTritiumCost(495.27, 8548, 818)
+	if inGameCost != 90 {
+		t.Fatalf("CarrierTritiumCost(495.27, 8548, 818) = %d, want 90", inGameCost)
+	}
+
+	// 494.89 Ly jump with 8,548 tonnes used capacity and 1,000-ton depot:
 	// Mass = 25000 + 8548 + 1000 = 34548
-	// 5 + 494.89 * 34548 / 200000 = 90.487... -> ceil = 91 tonnes
+	// 5 + 494.89 * 34548 / 200000 = 90.487... -> round = 90 tonnes
 	gameCost := CarrierTritiumCost(494.89, 8548, 1000)
-	if gameCost != 91 {
-		t.Fatalf("CarrierTritiumCost(494.89, 8548, 1000) = %d, want 91", gameCost)
+	if gameCost != 90 {
+		t.Fatalf("CarrierTritiumCost(494.89, 8548, 1000) = %d, want 90", gameCost)
 	}
 
 	// Spansh's artificially low depot assumption (437 tonnes depot, mass 33,985):
