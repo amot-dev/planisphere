@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BrowseDBPath,
   BrowseEDDiscoveryDB,
@@ -64,6 +64,7 @@ export function SetupWizardModal({
   const [eddBusy, setEddBusy] = useState<boolean>(false)
 
   // Step 4 state: Commanders and Online Sync
+  const userModifiedOnlineLookupsRef = useRef(false)
   const [onlineLookups, setOnlineLookups] = useState<boolean>(
     initialSettings?.onlineLookups ?? true,
   )
@@ -88,7 +89,9 @@ export function SetupWizardModal({
           initialSettings.edDiscoveryDbPath || initialSettings.defaultEdDiscoveryDbPath || '',
         )
       }
-      setOnlineLookups(initialSettings.onlineLookups)
+      if (!userModifiedOnlineLookupsRef.current) {
+        setOnlineLookups(initialSettings.onlineLookups)
+      }
     }
   }, [initialSettings])
 
@@ -184,6 +187,7 @@ export function SetupWizardModal({
   }
 
   async function handleToggleOnline(enabled: boolean) {
+    userModifiedOnlineLookupsRef.current = true
     setError('')
     setOnlineLookups(enabled)
     try {
