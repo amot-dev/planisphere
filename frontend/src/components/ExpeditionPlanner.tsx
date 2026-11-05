@@ -92,6 +92,15 @@ export function ExpeditionPlanner({
   const [loggingJump, setLoggingJump] = useState(false)
   const [copiedNextJump, setCopiedNextJump] = useState(false)
   const [copiedSystemRowId, setCopiedSystemRowId] = useState<number | null>(null)
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copiedNextJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      if (copiedNextJumpTimerRef.current) clearTimeout(copiedNextJumpTimerRef.current)
+    }
+  }, [])
 
   const [showNotes, setShowNotes] = useState<boolean>(() => {
     try {
@@ -225,9 +234,13 @@ export function ExpeditionPlanner({
       document.execCommand('copy')
       document.body.removeChild(textareaElement)
     }
+    if (copiedTimerRef.current) {
+      clearTimeout(copiedTimerRef.current)
+    }
     setCopiedSystemRowId(rowId)
-    setTimeout(() => {
+    copiedTimerRef.current = setTimeout(() => {
       setCopiedSystemRowId((currentId) => (currentId === rowId ? null : currentId))
+      copiedTimerRef.current = null
     }, 1500)
   }
 
@@ -1573,8 +1586,14 @@ export function ExpeditionPlanner({
           copiedNextJump={copiedNextJump}
           onCopySystem={(systemName) => {
             navigator.clipboard?.writeText(systemName).catch(() => {})
+            if (copiedNextJumpTimerRef.current) {
+              clearTimeout(copiedNextJumpTimerRef.current)
+            }
             setCopiedNextJump(true)
-            setTimeout(() => setCopiedNextJump(false), 1500)
+            copiedNextJumpTimerRef.current = setTimeout(() => {
+              setCopiedNextJump(false)
+              copiedNextJumpTimerRef.current = null
+            }, 1500)
           }}
           onArrive={handleCarrierArriveAtWaypoint}
           depotTritium={activeCarrierRoute.depotTritium !== undefined ? activeCarrierRoute.depotTritium : 1000}
