@@ -151,15 +151,15 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 		defer rows.Close()
 
 		for rows.Next() {
-			var sys, ts, raw string
-			if rows.Scan(&sys, &ts, &raw) == nil {
+			var candidateSystem, candidateTimestamp, candidateRawJSON string
+			if rows.Scan(&candidateSystem, &candidateTimestamp, &candidateRawJSON) == nil {
 				var dockInfo struct {
 					StationType string `json:"StationType"`
 					MarketID    int64  `json:"MarketID"`
 					StationName string `json:"StationName"`
 					Docked      *bool  `json:"Docked"`
 				}
-				if json.Unmarshal([]byte(raw), &dockInfo) == nil {
+				if json.Unmarshal([]byte(candidateRawJSON), &dockInfo) == nil {
 					if strings.EqualFold(dockInfo.StationType, "FleetCarrier") {
 						isDocked := dockInfo.Docked == nil || *dockInfo.Docked
 						if isDocked {
@@ -170,8 +170,8 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 								matchesCarrier = strings.Contains(strings.ToUpper(dockInfo.StationName), strings.ToUpper(playerCallsign))
 							}
 							if matchesCarrier {
-								dockedSystem = strings.TrimSpace(sys)
-								dockedTimestamp = ts
+								dockedSystem = strings.TrimSpace(candidateSystem)
+								dockedTimestamp = candidateTimestamp
 								return
 							}
 						}

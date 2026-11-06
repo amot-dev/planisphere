@@ -296,21 +296,21 @@ func GetRow(queryer db.Queryer, rowID int64) (Row, error) {
 
 // writePositions persists the order of rows as positions 1..n.
 func writePositions(queryer db.Queryer, rows []Row) error {
-	var stmt *sql.Stmt
+	var updatePositionStatement *sql.Stmt
 	for i := range rows {
 		if rows[i].Position == i+1 {
 			continue
 		}
-		if stmt == nil {
+		if updatePositionStatement == nil {
 			var prepError error
-			stmt, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ? WHERE id = ?`)
+			updatePositionStatement, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ? WHERE id = ?`)
 			if prepError != nil {
 				return prepError
 			}
-			defer stmt.Close()
+			defer updatePositionStatement.Close()
 		}
 		rows[i].Position = i + 1
-		if _, execError := stmt.Exec(i+1, rows[i].ID); execError != nil {
+		if _, execError := updatePositionStatement.Exec(i+1, rows[i].ID); execError != nil {
 			return execError
 		}
 	}
@@ -495,7 +495,7 @@ func PruneEmptyRows(transaction *sql.Tx, expeditionID int64) error {
 		return nil
 	}
 
-	// 1. Determine which waypoints are non-empty.
+	// Determine which waypoints are non-empty.
 	isNonEmptyWaypoint := make([]bool, len(rows))
 	for i, rowItem := range rows {
 		if rowItem.RowType == RowWaypoint && strings.TrimSpace(rowItem.SystemName) != "" {
@@ -503,7 +503,7 @@ func PruneEmptyRows(transaction *sql.Tx, expeditionID int64) error {
 		}
 	}
 
-	// 2. Identify empty waypoints and headers with 0 non-empty waypoints after them.
+	// Identify empty waypoints and headers with 0 non-empty waypoints after them.
 	var toDelete []int64
 	var surviving []Row
 
@@ -602,4 +602,3 @@ func moveTo(rows []Row, fromIndex, toIndex int) []Row {
 func touch(queryer db.Queryer, expeditionID int64) {
 	_, _ = queryer.Exec(`UPDATE expeditions SET updated_at = ? WHERE id = ?`, ed.NowISO(), expeditionID)
 }
-

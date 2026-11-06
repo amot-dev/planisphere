@@ -77,7 +77,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 
 	engine := stats.NewEngine(conn)
 
-	// 1. Unfiltered baseline
+	// Unfiltered baseline
 	unfiltered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
 	if computeError != nil {
 		t.Fatal(computeError)
@@ -101,7 +101,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		t.Fatalf("expected 40 tritium used, got %v", unfiltered.TritiumUsed)
 	}
 
-	// 2. Filter with Travel = false for Exploration mode
+	// Filter with Travel = false for Exploration mode
 	// Carrier Operations metrics (CarrierJumps, CarrierDistanceLy, TritiumUsed) MUST completely ignore mode!
 	// Navigation metrics (CarrierPassengerLy, ShipDistanceLy, DistanceLy) MUST be filtered out!
 	filtered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
@@ -138,7 +138,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		t.Fatalf("expected Jumps to be filtered to 0, got %d", filtered.Jumps)
 	}
 
-	// 2b. Filter with Travel = false AND Discovery = false (mode completely disabled)
+	// Filter with Travel = false AND Discovery = false (mode completely disabled)
 	// Carrier Operations metrics MUST still completely ignore mode!
 	filteredAllOff, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
@@ -159,7 +159,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		t.Fatalf("expected passenger distance 0 when all categories off: %+v", filteredAllOff)
 	}
 
-	// 2c. Filter enabled with empty modes list (everything excluded by default)
+	// Filter enabled with empty modes list (everything excluded by default)
 	filteredEmpty, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes:   []stats.ModeSelection{},
@@ -177,7 +177,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		t.Fatalf("expected passenger distance 0 with empty filter: %+v", filteredEmpty)
 	}
 
-	// 3. Filter with Travel = true for Exploration mode
+	// Filter with Travel = true for Exploration mode
 	// All metrics included
 	filteredTravelOn, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,

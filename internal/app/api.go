@@ -380,10 +380,10 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	status.FirstEventAt, status.LastEventAt = archiveStatus.FirstEventAt, archiveStatus.LastEventAt
 	status.FirstEventGalactic = ed.ToGalactic(archiveStatus.FirstEventAt)
 	status.LastEventGalactic = ed.ToGalactic(archiveStatus.LastEventAt)
-	var sys sql.NullString
+	var currentSystemName sql.NullString
 	_ = app.db.QueryRow(`SELECT system_name FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&sys)
-	status.CurrentSystem = sys.String
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&currentSystemName)
+	status.CurrentSystem = currentSystemName.String
 	var rawJSON, eventName string
 	if app.db.QueryRow(`SELECT event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND `+journal.CmdrFilterSQL+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&eventName, &rawJSON) == nil {

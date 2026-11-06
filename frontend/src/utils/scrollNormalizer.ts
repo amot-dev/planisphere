@@ -15,7 +15,7 @@
  * - Target scrollable element is cached during active scrolling gestures.
  */
 
-function isHTMLElement(candidate: any): candidate is HTMLElement {
+function isHTMLElement(candidate: unknown): candidate is HTMLElement {
   if (!candidate || typeof candidate !== 'object') return false
   if (typeof HTMLElement !== 'undefined') {
     return candidate instanceof HTMLElement
@@ -23,7 +23,7 @@ function isHTMLElement(candidate: any): candidate is HTMLElement {
   return 'classList' in candidate && 'scrollHeight' in candidate
 }
 
-function isNode(candidate: any): candidate is Node {
+function isNode(candidate: unknown): candidate is Node {
   if (!candidate || typeof candidate !== 'object') return false
   if (typeof Node !== 'undefined') {
     return candidate instanceof Node
@@ -41,8 +41,8 @@ export function findScrollable(
   const initialElement: HTMLElement | null =
     isHTMLElement(start)
       ? start
-      : isNode(start) && isHTMLElement((start as any).parentElement)
-        ? (start as any).parentElement
+      : isNode(start) && isHTMLElement(start.parentElement)
+        ? start.parentElement
         : null
   if (!initialElement || (hasDoc && (initialElement === document.body || initialElement === document.documentElement))) {
     return null

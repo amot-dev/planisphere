@@ -243,9 +243,9 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 	}
 
 	// Surviving should be:
-	// 1. Sol (waypoint)
-	// 2. Region 1 (header1)
-	// 3. Alpha Centauri (waypoint)
+	// - Sol (waypoint)
+	// - Region 1 (header1)
+	// - Alpha Centauri (waypoint)
 	// All empty waypoints and headers 2 and 3 must be deleted.
 	if len(survivingRows) != 3 {
 		t.Fatalf("expected 3 surviving rows, got %d: %+v", len(survivingRows), survivingRows)
@@ -439,7 +439,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Details for region header: should return empty details
+	// Details for region header: should return empty details
 	regDetails, err := expedition.Details(dbConn, regionRow.ID)
 	if err != nil {
 		t.Fatalf("Details on region row returned error: %v", err)
@@ -448,7 +448,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("expected empty details for region row, got %+v", regDetails)
 	}
 
-	// 2. Details for WP1 (origin)
+	// Details for WP1 (origin)
 	wp1Details, err := expedition.Details(dbConn, wp1.ID)
 	if err != nil {
 		t.Fatalf("Details for wp1 failed: %v", err)
@@ -466,7 +466,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("expected wp1 From '2026-01-01T10:00:00Z', got %q", wp1Details.From)
 	}
 
-	// 3. Second call for WP1 should hit origin metrics cache
+	// Second call for WP1 should hit origin metrics cache
 	wp1DetailsCached, err := expedition.Details(dbConn, wp1.ID)
 	if err != nil {
 		t.Fatalf("cached Details for wp1 failed: %v", err)
@@ -485,7 +485,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("metrics mismatch after recomputing: %+v vs %+v", wp1DetailsRecomputed.Metrics, wp1Details.Metrics)
 	}
 
-	// 4. Details for WP2 (leg)
+	// Details for WP2 (leg)
 	wp2Details, err := expedition.Details(dbConn, wp2.ID)
 	if err != nil {
 		t.Fatalf("Details for wp2 failed: %v", err)
@@ -509,7 +509,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("expected non-empty elapsed duration for wp2 leg")
 	}
 
-	// 5. Details for WP3 (future)
+	// Details for WP3 (future)
 	wp3Details, err := expedition.Details(dbConn, wp3.ID)
 	if err != nil {
 		t.Fatalf("Details for wp3 failed: %v", err)

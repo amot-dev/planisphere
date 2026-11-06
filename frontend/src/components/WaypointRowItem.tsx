@@ -25,13 +25,13 @@ export interface WaypointRowItemProps {
   lastVisitedIndex: number
   totalRows: number
   rowStyle: CSSProperties
-  dropProps: any
+  dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
   showCarrierStop?: boolean
   onToggleExpand: (id: number) => void
-  onDraftChange: (id: number, field: 'systemName' | 'poiName' | 'notes', val: string) => void
+  onDraftChange: (id: number, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
   onFieldFocus: (id: number) => void
-  onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', val: string) => void
+  onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
   onCopySystem: (id: number, name: string) => void
   onToggleFcStop: (row: expedition.Row) => void
   onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void

@@ -77,7 +77,7 @@ func main() {
 	// Sync Arch PKGBUILD
 	syncPKGBUILD(filepath.Join(rootDir, "packaging", "arch", "PKGBUILD"), appConfig)
 
-	fmt.Printf("✓ Metadata synchronized successfully across all project targets.\n")
+	fmt.Printf("Metadata synchronized successfully across all project targets.\n")
 }
 
 func writeFileIfChanged(path string, newContent []byte, perm os.FileMode) (bool, error) {

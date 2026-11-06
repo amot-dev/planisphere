@@ -325,41 +325,41 @@ export function ExpeditionPlanner({
     }
 
     const applyScroll = () => {
-      const el = scrollContainerRef.current
-      if (!el || el.clientHeight === 0) return false
+      const scrollContainer = scrollContainerRef.current
+      if (!scrollContainer || scrollContainer.clientHeight === 0) return false
 
       if (status === 'planning') {
-        el.scrollTop = el.scrollHeight
+        scrollContainer.scrollTop = scrollContainer.scrollHeight
         return true
       }
 
       if (status === 'active') {
         const targetRow =
-          el.querySelector<HTMLElement>('[data-last-visited="true"]') ??
-          el.querySelector<HTMLElement>('tr[data-row-index="0"]')
+          scrollContainer.querySelector<HTMLElement>('[data-last-visited="true"]') ??
+          scrollContainer.querySelector<HTMLElement>('tr[data-row-index="0"]')
 
         if (targetRow) {
           targetRow.scrollIntoView({ block: 'center', behavior: 'instant' })
-          const thead = el.querySelector('thead')
+          const thead = scrollContainer.querySelector('thead')
           const theadHeight = thead ? thead.offsetHeight : 0
-          const visibleHeight = el.clientHeight - theadHeight
+          const visibleHeight = scrollContainer.clientHeight - theadHeight
           const visibleCenter = theadHeight + visibleHeight / 2
 
-          const containerRect = el.getBoundingClientRect()
+          const containerRect = scrollContainer.getBoundingClientRect()
           const rowRect = targetRow.getBoundingClientRect()
           const rowCenter = rowRect.top - containerRect.top + rowRect.height / 2
           const delta = rowCenter - visibleCenter
           if (Math.abs(delta) > 1) {
-            el.scrollTop += delta
+            scrollContainer.scrollTop += delta
           }
           return true
         }
-        el.scrollTop = 0
+        scrollContainer.scrollTop = 0
         return true
       }
 
       if (status === 'completed') {
-        el.scrollTop = 0
+        scrollContainer.scrollTop = 0
         return true
       }
 
@@ -786,7 +786,7 @@ export function ExpeditionPlanner({
         manualDistInput: '',
         manualTritInput: '',
       })
-    } catch (routeError: any) {
+    } catch (routeError: unknown) {
       const errorRoute = app.CarrierRouteResult.createFrom({
         origin: routePrompt.origin.trim(),
         destination: routePrompt.destination.trim(),
@@ -794,7 +794,7 @@ export function ExpeditionPlanner({
         capacityUsed: carrierCapacity,
         depotTritium: carrierDepot,
         manualMode: true,
-        error: routeError?.message || String(routeError),
+        error: routeError instanceof Error ? routeError.message : String(routeError),
         totalJumps: 0,
         totalDistLy: 0,
         totalTritium: 0,
@@ -1444,18 +1444,18 @@ export function ExpeditionPlanner({
                   showNotes={showNotes}
                   showCarrierStop={showCarrierStop}
                   onToggleExpand={toggleExpand}
-                  onDraftChange={(id, field, val) =>
+                  onDraftChange={(rowId, fieldName, fieldValue) =>
                     setDrafts((prev) => ({
                       ...prev,
-                      [id]: { ...(prev[id] ?? draft), [field]: val },
+                      [rowId]: { ...(prev[rowId] ?? draft), [fieldName]: fieldValue },
                     }))
                   }
                   onFieldFocus={(id) => {
                     editingRowIdRef.current = id
                   }}
-                  onFieldBlur={(r, field, val) => {
+                  onFieldBlur={(waypointRow, fieldName, fieldValue) => {
                     editingRowIdRef.current = null
-                    commitField(r, field, val)
+                    commitField(waypointRow, fieldName, fieldValue)
                   }}
                   onCopySystem={handleCopySystem}
                   onToggleFcStop={toggleFcStop}
