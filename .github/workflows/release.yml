@@ -225,7 +225,7 @@ jobs:
           COMMENT="This issue has been resolved in release [${TAG_NAME}](${RELEASE_URL})."
 
           # Fetch all open issues with the target label
-          ISSUES=$(gh issue list --repo "${REPO}" --label "${LABEL}" --state open --json number --jq '.[].number')
+          ISSUES=$(gh issue list --repo "${REPO}" --label "${LABEL}" --state open --limit 1000 --json number --jq '.[].number')
 
           if [ -z "$ISSUES" ]; then
             echo "No open issues found with label '${LABEL}'."
@@ -234,7 +234,6 @@ jobs:
 
           for ISSUE in $ISSUES; do
             echo "Processing issue #${ISSUE}..."
-            gh issue comment "${ISSUE}" --repo "${REPO}" --body "${COMMENT}"
-            gh issue edit "${ISSUE}" --repo "${REPO}" --remove-label "${LABEL}"
-            gh issue close "${ISSUE}" --repo "${REPO}" --reason "completed"
+            gh issue edit "${ISSUE}" --repo "${REPO}" --remove-label "${LABEL}" || true
+            gh issue close "${ISSUE}" --repo "${REPO}" --comment "${COMMENT}" --reason "completed" || true
           done
