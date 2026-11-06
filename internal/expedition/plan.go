@@ -96,7 +96,7 @@ type shipState struct {
 
 var (
 	shipCacheMu      sync.Mutex
-	shipCacheMap     = make(map[string][]shipState)
+	shipCacheMap           = make(map[string][]shipState)
 	lastMaxJournalID int64 = -1
 
 	originMetricsMu    sync.Mutex
@@ -291,19 +291,38 @@ func shipsUsedOnLeg(timeline []shipState, jumps []string, after, until string) [
 	return transitions
 }
 
-
 // LatestPlayerLocation queries the most recent coordinates and star system for the active commander.
 func LatestPlayerLocation(queryer db.Queryer) (*ed.Vec3, string, error) {
 	var (
 		starX, starY, starZ sql.NullFloat64
 		systemName          sql.NullString
 	)
-	err := queryer.QueryRow(`SELECT star_x, star_y, star_z, system_name
-		FROM journal_events
-		WHERE event IN ('FSDJump','Location','CarrierJump')
-		  AND star_x IS NOT NULL AND star_y IS NOT NULL AND star_z IS NOT NULL
-		  AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&starX, &starY, &starZ, &systemName)
+	query := `SELECT star_x, star_y, star_z, system_name FROM (
+		SELECT * FROM (
+			SELECT star_x, star_y, star_z, system_name, timestamp, id
+			FROM journal_events
+			WHERE event = 'FSDJump'
+			  AND ` + journal.CmdrFilterSQL + `
+			ORDER BY timestamp DESC, id DESC LIMIT 1
+		)
+		UNION ALL
+		SELECT * FROM (
+			SELECT star_x, star_y, star_z, system_name, timestamp, id
+			FROM journal_events
+			WHERE event = 'Location'
+			  AND ` + journal.CmdrFilterSQL + `
+			ORDER BY timestamp DESC, id DESC LIMIT 1
+		)
+		UNION ALL
+		SELECT * FROM (
+			SELECT star_x, star_y, star_z, system_name, timestamp, id
+			FROM journal_events
+			WHERE event = 'CarrierJump'
+			  AND ` + journal.CmdrFilterSQL + `
+			ORDER BY timestamp DESC, id DESC LIMIT 1
+		)
+	) ORDER BY timestamp DESC, id DESC LIMIT 1`
+	err := queryer.QueryRow(query).Scan(&starX, &starY, &starZ, &systemName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", nil
@@ -340,7 +359,10 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 		planView.CurrentRowID = currentWaypoint.ID
 	}
 
-	playerPos, playerSystem, _ := LatestPlayerLocation(queryer)
+	playerPos, playerSystem, playerLocErr := LatestPlayerLocation(queryer)
+	if playerLocErr != nil && !errors.Is(playerLocErr, sql.ErrNoRows) {
+		return planView, playerLocErr
+	}
 	if playerPos == nil && currentWaypoint != nil && currentWaypoint.HasCoords {
 		coords, _ := currentWaypoint.Coords()
 		playerPos = &coords
@@ -465,7 +487,7 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 			rowViewItem.DistFromPrevLy = &dist
 			planView.PlannedLy += dist
 		}
-		if rowItem.ID == nextWaypointRowID {
+		if nextWaypointRowID > 0 && rowItem.ID == nextWaypointRowID {
 			rowViewItem.IsNextWaypoint = true
 			if playerPos != nil && rowItem.HasCoords {
 				endPos, _ := rowItem.Coords()
@@ -474,10 +496,28 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 			} else if rowViewItem.DistFromPrevLy != nil {
 				rowViewItem.DistFromCurrentLy = rowViewItem.DistFromPrevLy
 			}
-		} else if rowItem.VisitedAt == "" && playerPos != nil && rowItem.HasCoords {
-			endPos, _ := rowItem.Coords()
-			dist := ed.Distance(*playerPos, endPos)
-			rowViewItem.DistFromCurrentLy = &dist
+		}
+		// Accumulate remaining light years:
+		// When planning, accumulate distance from previous waypoint for all unvisited waypoints.
+		// When active, use distance from player (falling back to previous waypoint) for the next waypoint,
+		// and distance from previous waypoint for subsequent unvisited legs.
+		if rowItem.VisitedAt == "" {
+			switch expeditionRecord.Status {
+			case StatusPlanning:
+				if rowViewItem.DistFromPrevLy != nil {
+					planView.RemainingLy += *rowViewItem.DistFromPrevLy
+				}
+			case StatusActive:
+				if rowViewItem.IsNextWaypoint {
+					if rowViewItem.DistFromCurrentLy != nil {
+						planView.RemainingLy += *rowViewItem.DistFromCurrentLy
+					} else if rowViewItem.DistFromPrevLy != nil {
+						planView.RemainingLy += *rowViewItem.DistFromPrevLy
+					}
+				} else if rowViewItem.DistFromPrevLy != nil {
+					planView.RemainingLy += *rowViewItem.DistFromPrevLy
+				}
+			}
 		}
 		if gecLookup != nil && rowItem.SystemName != "" {
 			rowViewItem.GEC = gecLookup(rowItem.SystemName, rowItem.SystemAddress)
@@ -488,29 +528,6 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 	}
 	if planView.Rows == nil {
 		planView.Rows = []RowView{}
-	}
-
-	if expeditionRecord.Status == StatusPlanning {
-		for _, rv := range planView.Rows {
-			if rv.Row.IsWaypoint() && rv.Row.VisitedAt == "" && rv.DistFromPrevLy != nil {
-				planView.RemainingLy += *rv.DistFromPrevLy
-			}
-		}
-	} else if expeditionRecord.Status == StatusActive {
-		for _, rv := range planView.Rows {
-			if !rv.Row.IsWaypoint() || rv.Row.VisitedAt != "" {
-				continue
-			}
-			if rv.IsNextWaypoint {
-				if rv.DistFromCurrentLy != nil {
-					planView.RemainingLy += *rv.DistFromCurrentLy
-				} else if rv.DistFromPrevLy != nil {
-					planView.RemainingLy += *rv.DistFromPrevLy
-				}
-			} else if rv.DistFromPrevLy != nil {
-				planView.RemainingLy += *rv.DistFromPrevLy
-			}
-		}
 	}
 	planView.PendingTransitions = []Transition{}
 	if currentWaypoint != nil && shipTimeline != nil {
