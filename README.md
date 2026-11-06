@@ -26,7 +26,7 @@ That's where Planisphere comes in.
 Separate your flight stats across different styles of transport. If you take a high-speed detour back to the Bubble, switch modes so thousands of buckyballing light years don't ruin your expedition's jump averages and distance logs. You can even use partial filtering to let scan values and exobiology bio-data count toward your wallet totals while keeping the travel mileage strictly isolated.
 
 ### Waypoint flight planning without the spreadsheet
-Build your flight plan stop by stop with system names, coordinates, and personal notes. Planisphere watches your journal logs in the background; the moment you jump into a destination system, it marks the waypoint as visited and automatically steps forward to the next leg.
+Build your flight plan stop by stop with system names, coordinates, and personal notes. Planisphere watches your journal logs in the background; the moment you jump into a destination system, it marks the waypoint as visited and automatically steps forward to the next leg. During active expeditions, live telemetry displays the remaining distance to your next waypoint and continuously updates remaining route mileage.
 
 ### Fleet carrier routing that isn't a chore
 Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router to plot out 500 Ly jumps with accurate tritium calculations on the fly, tracks your carrier's current location from journal events, and supports manual hop adjustments when you want to chart your own course.
