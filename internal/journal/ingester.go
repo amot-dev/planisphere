@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
 	"errors"
@@ -42,7 +43,7 @@ type Result struct {
 	FilesScanned int
 	FilesUpdated int
 	LinesRead    int
-	NewEvents    []Event // events actually inserted (not previously known)
+	NewEvents    int // count of events actually inserted (not previously known)
 	Errors       []string
 }
 
@@ -50,7 +51,7 @@ func (result *Result) merge(other Result) {
 	result.FilesScanned += other.FilesScanned
 	result.FilesUpdated += other.FilesUpdated
 	result.LinesRead += other.LinesRead
-	result.NewEvents = append(result.NewEvents, other.NewEvents...)
+	result.NewEvents += other.NewEvents
 	result.Errors = append(result.Errors, other.Errors...)
 }
 
@@ -128,19 +129,8 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 	if _, seekError := fileHandle.Seek(state.offset, io.SeekStart); seekError != nil {
 		return result, seekError
 	}
-	data, readError := io.ReadAll(io.LimitReader(fileHandle, size-state.offset))
-	if readError != nil {
-		return result, readError
-	}
-	// Only consume complete lines; a partially written trailing line is
-	// picked up on the next pass.
-	lastNewline := bytes.LastIndexByte(data, '\n')
-	if lastNewline < 0 {
-		data = nil
-	} else {
-		data = data[:lastNewline+1]
-	}
-	newOffset := state.offset + int64(len(data))
+	newOffset := state.offset
+	reader := bufio.NewReader(io.LimitReader(fileHandle, size-state.offset))
 
 	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
 		var currentCmdr string
@@ -170,10 +160,18 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 		defer cmdrStmt.Close()
 
 		now := ed.NowISO()
-		for len(data) > 0 {
-			newlineIdx := bytes.IndexByte(data, '\n')
-			line := data[:newlineIdx]
-			data = data[newlineIdx+1:]
+		for {
+			rawLine, readError := reader.ReadBytes('\n')
+			if readError != nil && !errors.Is(readError, io.EOF) {
+				return readError
+			}
+			// Only consume complete lines; a partially written trailing line is
+			// picked up on the next pass.
+			if len(rawLine) == 0 || rawLine[len(rawLine)-1] != '\n' {
+				break
+			}
+			newOffset += int64(len(rawLine))
+			line := rawLine[:len(rawLine)-1]
 			if len(bytes.TrimSpace(line)) == 0 {
 				continue
 			}
@@ -209,7 +207,7 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 			rowsAffected, _ := execResult.RowsAffected()
 			if rowsAffected > 0 {
 				state.stored++
-				result.NewEvents = append(result.NewEvents, parsedEvent)
+				result.NewEvents++
 				if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
 					state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
 				}
@@ -346,41 +344,33 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 	}
 	defer eddConn.Close()
 
+	const eventFilter = `journalEntry.EventType IN (
+			'Commander','LoadGame','Statistics','Location','FSDJump','CarrierJump',
+			'CarrierStats','CarrierDepositFuel','CarrierJumpRequest','Docked','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
+			'ScanOrganic','MultiSellExplorationData','SellOrganicData','ShipyardSwap'
+		)`
+
+	var total int
+	if countError := eddConn.QueryRow(`
+		SELECT COUNT(*)
+		FROM JournalEntries journalEntry
+		WHERE ` + eventFilter).Scan(&total); countError != nil {
+		return result, fmt.Errorf("count EDDiscovery JournalEntries: %w", countError)
+	}
+
 	rows, queryError := eddConn.Query(`
 		SELECT COALESCE(NULLIF(travelUnit.Name, ''), 'EDD-' || journalEntry.TravelLogId),
 		       COALESCE(NULLIF(travelUnit.Path, ''), 'EDD-' || journalEntry.TravelLogId),
 		       journalEntry.EventData
 		FROM JournalEntries journalEntry
 		LEFT JOIN TravelLogUnit travelUnit ON travelUnit.Id = journalEntry.TravelLogId
-		WHERE journalEntry.EventType IN (
-			'Commander','LoadGame','Statistics','Location','FSDJump','CarrierJump',
-			'CarrierStats','CarrierDepositFuel','CarrierJumpRequest','Docked','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
-			'ScanOrganic','MultiSellExplorationData','SellOrganicData','ShipyardSwap'
-		)
+		WHERE ` + eventFilter + `
 		ORDER BY journalEntry.TravelLogId ASC, journalEntry.Id ASC`)
 	if queryError != nil {
 		return result, fmt.Errorf("query EDDiscovery JournalEntries: %w", queryError)
 	}
 	defer rows.Close()
 
-	type entryRow struct {
-		fileName string
-		filePath string
-		raw      string
-	}
-	var entries []entryRow
-	for rows.Next() {
-		var entry entryRow
-		if scanError := rows.Scan(&entry.fileName, &entry.filePath, &entry.raw); scanError != nil {
-			return result, scanError
-		}
-		entries = append(entries, entry)
-	}
-	if rowsError := rows.Err(); rowsError != nil {
-		return result, rowsError
-	}
-
-	total := len(entries)
 	reportProgress(0, total, 0, "Ingesting historical journal events into SQLite archive…")
 
 	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
@@ -407,39 +397,95 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 		}
 		defer cmdrStmt.Close()
 
+		updateCmdrStmt, prepUpdateError := transaction.Prepare(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`)
+		if prepUpdateError != nil {
+			return prepUpdateError
+		}
+		defer updateCmdrStmt.Close()
+
+		type commanderTracker struct {
+			fid       string
+			firstSeen string
+			lastSeen  string
+		}
+		cmdrTrackers := map[string]*commanderTracker{}
+
+		flushFileCmdr := func(file string, cmdr string, hasUnattributed bool) error {
+			if file != "" && hasUnattributed && cmdr != "" {
+				if _, execError := updateCmdrStmt.Exec(cmdr, file); execError != nil {
+					return execError
+				}
+			}
+			return nil
+		}
+
 		now := ed.NowISO()
 		var lastFile string
 		var currentCmdr string
+		fileHasUnattributed := false
 		fileEvents := map[string]int{}
 		filePaths := map[string]string{}
 		fileFirst := map[string]string{}
 		fileLast := map[string]string{}
 
-		for entryIndex, entry := range entries {
-			name := filepath.Base(strings.ReplaceAll(entry.fileName, `\`, `/`))
+		entryIndex := 0
+		for rows.Next() {
+			var rawFileName, rawFilePath, rawData string
+			if scanError := rows.Scan(&rawFileName, &rawFilePath, &rawData); scanError != nil {
+				return scanError
+			}
+
+			name := filepath.Base(strings.ReplaceAll(rawFileName, `\`, `/`))
 			if name != lastFile {
+				if err := flushFileCmdr(lastFile, currentCmdr, fileHasUnattributed); err != nil {
+					return err
+				}
 				lastFile = name
 				currentCmdr = ""
+				fileHasUnattributed = false
 				result.FilesScanned++
 			}
-			filePaths[name] = entry.filePath
+			filePaths[name] = rawFilePath
 			result.LinesRead++
 
 			if entryIndex%1500 == 0 {
 				reportProgress(entryIndex, total, result.FilesScanned, "Ingesting historical journal events into SQLite archive…")
 			}
+			entryIndex++
 
-			parsedEvent, ok, parseError := ParseLine([]byte(entry.raw), name)
+			parsedEvent, ok, parseError := ParseLine([]byte(rawData), name)
 			if parseError != nil || !ok {
 				continue
 			}
 			if parsedEvent.Commander != "" {
 				currentCmdr = parsedEvent.Commander
-				_, _ = cmdrStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp)
-				_, _ = transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCmdr, name)
 			} else if currentCmdr != "" {
 				parsedEvent.Commander = currentCmdr
-				_, _ = cmdrStmt.Exec(currentCmdr, "", parsedEvent.Timestamp, parsedEvent.Timestamp)
+			} else {
+				fileHasUnattributed = true
+			}
+
+			if parsedEvent.Commander != "" {
+				tracker, exists := cmdrTrackers[parsedEvent.Commander]
+				if !exists {
+					cmdrTrackers[parsedEvent.Commander] = &commanderTracker{
+						fid:       parsedEvent.FID,
+						firstSeen: parsedEvent.Timestamp,
+						lastSeen:  parsedEvent.Timestamp,
+					}
+				} else {
+					if tracker.fid == "" && parsedEvent.FID != "" {
+						tracker.fid = parsedEvent.FID
+					}
+					if parsedEvent.Timestamp != "" {
+						if tracker.firstSeen == "" || parsedEvent.Timestamp < tracker.firstSeen {
+							tracker.firstSeen = parsedEvent.Timestamp
+						}
+						if tracker.lastSeen == "" || parsedEvent.Timestamp > tracker.lastSeen {
+							tracker.lastSeen = parsedEvent.Timestamp
+						}
+					}
+				}
 			}
 
 			var xCoord, yCoord, zCoord any
@@ -456,6 +502,20 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 			}
 			if lastSeen, ok := fileLast[name]; !ok || parsedEvent.Timestamp > lastSeen {
 				fileLast[name] = parsedEvent.Timestamp
+			}
+		}
+
+		if rowsError := rows.Err(); rowsError != nil {
+			return rowsError
+		}
+
+		if err := flushFileCmdr(lastFile, currentCmdr, fileHasUnattributed); err != nil {
+			return err
+		}
+
+		for cmdrName, tracker := range cmdrTrackers {
+			if _, execError := cmdrStmt.Exec(cmdrName, tracker.fid, tracker.firstSeen, tracker.lastSeen); execError != nil {
+				return execError
 			}
 		}
 

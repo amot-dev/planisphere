@@ -49,8 +49,8 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	if scanError != nil {
 		t.Fatal(scanError)
 	}
-	if len(scanResult.NewEvents) != len(lines) {
-		t.Fatalf("ingested %d events, want %d", len(scanResult.NewEvents), len(lines))
+	if scanResult.NewEvents != len(lines) {
+		t.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(lines))
 	}
 
 	// Fetch default modes

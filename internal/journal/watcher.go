@@ -117,7 +117,7 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 			}
 			total.merge(fileResult)
 		}
-		if len(total.NewEvents) > 0 && watcher.onBatch != nil {
+		if total.NewEvents > 0 && watcher.onBatch != nil {
 			watcher.onBatch(total)
 		}
 	}

@@ -147,7 +147,7 @@ func (catalog *Catalog) Refresh(ctx context.Context) (int, error) {
 
 // Import replaces the cache with a combined-catalogue JSON document.
 func (catalog *Catalog) Import(body []byte) (int, error) {
-	var entries []json.RawMessage
+	var entries []remotePOI
 	if decodeError := json.Unmarshal(body, &entries); decodeError != nil {
 		return 0, fmt.Errorf("GEC decode: %w", decodeError)
 	}
@@ -164,9 +164,8 @@ func (catalog *Catalog) Import(body []byte) (int, error) {
 			return prepError
 		}
 		defer stmt.Close()
-		for _, rawJSON := range entries {
-			var remote remotePOI
-			if json.Unmarshal(rawJSON, &remote) != nil || remote.ID == 0 || strings.TrimSpace(remote.GalMapSearch) == "" {
+		for _, remote := range entries {
+			if remote.ID == 0 || strings.TrimSpace(remote.GalMapSearch) == "" {
 				continue
 			}
 			sourceName := strings.ToUpper(strings.TrimSpace(remote.Source))
@@ -179,12 +178,9 @@ func (catalog *Catalog) Import(body []byte) (int, error) {
 				rowID = 1_000_000_000 + remote.ID
 			}
 
-			// Keep the cache lean: drop the long-form descriptions.
-			var rawMap map[string]any
-			_ = json.Unmarshal(rawJSON, &rawMap)
-			delete(rawMap, "descriptionMardown")
-			delete(rawMap, "descriptionHtml")
-			slimJSON, _ := json.Marshal(rawMap)
+			// Keep the cache lean: remotePOI only defines metadata fields,
+			// automatically ignoring long-form descriptions without allocating them.
+			slimJSON, _ := json.Marshal(remote)
 			var xCoord, yCoord, zCoord any
 			if len(remote.Coordinates) == 3 {
 				xCoord, yCoord, zCoord = remote.Coordinates[0], remote.Coordinates[1], remote.Coordinates[2]

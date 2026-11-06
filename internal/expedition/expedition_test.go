@@ -63,8 +63,8 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 	if scanError != nil {
 		t.Fatal(scanError)
 	}
-	if len(scanResult.NewEvents) != len(lines) {
-		t.Fatalf("ingested %d events, want %d", len(scanResult.NewEvents), len(lines))
+	if scanResult.NewEvents != len(lines) {
+		t.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(lines))
 	}
 
 	// Re-scanning the same directory is idempotent (0 new events).
@@ -72,8 +72,8 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 	if rescanError != nil {
 		t.Fatal(rescanError)
 	}
-	if len(rescanResult.NewEvents) != 0 {
-		t.Fatalf("expected 0 new events on idempotent rescan, got %d", len(rescanResult.NewEvents))
+	if rescanResult.NewEvents != 0 {
+		t.Fatalf("expected 0 new events on idempotent rescan, got %d", rescanResult.NewEvents)
 	}
 
 	// Delete the journal file from disk: zero data may be lost.
