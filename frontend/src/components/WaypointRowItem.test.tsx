@@ -466,4 +466,132 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(htmlHidden).not.toContain('+ FC STOP')
     expect(htmlHidden).toContain('Col 285 Sector')
   })
+
+  it('renders distance from player when row is next waypoint in active expedition', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 18,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Maia',
+        seq: 2,
+        poiName: 'Black Hole',
+        notes: '',
+      },
+      number: 2,
+      visitState: 'future',
+      distFromPrevLy: 380.5,
+      distFromCurrentLy: 42.1,
+      isNextWaypoint: true,
+    })
+
+    const html = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(WaypointRowItem, {
+            rowView: mockRowView,
+            index: 1,
+            isPlanning: false,
+            isLocked: false,
+            isBeingDragged: false,
+            isDragTarget: false,
+            isExpanded: false,
+            isNextFcStop: false,
+            isNextWaypoint: true,
+            playerSystem: 'Merope',
+            hasActiveCarrierRoute: false,
+            draft: { systemName: 'Maia', poiName: 'Black Hole', notes: '' },
+            copiedSystemRowId: null,
+            insertMenuOpen: false,
+            lastVisitedIndex: 0,
+            totalRows: 5,
+            rowStyle: {},
+            dropProps: {},
+            onToggleExpand: () => {},
+            onDraftChange: () => {},
+            onFieldFocus: () => {},
+            onFieldBlur: () => {},
+            onCopySystem: () => {},
+            onToggleFcStop: () => {},
+            onOpenCarrierRoutePrompt: () => {},
+            onToggleInsertMenu: () => {},
+            onInsert: () => {},
+            onMove: () => {},
+            onDelete: () => {},
+            onDragStart: () => {},
+            onDragEnd: () => {},
+          }),
+        ),
+      ),
+    )
+
+    // Should display distance from player (42.1 Ly) with player location tooltip, not 380.5 Ly
+    expect(html).toContain('42.1 Ly')
+    expect(html).not.toContain('380.5 Ly')
+    expect(html).toContain('Estimated straight-line distance from player location (Merope)')
+  })
+
+  it('renders distance from previous waypoint in planning status even if next waypoint', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 19,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Maia',
+        seq: 2,
+        poiName: '',
+        notes: '',
+      },
+      number: 2,
+      visitState: 'future',
+      distFromPrevLy: 380.5,
+      distFromCurrentLy: 42.1,
+      isNextWaypoint: true,
+    })
+
+    const html = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(WaypointRowItem, {
+            rowView: mockRowView,
+            index: 1,
+            isPlanning: true,
+            isLocked: false,
+            isBeingDragged: false,
+            isDragTarget: false,
+            isExpanded: false,
+            isNextFcStop: false,
+            isNextWaypoint: true,
+            playerSystem: 'Merope',
+            hasActiveCarrierRoute: false,
+            draft: { systemName: 'Maia', poiName: '', notes: '' },
+            copiedSystemRowId: null,
+            insertMenuOpen: false,
+            lastVisitedIndex: -1,
+            totalRows: 5,
+            rowStyle: {},
+            dropProps: {},
+            onToggleExpand: () => {},
+            onDraftChange: () => {},
+            onFieldFocus: () => {},
+            onFieldBlur: () => {},
+            onCopySystem: () => {},
+            onToggleFcStop: () => {},
+            onOpenCarrierRoutePrompt: () => {},
+            onToggleInsertMenu: () => {},
+            onInsert: () => {},
+            onMove: () => {},
+            onDelete: () => {},
+            onDragStart: () => {},
+            onDragEnd: () => {},
+          }),
+        ),
+      ),
+    )
+
+    // In planning mode, should display distance from previous waypoint (380.5 Ly)
+    expect(html).toContain('380.5 Ly')
+    expect(html).not.toContain('42.1 Ly')
+    expect(html).toContain('Estimated straight-line distance from previous waypoint')
+  })
 })

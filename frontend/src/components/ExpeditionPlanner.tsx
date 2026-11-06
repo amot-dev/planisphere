@@ -1420,6 +1420,7 @@ export function ExpeditionPlanner({
                 notes: row.notes ?? '',
               }
               const isNextFcStop = Boolean(row.fcStop && !row.fcArrived && row.id === plan.nextFcStopRowId)
+              const isNextWaypoint = Boolean(rowView.isNextWaypoint || (plan.nextWaypointRowId && row.id === plan.nextWaypointRowId))
               const hasActiveCarrierRoute = Boolean(activeCarrierRoute && activeCarrierTargetRowId === row.id)
 
               return (
@@ -1433,6 +1434,8 @@ export function ExpeditionPlanner({
                   isDragTarget={isDragTarget}
                   isExpanded={isExpanded}
                   isNextFcStop={isNextFcStop}
+                  isNextWaypoint={isNextWaypoint}
+                  playerSystem={plan.playerSystem}
                   hasActiveCarrierRoute={hasActiveCarrierRoute}
                   draft={draft}
                   copiedSystemRowId={copiedSystemRowId}

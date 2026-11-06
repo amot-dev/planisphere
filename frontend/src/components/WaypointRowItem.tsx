@@ -19,6 +19,8 @@ export interface WaypointRowItemProps {
   isExpanded: boolean
   isNextFcStop: boolean
   hasActiveCarrierRoute: boolean
+  isNextWaypoint?: boolean
+  playerSystem?: string
   draft: { systemName: string; poiName: string; notes: string }
   copiedSystemRowId: number | null
   insertMenuOpen: boolean
@@ -53,6 +55,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   isExpanded,
   isNextFcStop,
   hasActiveCarrierRoute,
+  isNextWaypoint,
+  playerSystem,
   draft,
   copiedSystemRowId,
   insertMenuOpen,
@@ -78,6 +82,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 }: WaypointRowItemProps) {
   const row = rowView.row
   const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
+  const isNext = Boolean(isNextWaypoint ?? rowView.isNextWaypoint) && !isPlanning
 
   return (
     <tr
@@ -324,7 +329,31 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           </div>
         ) : (
           <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-[#a6907c] leading-5">
-            {rowView.number === 1 ? (
+            {isNext ? (
+              rowView.distFromCurrentLy !== undefined ? (
+                <span
+                  className="text-[#00D2FF]"
+                  title={
+                    playerSystem
+                      ? `Estimated straight-line distance from player location (${playerSystem})`
+                      : 'Estimated straight-line distance from player location'
+                  }
+                >
+                  +{formatLy(rowView.distFromCurrentLy, 1)}
+                </span>
+              ) : (
+                <span
+                  className="text-[#6e5b4b] uppercase text-[10px]"
+                  title={
+                    row.systemName?.trim()
+                      ? 'Coordinates unknown for this waypoint or player location'
+                      : undefined
+                  }
+                >
+                  {row.systemName?.trim() ? 'UNKNOWN' : '—'}
+                </span>
+              )
+            ) : rowView.number === 1 ? (
               row.systemName?.trim() ? (
                 <span
                   className="text-[#00D2FF]"

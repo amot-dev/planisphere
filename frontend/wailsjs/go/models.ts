@@ -664,6 +664,7 @@ export namespace expedition {
 	    visitedAtGalactic: string;
 	    distFromPrevLy?: number;
 	    distFromCurrentLy?: number;
+	    isNextWaypoint?: boolean;
 	    transitions: Transition[];
 	    legModeId: number;
 	    legModeName: string;
@@ -685,6 +686,7 @@ export namespace expedition {
 	        this.visitedAtGalactic = source["visitedAtGalactic"];
 	        this.distFromPrevLy = source["distFromPrevLy"];
 	        this.distFromCurrentLy = source["distFromCurrentLy"];
+	        this.isNextWaypoint = source["isNextWaypoint"];
 	        this.transitions = this.convertValues(source["transitions"], Transition);
 	        this.legModeId = source["legModeId"];
 	        this.legModeName = source["legModeName"];
@@ -716,7 +718,9 @@ export namespace expedition {
 	    endGalactic: string;
 	    rows: RowView[];
 	    currentRowId: number;
+	    nextWaypointRowId?: number;
 	    nextFcStopRowId: number;
+	    playerSystem?: string;
 	    waypointCount: number;
 	    visitedCount: number;
 	    plannedLy: number;
@@ -738,7 +742,9 @@ export namespace expedition {
 	        this.endGalactic = source["endGalactic"];
 	        this.rows = this.convertValues(source["rows"], RowView);
 	        this.currentRowId = source["currentRowId"];
+	        this.nextWaypointRowId = source["nextWaypointRowId"];
 	        this.nextFcStopRowId = source["nextFcStopRowId"];
+	        this.playerSystem = source["playerSystem"];
 	        this.waypointCount = source["waypointCount"];
 	        this.visitedCount = source["visitedCount"];
 	        this.plannedLy = source["plannedLy"];

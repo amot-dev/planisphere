@@ -530,5 +530,74 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     // Row 102 is not in existingDetails, so it must be loaded.
     expect(toLoad).toEqual([102])
   })
+
+  it('renders remaining Ly reflecting distance from player and shows player distance on next waypoint', () => {
+    const activePlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 7,
+        name: 'Live Telemetry Expedition',
+        description: '',
+        status: 'active',
+        armedAt: '',
+        createdAt: '3310-01-01T00:00:00Z',
+        updatedAt: '3310-01-01T00:00:00Z',
+      },
+      rows: [
+        {
+          row: { id: 1, expeditionId: 7, rowType: 'waypoint', systemName: 'Sol', seq: 1, visitedAt: '3310-01-01T10:00:00Z' },
+          number: 1,
+          visitState: 'visited',
+          visitedAtGalactic: '3310-01-01 10:00:00',
+        },
+        {
+          row: { id: 2, expeditionId: 7, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2 },
+          number: 2,
+          visitState: 'future',
+          isNextWaypoint: true,
+          distFromPrevLy: 4.3,
+          distFromCurrentLy: 2.1,
+        },
+        {
+          row: { id: 3, expeditionId: 7, rowType: 'waypoint', systemName: "Barnard's Star", seq: 3 },
+          number: 3,
+          visitState: 'future',
+          isNextWaypoint: false,
+          distFromPrevLy: 6.0,
+        },
+      ],
+      nextWaypointRowId: 2,
+      playerSystem: 'Interim Sol System',
+      modes: [],
+      visitedCount: 1,
+      waypointCount: 3,
+      plannedLy: 10.3,
+      remainingLy: 8.1, // 2.1 (player to WP2) + 6.0 (WP2 to WP3)
+    })
+
+    const html = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: activePlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    // Route readout at top:
+    expect(html).toContain('PLANNED ROUTE:')
+    expect(html).toContain('10.3 Ly')
+    expect(html).toContain('REMAINING:')
+    expect(html).toContain('8.1 Ly')
+
+    // WP2 (next waypoint) shows player distance (2.1 Ly) with player location tooltip:
+    expect(html).toContain('2.1 Ly')
+    expect(html).toContain('Estimated straight-line distance from player location (Interim Sol System)')
+
+    // WP3 (subsequent waypoint) shows distance from previous waypoint (6.0 Ly):
+    expect(html).toContain('6.0 Ly')
+    expect(html).toContain('Estimated straight-line distance from previous waypoint')
+  })
 })
 
