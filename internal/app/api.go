@@ -419,6 +419,11 @@ func (app *App) RescanJournals() error {
 
 // RefreshGEC re-downloads the EDAstro Galactic Exploration Catalog.
 func (app *App) RefreshGEC() (int, error) {
+	if !app.gecRefreshing.CompareAndSwap(false, true) {
+		return 0, errors.New("GEC refresh is already in progress")
+	}
+	defer app.gecRefreshing.Store(false)
+
 	app.dbMu.RLock()
 	if readyError := app.ready(); readyError != nil {
 		app.dbMu.RUnlock()

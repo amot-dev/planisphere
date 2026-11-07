@@ -70,7 +70,8 @@ type App struct {
 	ingester *journal.Ingester
 	watcher  *journal.Watcher
 	resolver *systems.Resolver
-	gec      *gec.Catalog
+	gec                  *gec.Catalog
+	gecRefreshing        atomic.Bool
 
 	scanning             atomic.Bool
 	lastErrorMu          sync.Mutex
@@ -403,6 +404,11 @@ func (app *App) reevaluate(expeditionID int64) {
 }
 
 func (app *App) maybeRefreshGEC() {
+	if !app.gecRefreshing.CompareAndSwap(false, true) {
+		return
+	}
+	defer app.gecRefreshing.Store(false)
+
 	app.dbMu.RLock()
 	online := app.onlineEnabled()
 	gecCat := app.gec
