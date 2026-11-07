@@ -108,7 +108,9 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 ### Architecture
 
 - **Local-First**: Everything lives in a local SQLite database on your machine. Your journals, route waypoints, and cached coordinates stay local and work completely offline.
-- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using fsnotify. It handles out-of-order writes safely and never touches your game files.
+- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using native filesystem notifications (`fsnotify`). It handles out-of-order writes safely and never touches your game files.
+  > [!WARNING]
+  > The journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent folders do not emit kernel filesystem events and are not supported for live log streaming.
 - **Single Source of Truth Config**: Versioning, product name, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, and package manifests in sync.
 
 ### Commands

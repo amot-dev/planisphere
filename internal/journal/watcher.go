@@ -11,9 +11,7 @@ import (
 )
 
 // Watcher tails the journal directory: fsnotify events trigger ingestion of
-// the changed file (debounced), and a slow poll of the newest journal acts as
-// a safety net for platforms/filesystems (Proton, network shares, Windows
-// buffered writes) where change notifications are unreliable.
+// the changed file (debounced).
 type Watcher struct {
 	ingester *Ingester
 	onBatch  func(Result)
@@ -68,7 +66,6 @@ func (watcher *Watcher) setActive(active bool, errorMessage string) {
 
 const (
 	debounceDelay = 300 * time.Millisecond
-	pollInterval  = 3 * time.Second
 )
 
 func (watcher *Watcher) run(ctx context.Context, dir string) {
@@ -105,8 +102,6 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 	debounce := time.NewTimer(time.Hour)
 	defer debounce.Stop()
 	debounce.Stop()
-	poll := time.NewTicker(pollInterval)
-	defer poll.Stop()
 
 	flush := func(paths []string) {
 		var total Result
@@ -147,19 +142,6 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 			}
 			pending = map[string]bool{}
 			flush(paths)
-		case <-poll.C:
-			tryWatch()
-			files, listError := ListJournalFiles(dir)
-			if listError != nil || len(files) == 0 {
-				continue
-			}
-			// The newest journal (and the previous one, in case the game
-			// rolled over between polls) are the only files that can grow.
-			start := len(files) - 2
-			if start < 0 {
-				start = 0
-			}
-			flush(files[start:])
 		}
 	}
 }
