@@ -942,7 +942,6 @@ export function ExpeditionPlanner({
 
       setActiveCarrierRoute(updatedRoute)
       persistRouteState({ route: updatedRoute, jumpIdx: nextJumpIndex })
-      onRefreshAll()
     } catch (error) {
       console.error(error)
     } finally {
@@ -975,7 +974,6 @@ export function ExpeditionPlanner({
         manualDistInput: '',
         manualTritInput: '',
       })
-      onRefreshAll()
     } catch (error) {
       console.error(error)
     } finally {

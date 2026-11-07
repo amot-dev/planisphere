@@ -35,7 +35,7 @@ const (
 
 // DataChanged tells the frontend which data to refresh.
 type DataChanged struct {
-	Scope        string `json:"scope"` // journal | plan | modes | settings
+	Scope        string `json:"scope"` // journal | plan | modes | settings | adjustments
 	ExpeditionID int64  `json:"expeditionId"`
 }
 
@@ -84,6 +84,15 @@ type App struct {
 	allTimeValid   bool
 	allTimeMetrics stats.Metrics
 
+	liveStatsMu    sync.Mutex
+	liveStatsCache map[string]stats.Metrics
+
+	careerStartMu       sync.Mutex
+	careerStartVal      string
+	careerStartGalactic string
+	careerStartDuration string
+	careerStartValid    bool
+
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
 }
@@ -94,6 +103,7 @@ func New() *App {
 		resolving:            map[int64]bool{},
 		resolvingExpeditions: map[int64]bool{},
 		resolveSem:           make(chan struct{}, 1),
+		liveStatsCache:       map[string]stats.Metrics{},
 	}
 }
 
@@ -202,6 +212,9 @@ func (app *App) getError() string {
 }
 
 func (app *App) changed(scope string, expeditionID int64) {
+	if scope == "modes" || scope == "journal" || scope == "plan" {
+		app.invalidateLiveStatsCache()
+	}
 	app.emit(EventDataChanged, DataChanged{Scope: scope, ExpeditionID: expeditionID})
 }
 
@@ -310,10 +323,20 @@ func (app *App) onJournalBatch(scanResult journal.Result) {
 	app.changed("journal", 0)
 }
 
+func (app *App) invalidateLiveStatsCache() {
+	app.liveStatsMu.Lock()
+	app.liveStatsCache = make(map[string]stats.Metrics)
+	app.liveStatsMu.Unlock()
+}
+
 func (app *App) invalidateAllTimeCache() {
 	app.allTimeMu.Lock()
 	app.allTimeValid = false
 	app.allTimeMu.Unlock()
+	app.careerStartMu.Lock()
+	app.careerStartValid = false
+	app.careerStartMu.Unlock()
+	app.invalidateLiveStatsCache()
 	expedition.InvalidateShipCache()
 }
 

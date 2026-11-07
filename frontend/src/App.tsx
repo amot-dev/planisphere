@@ -213,9 +213,17 @@ export default function App() {
           return
         }
 
-        if (scope === 'plan' || scope === 'coords') {
+        if (scope === 'plan') {
           if (currentActive > 0) {
             loadPlanOnly(currentActive)
+          }
+          return
+        }
+
+        if (scope === 'adjustments') {
+          if (currentActive > 0) {
+            loadPlanOnly(currentActive)
+            loadStatsOnly(currentActive, filterRef.current)
           }
           return
         }

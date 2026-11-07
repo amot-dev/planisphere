@@ -1142,15 +1142,30 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
-	var firstEvent sql.NullString
-	_ = app.db.QueryRow(`SELECT MIN(c.first_seen) FROM commanders c WHERE c.enabled = 1 AND c.first_seen IS NOT NULL AND c.first_seen != ''`).Scan(&firstEvent)
-	if !firstEvent.Valid || firstEvent.String == "" {
-		_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstEvent)
-	}
-	if firstEvent.Valid && firstEvent.String != "" {
-		sidebar.CareerStart = firstEvent.String
-		sidebar.CareerStartGalactic = ed.ToGalactic(firstEvent.String)
-		sidebar.CareerDuration = expedition.Elapsed(firstEvent.String, "")
+	app.careerStartMu.Lock()
+	if app.careerStartValid {
+		sidebar.CareerStart = app.careerStartVal
+		sidebar.CareerStartGalactic = app.careerStartGalactic
+		sidebar.CareerDuration = app.careerStartDuration
+		app.careerStartMu.Unlock()
+	} else {
+		app.careerStartMu.Unlock()
+		var firstEvent sql.NullString
+		_ = app.db.QueryRow(`SELECT MIN(c.first_seen) FROM commanders c WHERE c.enabled = 1 AND c.first_seen IS NOT NULL AND c.first_seen != ''`).Scan(&firstEvent)
+		if !firstEvent.Valid || firstEvent.String == "" {
+			_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstEvent)
+		}
+		if firstEvent.Valid && firstEvent.String != "" {
+			sidebar.CareerStart = firstEvent.String
+			sidebar.CareerStartGalactic = ed.ToGalactic(firstEvent.String)
+			sidebar.CareerDuration = expedition.Elapsed(firstEvent.String, "")
+			app.careerStartMu.Lock()
+			app.careerStartVal = sidebar.CareerStart
+			app.careerStartGalactic = sidebar.CareerStartGalactic
+			app.careerStartDuration = sidebar.CareerDuration
+			app.careerStartValid = true
+			app.careerStartMu.Unlock()
+		}
 	}
 	if sidebar.Started {
 		if sidebar.End == "" {
@@ -1161,17 +1176,35 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		}
 		sidebar.StartGalactic = ed.ToGalactic(sidebar.Start)
 		sidebar.Duration = expedition.Elapsed(sidebar.Start, sidebar.End)
-		liveMetrics, computeError := statsEngine.Compute(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
-		if computeError != nil {
-			return sidebar, computeError
+
+		filterJSON, _ := json.Marshal(filter)
+		cacheKey := fmt.Sprintf("%d|%s|%s|%s", expeditionID, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, string(filterJSON))
+
+		app.liveStatsMu.Lock()
+		cachedMetrics, isCached := app.liveStatsCache[cacheKey]
+		app.liveStatsMu.Unlock()
+
+		var liveMetrics stats.Metrics
+		if isCached {
+			liveMetrics = cachedMetrics
+		} else {
+			var computeError error
+			liveMetrics, computeError = statsEngine.Compute(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
+			if computeError != nil {
+				return sidebar, computeError
+			}
+			// Carrier operations metrics (carrier jumps, carrier distance, and tritium) for the expedition
+			// come exclusively from the Spansh / manual route logger (expeditionRecord.Adjustments) to prevent duplication.
+			// Non-operation personal navigation metrics (CarrierPassengerLy and total DistanceLy)
+			// are preserved directly from journal events when the commander is aboard.
+			liveMetrics.CarrierJumps = 0
+			liveMetrics.CarrierDistanceLy = 0
+			liveMetrics.TritiumUsed = nil
+
+			app.liveStatsMu.Lock()
+			app.liveStatsCache[cacheKey] = liveMetrics
+			app.liveStatsMu.Unlock()
 		}
-		// Carrier operations metrics (carrier jumps, carrier distance, and tritium) for the expedition
-		// come exclusively from the Spansh / manual route logger (expeditionRecord.Adjustments) to prevent duplication.
-		// Non-operation personal navigation metrics (CarrierPassengerLy and total DistanceLy)
-		// are preserved directly from journal events when the commander is aboard.
-		liveMetrics.CarrierJumps = 0
-		liveMetrics.CarrierDistanceLy = 0
-		liveMetrics.TritiumUsed = nil
 
 		sidebar.Live = liveMetrics
 		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)

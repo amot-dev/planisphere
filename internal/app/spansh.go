@@ -316,7 +316,7 @@ func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritiu
 	}(); err != nil {
 		return err
 	}
-	app.changed("all", expeditionID)
+	app.changed("adjustments", expeditionID)
 	return nil
 }
 

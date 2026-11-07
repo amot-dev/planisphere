@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"planisphere/internal/db"
+	"planisphere/internal/expedition"
+	"planisphere/internal/stats"
 )
 
 func TestReconcileSpanshJumps(t *testing.T) {
@@ -349,5 +352,168 @@ func TestQuerySpanshCarrierRoute_ContextDeadlineExceeded(t *testing.T) {
 		t.Errorf("expected error message to contain cancellation text, got: %v", queryError)
 	}
 }
+
+func TestRecordCarrierJump(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := tempDir + "/test.sqlite"
+
+	testApp := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := testApp.initialize(ctx, dbPath); err != nil {
+		t.Fatalf("initialize db: %v", err)
+	}
+	defer testApp.shutdown(ctx)
+
+	var emittedEvents []DataChanged
+	var emitMu sync.Mutex
+	testApp.emit = func(event string, data ...any) {
+		if event == EventDataChanged && len(data) > 0 {
+			if dc, ok := data[0].(DataChanged); ok {
+				emitMu.Lock()
+				emittedEvents = append(emittedEvents, dc)
+				emitMu.Unlock()
+			}
+		}
+	}
+
+	exp, createErr := testApp.CreateExpedition("Carrier Test", "Testing carrier jumps")
+	if createErr != nil {
+		t.Fatalf("failed to create expedition: %v", createErr)
+	}
+
+	// Clear events from creation
+	emitMu.Lock()
+	emittedEvents = nil
+	emitMu.Unlock()
+
+	// Record a carrier jump of 498.5 Ly using 95t tritium
+	if err := testApp.RecordCarrierJump(exp.ID, 498.5, 95); err != nil {
+		t.Fatalf("RecordCarrierJump failed: %v", err)
+	}
+
+	// Verify emitted event scope is strictly "adjustments", not "all"
+	emitMu.Lock()
+	if len(emittedEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(emittedEvents))
+	}
+	if emittedEvents[0].Scope != "adjustments" {
+		t.Errorf("expected scope 'adjustments', got '%s'", emittedEvents[0].Scope)
+	}
+	if emittedEvents[0].ExpeditionID != exp.ID {
+		t.Errorf("expected expeditionID %d, got %d", exp.ID, emittedEvents[0].ExpeditionID)
+	}
+	emitMu.Unlock()
+
+	// Verify adjustments were correctly written
+	planView, getErr := testApp.GetPlan(exp.ID)
+	if getErr != nil {
+		t.Fatalf("GetPlan failed: %v", getErr)
+	}
+	adj := planView.Expedition.Adjustments
+	if adj.CarrierJumps != 1 {
+		t.Errorf("expected 1 carrier jump, got %d", adj.CarrierJumps)
+	}
+	if adj.CarrierDistanceLy != 498.5 {
+		t.Errorf("expected 498.5 carrier distance, got %f", adj.CarrierDistanceLy)
+	}
+	if adj.TritiumUsed == nil || *adj.TritiumUsed != 95 {
+		t.Errorf("expected 95 tritium, got %v", adj.TritiumUsed)
+	}
+
+	// Record a second carrier jump
+	if err := testApp.RecordCarrierJump(exp.ID, 120.0, 25); err != nil {
+		t.Fatalf("second RecordCarrierJump failed: %v", err)
+	}
+	planView2, _ := testApp.GetPlan(exp.ID)
+	adj2 := planView2.Expedition.Adjustments
+	if adj2.CarrierJumps != 2 {
+		t.Errorf("expected 2 carrier jumps, got %d", adj2.CarrierJumps)
+	}
+	if adj2.CarrierDistanceLy != 618.5 {
+		t.Errorf("expected 618.5 carrier distance, got %f", adj2.CarrierDistanceLy)
+	}
+	if adj2.TritiumUsed == nil || *adj2.TritiumUsed != 120 {
+		t.Errorf("expected 120 tritium, got %v", adj2.TritiumUsed)
+	}
+}
+
+func TestLiveStatsCacheOnCarrierJump(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := tempDir + "/test.sqlite"
+
+	testApp := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := testApp.initialize(ctx, dbPath); err != nil {
+		t.Fatalf("initialize db: %v", err)
+	}
+	defer testApp.shutdown(ctx)
+
+	exp, createErr := testApp.CreateExpedition("Stats Cache Test", "Testing live stats caching")
+	if createErr != nil {
+		t.Fatalf("failed to create expedition: %v", createErr)
+	}
+
+	plan, _ := testApp.GetPlan(exp.ID)
+	if len(plan.Rows) > 0 {
+		sysName := "Sol"
+		_ = testApp.UpdateRow(expedition.RowPatch{ID: plan.Rows[0].Row.ID, SystemName: &sysName})
+	}
+
+	// Start expedition so stats computing is active
+	if err := testApp.StartExpedition(exp.ID, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("StartExpedition failed: %v", err)
+	}
+
+	filter := stats.Filter{Enabled: false}
+
+	// First call to GetSidebarStats should populate liveStatsCache
+	sidebar1, err := testApp.GetSidebarStats(exp.ID, filter)
+	if err != nil {
+		t.Fatalf("GetSidebarStats failed: %v", err)
+	}
+	if sidebar1.Expedition.CarrierJumps != 0 {
+		t.Errorf("expected 0 carrier jumps, got %d", sidebar1.Expedition.CarrierJumps)
+	}
+
+	testApp.liveStatsMu.Lock()
+	cacheLen := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+	if cacheLen == 0 {
+		t.Fatal("expected liveStatsCache to have at least 1 entry")
+	}
+
+	// Record carrier jump
+	if err := testApp.RecordCarrierJump(exp.ID, 500.0, 100); err != nil {
+		t.Fatalf("RecordCarrierJump failed: %v", err)
+	}
+
+	// liveStatsCache should NOT have been cleared because no raw journal events or modes changed
+	testApp.liveStatsMu.Lock()
+	cacheLenAfter := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+	if cacheLenAfter != cacheLen {
+		t.Errorf("expected liveStatsCache length %d to be preserved, got %d", cacheLen, cacheLenAfter)
+	}
+
+	// Second call to GetSidebarStats uses the cached live metrics and combines with new adjustments
+	sidebar2, err := testApp.GetSidebarStats(exp.ID, filter)
+	if err != nil {
+		t.Fatalf("second GetSidebarStats failed: %v", err)
+	}
+	if sidebar2.Expedition.CarrierJumps != 1 {
+		t.Errorf("expected 1 carrier jump, got %d", sidebar2.Expedition.CarrierJumps)
+	}
+	if sidebar2.Expedition.CarrierDistanceLy != 500.0 {
+		t.Errorf("expected 500.0 carrier distance, got %f", sidebar2.Expedition.CarrierDistanceLy)
+	}
+	if sidebar2.Adjustments.CarrierJumps != 1 {
+		t.Errorf("expected 1 adjustment carrier jump, got %d", sidebar2.Adjustments.CarrierJumps)
+	}
+}
+
 
 
