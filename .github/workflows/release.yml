@@ -219,7 +219,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
-          LABEL: "status: unreleased"
+          LABEL: "unreleased"
         run: |
           RELEASE_URL="https://github.com/${REPO}/releases/tag/${TAG_NAME}"
           COMMENT="This issue has been resolved in release [${TAG_NAME}](${RELEASE_URL})."
