@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"planisphere/internal/expedition"
+	"planisphere/internal/stats"
 )
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
@@ -176,5 +177,68 @@ func TestMoveRow_NonexistentRow(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when moving nonexistent row, got nil")
 	}
+}
+
+func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
+	temporaryDirectory := testingContext.TempDir()
+	databasePath := filepath.Join(temporaryDirectory, "career_test.sqlite")
+
+	testApp := New()
+	applicationContext, cancelFunction := context.WithCancel(context.Background())
+	defer cancelFunction()
+
+	if initializeError := testApp.initialize(applicationContext, databasePath); initializeError != nil {
+		testingContext.Fatalf("initialize db: %v", initializeError)
+	}
+	defer testApp.shutdown(applicationContext)
+
+	// Insert commander record with first_seen timestamp
+	expectedCareerStart := "2024-03-15T12:00:00Z"
+	_, insertError := testApp.db.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Commander Jameson', 1, ?)`, expectedCareerStart)
+	if insertError != nil {
+		testingContext.Fatalf("insert commander: %v", insertError)
+	}
+
+	expeditionRecord, createError := testApp.CreateExpedition("Career Expedition", "Testing career duration")
+	if createError != nil {
+		testingContext.Fatalf("failed to create expedition: %v", createError)
+	}
+
+	filterSettings := stats.Filter{Enabled: false}
+
+	// Concurrently invoke GetSidebarStats to exercise double-checked locking
+	concurrentRoutines := 10
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(concurrentRoutines)
+
+	for routineIndex := 0; routineIndex < concurrentRoutines; routineIndex++ {
+		go func() {
+			defer waitGroup.Done()
+			sidebarStats, getStatsError := testApp.GetSidebarStats(expeditionRecord.ID, filterSettings)
+			if getStatsError != nil {
+				testingContext.Errorf("GetSidebarStats failed: %v", getStatsError)
+				return
+			}
+			if sidebarStats.CareerStart != expectedCareerStart {
+				testingContext.Errorf("expected CareerStart %s, got %s", expectedCareerStart, sidebarStats.CareerStart)
+			}
+			if sidebarStats.CareerStartGalactic == "" {
+				testingContext.Errorf("expected non-empty CareerStartGalactic")
+			}
+			if sidebarStats.CareerDuration == "" {
+				testingContext.Errorf("expected non-empty CareerDuration")
+			}
+		}()
+	}
+	waitGroup.Wait()
+
+	testApp.careerStartMu.Lock()
+	if !testApp.careerStartValid {
+		testingContext.Errorf("expected careerStartValid to be true")
+	}
+	if testApp.careerStartTimestamp != expectedCareerStart {
+		testingContext.Errorf("expected careerStartTimestamp %s, got %s", expectedCareerStart, testApp.careerStartTimestamp)
+	}
+	testApp.careerStartMu.Unlock()
 }
 

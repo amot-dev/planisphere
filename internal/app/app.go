@@ -87,11 +87,11 @@ type App struct {
 	liveStatsMu    sync.Mutex
 	liveStatsCache map[string]stats.Metrics
 
-	careerStartMu       sync.Mutex
-	careerStartVal      string
-	careerStartGalactic string
-	careerStartDuration string
-	careerStartValid    bool
+	// Career start timestamp caching fields protected by careerStartMu.
+	careerStartMu        sync.Mutex
+	careerStartTimestamp string
+	careerStartGalactic  string
+	careerStartValid     bool
 
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)

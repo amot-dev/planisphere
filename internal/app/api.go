@@ -1142,30 +1142,43 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
+	var careerStart string
+	var careerStartGalactic string
+
 	app.careerStartMu.Lock()
 	if app.careerStartValid {
-		sidebar.CareerStart = app.careerStartVal
-		sidebar.CareerStartGalactic = app.careerStartGalactic
-		sidebar.CareerDuration = app.careerStartDuration
+		careerStart = app.careerStartTimestamp
+		careerStartGalactic = app.careerStartGalactic
 		app.careerStartMu.Unlock()
 	} else {
 		app.careerStartMu.Unlock()
-		var firstEvent sql.NullString
-		_ = app.db.QueryRow(`SELECT MIN(c.first_seen) FROM commanders c WHERE c.enabled = 1 AND c.first_seen IS NOT NULL AND c.first_seen != ''`).Scan(&firstEvent)
-		if !firstEvent.Valid || firstEvent.String == "" {
-			_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstEvent)
+
+		var earliestSeenTimestamp sql.NullString
+		_ = app.db.QueryRow(`SELECT MIN(commanders.first_seen) FROM commanders WHERE commanders.enabled = 1 AND commanders.first_seen IS NOT NULL AND commanders.first_seen != ''`).Scan(&earliestSeenTimestamp)
+		if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
+			_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&earliestSeenTimestamp)
 		}
-		if firstEvent.Valid && firstEvent.String != "" {
-			sidebar.CareerStart = firstEvent.String
-			sidebar.CareerStartGalactic = ed.ToGalactic(firstEvent.String)
-			sidebar.CareerDuration = expedition.Elapsed(firstEvent.String, "")
-			app.careerStartMu.Lock()
-			app.careerStartVal = sidebar.CareerStart
-			app.careerStartGalactic = sidebar.CareerStartGalactic
-			app.careerStartDuration = sidebar.CareerDuration
+
+		app.careerStartMu.Lock()
+		if !app.careerStartValid {
+			if earliestSeenTimestamp.Valid && earliestSeenTimestamp.String != "" {
+				app.careerStartTimestamp = earliestSeenTimestamp.String
+				app.careerStartGalactic = ed.ToGalactic(earliestSeenTimestamp.String)
+			} else {
+				app.careerStartTimestamp = ""
+				app.careerStartGalactic = ""
+			}
 			app.careerStartValid = true
-			app.careerStartMu.Unlock()
 		}
+		careerStart = app.careerStartTimestamp
+		careerStartGalactic = app.careerStartGalactic
+		app.careerStartMu.Unlock()
+	}
+
+	if careerStart != "" {
+		sidebar.CareerStart = careerStart
+		sidebar.CareerStartGalactic = careerStartGalactic
+		sidebar.CareerDuration = expedition.Elapsed(careerStart, "")
 	}
 	if sidebar.Started {
 		if sidebar.End == "" {
