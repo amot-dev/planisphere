@@ -710,7 +710,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. In planning status:
+	// In planning status:
 	// PlannedLy = 100 + 150 = 250 Ly.
 	// RemainingLy = 250 Ly.
 	// No row is next waypoint.
@@ -724,17 +724,19 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	if planPlanning.RemainingLy != 250.0 {
 		t.Errorf("expected remaining ly 250.0 in planning, got %v", planPlanning.RemainingLy)
 	}
-	for _, r := range planPlanning.Rows {
-		if r.IsNextWaypoint {
-			t.Errorf("expected no next waypoint in planning status, row %d had IsNextWaypoint=true", r.Number)
+	for _, waypointRowView := range planPlanning.Rows {
+		if waypointRowView.IsNextWaypoint {
+			t.Errorf("expected no next waypoint in planning status, row %d had IsNextWaypoint=true", waypointRowView.Number)
 		}
 	}
 
-	// 2. Start expedition at WP1:
+	// Start expedition at WP1:
 	// Visit WP1 at 2026-03-01T10:00:00Z.
-	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
+	if txErr := db.WithTx(dbConn, func(tx *sql.Tx) error {
 		return expedition.Start(tx, exp.ID, "2026-03-01T10:00:00Z")
-	})
+	}); txErr != nil {
+		t.Fatal(txErr)
+	}
 	visitedAt := "2026-03-01T10:00:00Z"
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = ? WHERE id = ?`, visitedAt, wp1.ID); err != nil {
 		t.Fatal(err)
@@ -761,12 +763,12 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	}
 
 	var wp2Row, wp3Row expedition.RowView
-	for _, r := range planActive1.Rows {
-		if r.Row.ID == wp2.ID {
-			wp2Row = r
+	for _, waypointRowView := range planActive1.Rows {
+		if waypointRowView.Row.ID == wp2.ID {
+			wp2Row = waypointRowView
 		}
-		if r.Row.ID == wp3.ID {
-			wp3Row = r
+		if waypointRowView.Row.ID == wp3.ID {
+			wp3Row = waypointRowView
 		}
 	}
 	if !wp2Row.IsNextWaypoint {
@@ -782,7 +784,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Errorf("expected wp3 dist from prev 150.0, got %v", wp3Row.DistFromPrevLy)
 	}
 
-	// 3. Player jumps closer to WP2: Waypoint "Interim System" at (60, 0, 0)
+	// Player jumps closer to WP2: Waypoint "Interim System" at (60, 0, 0)
 	_, err = dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, star_x, star_y, star_z, raw_json, ingested_at)
 		VALUES ('ev-jump1', '2026-03-01T11:00:00Z', 'FSDJump', 'Interim System', 60.0, 0.0, 0.0, '{}', '2026-03-01T11:00:00Z')`)
 	if err != nil {
@@ -803,13 +805,13 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	if planActive2.RemainingLy != 190.0 {
 		t.Errorf("expected remaining ly 190.0 after jump, got %v", planActive2.RemainingLy)
 	}
-	for _, r := range planActive2.Rows {
-		if r.Row.ID == wp2.ID {
-			if r.DistFromCurrentLy == nil || *r.DistFromCurrentLy != 40.0 {
-				t.Errorf("expected wp2 dist from player 40.0, got %v", r.DistFromCurrentLy)
+	for _, waypointRowView := range planActive2.Rows {
+		if waypointRowView.Row.ID == wp2.ID {
+			if waypointRowView.DistFromCurrentLy == nil || *waypointRowView.DistFromCurrentLy != 40.0 {
+				t.Errorf("expected wp2 dist from player 40.0, got %v", waypointRowView.DistFromCurrentLy)
 			}
-			if r.DistFromPrevLy == nil || *r.DistFromPrevLy != 100.0 {
-				t.Errorf("expected wp2 dist from prev (planned leg) to remain 100.0, got %v", r.DistFromPrevLy)
+			if waypointRowView.DistFromPrevLy == nil || *waypointRowView.DistFromPrevLy != 100.0 {
+				t.Errorf("expected wp2 dist from prev (planned leg) to remain 100.0, got %v", waypointRowView.DistFromPrevLy)
 			}
 		}
 	}
