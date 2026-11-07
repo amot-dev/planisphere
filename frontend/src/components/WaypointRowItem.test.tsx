@@ -467,6 +467,51 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(htmlHidden).toContain('Col 285 Sector')
   })
 
+  function renderRowItem(props: Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView }) {
+    const defaultProps: Parameters<typeof WaypointRowItem>[0] = {
+      index: 1,
+      isPlanning: false,
+      isLocked: false,
+      isBeingDragged: false,
+      isDragTarget: false,
+      isExpanded: false,
+      isNextFcStop: false,
+      hasActiveCarrierRoute: false,
+      draft: {
+        systemName: props.rowView.row?.systemName ?? '',
+        poiName: props.rowView.row?.poiName ?? '',
+        notes: props.rowView.row?.notes ?? '',
+      },
+      copiedSystemRowId: null,
+      insertMenuOpen: false,
+      lastVisitedIndex: 0,
+      totalRows: 5,
+      rowStyle: {},
+      dropProps: {},
+      onToggleExpand: () => {},
+      onDraftChange: () => {},
+      onFieldFocus: () => {},
+      onFieldBlur: () => {},
+      onCopySystem: () => {},
+      onToggleFcStop: () => {},
+      onOpenCarrierRoutePrompt: () => {},
+      onToggleInsertMenu: () => {},
+      onInsert: () => {},
+      onMove: () => {},
+      onDelete: () => {},
+      onDragStart: () => {},
+      onDragEnd: () => {},
+      ...props,
+    }
+    return renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(WaypointRowItem, defaultProps),
+        ),
+      ),
+    )
+  }
+
   it('renders distance from player when row is next waypoint in active expedition', () => {
     const mockRowView = expedition.RowView.createFrom({
       row: {
@@ -485,45 +530,12 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       isNextWaypoint: true,
     })
 
-    const html = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: mockRowView,
-            index: 1,
-            isPlanning: false,
-            isLocked: false,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: false,
-            isNextFcStop: false,
-            isNextWaypoint: true,
-            playerSystem: 'Merope',
-            hasActiveCarrierRoute: false,
-            draft: { systemName: 'Maia', poiName: 'Black Hole', notes: '' },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: 0,
-            totalRows: 5,
-            rowStyle: {},
-            dropProps: {},
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const html = renderRowItem({
+      rowView: mockRowView,
+      isPlanning: false,
+      isNextWaypoint: true,
+      playerSystem: 'Merope',
+    })
 
     // Should display distance from player (42.1 Ly) with player location tooltip, not 380.5 Ly
     expect(html).toContain('42.1 Ly')
@@ -549,45 +561,12 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       isNextWaypoint: true,
     })
 
-    const html = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: mockRowView,
-            index: 1,
-            isPlanning: true,
-            isLocked: false,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: false,
-            isNextFcStop: false,
-            isNextWaypoint: true,
-            playerSystem: 'Merope',
-            hasActiveCarrierRoute: false,
-            draft: { systemName: 'Maia', poiName: '', notes: '' },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: -1,
-            totalRows: 5,
-            rowStyle: {},
-            dropProps: {},
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const html = renderRowItem({
+      rowView: mockRowView,
+      isPlanning: true,
+      isNextWaypoint: true,
+      playerSystem: 'Merope',
+    })
 
     // In planning mode, should display distance from previous waypoint (380.5 Ly)
     expect(html).toContain('380.5 Ly')
