@@ -45,6 +45,73 @@ export interface WaypointRowItemProps {
   onDragEnd: () => void
 }
 
+function renderDistanceValue(
+  isNext: boolean,
+  rowView: expedition.RowView,
+  row: expedition.Row,
+  playerSystem?: string,
+) {
+  if (isNext) {
+    if (rowView.distFromCurrentLy != null) {
+      const tooltip = playerSystem
+        ? `Estimated straight-line distance from player location (${playerSystem})`
+        : 'Estimated straight-line distance from player location'
+      return (
+        <span className="text-[#00D2FF]" title={tooltip}>
+          +{formatLy(rowView.distFromCurrentLy, 1)}
+        </span>
+      )
+    }
+    return (
+      <span
+        className="text-[#6e5b4b] uppercase text-[10px]"
+        title={
+          row.systemName?.trim()
+            ? 'Coordinates unknown for this waypoint or player location'
+            : undefined
+        }
+      >
+        {row.systemName?.trim() ? 'UNKNOWN' : '—'}
+      </span>
+    )
+  }
+
+  if (rowView.number === 1) {
+    if (row.systemName?.trim()) {
+      return (
+        <span className="text-[#00D2FF]" title="Starting Waypoint (Origin)">
+          +0 Ly
+        </span>
+      )
+    }
+    return <span className="text-[#6e5b4b]">—</span>
+  }
+
+  if (rowView.distFromPrevLy != null) {
+    return (
+      <span
+        className="text-[#00D2FF]"
+        title="Estimated straight-line distance from previous waypoint"
+      >
+        +{formatLy(rowView.distFromPrevLy, 1)}
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="text-[#6e5b4b] uppercase text-[10px]"
+      title={
+        row.systemName?.trim()
+          ? 'Coordinates unknown for this waypoint or preceding waypoint'
+          : undefined
+      }
+    >
+      {row.systemName?.trim() ? 'UNKNOWN' : '—'}
+    </span>
+  )
+}
+
 export const WaypointRowItem = memo(function WaypointRowItem({
   rowView,
   index,
@@ -329,60 +396,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           </div>
         ) : (
           <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-[#a6907c] leading-5">
-            {isNext ? (
-              rowView.distFromCurrentLy !== undefined ? (
-                <span
-                  className="text-[#00D2FF]"
-                  title={
-                    playerSystem
-                      ? `Estimated straight-line distance from player location (${playerSystem})`
-                      : 'Estimated straight-line distance from player location'
-                  }
-                >
-                  +{formatLy(rowView.distFromCurrentLy, 1)}
-                </span>
-              ) : (
-                <span
-                  className="text-[#6e5b4b] uppercase text-[10px]"
-                  title={
-                    row.systemName?.trim()
-                      ? 'Coordinates unknown for this waypoint or player location'
-                      : undefined
-                  }
-                >
-                  {row.systemName?.trim() ? 'UNKNOWN' : '—'}
-                </span>
-              )
-            ) : rowView.number === 1 ? (
-              row.systemName?.trim() ? (
-                <span
-                  className="text-[#00D2FF]"
-                  title="Starting Waypoint (Origin)"
-                >
-                  +0 Ly
-                </span>
-              ) : (
-                <span className="text-[#6e5b4b]">—</span>
-              )
-            ) : rowView.distFromPrevLy !== undefined ? (
-              <span
-                className="text-[#00D2FF]"
-                title="Estimated straight-line distance from previous waypoint"
-              >
-                +{formatLy(rowView.distFromPrevLy, 1)}
-              </span>
-            ) : (
-              <span
-                className="text-[#6e5b4b] uppercase text-[10px]"
-                title={
-                  row.systemName?.trim()
-                    ? 'Coordinates unknown for this waypoint or preceding waypoint'
-                    : undefined
-                }
-              >
-                {row.systemName?.trim() ? 'UNKNOWN' : '—'}
-              </span>
-            )}
+            {renderDistanceValue(isNext, rowView, row, playerSystem)}
           </div>
         )}
       </td>
