@@ -325,7 +325,7 @@ func (app *App) onJournalBatch(scanResult journal.Result) {
 
 func (app *App) invalidateLiveStatsCache() {
 	app.liveStatsMu.Lock()
-	app.liveStatsCache = make(map[string]stats.Metrics)
+	clear(app.liveStatsCache)
 	app.liveStatsMu.Unlock()
 }
 

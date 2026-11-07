@@ -222,7 +222,6 @@ export default function App() {
 
         if (scope === 'adjustments') {
           if (currentActive > 0) {
-            loadPlanOnly(currentActive)
             loadStatsOnly(currentActive, filterRef.current)
           }
           return
