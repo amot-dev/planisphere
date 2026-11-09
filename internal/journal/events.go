@@ -33,6 +33,9 @@ var RelevantEvents = map[string]bool{
 	"SellExplorationData":      true,
 	"SellOrganicData":          true,
 	"ShipyardSwap":             true,
+	"Died":                     true,
+	"Resurrect":                true,
+	"NpcCrewPaidWage":          true,
 }
 
 // LocationEvents are the events that place the player in a system.
@@ -77,6 +80,12 @@ type commonFields struct {
 	Total         *int64          `json:"Total"`
 	TotalEarnings *int64          `json:"TotalEarnings"`
 	MarketID      *int64          `json:"MarketID"`
+	KillerName    string          `json:"KillerName"`
+	KillerShip    string          `json:"KillerShip"`
+	Option        string          `json:"Option"`
+	Cost          *int64          `json:"Cost"`
+	NpcCrewID     *int64          `json:"NpcCrewId"`
+	Amount        *int64          `json:"Amount"`
 }
 
 var eventKey = []byte(`"event"`)
@@ -157,6 +166,12 @@ func keyIdentifiers(fields *commonFields, raw []byte) []string {
 		return []string{optInt(fields.SystemAddress), optInt(fields.MarketID)}
 	case "MultiSellExplorationData", "SellExplorationData":
 		return []string{optInt(fields.TotalEarnings)}
+	case "Died":
+		return []string{fields.KillerName, fields.KillerShip}
+	case "Resurrect":
+		return []string{fields.Option, optInt(fields.Cost)}
+	case "NpcCrewPaidWage":
+		return []string{optInt(fields.NpcCrewID), optInt(fields.Amount)}
 	case "Statistics":
 		return nil
 	default:

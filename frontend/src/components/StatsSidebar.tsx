@@ -27,6 +27,7 @@ export const StatsSidebar = memo(function StatsSidebar({
 }: StatsSidebarProps) {
   const [scanExpanded, setScanExpanded] = useState(true)
   const [organicExpanded, setOrganicExpanded] = useState(true)
+  const [realizedExpanded, setRealizedExpanded] = useState(true)
   const [viewScope, setViewScope] = useState<'expedition' | 'allTime'>('expedition')
 
   const modeList: modes.Mode[] = modesState?.modes ?? []
@@ -514,11 +515,71 @@ export const StatsSidebar = memo(function StatsSidebar({
               </div>
             )}
           </div>
+
+          {/* Realized Value — Orange Realized Profit & Loss Ledger */}
+          <div className="p-2.5">
+            <button
+              type="button"
+              onClick={() => setRealizedExpanded((previous) => !previous)}
+              className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#F4ECE4] truncate">
+                  Realized Value
+                </span>
+                <span className="text-[10px] text-[#FF7100] shrink-0">{realizedExpanded ? '▾' : '▸'}</span>
+              </div>
+              <span className="font-mono-tabular text-xs font-extrabold text-[#FF7100] whitespace-nowrap shrink-0">
+                {formatCredits(sidebarStats?.realization?.totalRealized)}
+              </span>
+            </button>
+            {realizedExpanded && (
+              <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#FF7100]/50 text-[11px]">
+                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                  <span className="truncate">Cartographics Lost (Death)</span>
+                  <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                    {formatLoss(sidebarStats?.realization?.cartoLostDeath)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                  <span className="truncate">Exobiology Lost (Death)</span>
+                  <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                    {formatLoss(sidebarStats?.realization?.organicLostDeath)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                  <span className="truncate">Cartographics Stolen</span>
+                  <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                    {formatLoss(sidebarStats?.realization?.cartoStolen)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                  <span className="truncate">Exobiology Stolen</span>
+                  <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                    {formatLoss(sidebarStats?.realization?.organicStolen)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                  <span className="truncate">NPC Crew Payouts</span>
+                  <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                    {formatLoss(sidebarStats?.realization?.npcCrewLoss)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </aside>
   )
 })
+
+function formatLoss(val?: number): string {
+  if (!val || val === 0) {
+    return '0 Cr'
+  }
+  return `-${formatCredits(val)}`
+}
 
 function StatRow({
   label,

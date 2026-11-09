@@ -619,6 +619,7 @@ type WaypointDetails struct {
 	Elapsed      string        `json:"elapsed"`
 	PrevSystem   string        `json:"prevSystem"`
 	Metrics      stats.Metrics `json:"metrics"`
+	Realization  stats.RealizationBreakdown `json:"realization"`
 
 	EstDistFromPrevLy    *float64 `json:"estDistFromPrevLy,omitempty"`
 	EstDistFromCurrentLy *float64 `json:"estDistFromCurrentLy,omitempty"`
@@ -723,6 +724,7 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 			originMetricsCache[cacheKey] = computed
 			originMetricsMu.Unlock()
 		}
+		waypointDetails.Realization, _ = engine.ComputeRealization(stats.Range{After: "", Until: targetRow.VisitedAt}, nil)
 	} else {
 		waypointDetails.Kind = "leg"
 		// The leg starts at the visit of the waypoint visited immediately before this one.
@@ -745,6 +747,7 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 		if computeError != nil {
 			return waypointDetails, computeError
 		}
+		waypointDetails.Realization, _ = engine.ComputeRealization(stats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, nil)
 	}
 	if startTime, parseStartError := ed.ParseISO(waypointDetails.From); parseStartError == nil {
 		if endTime, parseEndError := ed.ParseISO(waypointDetails.To); parseEndError == nil {

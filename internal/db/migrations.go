@@ -67,6 +67,11 @@ var migrations = []migration{
 		description: "Add source column to gec_pois_cache, unescape HTML entities in expedition rows, and reset gec cache",
 		apply:       migrateGECSchemaV5,
 	},
+	{
+		key:         "realization_events_v6",
+		description: "Reset ingested_journals byte offsets for Died, Resurrect, NpcCrewPaidWage, and SellExplorationData",
+		apply:       migrateRealizationEventsV6,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -174,5 +179,12 @@ func migrateGECSchemaV5(dbConn *sql.DB) error {
 	_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&amp;', '&') WHERE poi_name LIKE '%&amp;%'`)
 	_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&quot;', '"') WHERE poi_name LIKE '%&quot;%'`)
 	_ = SetSetting(dbConn, "gec_fetched_at", "")
+	return nil
+}
+
+func migrateRealizationEventsV6(dbConn *sql.DB) error {
+	if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
+		return updateError
+	}
 	return nil
 }

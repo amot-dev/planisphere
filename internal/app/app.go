@@ -198,6 +198,7 @@ func (app *App) backgroundStart() {
 		watcher.Start(app.ctx, jDir)
 	}
 	app.maybeRefreshGEC()
+	go app.maybeCatchUpEDD()
 }
 
 func (app *App) setError(errorMessage string) {
@@ -431,6 +432,44 @@ func (app *App) maybeRefreshGEC() {
 	}
 	app.populateMissingPOIs()
 	app.changed("plan", 0)
+}
+
+func (app *App) maybeCatchUpEDD() {
+	app.dbMu.RLock()
+	database := app.db
+	ingester := app.ingester
+	app.dbMu.RUnlock()
+	if database == nil || ingester == nil {
+		return
+	}
+	recovered, _ := db.GetSetting(database, "edd_history_recovered_v1")
+	if recovered != "1" {
+		return
+	}
+	alreadyDone, _ := db.GetSetting(database, "edd_history_realization_v6")
+	if alreadyDone == "1" {
+		return
+	}
+	eddPath, _ := db.GetSetting(database, "edd_db_path")
+	if eddPath == "" {
+		eddPath = journal.DiscoverEDDiscoveryDBPath()
+		if eddPath == "" {
+			eddPath = journal.DefaultEDDiscoveryDBPath()
+		}
+	}
+	if !journal.FileExists(eddPath) {
+		return
+	}
+	defer app.emitEDDProgress(false, 0, 0, 0, "")
+	_, err := ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
+		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
+	})
+	if err == nil {
+		_ = db.SetSetting(database, "edd_history_realization_v6", "1")
+		app.invalidateAllTimeCache()
+		app.reevaluateActive()
+		app.changed("journal", 0)
+	}
 }
 
 // kickResolution resolves coordinates for waypoints of an expedition that

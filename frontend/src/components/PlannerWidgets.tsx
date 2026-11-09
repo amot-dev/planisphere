@@ -450,6 +450,7 @@ export function WaypointDetailsDrawer({
   }
 
   const metrics = details.metrics
+  const realization = details.realization
   const isOrigin = details.kind === 'origin'
 
   const shipsUsed = Array.from(
@@ -527,7 +528,7 @@ export function WaypointDetailsDrawer({
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 pt-1">
         <div className="p-2.5 border border-[#3d2816] border-l-2 border-l-[#00D2FF] bg-[#120d09]">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] uppercase tracking-wider text-[#a6907c] font-bold truncate">
@@ -577,9 +578,59 @@ export function WaypointDetailsDrawer({
             </div>
           </div>
         </div>
+
+        <div className="p-2.5 border border-[#3d2816] border-l-2 border-l-[#FF7100] bg-[#120d09]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-[#a6907c] font-bold truncate">
+              Realized Value
+            </span>
+            <span className="font-mono-tabular text-sm font-extrabold text-[#FF7100] whitespace-nowrap shrink-0">
+              {formatCredits(realization?.totalRealized)}
+            </span>
+          </div>
+          <div className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px]">
+            <div className="flex justify-between gap-2 text-[#a6907c]">
+              <span className="truncate">Cartographics Lost (Death):</span>
+              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                {formatLoss(realization?.cartoLostDeath)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 text-[#a6907c]">
+              <span className="truncate">Exobiology Lost (Death):</span>
+              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                {formatLoss(realization?.organicLostDeath)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 text-[#a6907c]">
+              <span className="truncate">Cartographics Stolen:</span>
+              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                {formatLoss(realization?.cartoStolen)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 text-[#a6907c]">
+              <span className="truncate">Exobiology Stolen:</span>
+              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                {formatLoss(realization?.organicStolen)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2 text-[#a6907c]">
+              <span className="truncate">NPC Crew Payouts:</span>
+              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                {formatLoss(realization?.npcCrewLoss)}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
+}
+
+function formatLoss(val?: number): string {
+  if (!val || val === 0) {
+    return '0 Cr'
+  }
+  return `-${formatCredits(val)}`
 }
 
 function MetricMiniCard({

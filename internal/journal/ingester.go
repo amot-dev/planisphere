@@ -347,7 +347,8 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 	const eventFilter = `journalEntry.EventType IN (
 			'Commander','LoadGame','Statistics','Location','FSDJump','CarrierJump',
 			'CarrierStats','CarrierDepositFuel','CarrierJumpRequest','Docked','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
-			'ScanOrganic','MultiSellExplorationData','SellOrganicData','ShipyardSwap'
+			'ScanOrganic','MultiSellExplorationData','SellExplorationData','SellOrganicData','ShipyardSwap',
+			'Died','Resurrect','NpcCrewPaidWage'
 		)`
 
 	var total int

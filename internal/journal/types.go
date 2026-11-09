@@ -195,6 +195,95 @@ func leadingNumber(rawString string) float64 {
 	return parsedNumber
 }
 
+// Attacker represents one attacker in a Died event.
+type Attacker struct {
+	Name string `json:"Name"`
+	Ship string `json:"Ship"`
+	Rank string `json:"Rank"`
+}
+
+// DiedEvent is written when the commander or their ship is destroyed.
+type DiedEvent struct {
+	Timestamp  string     `json:"timestamp"`
+	KillerName string     `json:"KillerName"`
+	KillerShip string     `json:"KillerShip"`
+	KillerRank string     `json:"KillerRank"`
+	Killers    []Attacker `json:"Killers"`
+}
+
+// IsOnFoot reports whether the death was an on-foot suit death.
+func (died DiedEvent) IsOnFoot() bool {
+	if strings.Contains(strings.ToLower(died.KillerShip), "suit") {
+		return true
+	}
+	for _, attacker := range died.Killers {
+		if strings.Contains(strings.ToLower(attacker.Ship), "suit") {
+			return true
+		}
+	}
+	return false
+}
+
+// ResurrectEvent is written when respawning after a death.
+type ResurrectEvent struct {
+	Timestamp string `json:"timestamp"`
+	Option    string `json:"Option"`
+	Cost      int64  `json:"Cost"`
+	Bankrupt  bool   `json:"Bankrupt"`
+}
+
+// NpcCrewPaidWageEvent is written when active/inactive NPC crew receive a wage cut.
+type NpcCrewPaidWageEvent struct {
+	Timestamp   string `json:"timestamp"`
+	NpcCrewName string `json:"NpcCrewName"`
+	NpcCrewID   int64  `json:"NpcCrewId"`
+	Amount      int64  `json:"Amount"`
+}
+
+// BioDataItem is an organic sample sold at Vista Genomics.
+type BioDataItem struct {
+	Genus            string `json:"Genus"`
+	GenusLocalised   string `json:"Genus_Localised"`
+	Species          string `json:"Species"`
+	SpeciesLocalised string `json:"Species_Localised"`
+	Variant          string `json:"Variant"`
+	VariantLocalised string `json:"Variant_Localised"`
+	Value            int64  `json:"Value"`
+	Bonus            int64  `json:"Bonus"`
+}
+
+// SellOrganicDataEvent is written when selling exobiology data.
+type SellOrganicDataEvent struct {
+	Timestamp string        `json:"timestamp"`
+	MarketID  int64         `json:"MarketID"`
+	BioData   []BioDataItem `json:"BioData"`
+}
+
+// SellExplorationDataEvent is written when selling cartographic data.
+type SellExplorationDataEvent struct {
+	Timestamp     string   `json:"timestamp"`
+	BaseValue     int64    `json:"BaseValue"`
+	Bonus         int64    `json:"Bonus"`
+	TotalEarnings int64    `json:"TotalEarnings"`
+	Systems       []string `json:"Systems"`
+	Discovered    []string `json:"Discovered"`
+}
+
+// MultiSellDiscoveredSystem represents a system in MultiSellExplorationData.
+type MultiSellDiscoveredSystem struct {
+	SystemName string `json:"SystemName"`
+	NumBodies  int    `json:"NumBodies"`
+}
+
+// MultiSellExplorationDataEvent is written when selling cartographic data in bulk.
+type MultiSellExplorationDataEvent struct {
+	Timestamp     string                      `json:"timestamp"`
+	BaseValue     int64                       `json:"BaseValue"`
+	Bonus         int64                       `json:"Bonus"`
+	TotalEarnings int64                       `json:"TotalEarnings"`
+	Discovered    []MultiSellDiscoveredSystem `json:"Discovered"`
+}
+
 // Vec returns the StarPos as (coordX, coordY, coordZ) and whether it was present.
 func Vec(positionCoords []float64) (coordX, coordY, coordZ float64, hasCoords bool) {
 	if len(positionCoords) != 3 {

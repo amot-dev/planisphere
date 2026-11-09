@@ -407,6 +407,72 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).not.toContain('[MODE]:')
   })
 
+  it('renders Realized Value card with combined total sold and 5 orange negative lines without emojis', () => {
+    const mockRowView = expedition.RowView.createFrom({
+      row: {
+        id: 2,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Colonia',
+      },
+      number: 2,
+      visitState: 'visited',
+    })
+
+    const mockDetails = expedition.WaypointDetails.createFrom({
+      kind: 'leg',
+      number: 2,
+      metrics: {
+        scanValueTotal: 50000000,
+        organicValueTotal: 95000000,
+      } as any,
+      realization: {
+        totalRealized: 120000000,
+        cartoLostDeath: 5000000,
+        organicLostDeath: 10000000,
+        cartoStolen: 2000000,
+        organicStolen: 8000000,
+        npcCrewLoss: 1200000,
+      } as any,
+    })
+
+    const html = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: mockDetails,
+        loading: false,
+        rowView: mockRowView,
+      }),
+    )
+
+    // Check Realized Value card header
+    expect(html).toContain('Realized Value')
+    expect(html).toContain('120,000,000 Cr')
+
+    // Check the 5 orange negative loss lines
+    expect(html).toContain('Cartographics Lost (Death):')
+    expect(html).toContain('-5,000,000 Cr')
+
+    expect(html).toContain('Exobiology Lost (Death):')
+    expect(html).toContain('-10,000,000 Cr')
+
+    expect(html).toContain('Cartographics Stolen:')
+    expect(html).toContain('-2,000,000 Cr')
+
+    expect(html).toContain('Exobiology Stolen:')
+    expect(html).toContain('-8,000,000 Cr')
+
+    expect(html).toContain('NPC Crew Payouts:')
+    expect(html).toContain('-1,200,000 Cr')
+
+    // Ensure all 5 values have orange text-[#FF7100] styling
+    const orangeMatches = html.match(/text-\[#FF7100\]/g)
+    expect(orangeMatches && orangeMatches.length).toBeGreaterThanOrEqual(6)
+
+    // Ensure strictly no emojis anywhere in the drawer HTML
+    const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u
+    expect(emojiRegex.test(html)).toBe(false)
+  })
+
   it('supports collapsible columns: hides notes or carrier stop when toggled off', () => {
     const mockRowView = expedition.RowView.createFrom({
       row: {

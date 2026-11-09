@@ -272,6 +272,8 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 		return 0, importError
 	}
 	_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
+	_ = db.SetSetting(app.db, "edd_db_path", eddPath)
+	_ = db.SetSetting(app.db, "edd_history_realization_v6", "1")
 	app.dbMu.RUnlock()
 
 	app.invalidateAllTimeCache()
@@ -1114,6 +1116,7 @@ type SidebarStats struct {
 	BaselineSource      string        `json:"baselineSource"`
 	Baseline            stats.Metrics `json:"baseline"`
 	Lifetime            stats.Metrics `json:"lifetime"` // baseline + expedition
+	Realization         stats.RealizationBreakdown `json:"realization"`
 }
 
 // GetSidebarStats computes the sidebar for an expedition with mode filters.
@@ -1226,6 +1229,9 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 
 		sidebar.Live = liveMetrics
 		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
+		sidebar.Realization, _ = statsEngine.ComputeRealization(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
+	} else {
+		sidebar.Realization, _ = statsEngine.ComputeRealization(stats.Range{}, &filter)
 	}
 	return sidebar, nil
 }
