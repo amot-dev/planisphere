@@ -342,7 +342,8 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
         title={`Open ${systemName} on Inara (${inara})`}
         className={linkBtnClasses}
       >
-        INARA ↗
+        <span>INARA</span>
+        <span aria-hidden="true">↗</span>
       </button>
       <button
         type="button"
@@ -353,7 +354,8 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
         title={`Open ${systemName} on EDSM (${edsm})`}
         className={linkBtnClasses}
       >
-        EDSM ↗
+        <span>EDSM</span>
+        <span aria-hidden="true">↗</span>
       </button>
       {rowView.gec?.url && (
         <button
@@ -365,7 +367,8 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
           title={`EDAstro GEC POI: ${rowView.gec.name} (${rowView.gec.type})`}
           className={linkBtnClasses}
         >
-          GEC ↗
+          <span>GEC</span>
+          <span aria-hidden="true">↗</span>
         </button>
       )}
     </div>

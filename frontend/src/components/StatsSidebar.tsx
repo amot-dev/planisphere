@@ -516,7 +516,7 @@ export const StatsSidebar = memo(function StatsSidebar({
             )}
           </div>
 
-          {/* Realized Value — Orange Realized Profit & Loss Ledger */}
+          {/* Realized Value — Orange Realized Profit and Loss Ledger */}
           <div className="p-2.5">
             <button
               type="button"

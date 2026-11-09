@@ -1148,7 +1148,7 @@ export function ExpeditionPlanner({
                 !hasWp1System ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
               }`}
             >
-              <span>▶ ENGAGE EXPEDITION</span>
+              <span>ENGAGE EXPEDITION</span>
             </button>
           )}
 
