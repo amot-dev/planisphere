@@ -58,16 +58,11 @@ export const SquareCheckbox = memo(function SquareCheckbox({
         disabled ? 'opacity-40 cursor-not-allowed' : isInteractive ? 'cursor-pointer' : ''
       } ${className}`}
       title={title}
-      onClick={(event) => {
-        if (!isInteractive || !onChange) return
-        event.stopPropagation()
-        onChange(checked !== true)
-      }}
     >
       {onChange && (
         <input
           type="checkbox"
-          className="sr-only"
+          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
           checked={checked === true}
           disabled={disabled}
           onChange={(event) => {

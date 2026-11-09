@@ -36,4 +36,17 @@ describe('SquareCheckbox', () => {
     expect(html).toContain('fill="transparent"')
     expect(html).toContain('fill="#ff0000"')
   })
+
+  it('renders accessible overlay checkbox input for keyboard and click dispatch', () => {
+    const html = renderToString(
+      createElement(SquareCheckbox, {
+        checked: false,
+        onChange: () => {},
+        'aria-label': 'Track Commander',
+      }),
+    )
+    expect(html).toContain('type="checkbox"')
+    expect(html).toContain('absolute inset-0')
+    expect(html).toContain('aria-label="Track Commander"')
+  })
 })
