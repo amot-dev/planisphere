@@ -117,14 +117,6 @@ export default function App() {
       if (chosenId > 0) {
         setActiveExpeditionId(chosenId)
         activeExpeditionIdRef.current = chosenId
-        try {
-          const initialPlan = await GetPlan(chosenId)
-          if (initialPlan) {
-            setPlan(initialPlan)
-          }
-        } catch (planError) {
-          console.error('Failed to preload initial plan:', planError)
-        }
       }
     } catch (coreStateError) {
       console.error('Failed to load core state:', coreStateError)
