@@ -1,11 +1,13 @@
 package journal_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"planisphere/internal/db"
 	"planisphere/internal/journal"
@@ -265,4 +267,69 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 	if cmdrs[1].name != "CmdrTwo" || cmdrs[1].fid != "F002" || cmdrs[1].firstSeen != "2026-01-19T20:00:00Z" || cmdrs[1].lastSeen != "2026-01-19T20:30:00Z" {
 		t.Errorf("unexpected CmdrTwo record: %+v", cmdrs[1])
 	}
+}
+
+func TestWatcherStartStopSynchronization(t *testing.T) {
+	temporaryDirectoryOne := t.TempDir()
+	temporaryDirectoryTwo := t.TempDir()
+
+	watcherInstance := journal.NewWatcher(nil, nil)
+
+	parentContext, cancelParentContext := context.WithCancel(context.Background())
+	defer cancelParentContext()
+
+	watcherInstance.Start(parentContext, temporaryDirectoryOne)
+	watcherInstance.Start(parentContext, temporaryDirectoryTwo)
+
+	time.Sleep(50 * time.Millisecond)
+
+	isActive, watcherErrorMessage := watcherInstance.Active()
+	if !isActive {
+		t.Fatalf("expected watcher to remain active after sequential Start calls, got inactive with error: %s", watcherErrorMessage)
+	}
+
+	watcherInstance.Stop()
+
+	isActiveAfterStop, _ := watcherInstance.Active()
+	if isActiveAfterStop {
+		t.Fatalf("expected watcher to be inactive after explicit Stop")
+	}
+}
+
+func TestWatcherReconnectWhenDirectoryCreated(t *testing.T) {
+	baseTemporaryDirectory := t.TempDir()
+	targetJournalDirectory := filepath.Join(baseTemporaryDirectory, "journals")
+
+	watcherInstance := journal.NewWatcher(nil, nil)
+
+	parentContext, cancelParentContext := context.WithCancel(context.Background())
+	defer cancelParentContext()
+
+	watcherInstance.Start(parentContext, targetJournalDirectory)
+
+	initiallyActive, _ := watcherInstance.Active()
+	if initiallyActive {
+		t.Fatalf("expected watcher to be initially inactive because directory does not exist")
+	}
+
+	if directoryCreationError := os.Mkdir(targetJournalDirectory, 0o755); directoryCreationError != nil {
+		t.Fatalf("failed to create target journal directory: %v", directoryCreationError)
+	}
+
+	deadlineTimer := time.Now().Add(4 * time.Second)
+	reconnectedSuccessfully := false
+	for time.Now().Before(deadlineTimer) {
+		activeStatus, _ := watcherInstance.Active()
+		if activeStatus {
+			reconnectedSuccessfully = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !reconnectedSuccessfully {
+		t.Fatalf("expected watcher to automatically reconnect after directory was created")
+	}
+
+	watcherInstance.Stop()
 }

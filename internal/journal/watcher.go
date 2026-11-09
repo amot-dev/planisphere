@@ -16,9 +16,10 @@ type Watcher struct {
 	ingester *Ingester
 	onBatch  func(Result)
 
-	mu      sync.Mutex
-	dir     string
-	cancel  context.CancelFunc
+	mu        sync.Mutex
+	dir       string
+	cancel    context.CancelFunc
+	done      chan struct{}
 	active    bool
 	lastError string
 }
@@ -40,11 +41,13 @@ func (watcher *Watcher) Active() (bool, string) {
 func (watcher *Watcher) Start(parent context.Context, dir string) {
 	watcher.Stop()
 	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
 	watcher.mu.Lock()
 	watcher.dir = dir
 	watcher.cancel = cancel
+	watcher.done = done
 	watcher.mu.Unlock()
-	go watcher.run(ctx, dir)
+	go watcher.run(ctx, dir, done)
 }
 
 // Stop stops watching.
@@ -54,8 +57,14 @@ func (watcher *Watcher) Stop() {
 		watcher.cancel()
 		watcher.cancel = nil
 	}
-	watcher.active = false
+	done := watcher.done
+	watcher.done = nil
 	watcher.mu.Unlock()
+
+	if done != nil {
+		<-done
+	}
+	watcher.setActive(false, "")
 }
 
 func (watcher *Watcher) setActive(active bool, errorMessage string) {
@@ -65,10 +74,11 @@ func (watcher *Watcher) setActive(active bool, errorMessage string) {
 }
 
 const (
-	debounceDelay = 300 * time.Millisecond
+	debounceDelay     = 300 * time.Millisecond
+	reconnectInterval = 2 * time.Second
 )
 
-func (watcher *Watcher) run(ctx context.Context, dir string) {
+func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{}) {
 	var fsWatcher *fsnotify.Watcher
 	var fsEvents <-chan fsnotify.Event
 	var errorChan <-chan error
@@ -83,7 +93,7 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 			return
 		}
 		if addError := newWatcher.Add(dir); addError != nil {
-			newWatcher.Close()
+			_ = newWatcher.Close()
 			watcher.setActive(false, addError.Error())
 			return
 		}
@@ -92,16 +102,20 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 	}
 	defer func() {
 		if fsWatcher != nil {
-			fsWatcher.Close()
+			_ = fsWatcher.Close()
 		}
 		watcher.setActive(false, "")
+		close(done)
 	}()
 
 	tryWatch()
 	pending := map[string]bool{}
-	debounce := time.NewTimer(time.Hour)
-	defer debounce.Stop()
-	debounce.Stop()
+	debounceTimer := time.NewTimer(time.Hour)
+	defer debounceTimer.Stop()
+	debounceTimer.Stop()
+
+	reconnectTicker := time.NewTicker(reconnectInterval)
+	defer reconnectTicker.Stop()
 
 	flush := func(paths []string) {
 		var total Result
@@ -121,21 +135,28 @@ func (watcher *Watcher) run(ctx context.Context, dir string) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-reconnectTicker.C:
+			if fsWatcher == nil {
+				tryWatch()
+			}
 		case fsEvent, ok := <-fsEvents:
 			if !ok {
+				if fsWatcher != nil {
+					_ = fsWatcher.Close()
+				}
 				fsWatcher, fsEvents, errorChan = nil, nil, nil
 				watcher.setActive(false, "watcher closed")
 				continue
 			}
 			if IsJournalFile(fsEvent.Name) && fsEvent.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 				pending[fsEvent.Name] = true
-				debounce.Reset(debounceDelay)
+				debounceTimer.Reset(debounceDelay)
 			}
 		case watchError, ok := <-errorChan:
 			if ok && watchError != nil {
 				log.Printf("journal: watcher error: %v", watchError)
 			}
-		case <-debounce.C:
+		case <-debounceTimer.C:
 			paths := make([]string, 0, len(pending))
 			for path := range pending {
 				paths = append(paths, path)
