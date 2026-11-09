@@ -34,8 +34,14 @@ Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router t
 ### Real-time cartography and exobiology payouts
 Get estimated credit values for bodies you scan (FSS, DSS, first discovery, first mapped, and terraformable bonuses) and plants you sample in your Artemis suit (base species value plus the massive first-logged multiplier) right as they hit your journal.
 
+### Realized earnings and loss accounting
+When you dock and sell exploration data, Planisphere tracks your actual realized earnings alongside theoretical survey totals. It automatically logs credit losses resulting from ship destruction, first-discovery or first-logged bonuses claimed first by other commanders, and active NPC crew wage deductions.
+
 > [!NOTE]
 > **What happens if you die?** Elite Dangerous journals never erase past entries. If your ship is destroyed out in the black, Planisphere preserves all the scans, organic samples, and estimated values you gathered before rebuy. Your stats record the survey work you actually did in the field, even if you never got to cash it in. Respawning also won't inflate your jump distance or advance your waypoints.
+
+### Optional historical import from EDDiscovery
+If your older raw journal files have been purged or archived, Planisphere can optionally recover your flight history directly from an existing EDDiscovery database (`EDDUser.sqlite`) on an as-needed basis during setup or through Settings.
 
 ### Built-in POI catalog
 Automatically flags systems listed in EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP). When your route passes a notable landmark or planetary nebula, you get the POI name and one-click shortcuts to EDAstro, Inara, and EDSM.
@@ -108,9 +114,10 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 ### Architecture
 
 - **Local-First**: Everything lives in a local SQLite database on your machine. Your journals, route waypoints, and cached coordinates stay local and work completely offline.
-- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using native filesystem notifications (`fsnotify`). It handles out-of-order writes safely and never touches your game files.
+- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using native filesystem notifications (`fsnotify`) as its primary event pipeline. It handles out-of-order writes safely and never touches your game files.
   > [!WARNING]
   > The journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent folders do not emit kernel filesystem events and are not supported for live log streaming.
+- **Optional Historical Ingestion**: When older journal files are no longer available on disk, Planisphere can optionally backfill past flight events from an existing EDDiscovery database (`EDDUser.sqlite`).
 - **Single Source of Truth Config**: Versioning, product name, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, and package manifests in sync.
 
 ### Commands
