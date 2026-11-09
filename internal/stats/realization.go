@@ -157,8 +157,47 @@ func timeDiffSeconds(ts1, ts2 string) float64 {
 	return math.Abs(t1.Sub(t2).Seconds())
 }
 
-// buildLedger constructs the full chronological lifecycle ledger.
+var (
+	ledgerCacheMu sync.RWMutex
+	cachedLedger  *RealizationLedger
+	cachedDB      any
+)
+
+// InvalidateLedgerCache clears the in-memory cached realization ledger.
+func InvalidateLedgerCache() {
+	ledgerCacheMu.Lock()
+	cachedLedger = nil
+	cachedDB = nil
+	ledgerCacheMu.Unlock()
+}
+
+// buildLedger returns the cached lifecycle ledger or constructs a new one.
 func (engine *Engine) buildLedger() (*RealizationLedger, error) {
+	ledgerCacheMu.RLock()
+	if cachedLedger != nil && cachedDB == engine.DB {
+		ledger := cachedLedger
+		ledgerCacheMu.RUnlock()
+		return ledger, nil
+	}
+	ledgerCacheMu.RUnlock()
+
+	ledgerCacheMu.Lock()
+	defer ledgerCacheMu.Unlock()
+	if cachedLedger != nil && cachedDB == engine.DB {
+		return cachedLedger, nil
+	}
+
+	freshLedger, constructError := engine.constructLedger()
+	if constructError != nil {
+		return nil, constructError
+	}
+	cachedLedger = freshLedger
+	cachedDB = engine.DB
+	return freshLedger, nil
+}
+
+// constructLedger builds the full chronological lifecycle ledger from journal events.
+func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 	events, err := engine.loadEvents("", "9999-12-31T23:59:59Z", realizationEvents)
 	if err != nil {
 		return nil, err

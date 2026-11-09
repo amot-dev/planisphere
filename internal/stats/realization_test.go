@@ -15,7 +15,10 @@ func setupRealizationDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open in-memory db: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() {
+		_ = conn.Close()
+		stats.InvalidateLedgerCache()
+	})
 	return conn
 }
 
@@ -161,5 +164,50 @@ func TestRealizationCartoLostDeathAndSold(t *testing.T) {
 	}
 	if res.TotalRealized != 0 {
 		t.Errorf("expected TotalRealized 0, got %d", res.TotalRealized)
+	}
+}
+
+func TestRealizationLedgerCaching(t *testing.T) {
+	databaseConnection := setupRealizationDB(t)
+
+	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`)
+
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	firstResult, firstComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
+	if firstComputeError != nil {
+		t.Fatalf("first ComputeRealization failed: %v", firstComputeError)
+	}
+	if firstResult.PendingValue <= 0 {
+		t.Fatalf("expected positive PendingValue, got %d", firstResult.PendingValue)
+	}
+
+	// Insert second event directly into database without invalidating cache
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`)
+
+	// Query with cached ledger should still report pending because cache has not been invalidated
+	secondResult, secondComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
+	if secondComputeError != nil {
+		t.Fatalf("second ComputeRealization failed: %v", secondComputeError)
+	}
+	if secondResult.PendingValue != firstResult.PendingValue {
+		t.Fatalf("expected identical cached pending value %d, got %d", firstResult.PendingValue, secondResult.PendingValue)
+	}
+
+	// Invalidate ledger cache
+	stats.InvalidateLedgerCache()
+
+	// Query after invalidation should pick up the sale
+	thirdResult, thirdComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
+	if thirdComputeError != nil {
+		t.Fatalf("third ComputeRealization failed: %v", thirdComputeError)
+	}
+	if thirdResult.PendingValue != 0 {
+		t.Fatalf("expected pending value 0 after sale realization and cache invalidation, got %d", thirdResult.PendingValue)
+	}
+	if thirdResult.TotalRealized != 95054000 {
+		t.Fatalf("expected TotalRealized 95054000 after cache invalidation, got %d", thirdResult.TotalRealized)
 	}
 }

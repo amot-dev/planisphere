@@ -282,6 +282,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	}
 	app.dbMu.RUnlock()
 
+	stats.InvalidateLedgerCache()
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
 	app.changed("journal", 0)

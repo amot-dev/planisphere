@@ -41,11 +41,12 @@ func NewIngester(conn *sql.DB) *Ingester { return &Ingester{conn: conn} }
 
 // Result summarises an ingestion pass.
 type Result struct {
-	FilesScanned int
-	FilesUpdated int
-	LinesRead    int
-	NewEvents    int // count of events actually inserted (not previously known)
-	Errors       []string
+	FilesScanned         int
+	FilesUpdated         int
+	LinesRead            int
+	NewEvents            int // count of events actually inserted (not previously known)
+	HasRealizationEvents bool
+	Errors               []string
 }
 
 func (result *Result) merge(other Result) {
@@ -53,7 +54,20 @@ func (result *Result) merge(other Result) {
 	result.FilesUpdated += other.FilesUpdated
 	result.LinesRead += other.LinesRead
 	result.NewEvents += other.NewEvents
+	result.HasRealizationEvents = result.HasRealizationEvents || other.HasRealizationEvents
 	result.Errors = append(result.Errors, other.Errors...)
+}
+
+// IsRealizationEvent reports whether eventName affects exploration payout realization or loss accounting.
+func IsRealizationEvent(eventName string) bool {
+	switch eventName {
+	case "Scan", "SAAScanComplete", "ScanOrganic",
+		"SellExplorationData", "MultiSellExplorationData", "SellOrganicData",
+		"Died", "Resurrect", "NpcCrewPaidWage":
+		return true
+	default:
+		return false
+	}
 }
 
 // ListJournalFiles returns all journal files in dir sorted by name (which is
@@ -214,6 +228,9 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 			if rowsAffected > 0 {
 				state.stored++
 				result.NewEvents++
+				if IsRealizationEvent(parsedEvent.Event) {
+					result.HasRealizationEvents = true
+				}
 				if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
 					state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
 				}
@@ -515,6 +532,9 @@ func (ingester *Ingester) ImportEDDiscoveryDB(ctx context.Context, eddPath strin
 				return execError
 			}
 			fileEvents[name]++
+			if IsRealizationEvent(parsedEvent.Event) {
+				result.HasRealizationEvents = true
+			}
 			if firstSeen, ok := fileFirst[name]; !ok || parsedEvent.Timestamp < firstSeen {
 				fileFirst[name] = parsedEvent.Timestamp
 			}

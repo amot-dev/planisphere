@@ -308,6 +308,9 @@ func (app *App) runScan() {
 		_ = db.SetSetting(app.db, settingLastScanAt, ed.NowISO())
 	}
 	app.dbMu.RUnlock()
+	if scanResult.HasRealizationEvents {
+		stats.InvalidateLedgerCache()
+	}
 	if scanResult.LinesRead > 0 {
 		app.invalidateAllTimeCache()
 	}
@@ -320,6 +323,9 @@ func (app *App) runScan() {
 
 // onJournalBatch runs after the live tailer stored new events.
 func (app *App) onJournalBatch(scanResult journal.Result) {
+	if scanResult.HasRealizationEvents {
+		stats.InvalidateLedgerCache()
+	}
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
 	app.changed("journal", 0)
@@ -465,6 +471,7 @@ func (app *App) maybeCatchUpEDD() {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if err == nil {
+		stats.InvalidateLedgerCache()
 		_ = db.SetSetting(database, "edd_history_realization_v6", "1")
 		app.invalidateAllTimeCache()
 		app.reevaluateActive()
