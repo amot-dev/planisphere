@@ -3,6 +3,7 @@ package journal
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -67,7 +68,7 @@ func ListJournalFiles(dir string) ([]string, error) {
 }
 
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
-func (ingester *Ingester) ScanDir(dir string) (Result, error) {
+func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, error) {
 	var scanResult Result
 	if !DirExists(dir) {
 		return scanResult, fmt.Errorf("journal directory not found: %s", dir)
@@ -77,6 +78,11 @@ func (ingester *Ingester) ScanDir(dir string) (Result, error) {
 		return scanResult, listError
 	}
 	for _, filePath := range files {
+		select {
+		case <-ctx.Done():
+			return scanResult, ctx.Err()
+		default:
+		}
 		fileResult, ingestError := ingester.IngestFile(filePath)
 		if ingestError != nil {
 			scanResult.Errors = append(scanResult.Errors, fmt.Sprintf("%s: %v", filepath.Base(filePath), ingestError))
@@ -322,9 +328,15 @@ func SetCommanderEnabled(queryer db.Queryer, name string, enabled bool) error {
 // inside an EDDiscovery SQLite database (JournalEntries.EventData) for older
 // .log files that may have been deleted from disk. Once imported, all events
 // live permanently inside our own journal_events table.
-func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(current, total, files int, stage string)) (Result, error) {
+func (ingester *Ingester) ImportEDDiscoveryDB(ctx context.Context, eddPath string, onProgress func(current, total, files int, stage string)) (Result, error) {
 	ingester.mu.Lock()
 	defer ingester.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	default:
+	}
 
 	reportProgress := func(current, total, files int, stage string) {
 		if onProgress != nil {
@@ -352,14 +364,14 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 		)`
 
 	var total int
-	if countError := eddConn.QueryRow(`
+	if countError := eddConn.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM JournalEntries journalEntry
 		WHERE ` + eventFilter).Scan(&total); countError != nil {
 		return result, fmt.Errorf("count EDDiscovery JournalEntries: %w", countError)
 	}
 
-	rows, queryError := eddConn.Query(`
+	rows, queryError := eddConn.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(travelUnit.Name, ''), 'EDD-' || journalEntry.TravelLogId),
 		       COALESCE(NULLIF(travelUnit.Path, ''), 'EDD-' || journalEntry.TravelLogId),
 		       journalEntry.EventData
@@ -450,6 +462,11 @@ func (ingester *Ingester) ImportEDDiscoveryDB(eddPath string, onProgress func(cu
 			result.LinesRead++
 
 			if entryIndex%1500 == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 				reportProgress(entryIndex, total, result.FilesScanned, "Ingesting historical journal events into SQLite archive…")
 			}
 			entryIndex++

@@ -3,6 +3,7 @@ package journal_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,7 +179,7 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 
 	var lastTotal int
 	progressCalled := false
-	res, err := ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
+	res, err := ingester.ImportEDDiscoveryDB(context.Background(), eddPath, func(current, total, files int, stage string) {
 		progressCalled = true
 		lastTotal = total
 	})
@@ -332,4 +333,47 @@ func TestWatcherReconnectWhenDirectoryCreated(t *testing.T) {
 	}
 
 	watcherInstance.Stop()
+}
+
+func TestScanDir_ContextCancellation(t *testing.T) {
+	temporaryDatabaseConnection, databaseOpenError := db.Open(":memory:")
+	if databaseOpenError != nil {
+		t.Fatal(databaseOpenError)
+	}
+	defer temporaryDatabaseConnection.Close()
+
+	temporaryDirectory := t.TempDir()
+	journalFilePath := filepath.Join(temporaryDirectory, "Journal.2026-01-18T190000.01.log")
+	journalContent := `{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay"}` + "\n"
+	if writeError := os.WriteFile(journalFilePath, []byte(journalContent), 0o644); writeError != nil {
+		t.Fatal(writeError)
+	}
+
+	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
+
+	cancelledContext, cancelFunction := context.WithCancel(context.Background())
+	cancelFunction() // Cancel immediately
+
+	_, scanError := ingesterInstance.ScanDir(cancelledContext, temporaryDirectory)
+	if !errors.Is(scanError, context.Canceled) {
+		t.Fatalf("expected context.Canceled error from ScanDir, got %v", scanError)
+	}
+}
+
+func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
+	temporaryDatabaseConnection, databaseOpenError := db.Open(":memory:")
+	if databaseOpenError != nil {
+		t.Fatal(databaseOpenError)
+	}
+	defer temporaryDatabaseConnection.Close()
+
+	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
+
+	cancelledContext, cancelFunction := context.WithCancel(context.Background())
+	cancelFunction() // Cancel immediately
+
+	_, importError := ingesterInstance.ImportEDDiscoveryDB(cancelledContext, "nonexistent.sqlite", nil)
+	if !errors.Is(importError, context.Canceled) {
+		t.Fatalf("expected context.Canceled error from ImportEDDiscoveryDB, got %v", importError)
+	}
 }

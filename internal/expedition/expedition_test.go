@@ -1,6 +1,7 @@
 package expedition_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 	}
 
 	ingester := journal.NewIngester(dbConn)
-	scanResult, scanError := ingester.ScanDir(tmpDir)
+	scanResult, scanError := ingester.ScanDir(context.Background(), tmpDir)
 	if scanError != nil {
 		t.Fatal(scanError)
 	}
@@ -68,7 +69,7 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 	}
 
 	// Re-scanning the same directory is idempotent (0 new events).
-	rescanResult, rescanError := ingester.ScanDir(tmpDir)
+	rescanResult, rescanError := ingester.ScanDir(context.Background(), tmpDir)
 	if rescanError != nil {
 		t.Fatal(rescanError)
 	}
@@ -308,7 +309,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		t.Fatal(err)
 	}
 	ingester := journal.NewIngester(dbConn)
-	if _, err := ingester.ScanDir(tmpDir); err != nil {
+	if _, err := ingester.ScanDir(context.Background(), tmpDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +403,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	ingester := journal.NewIngester(dbConn)
-	if _, err := ingester.ScanDir(tmpDir); err != nil {
+	if _, err := ingester.ScanDir(context.Background(), tmpDir); err != nil {
 		t.Fatal(err)
 	}
 

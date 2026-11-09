@@ -295,7 +295,7 @@ func (app *App) runScan() {
 	if ingester == nil || database == nil {
 		return
 	}
-	scanResult, scanError := ingester.ScanDir(dir)
+	scanResult, scanError := ingester.ScanDir(app.ctx, dir)
 	if scanError != nil {
 		app.setError(scanError.Error())
 	} else if len(scanResult.Errors) > 0 {
@@ -461,7 +461,7 @@ func (app *App) maybeCatchUpEDD() {
 		return
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
-	_, err := ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
+	_, err := ingester.ImportEDDiscoveryDB(app.ctx, eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if err == nil {

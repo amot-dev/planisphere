@@ -267,7 +267,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
 
-	importResult, importError := ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
+	importResult, importError := ingester.ImportEDDiscoveryDB(app.ctx, eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError != nil {

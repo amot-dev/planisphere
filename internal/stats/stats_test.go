@@ -1,6 +1,7 @@
 package stats_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	}
 
 	ingester := journal.NewIngester(conn)
-	scanResult, scanError := ingester.ScanDir(tmpDir)
+	scanResult, scanError := ingester.ScanDir(context.Background(), tmpDir)
 	if scanError != nil {
 		t.Fatal(scanError)
 	}
@@ -217,7 +218,7 @@ func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
 	}
 
 	ingester := journal.NewIngester(conn)
-	if _, scanError := ingester.ScanDir(tmpDir); scanError != nil {
+	if _, scanError := ingester.ScanDir(context.Background(), tmpDir); scanError != nil {
 		t.Fatal(scanError)
 	}
 
@@ -289,7 +290,7 @@ func TestPreloadScansForMappedBodies(t *testing.T) {
 	}
 
 	ingester := journal.NewIngester(conn)
-	if _, err := ingester.ScanDir(tmpDir); err != nil {
+	if _, err := ingester.ScanDir(context.Background(), tmpDir); err != nil {
 		t.Fatal(err)
 	}
 
