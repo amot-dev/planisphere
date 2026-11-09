@@ -72,6 +72,11 @@ var migrations = []migration{
 		description: "Reset ingested_journals byte offsets for Died, Resurrect, NpcCrewPaidWage, and SellExplorationData",
 		apply:       migrateRealizationEventsV6,
 	},
+	{
+		key:         "source_file_index_v7",
+		description: "Add index on journal_events source_file column to accelerate commander backfills",
+		apply:       migrateSourceFileIndexV7,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -185,6 +190,13 @@ func migrateGECSchemaV5(dbConn *sql.DB) error {
 func migrateRealizationEventsV6(dbConn *sql.DB) error {
 	if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
 		return updateError
+	}
+	return nil
+}
+
+func migrateSourceFileIndexV7(dbConn *sql.DB) error {
+	if _, createIndexError := dbConn.Exec(`CREATE INDEX IF NOT EXISTS idx_journal_events_source ON journal_events(source_file)`); createIndexError != nil {
+		return fmt.Errorf("create idx_journal_events_source: %w", createIndexError)
 	}
 	return nil
 }

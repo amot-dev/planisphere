@@ -38,6 +38,8 @@ func TestMigrateIdempotency(t *testing.T) {
 		"commander_schema_v3",
 		"fc_arrived_v4",
 		"gec_schema_v5",
+		"realization_events_v6",
+		"source_file_index_v7",
 	}
 
 	for _, key := range expectedKeys {
@@ -57,6 +59,15 @@ func TestMigrateIdempotency(t *testing.T) {
 	}
 	if expName != db.DefaultExpeditionName {
 		t.Errorf("expected expedition %q, got %q", db.DefaultExpeditionName, expName)
+	}
+
+	// Verify idx_journal_events_source index exists
+	var indexCount int
+	if indexQueryError := dbConn.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_journal_events_source'").Scan(&indexCount); indexQueryError != nil {
+		t.Fatalf("query sqlite_master for idx_journal_events_source: %v", indexQueryError)
+	}
+	if indexCount != 1 {
+		t.Fatalf("expected index idx_journal_events_source to exist, found count %d", indexCount)
 	}
 }
 

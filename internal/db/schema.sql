@@ -59,6 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_events_event_ts ON journal_events(event, 
 CREATE INDEX IF NOT EXISTS idx_journal_events_system   ON journal_events(system_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_journal_events_body     ON journal_events(system_address, body_id);
 CREATE INDEX IF NOT EXISTS idx_journal_events_cmdr     ON journal_events(commander COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_journal_events_source   ON journal_events(source_file);
 
 -- Tracking modes (Exploration / Tourism / Travel + user-defined).
 CREATE TABLE IF NOT EXISTS modes (
