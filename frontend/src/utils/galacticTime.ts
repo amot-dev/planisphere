@@ -79,6 +79,16 @@ export function formatCredits(credits: number | undefined | null): string {
 }
 
 /**
+ * Formats credit loss values with negative prefix and "Cr" suffix.
+ */
+export function formatLoss(val?: number | null): string {
+  if (!val || val === 0) {
+    return '0 Cr'
+  }
+  return `-${formatCredits(val)}`
+}
+
+/**
  * Formats compact credit values (e.g. "95.05M Cr" or "1,420,100 Cr").
  */
 export function formatLy(lightYears: number | undefined | null, decimals = 2): string {

@@ -228,9 +228,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 
 	findCrewWage := func(saleTimestamp string) int64 {
 		var totalWage int64
-		for _, w := range recentWageEvents {
-			if timeDiffSeconds(w.Timestamp, saleTimestamp) <= 5.0 {
-				totalWage += w.Amount
+		for _, wageEvent := range recentWageEvents {
+			if timeDiffSeconds(wageEvent.Timestamp, saleTimestamp) <= 5.0 {
+				totalWage += wageEvent.Amount
 			}
 		}
 		return totalWage
@@ -252,7 +252,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			if scanEv.ScanType == "NavBeaconDetail" {
 				continue
 			}
-			val := ed.EstimateBodyValue(toBodyScan(&scanEv), ed.MappingInfo{}, engine.Odyssey)
+			estimatedBodyValue := ed.EstimateBodyValue(toBodyScan(&scanEv), ed.MappingInfo{}, engine.Odyssey)
 			rec := &scanRecord{
 				timestamp:        ev.timestamp,
 				systemAddress:    scanEv.SystemAddress,
@@ -260,9 +260,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				bodyID:           scanEv.BodyID,
 				bodyName:         scanEv.BodyName,
 				isOrganic:        false,
-				theoreticalBase:  val.Base,
-				theoreticalBonus: val.Bonus,
-				theoreticalTotal: val.Total,
+				theoreticalBase:  estimatedBodyValue.Base,
+				theoreticalBonus: estimatedBodyValue.Bonus,
+				theoreticalTotal: estimatedBodyValue.Total,
 				status:           "pending",
 			}
 			unsoldCarto[key] = rec
@@ -279,13 +279,13 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				continue
 			}
 			mappingInfo := ed.MappingInfo{Mapped: true, ProbesUsed: saaEv.ProbesUsed, EfficiencyTarget: saaEv.EfficiencyTarget}
-			inc := ed.EstimateMappingIncrement(toBodyScan(scan), mappingInfo, engine.Odyssey)
+			mappingIncrement := ed.EstimateMappingIncrement(toBodyScan(scan), mappingInfo, engine.Odyssey)
 
 			rec := unsoldCarto[key]
 			if rec != nil {
-				rec.theoreticalBase += inc.Base
-				rec.theoreticalBonus += inc.Bonus
-				rec.theoreticalTotal += inc.Total
+				rec.theoreticalBase += mappingIncrement.Base
+				rec.theoreticalBonus += mappingIncrement.Bonus
+				rec.theoreticalTotal += mappingIncrement.Total
 			} else {
 				// Mapped without existing pending scan in current batch
 				rec = &scanRecord{
@@ -294,9 +294,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					bodyID:           saaEv.BodyID,
 					bodyName:         saaEv.BodyName,
 					isOrganic:        false,
-					theoreticalBase:  inc.Base,
-					theoreticalBonus: inc.Bonus,
-					theoreticalTotal: inc.Total,
+					theoreticalBase:  mappingIncrement.Base,
+					theoreticalBonus: mappingIncrement.Bonus,
+					theoreticalTotal: mappingIncrement.Total,
 					status:           "pending",
 				}
 				unsoldCarto[key] = rec
@@ -318,7 +318,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					firstLogged = !*parentScan.WasFootfalled
 				}
 			}
-			val := ed.OrganicValue(baseVal, firstLogged)
+			calculatedOrganicValue := ed.OrganicValue(baseVal, firstLogged)
 			rec := &scanRecord{
 				timestamp:        ev.timestamp,
 				systemAddress:    organicEv.SystemAddress,
@@ -326,9 +326,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				isOrganic:        true,
 				species:          organicEv.Species,
 				variant:          organicEv.Variant,
-				theoreticalBase:  val.Base,
-				theoreticalBonus: val.Bonus,
-				theoreticalTotal: val.Total,
+				theoreticalBase:  calculatedOrganicValue.Base,
+				theoreticalBonus: calculatedOrganicValue.Bonus,
+				theoreticalTotal: calculatedOrganicValue.Total,
 				status:           "pending",
 			}
 			unsoldOrganic = append(unsoldOrganic, rec)
@@ -420,13 +420,13 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 			totalCrewWage := findCrewWage(sellEv.Timestamp)
 			discoveredSet := make(map[string]bool, len(sellEv.Discovered))
-			for _, d := range sellEv.Discovered {
-				discoveredSet[strings.ToLower(strings.TrimSpace(d))] = true
+			for _, discoveredBody := range sellEv.Discovered {
+				discoveredSet[strings.ToLower(strings.TrimSpace(discoveredBody))] = true
 			}
 
 			soldSystemSet := make(map[string]bool, len(sellEv.Systems))
-			for _, s := range sellEv.Systems {
-				soldSystemSet[strings.ToLower(strings.TrimSpace(s))] = true
+			for _, soldSystemName := range sellEv.Systems {
+				soldSystemSet[strings.ToLower(strings.TrimSpace(soldSystemName))] = true
 			}
 
 			// Find matching unsold carto records for sold systems
@@ -440,26 +440,28 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 
 			if len(matchedRecs) > 0 {
 				var totalTheoretical int64
-				for _, r := range matchedRecs {
-					totalTheoretical += r.theoreticalTotal
+				for _, matchedRecord := range matchedRecs {
+					totalTheoretical += matchedRecord.theoreticalTotal
 				}
-				for _, r := range matchedRecs {
-					r.status = "sold"
-					r.soldTimestamp = sellEv.Timestamp
+				// Distribute lump-sum earnings, bonuses, and crew deductions proportionally across matched scan records
+				// according to each body's share of total theoretical scan value.
+				for _, matchedRecord := range matchedRecs {
+					matchedRecord.status = "sold"
+					matchedRecord.soldTimestamp = sellEv.Timestamp
 					ratio := 1.0
 					if totalTheoretical > 0 {
-						ratio = float64(r.theoreticalTotal) / float64(totalTheoretical)
+						ratio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
 					}
-					r.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
-					r.actualBase = int64(float64(sellEv.BaseValue) * ratio)
-					r.actualBonus = int64(float64(sellEv.Bonus) * ratio)
+					matchedRecord.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
+					matchedRecord.actualBase = int64(float64(sellEv.BaseValue) * ratio)
+					matchedRecord.actualBonus = int64(float64(sellEv.Bonus) * ratio)
 					if totalCrewWage > 0 {
-						r.crewLoss = int64(float64(totalCrewWage) * ratio)
+						matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
 					}
 
 					// Stolen check: had bonus expectation, but body name not in Discovered array
-					if r.theoreticalBonus > 0 && !discoveredSet[strings.ToLower(strings.TrimSpace(r.bodyName))] && sellEv.Bonus == 0 {
-						r.stolenLoss = r.theoreticalBonus
+					if matchedRecord.theoreticalBonus > 0 && !discoveredSet[strings.ToLower(strings.TrimSpace(matchedRecord.bodyName))] && sellEv.Bonus == 0 {
+						matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
 					}
 				}
 			} else {
@@ -478,8 +480,8 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 			totalCrewWage := findCrewWage(sellEv.Timestamp)
 			soldSystemSet := make(map[string]bool, len(sellEv.Discovered))
-			for _, d := range sellEv.Discovered {
-				soldSystemSet[strings.ToLower(strings.TrimSpace(d.SystemName))] = true
+			for _, discoveredEntry := range sellEv.Discovered {
+				soldSystemSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
 			}
 
 			var matchedRecs []*scanRecord
@@ -492,24 +494,26 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 
 			if len(matchedRecs) > 0 {
 				var totalTheoretical int64
-				for _, r := range matchedRecs {
-					totalTheoretical += r.theoreticalTotal
+				for _, matchedRecord := range matchedRecs {
+					totalTheoretical += matchedRecord.theoreticalTotal
 				}
-				for _, r := range matchedRecs {
-					r.status = "sold"
-					r.soldTimestamp = sellEv.Timestamp
+				// Distribute multi-sell earnings, bonuses, and crew deductions proportionally across matched scan records
+				// according to each body's share of total theoretical scan value.
+				for _, matchedRecord := range matchedRecs {
+					matchedRecord.status = "sold"
+					matchedRecord.soldTimestamp = sellEv.Timestamp
 					ratio := 1.0
 					if totalTheoretical > 0 {
-						ratio = float64(r.theoreticalTotal) / float64(totalTheoretical)
+						ratio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
 					}
-					r.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
-					r.actualBase = int64(float64(sellEv.BaseValue) * ratio)
-					r.actualBonus = int64(float64(sellEv.Bonus) * ratio)
+					matchedRecord.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
+					matchedRecord.actualBase = int64(float64(sellEv.BaseValue) * ratio)
+					matchedRecord.actualBonus = int64(float64(sellEv.Bonus) * ratio)
 					if totalCrewWage > 0 {
-						r.crewLoss = int64(float64(totalCrewWage) * ratio)
+						matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
 					}
-					if r.theoreticalBonus > 0 && sellEv.Bonus == 0 {
-						r.stolenLoss = r.theoreticalBonus
+					if matchedRecord.theoreticalBonus > 0 && sellEv.Bonus == 0 {
+						matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
 					}
 				}
 			} else {

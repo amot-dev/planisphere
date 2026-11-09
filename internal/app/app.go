@@ -221,11 +221,11 @@ func (app *App) changed(scope string, expeditionID int64) {
 }
 
 func (app *App) emitEDDProgress(active bool, current, total, files int, stage string) {
-	pct := 0
+	percentageProgress := 0
 	if total > 0 {
-		pct = (current * 100) / total
-		if pct > 100 {
-			pct = 100
+		percentageProgress = (current * 100) / total
+		if percentageProgress > 100 {
+			percentageProgress = 100
 		}
 	}
 	app.emit(EventEDDProgress, EDDImportProgress{
@@ -233,7 +233,7 @@ func (app *App) emitEDDProgress(active bool, current, total, files int, stage st
 		Stage:   stage,
 		Current: current,
 		Total:   total,
-		Percent: pct,
+		Percent: percentageProgress,
 		Files:   files,
 	})
 }
@@ -592,10 +592,10 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 				<-app.resolveSem
 			}()
 			app.dbMu.RLock()
-			res := app.resolver
+			coordinateResolver := app.resolver
 			app.dbMu.RUnlock()
-			if res != nil {
-				systemInfo, lookupError = res.Resolve(app.ctx, rowItem.SystemName)
+			if coordinateResolver != nil {
+				systemInfo, lookupError = coordinateResolver.Resolve(app.ctx, rowItem.SystemName)
 			}
 		}()
 	} else {

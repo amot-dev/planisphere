@@ -42,13 +42,13 @@ type Metrics struct {
 	FirstLogged        int     `json:"firstLogged"`
 }
 
-// Add returns the field-wise sum of baseMetrics and otherMetrics.
-func (baseMetrics Metrics) Add(otherMetrics Metrics) Metrics {
+// Add returns the field-wise sum of metrics and otherMetrics.
+func (metrics Metrics) Add(otherMetrics Metrics) Metrics {
 	var tritiumTotal *int
-	if baseMetrics.TritiumUsed != nil || otherMetrics.TritiumUsed != nil {
+	if metrics.TritiumUsed != nil || otherMetrics.TritiumUsed != nil {
 		tritiumSum := 0
-		if baseMetrics.TritiumUsed != nil {
-			tritiumSum += *baseMetrics.TritiumUsed
+		if metrics.TritiumUsed != nil {
+			tritiumSum += *metrics.TritiumUsed
 		}
 		if otherMetrics.TritiumUsed != nil {
 			tritiumSum += *otherMetrics.TritiumUsed
@@ -56,42 +56,42 @@ func (baseMetrics Metrics) Add(otherMetrics Metrics) Metrics {
 		tritiumTotal = &tritiumSum
 	}
 	return Metrics{
-		DistanceLy:         baseMetrics.DistanceLy + otherMetrics.DistanceLy,
-		ShipDistanceLy:     baseMetrics.ShipDistanceLy + otherMetrics.ShipDistanceLy,
-		CarrierPassengerLy: baseMetrics.CarrierPassengerLy + otherMetrics.CarrierPassengerLy,
-		Jumps:              baseMetrics.Jumps + otherMetrics.Jumps,
-		CarrierJumps:       baseMetrics.CarrierJumps + otherMetrics.CarrierJumps,
-		CarrierDistanceLy:  baseMetrics.CarrierDistanceLy + otherMetrics.CarrierDistanceLy,
+		DistanceLy:         metrics.DistanceLy + otherMetrics.DistanceLy,
+		ShipDistanceLy:     metrics.ShipDistanceLy + otherMetrics.ShipDistanceLy,
+		CarrierPassengerLy: metrics.CarrierPassengerLy + otherMetrics.CarrierPassengerLy,
+		Jumps:              metrics.Jumps + otherMetrics.Jumps,
+		CarrierJumps:       metrics.CarrierJumps + otherMetrics.CarrierJumps,
+		CarrierDistanceLy:  metrics.CarrierDistanceLy + otherMetrics.CarrierDistanceLy,
 		TritiumUsed:        tritiumTotal,
-		JetConeBoosts:      baseMetrics.JetConeBoosts + otherMetrics.JetConeBoosts,
-		PremiumBoosts:      baseMetrics.PremiumBoosts + otherMetrics.PremiumBoosts,
-		StandardBoosts:     baseMetrics.StandardBoosts + otherMetrics.StandardBoosts,
-		BasicBoosts:        baseMetrics.BasicBoosts + otherMetrics.BasicBoosts,
-		BodiesScanned:      baseMetrics.BodiesScanned + otherMetrics.BodiesScanned,
-		BodiesMapped:       baseMetrics.BodiesMapped + otherMetrics.BodiesMapped,
-		ScanValueTotal:     baseMetrics.ScanValueTotal + otherMetrics.ScanValueTotal,
-		ScanValueBase:      baseMetrics.ScanValueBase + otherMetrics.ScanValueBase,
-		ScanValueBonus:     baseMetrics.ScanValueBonus + otherMetrics.ScanValueBonus,
-		FirstDiscoveries:   baseMetrics.FirstDiscoveries + otherMetrics.FirstDiscoveries,
-		FirstMapped:        baseMetrics.FirstMapped + otherMetrics.FirstMapped,
-		OrganicSamples:     baseMetrics.OrganicSamples + otherMetrics.OrganicSamples,
-		OrganicValueTotal:  baseMetrics.OrganicValueTotal + otherMetrics.OrganicValueTotal,
-		OrganicValueBase:   baseMetrics.OrganicValueBase + otherMetrics.OrganicValueBase,
-		OrganicValueBonus:  baseMetrics.OrganicValueBonus + otherMetrics.OrganicValueBonus,
-		FirstLogged:        baseMetrics.FirstLogged + otherMetrics.FirstLogged,
+		JetConeBoosts:      metrics.JetConeBoosts + otherMetrics.JetConeBoosts,
+		PremiumBoosts:      metrics.PremiumBoosts + otherMetrics.PremiumBoosts,
+		StandardBoosts:     metrics.StandardBoosts + otherMetrics.StandardBoosts,
+		BasicBoosts:        metrics.BasicBoosts + otherMetrics.BasicBoosts,
+		BodiesScanned:      metrics.BodiesScanned + otherMetrics.BodiesScanned,
+		BodiesMapped:       metrics.BodiesMapped + otherMetrics.BodiesMapped,
+		ScanValueTotal:     metrics.ScanValueTotal + otherMetrics.ScanValueTotal,
+		ScanValueBase:      metrics.ScanValueBase + otherMetrics.ScanValueBase,
+		ScanValueBonus:     metrics.ScanValueBonus + otherMetrics.ScanValueBonus,
+		FirstDiscoveries:   metrics.FirstDiscoveries + otherMetrics.FirstDiscoveries,
+		FirstMapped:        metrics.FirstMapped + otherMetrics.FirstMapped,
+		OrganicSamples:     metrics.OrganicSamples + otherMetrics.OrganicSamples,
+		OrganicValueTotal:  metrics.OrganicValueTotal + otherMetrics.OrganicValueTotal,
+		OrganicValueBase:   metrics.OrganicValueBase + otherMetrics.OrganicValueBase,
+		OrganicValueBonus:  metrics.OrganicValueBonus + otherMetrics.OrganicValueBonus,
+		FirstLogged:        metrics.FirstLogged + otherMetrics.FirstLogged,
 	}
 }
 
-func (targetMetrics *Metrics) addScan(scanVal ed.ScanValue) {
-	targetMetrics.ScanValueTotal += scanVal.Total
-	targetMetrics.ScanValueBase += scanVal.Base
-	targetMetrics.ScanValueBonus += scanVal.Bonus
+func (metrics *Metrics) addScan(scanVal ed.ScanValue) {
+	metrics.ScanValueTotal += scanVal.Total
+	metrics.ScanValueBase += scanVal.Base
+	metrics.ScanValueBonus += scanVal.Bonus
 }
 
-func (targetMetrics *Metrics) addOrganic(organicVal ed.ScanValue) {
-	targetMetrics.OrganicValueTotal += organicVal.Total
-	targetMetrics.OrganicValueBase += organicVal.Base
-	targetMetrics.OrganicValueBonus += organicVal.Bonus
+func (metrics *Metrics) addOrganic(organicVal ed.ScanValue) {
+	metrics.OrganicValueTotal += organicVal.Total
+	metrics.OrganicValueBase += organicVal.Base
+	metrics.OrganicValueBonus += organicVal.Bonus
 }
 
 // Range is the half-open time range (After, Until]. Empty After means "from

@@ -483,16 +483,16 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 		if prevWaypoint != nil && prevWaypoint.HasCoords && rowItem.HasCoords {
 			startPos, _ := prevWaypoint.Coords()
 			endPos, _ := rowItem.Coords()
-			dist := ed.Distance(startPos, endPos)
-			rowViewItem.DistFromPrevLy = &dist
-			planView.PlannedLy += dist
+			legDistanceLy := ed.Distance(startPos, endPos)
+			rowViewItem.DistFromPrevLy = &legDistanceLy
+			planView.PlannedLy += legDistanceLy
 		}
 		if nextWaypointRowID > 0 && rowItem.ID == nextWaypointRowID {
 			rowViewItem.IsNextWaypoint = true
 			if playerPos != nil && rowItem.HasCoords {
 				endPos, _ := rowItem.Coords()
-				dist := ed.Distance(*playerPos, endPos)
-				rowViewItem.DistFromCurrentLy = &dist
+				playerDistanceLy := ed.Distance(*playerPos, endPos)
+				rowViewItem.DistFromCurrentLy = &playerDistanceLy
 			} else if rowViewItem.DistFromPrevLy != nil {
 				rowViewItem.DistFromCurrentLy = rowViewItem.DistFromPrevLy
 			}

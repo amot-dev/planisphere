@@ -161,12 +161,19 @@ func loadRegionGrid() {
 	}
 }
 
+const (
+	galaxyGridScaleNumerator   = 83
+	galaxyGridScaleDenominator = 4096
+)
+
 // RegionAt returns the galactic region containing the given coordinates.
 func RegionAt(coordX, coordY, coordZ float64) (Region, bool) {
 	regionGridOnce.Do(loadRegionGrid)
 	_ = coordY
-	pixelX := int((coordX - regionX0) * 83 / 4096)
-	pixelZ := int((coordZ - regionZ0) * 83 / 4096)
+	// The raster grid uses a scale factor of 83 / 4096 pixels per light year (approximately 49.35 light years per pixel),
+	// matching Frontier and EDDiscovery galactic coordinate projections.
+	pixelX := int((coordX - regionX0) * galaxyGridScaleNumerator / galaxyGridScaleDenominator)
+	pixelZ := int((coordZ - regionZ0) * galaxyGridScaleNumerator / galaxyGridScaleDenominator)
 	if pixelX < 0 || pixelZ < 0 || pixelZ >= len(regionGrid) {
 		return Region{}, false
 	}

@@ -3,6 +3,7 @@ import {
   edastroGecUrl,
   edsmSystemUrl,
   formatCredits,
+  formatLoss,
   formatLy,
   fromGalacticTime,
   inaraSystemUrl,
@@ -42,6 +43,9 @@ describe('Galactic Standard Time (+1286 years)', () => {
   it('formats credits and light years', () => {
     expect(formatCredits(95054000)).toBe('95,054,000 Cr')
     expect(formatLy(23016.8, 1)).toBe('23,016.8 Ly')
+    expect(formatLoss(0)).toBe('0 Cr')
+    expect(formatLoss(undefined)).toBe('0 Cr')
+    expect(formatLoss(125000)).toBe('-125,000 Cr')
   })
 })
 

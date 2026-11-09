@@ -5,6 +5,7 @@ import {
   edsmSystemUrl,
   formatCredits,
   formatInt,
+  formatLoss,
   formatLy,
   inaraSystemUrl,
   nowGalacticTime,
@@ -627,13 +628,6 @@ export function WaypointDetailsDrawer({
       </div>
     </div>
   )
-}
-
-function formatLoss(val?: number): string {
-  if (!val || val === 0) {
-    return '0 Cr'
-  }
-  return `-${formatCredits(val)}`
 }
 
 function MetricMiniCard({

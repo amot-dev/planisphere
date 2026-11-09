@@ -889,27 +889,27 @@ export function ExpeditionPlanner({
 
   async function handleCompleteSpanshJump() {
     if (!plan || !activeCarrierRoute || loggingJump) return
-    const hop = activeCarrierRoute.jumps?.[carrierJumpIndex]
-    if (!hop) return
+    const carrierHop = activeCarrierRoute.jumps?.[carrierJumpIndex]
+    if (!carrierHop) return
 
     // Verify depot has sufficient tritium for this jump before proceeding
     const currentDepot =
       activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
         ? activeCarrierRoute.depotTritium
         : 1000
-    if (currentDepot < hop.tritiumUsed) {
+    if (currentDepot < carrierHop.tritiumUsed) {
       return
     }
 
     setLoggingJump(true)
     onBusyChange('LOGGING CARRIER JUMP')
     try {
-      await RecordCarrierJump(plan.expedition.id, hop.distanceLy, hop.tritiumUsed)
+      await RecordCarrierJump(plan.expedition.id, carrierHop.distanceLy, carrierHop.tritiumUsed)
       const nextJumpIndex = carrierJumpIndex + 1
       setCarrierJumpIndex(nextJumpIndex)
 
       // Deduct consumed fuel from the depot
-      const nextDepot = Math.max(0, currentDepot - hop.tritiumUsed)
+      const nextDepot = Math.max(0, currentDepot - carrierHop.tritiumUsed)
 
       // Recalculate remaining hops based on the updated depot fuel level
       const currentJumps = activeCarrierRoute.jumps || []

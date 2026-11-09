@@ -1,6 +1,6 @@
 import { memo, useState } from 'react'
 import { app, modes, stats } from '../../wailsjs/go/models'
-import { formatCredits, formatInt, formatLy } from '../utils/galacticTime'
+import { formatCredits, formatInt, formatLoss, formatLy } from '../utils/galacticTime'
 import { SquareCheckbox } from './SquareCheckbox'
 
 export interface StatsSidebarProps {
@@ -573,13 +573,6 @@ export const StatsSidebar = memo(function StatsSidebar({
     </aside>
   )
 })
-
-function formatLoss(val?: number): string {
-  if (!val || val === 0) {
-    return '0 Cr'
-  }
-  return `-${formatCredits(val)}`
-}
 
 function StatRow({
   label,

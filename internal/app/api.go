@@ -983,49 +983,49 @@ func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (Regio
 	if listRowsError != nil {
 		return RegionOptions{}, listRowsError
 	}
-	// cut = index of the first row *after* the header position.
-	cut := len(rows)
+	// cutoffIndex = index of the first row *after* the header position.
+	cutoffIndex := len(rows)
 	switch {
 	case rowID == expedition.InsertAtTop:
-		cut = 0
+		cutoffIndex = 0
 	case rowID > 0:
 		for rowIndex, rowItem := range rows {
 			if rowItem.ID == rowID {
 				if editing {
-					cut = rowIndex
+					cutoffIndex = rowIndex
 				} else {
-					cut = rowIndex + 1
+					cutoffIndex = rowIndex + 1
 				}
 				break
 			}
 		}
 	}
 	anchor := 0
-	for rowIndex := 0; rowIndex < cut && rowIndex < len(rows); rowIndex++ {
+	for rowIndex := 0; rowIndex < cutoffIndex && rowIndex < len(rows); rowIndex++ {
 		if rows[rowIndex].RowType == expedition.RowRegion && rows[rowIndex].RegionID > 0 {
 			anchor = rows[rowIndex].RegionID
 		}
 	}
-	out := RegionOptions{AnchorIsDefault: anchor == 0}
+	regionOptionsResult := RegionOptions{AnchorIsDefault: anchor == 0}
 	if anchor == 0 {
 		anchor = ed.InnerOrionSpurID
 	}
 	regionRecord, _ := ed.RegionByID(anchor)
-	out.AnchorID, out.AnchorName = anchor, regionRecord.Name
-	out.Options = ed.PrioritizedRegions(anchor)
-	start := cut
+	regionOptionsResult.AnchorID, regionOptionsResult.AnchorName = anchor, regionRecord.Name
+	regionOptionsResult.Options = ed.PrioritizedRegions(anchor)
+	start := cutoffIndex
 	if editing {
-		start = cut + 1
+		start = cutoffIndex + 1
 	}
 	for rowIndex := start; rowIndex < len(rows); rowIndex++ {
 		if rows[rowIndex].IsWaypoint() && rows[rowIndex].HasCoords {
 			if foundRegion, ok := ed.RegionAt(rows[rowIndex].X, rows[rowIndex].Y, rows[rowIndex].Z); ok {
-				out.SuggestedRegionID = foundRegion.ID
+				regionOptionsResult.SuggestedRegionID = foundRegion.ID
 			}
 			break
 		}
 	}
-	return out, nil
+	return regionOptionsResult, nil
 }
 
 // StartCandidates lists recorded visits to Waypoint #1.
