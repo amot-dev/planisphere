@@ -250,30 +250,36 @@ func (app *App) BrowseEDDiscoveryDB() (string, error) {
 // archive so deleted older .log files are permanently recovered.
 func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	app.dbMu.RLock()
-	if readyError := app.ready(); readyError != nil {
-		app.dbMu.RUnlock()
+	readyError := app.ready()
+	ingester := app.ingester
+	app.dbMu.RUnlock()
+
+	if readyError != nil {
 		return 0, readyError
 	}
+	if ingester == nil {
+		return 0, errorNotReady
+	}
+
 	eddPath = strings.TrimSpace(eddPath)
 	if eddPath == "" {
 		eddPath = journal.DefaultEDDiscoveryDBPath()
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
-	ingester := app.ingester
-	if ingester == nil {
-		app.dbMu.RUnlock()
-		return 0, errorNotReady
-	}
+
 	importResult, importError := ingester.ImportEDDiscoveryDB(eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError != nil {
-		app.dbMu.RUnlock()
 		return 0, importError
 	}
-	_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
-	_ = db.SetSetting(app.db, "edd_db_path", eddPath)
-	_ = db.SetSetting(app.db, "edd_history_realization_v6", "1")
+
+	app.dbMu.RLock()
+	if app.db != nil {
+		_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
+		_ = db.SetSetting(app.db, "edd_db_path", eddPath)
+		_ = db.SetSetting(app.db, "edd_history_realization_v6", "1")
+	}
 	app.dbMu.RUnlock()
 
 	app.invalidateAllTimeCache()
