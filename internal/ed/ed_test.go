@@ -89,17 +89,10 @@ func TestCarrierTritiumCost(t *testing.T) {
 
 	// 494.89 Ly jump with 8,548 tonnes used capacity and 1,000-ton depot:
 	// Mass = 25000 + 8548 + 1000 = 34548
-	// 5 + 494.89 * 34548 / 200000 = 90.487... -> round = 90 tonnes
+	// 5 + 494.89 * 34548 / 200000 = 90.487... -> round = 90 tonnes (overriding Spansh's 89t truncated estimate)
 	gameCost := CarrierTritiumCost(494.89, 8548, 1000)
 	if gameCost != 90 {
 		t.Fatalf("CarrierTritiumCost(494.89, 8548, 1000) = %d, want 90", gameCost)
-	}
-
-	// Spansh's artificially low depot assumption (437 tonnes depot, mass 33,985):
-	// Truncated integer division: floor(5 + 494.89 * 33985 / 200000) = 89 tonnes (Spansh estimate)
-	spanshTruncated := int(math.Floor(5.0 + (494.89*(8548.0+437.0+25000.0))/200000.0))
-	if spanshTruncated != 89 {
-		t.Fatalf("spanshTruncated = %d, want 89", spanshTruncated)
 	}
 
 	if math.Abs(Distance(Vec3{0, 0, 0}, Vec3{3, 4, 12})-13) > 1e-9 {

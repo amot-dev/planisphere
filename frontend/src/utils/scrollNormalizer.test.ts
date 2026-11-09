@@ -58,48 +58,6 @@ describe('Scroll Performance and Normalizer', () => {
     expect(findScrollable(nonNode as any, 10, 0)).toBeNull()
   })
 
-  it('safely processes wheel event when target is not a Node (e.g. window)', () => {
-    const listeners: Record<string, Function> = {}
-    const originalWindow = (globalThis as any).window
-
-    try {
-      const mockWindow: any = {
-        addEventListener: (event: string, handler: Function) => {
-          listeners[event] = handler
-        },
-        removeEventListener: (event: string, handler: Function) => {
-          if (listeners[event] === handler) {
-            delete listeners[event]
-          }
-        },
-      }
-      ;(globalThis as any).window = mockWindow
-
-      const cleanup = initScrollSpeedNormalizer()
-      const wheelHandler = listeners['wheel']
-      expect(typeof wheelHandler).toBe('function')
-
-      // Wheel event targeted at Window object
-      const fakeWheelEvent: any = {
-        target: mockWindow,
-        deltaY: 50,
-        deltaX: 0,
-        deltaMode: 0,
-        ctrlKey: false,
-        shiftKey: false,
-        cancelable: true,
-        preventDefault: () => {},
-      }
-
-      // Should not throw TypeError: parameter 1 is not of type 'Node'
-      expect(() => wheelHandler(fakeWheelEvent)).not.toThrow()
-
-      cleanup()
-    } finally {
-      ;(globalThis as any).window = originalWindow
-    }
-  })
-
   describe('Wheel Event Normalization and Scaling', () => {
     let mockWindow: any
     let listeners: Record<string, Function>
@@ -126,6 +84,26 @@ describe('Scroll Performance and Normalizer', () => {
     afterEach(() => {
       cleanup()
       ;(globalThis as any).window = originalWindow
+    })
+
+    it('safely processes wheel event when target is not a Node (e.g. window)', () => {
+      const wheelHandler = listeners['wheel']
+      expect(typeof wheelHandler).toBe('function')
+
+      // Wheel event targeted at Window object
+      const fakeWheelEvent: any = {
+        target: mockWindow,
+        deltaY: 50,
+        deltaX: 0,
+        deltaMode: 0,
+        ctrlKey: false,
+        shiftKey: false,
+        cancelable: true,
+        preventDefault: () => {},
+      }
+
+      // Should not throw TypeError: parameter 1 is not of type 'Node'
+      expect(() => wheelHandler(fakeWheelEvent)).not.toThrow()
     })
 
     it('scales discrete mouse wheel deltas by 2.8x on scrollable containers and prevents default', () => {

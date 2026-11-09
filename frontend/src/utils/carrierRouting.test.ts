@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateCarrierJumpFuel,
-  CARRIER_BASE_MASS_TONNES,
   CARRIER_MAX_DEPOT_TONNES,
 } from './carrierRouting'
 
@@ -15,11 +14,7 @@ describe('calculateCarrierJumpFuel', () => {
   })
 
   it('corrects Spansh discrepancy: charges 90t for 494.89 Ly with 8548t used capacity and 1000t depot', () => {
-    // Spansh estimates 89 tonnes by artificially assuming depot only holds 437 tonnes and truncating
-    // Truncated integer division: floor(5 + 494.89 * (25000 + 8548 + 437) / 200000) = 89
-    const spanshAssumed = Math.floor(5 + (494.89 * (CARRIER_BASE_MASS_TONNES + 8548 + 437)) / 200000)
-    expect(spanshAssumed).toBe(89)
-
+    // Spansh estimates 89 tonnes by artificially assuming depot only holds 437 tonnes and truncating.
     // The actual game registers a full 1,000-ton depot and charges 90 tonnes:
     // Total mass = 25,000 + 8,548 + 1,000 = 34,548
     // round(5 + 494.89 * 34548 / 200000) = round(90.487...) = 90

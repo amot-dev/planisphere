@@ -6,6 +6,51 @@ import { AutoExpandingTextarea, WaypointDetailsDrawer } from './PlannerWidgets'
 import { expedition } from '../../wailsjs/go/models'
 
 describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () => {
+  function renderRowItem(props: Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView }) {
+    const defaultProps: Parameters<typeof WaypointRowItem>[0] = {
+      index: 1,
+      isPlanning: false,
+      isLocked: false,
+      isBeingDragged: false,
+      isDragTarget: false,
+      isExpanded: false,
+      isNextFcStop: false,
+      hasActiveCarrierRoute: false,
+      draft: {
+        systemName: props.rowView.row?.systemName ?? '',
+        poiName: props.rowView.row?.poiName ?? '',
+        notes: props.rowView.row?.notes ?? '',
+      },
+      copiedSystemRowId: null,
+      insertMenuOpen: false,
+      lastVisitedIndex: 0,
+      totalRows: 5,
+      rowStyle: {},
+      dropProps: {},
+      onToggleExpand: () => {},
+      onDraftChange: () => {},
+      onFieldFocus: () => {},
+      onFieldBlur: () => {},
+      onCopySystem: () => {},
+      onToggleFcStop: () => {},
+      onOpenCarrierRoutePrompt: () => {},
+      onToggleInsertMenu: () => {},
+      onInsert: () => {},
+      onMove: () => {},
+      onDelete: () => {},
+      onDragStart: () => {},
+      onDragEnd: () => {},
+      ...props,
+    }
+    return renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(WaypointRowItem, defaultProps),
+        ),
+      ),
+    )
+  }
+
   it('AutoExpandingTextarea renders with rows="1" and min-h-[28px] without artificial wrap for 43-char LFT 509 notes', () => {
     const lftNotes = 'Returning to Bubble to participate in event'
     const html = renderToString(
@@ -40,47 +85,13 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       visitedAtGalactic: '3310-02-15 14:32',
     })
 
-    const html = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: mockRowView,
-            index: 10,
-            isPlanning: false,
-            isLocked: true,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: false,
-            isNextFcStop: false,
-            hasActiveCarrierRoute: false,
-            draft: {
-              systemName: 'Sol',
-              poiName: 'Earth',
-              notes: 'Returning to Bubble to participate in event',
-            },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: 10,
-            totalRows: 25,
-            rowStyle: {},
-            dropProps: {},
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const html = renderRowItem({
+      rowView: mockRowView,
+      index: 10,
+      isLocked: true,
+      lastVisitedIndex: 10,
+      totalRows: 25,
+    })
 
     // Cell padding py-1.5 and align-top on all cells
     expect(html).toContain('align-top')
@@ -115,47 +126,12 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       distFromPrevLy: 42.5,
     })
 
-    const html = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: mockRowView,
-            index: 16,
-            isPlanning: false,
-            isLocked: false,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: false,
-            isNextFcStop: false,
-            hasActiveCarrierRoute: false,
-            draft: {
-              systemName: 'LFT 509',
-              poiName: 'Outpost',
-              notes: '',
-            },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: 10,
-            totalRows: 25,
-            rowStyle: {},
-            dropProps: {},
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const html = renderRowItem({
+      rowView: mockRowView,
+      index: 16,
+      lastVisitedIndex: 10,
+      totalRows: 25,
+    })
 
     // Unvisited input has h-7, py-[3px], border-transparent matching the locked span
     expect(html).toContain('w-full h-7 bg-transparent px-1.5 py-[3px] border border-transparent')
@@ -180,43 +156,13 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       visitState: 'visited',
     })
 
-    const html = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: fcStopRowView,
-            index: 19,
-            isPlanning: false,
-            isLocked: true,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: false,
-            isNextFcStop: false,
-            hasActiveCarrierRoute: false,
-            draft: { systemName: 'Colonia', poiName: '', notes: '' },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: 20,
-            totalRows: 25,
-            rowStyle: {},
-            dropProps: {},
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const html = renderRowItem({
+      rowView: fcStopRowView,
+      index: 19,
+      isLocked: true,
+      lastVisitedIndex: 20,
+      totalRows: 25,
+    })
 
     expect(html).toContain('ARRIVED')
     expect(html).toContain('h-5 px-1.5 inline-flex items-center justify-center')
@@ -236,43 +182,14 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       visitState: 'visited',
     })
 
-    const html = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: mockRowView,
-            index: 11,
-            isPlanning: false,
-            isLocked: true,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: true,
-            isNextFcStop: false,
-            hasActiveCarrierRoute: false,
-            draft: { systemName: 'Sol', poiName: '', notes: '' },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: 11,
-            totalRows: 25,
-            rowStyle: {},
-            dropProps: {},
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const html = renderRowItem({
+      rowView: mockRowView,
+      index: 11,
+      isLocked: true,
+      isExpanded: true,
+      lastVisitedIndex: 11,
+      totalRows: 25,
+    })
 
     // Chevron cell has border-l-2 and inset shadow bottom line so it never miters or clips the left border
     expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]')
@@ -487,96 +404,19 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       visitState: 'unvisited',
     })
 
-    const htmlHidden = renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, {
-            rowView: mockRowView,
-            index: 2,
-            isPlanning: true,
-            isLocked: false,
-            isBeingDragged: false,
-            isDragTarget: false,
-            isExpanded: false,
-            isNextFcStop: false,
-            hasActiveCarrierRoute: false,
-            draft: { systemName: 'Col 285 Sector', poiName: 'Planet 1', notes: 'Secret mining location' },
-            copiedSystemRowId: null,
-            insertMenuOpen: false,
-            lastVisitedIndex: 0,
-            totalRows: 5,
-            rowStyle: {},
-            dropProps: {},
-            showNotes: false,
-            showCarrierStop: false,
-            onToggleExpand: () => {},
-            onDraftChange: () => {},
-            onFieldFocus: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-            onToggleInsertMenu: () => {},
-            onInsert: () => {},
-            onMove: () => {},
-            onDelete: () => {},
-            onDragStart: () => {},
-            onDragEnd: () => {},
-          }),
-        ),
-      ),
-    )
+    const htmlHidden = renderRowItem({
+      rowView: mockRowView,
+      index: 2,
+      isPlanning: true,
+      showNotes: false,
+      showCarrierStop: false,
+    })
 
     // Secret mining location and FC Stop should not be present
     expect(htmlHidden).not.toContain('Secret mining location')
     expect(htmlHidden).not.toContain('+ FC STOP')
     expect(htmlHidden).toContain('Col 285 Sector')
   })
-
-  function renderRowItem(props: Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView }) {
-    const defaultProps: Parameters<typeof WaypointRowItem>[0] = {
-      index: 1,
-      isPlanning: false,
-      isLocked: false,
-      isBeingDragged: false,
-      isDragTarget: false,
-      isExpanded: false,
-      isNextFcStop: false,
-      hasActiveCarrierRoute: false,
-      draft: {
-        systemName: props.rowView.row?.systemName ?? '',
-        poiName: props.rowView.row?.poiName ?? '',
-        notes: props.rowView.row?.notes ?? '',
-      },
-      copiedSystemRowId: null,
-      insertMenuOpen: false,
-      lastVisitedIndex: 0,
-      totalRows: 5,
-      rowStyle: {},
-      dropProps: {},
-      onToggleExpand: () => {},
-      onDraftChange: () => {},
-      onFieldFocus: () => {},
-      onFieldBlur: () => {},
-      onCopySystem: () => {},
-      onToggleFcStop: () => {},
-      onOpenCarrierRoutePrompt: () => {},
-      onToggleInsertMenu: () => {},
-      onInsert: () => {},
-      onMove: () => {},
-      onDelete: () => {},
-      onDragStart: () => {},
-      onDragEnd: () => {},
-      ...props,
-    }
-    return renderToString(
-      createElement('table', null,
-        createElement('tbody', null,
-          createElement(WaypointRowItem, defaultProps),
-        ),
-      ),
-    )
-  }
 
   it('renders distance from player when row is next waypoint in active expedition', () => {
     const mockRowView = expedition.RowView.createFrom({
