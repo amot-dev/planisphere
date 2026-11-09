@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -376,4 +377,26 @@ func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
 	if !errors.Is(importError, context.Canceled) {
 		t.Fatalf("expected context.Canceled error from ImportEDDiscoveryDB, got %v", importError)
 	}
+}
+
+func TestComputeUIDDeterministicAndConcurrent(t *testing.T) {
+	initialUID := journal.ComputeUID("2026-01-18T19:05:00Z", "FSDJump", "1001", "Sol")
+	if len(initialUID) != 64 {
+		t.Fatalf("expected 64-char sha256 hex string, got %d (%s)", len(initialUID), initialUID)
+	}
+
+	var waitGroup sync.WaitGroup
+	for workerIndex := 0; workerIndex < 20; workerIndex++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			for iteration := 0; iteration < 100; iteration++ {
+				computedUID := journal.ComputeUID("2026-01-18T19:05:00Z", "FSDJump", "1001", "Sol")
+				if computedUID != initialUID {
+					t.Errorf("expected deterministic UID %s, got %s", initialUID, computedUID)
+				}
+			}
+		}()
+	}
+	waitGroup.Wait()
 }

@@ -6,8 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
+	"io"
 	"strconv"
 	"strings"
+	"sync"
 
 	"planisphere/internal/ed"
 )
@@ -124,19 +127,33 @@ func optFloat(floatValue *float64) string {
 	return strconv.FormatFloat(*floatValue, 'f', -1, 64)
 }
 
+var sha256HasherPool = sync.Pool{
+	New: func() any {
+		return sha256.New()
+	},
+}
+
 // ComputeUID returns SHA256(timestamp + event + key identifiers) as hex. The
 // key identifiers are chosen per event type so that the same in-game action is
 // always mapped to the same UID, regardless of which file it was read from.
 func ComputeUID(timestamp, event string, keys ...string) string {
-	hasher := sha256.New()
-	hasher.Write([]byte(timestamp))
-	hasher.Write([]byte{0})
-	hasher.Write([]byte(event))
+	hasher := sha256HasherPool.Get().(hash.Hash)
+	defer func() {
+		hasher.Reset()
+		sha256HasherPool.Put(hasher)
+	}()
+
+	_, _ = io.WriteString(hasher, timestamp)
+	_, _ = io.WriteString(hasher, "\x00")
+	_, _ = io.WriteString(hasher, event)
 	for _, key := range keys {
-		hasher.Write([]byte{0})
-		hasher.Write([]byte(key))
+		_, _ = io.WriteString(hasher, "\x00")
+		_, _ = io.WriteString(hasher, key)
 	}
-	return hex.EncodeToString(hasher.Sum(nil))
+
+	var digestBuffer [sha256.Size]byte
+	sum := hasher.Sum(digestBuffer[:0])
+	return hex.EncodeToString(sum)
 }
 
 func keyIdentifiers(fields *commonFields, raw []byte) []string {
