@@ -83,6 +83,7 @@ type commonFields struct {
 	Total         *int64          `json:"Total"`
 	TotalEarnings *int64          `json:"TotalEarnings"`
 	MarketID      *int64          `json:"MarketID"`
+	BioData       []BioDataItem   `json:"BioData"`
 	KillerName    string          `json:"KillerName"`
 	KillerShip    string          `json:"KillerShip"`
 	Option        string          `json:"Option"`
@@ -183,6 +184,18 @@ func keyIdentifiers(fields *commonFields, raw []byte) []string {
 		return []string{optInt(fields.SystemAddress), optInt(fields.MarketID)}
 	case "MultiSellExplorationData", "SellExplorationData":
 		return []string{optInt(fields.TotalEarnings)}
+	case "SellOrganicData":
+		var totalValue, totalBonus int64
+		for _, item := range fields.BioData {
+			totalValue += item.Value
+			totalBonus += item.Bonus
+		}
+		return []string{
+			optInt(fields.MarketID),
+			strconv.Itoa(len(fields.BioData)),
+			strconv.FormatInt(totalValue, 10),
+			strconv.FormatInt(totalBonus, 10),
+		}
 	case "Died":
 		return []string{fields.KillerName, fields.KillerShip}
 	case "Resurrect":

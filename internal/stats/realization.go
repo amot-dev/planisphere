@@ -2,6 +2,7 @@ package stats
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -37,17 +38,20 @@ func (base RealizationBreakdown) Add(other RealizationBreakdown) RealizationBrea
 }
 
 type scanRecord struct {
-	timestamp        string
-	systemAddress    int64
-	starSystem       string
-	bodyID           int64
-	bodyName         string
-	isOrganic        bool
-	species          string
-	variant          string
-	theoreticalBase  int64
-	theoreticalBonus int64
-	theoreticalTotal int64
+	timestamp          string
+	systemAddress      int64
+	starSystem         string
+	bodyID             int64
+	bodyName           string
+	isOrganic          bool
+	undiscoveredAtScan bool
+	species            string
+	speciesLocalised   string
+	variant            string
+	variantLocalised   string
+	theoreticalBase    int64
+	theoreticalBonus   int64
+	theoreticalTotal   int64
 
 	// Realized outcome
 	status        string // "pending", "sold", "lost_death"
@@ -58,6 +62,77 @@ type scanRecord struct {
 	stolenLoss    int64
 	crewLoss      int64
 	soldTimestamp string
+}
+
+func normalizeSpecies(codexID, localised string) string {
+	if sp, ok := ed.LookupSpecies(codexID, localised); ok {
+		return strings.ToLower(sp.Name)
+	}
+	if localised = strings.TrimSpace(localised); localised != "" {
+		return strings.ToLower(localised)
+	}
+	trimmed := strings.Trim(strings.TrimSpace(codexID), "$;")
+	return strings.ToLower(trimmed)
+}
+
+func normalizeVariant(codexID, localised string) string {
+	if localised = strings.TrimSpace(localised); localised != "" {
+		return strings.ToLower(localised)
+	}
+	trimmed := strings.Trim(strings.TrimSpace(codexID), "$;")
+	return strings.ToLower(trimmed)
+}
+
+func findMatchingOrganic(unsold []*scanRecord, item journal.BioDataItem) int {
+	itemSpecies := normalizeSpecies(item.Species, item.SpeciesLocalised)
+	if itemSpecies == "" {
+		return -1
+	}
+	itemVariant := normalizeVariant(item.Variant, item.VariantLocalised)
+
+	// Pass 1: Match both species and non-empty variant
+	if itemVariant != "" {
+		for i, rec := range unsold {
+			if rec.status != "pending" {
+				continue
+			}
+			recSpecies := normalizeSpecies(rec.species, rec.speciesLocalised)
+			if recSpecies == itemSpecies {
+				recVariant := normalizeVariant(rec.variant, rec.variantLocalised)
+				if recVariant != "" && recVariant == itemVariant {
+					return i
+				}
+			}
+		}
+	}
+
+	// Pass 2: Match species where variant does not conflict
+	for i, rec := range unsold {
+		if rec.status != "pending" {
+			continue
+		}
+		recSpecies := normalizeSpecies(rec.species, rec.speciesLocalised)
+		if recSpecies == itemSpecies {
+			recVariant := normalizeVariant(rec.variant, rec.variantLocalised)
+			if itemVariant != "" && recVariant != "" && itemVariant != recVariant {
+				continue
+			}
+			return i
+		}
+	}
+
+	// Pass 3: Fallback match species even if variants differ
+	for i, rec := range unsold {
+		if rec.status != "pending" {
+			continue
+		}
+		recSpecies := normalizeSpecies(rec.species, rec.speciesLocalised)
+		if recSpecies == itemSpecies {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // RealizationLedger tracks all scans and their final realization outcomes.
@@ -215,13 +290,20 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 	unsoldCarto := make(map[cartoKey]*scanRecord)
 	unsoldOrganic := make([]*scanRecord, 0, 100)
 	recentWageEvents := make([]journal.NpcCrewPaidWageEvent, 0, 50)
+	resurrectEvents := make([]journal.ResurrectEvent, 0, 10)
 
-	// First pass: collect wage events so they can be matched with concurrent sales
+	// First pass: collect wage and resurrect events so they can be matched with concurrent sales and deaths
 	for _, ev := range events {
-		if ev.eventType == "NpcCrewPaidWage" {
+		switch ev.eventType {
+		case "NpcCrewPaidWage":
 			var wageEv journal.NpcCrewPaidWageEvent
 			if json.Unmarshal([]byte(ev.rawJSON), &wageEv) == nil {
 				recentWageEvents = append(recentWageEvents, wageEv)
+			}
+		case "Resurrect":
+			var resEv journal.ResurrectEvent
+			if json.Unmarshal([]byte(ev.rawJSON), &resEv) == nil {
+				resurrectEvents = append(resurrectEvents, resEv)
 			}
 		}
 	}
@@ -236,9 +318,20 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		return totalWage
 	}
 
-	scans := make(map[cartoKey]*journal.ScanEvent)
+	findNextResurrect := func(diedTimestamp string) *journal.ResurrectEvent {
+		for _, resEv := range resurrectEvents {
+			if resEv.Timestamp >= diedTimestamp && timeDiffSeconds(resEv.Timestamp, diedTimestamp) <= 600.0 {
+				return &resEv
+			}
+		}
+		return nil
+	}
 
-	for _, ev := range events {
+	scans := make(map[cartoKey]*journal.ScanEvent)
+	seenSales := make(map[string]bool)
+
+	for evIdx := 0; evIdx < len(events); evIdx++ {
+		ev := events[evIdx]
 		switch ev.eventType {
 		case "Scan":
 			var scanEv journal.ScanEvent
@@ -254,16 +347,17 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 			estimatedBodyValue := ed.EstimateBodyValue(toBodyScan(&scanEv), ed.MappingInfo{}, engine.Odyssey)
 			rec := &scanRecord{
-				timestamp:        ev.timestamp,
-				systemAddress:    scanEv.SystemAddress,
-				starSystem:       scanEv.StarSystem,
-				bodyID:           scanEv.BodyID,
-				bodyName:         scanEv.BodyName,
-				isOrganic:        false,
-				theoreticalBase:  estimatedBodyValue.Base,
-				theoreticalBonus: estimatedBodyValue.Bonus,
-				theoreticalTotal: estimatedBodyValue.Total,
-				status:           "pending",
+				timestamp:          ev.timestamp,
+				systemAddress:      scanEv.SystemAddress,
+				starSystem:         scanEv.StarSystem,
+				bodyID:             scanEv.BodyID,
+				bodyName:           scanEv.BodyName,
+				isOrganic:          false,
+				undiscoveredAtScan: !scanEv.WasDiscovered,
+				theoreticalBase:    estimatedBodyValue.Base,
+				theoreticalBonus:   estimatedBodyValue.Bonus,
+				theoreticalTotal:   estimatedBodyValue.Total,
+				status:             "pending",
 			}
 			unsoldCarto[key] = rec
 			ledger.records = append(ledger.records, rec)
@@ -286,18 +380,22 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				rec.theoreticalBase += mappingIncrement.Base
 				rec.theoreticalBonus += mappingIncrement.Bonus
 				rec.theoreticalTotal += mappingIncrement.Total
+				if !scan.WasMapped {
+					rec.undiscoveredAtScan = true
+				}
 			} else {
 				// Mapped without existing pending scan in current batch
 				rec = &scanRecord{
-					timestamp:        ev.timestamp,
-					systemAddress:    saaEv.SystemAddress,
-					bodyID:           saaEv.BodyID,
-					bodyName:         saaEv.BodyName,
-					isOrganic:        false,
-					theoreticalBase:  mappingIncrement.Base,
-					theoreticalBonus: mappingIncrement.Bonus,
-					theoreticalTotal: mappingIncrement.Total,
-					status:           "pending",
+					timestamp:          ev.timestamp,
+					systemAddress:      saaEv.SystemAddress,
+					bodyID:             saaEv.BodyID,
+					bodyName:           saaEv.BodyName,
+					isOrganic:          false,
+					undiscoveredAtScan: !scan.WasDiscovered || !scan.WasMapped,
+					theoreticalBase:    mappingIncrement.Base,
+					theoreticalBonus:   mappingIncrement.Bonus,
+					theoreticalTotal:   mappingIncrement.Total,
+					status:             "pending",
 				}
 				unsoldCarto[key] = rec
 				ledger.records = append(ledger.records, rec)
@@ -309,27 +407,27 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				continue
 			}
 			baseVal := ed.SpeciesBaseValue(organicEv.Species, organicEv.SpeciesLocalised, organicEv.Genus)
-			firstLogged := false
-			if organicEv.WasLogged != nil {
-				firstLogged = !*organicEv.WasLogged
-			} else {
-				parentKey := cartoKey{organicEv.SystemAddress, organicEv.Body}
-				if parentScan := scans[parentKey]; parentScan != nil && parentScan.WasFootfalled != nil {
-					firstLogged = !*parentScan.WasFootfalled
-				}
-			}
+			parentKey := cartoKey{organicEv.SystemAddress, organicEv.Body}
+			parentScan := scans[parentKey]
+			// Naively check the parent body's Scan WasFootfalled == false only.
+			// ScanOrganic.WasLogged is intentionally ignored because Frontier journals
+			// do not reliably populate it: https://issues.frontierstore.net/issue-detail/81891
+			firstLogged := parentScan != nil && parentScan.WasFootfalled != nil && !*parentScan.WasFootfalled
 			calculatedOrganicValue := ed.OrganicValue(baseVal, firstLogged)
 			rec := &scanRecord{
-				timestamp:        ev.timestamp,
-				systemAddress:    organicEv.SystemAddress,
-				bodyID:           organicEv.Body,
-				isOrganic:        true,
-				species:          organicEv.Species,
-				variant:          organicEv.Variant,
-				theoreticalBase:  calculatedOrganicValue.Base,
-				theoreticalBonus: calculatedOrganicValue.Bonus,
-				theoreticalTotal: calculatedOrganicValue.Total,
-				status:           "pending",
+				timestamp:          ev.timestamp,
+				systemAddress:      organicEv.SystemAddress,
+				bodyID:             organicEv.Body,
+				isOrganic:          true,
+				undiscoveredAtScan: firstLogged,
+				species:            organicEv.Species,
+				speciesLocalised:   organicEv.SpeciesLocalised,
+				variant:            organicEv.Variant,
+				variantLocalised:   organicEv.VariantLocalised,
+				theoreticalBase:    calculatedOrganicValue.Base,
+				theoreticalBonus:   calculatedOrganicValue.Bonus,
+				theoreticalTotal:   calculatedOrganicValue.Total,
+				status:             "pending",
 			}
 			unsoldOrganic = append(unsoldOrganic, rec)
 			ledger.records = append(ledger.records, rec)
@@ -337,9 +435,24 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		case "Died":
 			var diedEv journal.DiedEvent
 			_ = json.Unmarshal([]byte(ev.rawJSON), &diedEv)
-			isOnFoot := diedEv.IsOnFoot()
 
-			// Exobiology samples in the suit are always lost on death
+			// Determine if this was ship destruction or on-foot suit death
+			isShipDestruction := false
+			if resEv := findNextResurrect(ev.timestamp); resEv != nil {
+				if resEv.Cost > 0 || strings.EqualFold(resEv.Option, "rebuy") {
+					isShipDestruction = true
+				} else {
+					isShipDestruction = false
+				}
+			} else {
+				if diedEv.IsOnFoot() {
+					isShipDestruction = false
+				} else if diedEv.KillerShip != "" {
+					isShipDestruction = true
+				}
+			}
+
+			// Exobiology samples in suit are always lost on death
 			for _, orgRec := range unsoldOrganic {
 				if orgRec.status == "pending" {
 					orgRec.status = "lost_death"
@@ -348,8 +461,8 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 			unsoldOrganic = unsoldOrganic[:0]
 
-			// Cartographic data is lost on ship destruction
-			if !isOnFoot {
+			// Cartographic data is only lost on ship destruction
+			if isShipDestruction {
 				for _, cartoRec := range unsoldCarto {
 					if cartoRec.status == "pending" {
 						cartoRec.status = "lost_death"
@@ -364,11 +477,18 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			if json.Unmarshal([]byte(ev.rawJSON), &sellEv) != nil {
 				continue
 			}
-			totalCrewWage := findCrewWage(sellEv.Timestamp)
-			var totalSaleGross int64
+			var totalSaleValue, totalSaleBonus int64
 			for _, item := range sellEv.BioData {
-				totalSaleGross += item.Value + item.Bonus
+				totalSaleValue += item.Value
+				totalSaleBonus += item.Bonus
 			}
+			totalSaleGross := totalSaleValue + totalSaleBonus
+			saleKey := fmt.Sprintf("organic|%s|%d|%d|%d|%d", sellEv.Timestamp, sellEv.MarketID, len(sellEv.BioData), totalSaleValue, totalSaleBonus)
+			if seenSales[saleKey] {
+				continue
+			}
+			seenSales[saleKey] = true
+			totalCrewWage := findCrewWage(sellEv.Timestamp)
 
 			for _, item := range sellEv.BioData {
 				itemGross := item.Value + item.Bonus
@@ -377,14 +497,8 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					allocatedCrew = (totalCrewWage * itemGross) / totalSaleGross
 				}
 
-				// Find oldest pending unsold matching specimen
-				matchedIdx := -1
-				for i, orgRec := range unsoldOrganic {
-					if orgRec.status == "pending" && (strings.EqualFold(orgRec.species, item.Species) || strings.EqualFold(orgRec.variant, item.Variant)) {
-						matchedIdx = i
-						break
-					}
-				}
+				// Find matching pending unsold specimen using robust species matching
+				matchedIdx := findMatchingOrganic(unsoldOrganic, item)
 
 				if matchedIdx >= 0 {
 					matched := unsoldOrganic[matchedIdx]
@@ -395,8 +509,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					matched.actualGross = itemGross
 					matched.crewLoss = allocatedCrew
 
-					// Stolen check: player expected first-logged bonus, but received none
-					if matched.theoreticalBonus > 0 && item.Bonus == 0 {
+					// Stolen check: only flag as stolen if the body was undiscovered at the time of scan
+					// and the player expected a first-logged bonus, but received none.
+					if matched.undiscoveredAtScan && matched.theoreticalBonus > 0 && item.Bonus == 0 {
 						matched.stolenLoss = matched.theoreticalBonus
 					}
 
@@ -418,6 +533,11 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			if json.Unmarshal([]byte(ev.rawJSON), &sellEv) != nil {
 				continue
 			}
+			saleKey := fmt.Sprintf("carto|%s|%d|%d|%d", sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, len(sellEv.Systems))
+			if seenSales[saleKey] {
+				continue
+			}
+			seenSales[saleKey] = true
 			totalCrewWage := findCrewWage(sellEv.Timestamp)
 			discoveredSet := make(map[string]bool, len(sellEv.Discovered))
 			for _, discoveredBody := range sellEv.Discovered {
@@ -432,9 +552,11 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			// Find matching unsold carto records for sold systems
 			var matchedRecs []*scanRecord
 			for key, rec := range unsoldCarto {
-				if rec.status == "pending" && (soldSystemSet[strings.ToLower(rec.starSystem)] || len(sellEv.Systems) == 0) {
-					matchedRecs = append(matchedRecs, rec)
-					delete(unsoldCarto, key)
+				if rec.status == "pending" && rec.timestamp <= sellEv.Timestamp {
+					if len(soldSystemSet) == 0 || soldSystemSet[strings.ToLower(rec.starSystem)] {
+						matchedRecs = append(matchedRecs, rec)
+						delete(unsoldCarto, key)
+					}
 				}
 			}
 
@@ -443,25 +565,46 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				for _, matchedRecord := range matchedRecs {
 					totalTheoretical += matchedRecord.theoreticalTotal
 				}
-				// Distribute lump-sum earnings, bonuses, and crew deductions proportionally across matched scan records
-				// according to each body's share of total theoretical scan value.
-				for _, matchedRecord := range matchedRecs {
+				var allocatedGross int64
+				var allocatedBase int64
+				var allocatedBonus int64
+				var allocatedCrew int64
+				for recIdx, matchedRecord := range matchedRecs {
 					matchedRecord.status = "sold"
 					matchedRecord.soldTimestamp = sellEv.Timestamp
 					ratio := 1.0
 					if totalTheoretical > 0 {
 						ratio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
+					} else if len(matchedRecs) > 0 {
+						ratio = 1.0 / float64(len(matchedRecs))
 					}
-					matchedRecord.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
-					matchedRecord.actualBase = int64(float64(sellEv.BaseValue) * ratio)
-					matchedRecord.actualBonus = int64(float64(sellEv.Bonus) * ratio)
-					if totalCrewWage > 0 {
-						matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
+					if recIdx == len(matchedRecs)-1 {
+						matchedRecord.actualGross = sellEv.TotalEarnings - allocatedGross
+						matchedRecord.actualBase = sellEv.BaseValue - allocatedBase
+						matchedRecord.actualBonus = sellEv.Bonus - allocatedBonus
+						if totalCrewWage > 0 {
+							matchedRecord.crewLoss = totalCrewWage - allocatedCrew
+						}
+					} else {
+						matchedRecord.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
+						matchedRecord.actualBase = int64(float64(sellEv.BaseValue) * ratio)
+						matchedRecord.actualBonus = int64(float64(sellEv.Bonus) * ratio)
+						allocatedGross += matchedRecord.actualGross
+						allocatedBase += matchedRecord.actualBase
+						allocatedBonus += matchedRecord.actualBonus
+						if totalCrewWage > 0 {
+							matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
+							allocatedCrew += matchedRecord.crewLoss
+						}
 					}
 
-					// Stolen check: had bonus expectation, but body name not in Discovered array
-					if matchedRecord.theoreticalBonus > 0 && !discoveredSet[strings.ToLower(strings.TrimSpace(matchedRecord.bodyName))] && sellEv.Bonus == 0 {
-						matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
+					// Stolen check: had bonus expectation on an undiscovered body, but body/system was not awarded first discovery
+					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
+						normBody := strings.ToLower(strings.TrimSpace(matchedRecord.bodyName))
+						normSystem := strings.ToLower(strings.TrimSpace(matchedRecord.starSystem))
+						if !discoveredSet[normBody] && !discoveredSet[normSystem] {
+							matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
+						}
 					}
 				}
 			} else {
@@ -478,15 +621,51 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			if json.Unmarshal([]byte(ev.rawJSON), &sellEv) != nil {
 				continue
 			}
-			totalCrewWage := findCrewWage(sellEv.Timestamp)
-			soldSystemSet := make(map[string]bool, len(sellEv.Discovered))
+			saleKey := fmt.Sprintf("carto_multi|%s|%d|%d|%d", sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, len(sellEv.Discovered))
+			if seenSales[saleKey] {
+				continue
+			}
+			seenSales[saleKey] = true
+
+			totalEarnings := sellEv.TotalEarnings
+			baseValue := sellEv.BaseValue
+			bonus := sellEv.Bonus
+			lastTimestamp := sellEv.Timestamp
+			discoveredSet := make(map[string]bool, len(sellEv.Discovered))
 			for _, discoveredEntry := range sellEv.Discovered {
-				soldSystemSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
+				discoveredSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
 			}
 
+			// Coalesce sequential MultiSellExplorationData events within 60s (e.g. multi-page selling)
+			for evIdx+1 < len(events) && events[evIdx+1].eventType == "MultiSellExplorationData" {
+				var nextSell journal.MultiSellExplorationDataEvent
+				if json.Unmarshal([]byte(events[evIdx+1].rawJSON), &nextSell) == nil {
+					if timeDiffSeconds(nextSell.Timestamp, lastTimestamp) <= 60.0 {
+						nextKey := fmt.Sprintf("carto_multi|%s|%d|%d|%d", nextSell.Timestamp, nextSell.TotalEarnings, nextSell.BaseValue, len(nextSell.Discovered))
+						if !seenSales[nextKey] {
+							seenSales[nextKey] = true
+							totalEarnings += nextSell.TotalEarnings
+							baseValue += nextSell.BaseValue
+							bonus += nextSell.Bonus
+							for _, disc := range nextSell.Discovered {
+								discoveredSet[strings.ToLower(strings.TrimSpace(disc.SystemName))] = true
+							}
+							lastTimestamp = nextSell.Timestamp
+						}
+						evIdx++
+						continue
+					}
+				}
+				break
+			}
+
+			totalCrewWage := findCrewWage(lastTimestamp)
+
+			// In MultiSellExplorationData, all pending cartographic scans accumulated up to this sale
+			// timestamp are sold.
 			var matchedRecs []*scanRecord
 			for key, rec := range unsoldCarto {
-				if rec.status == "pending" && (soldSystemSet[strings.ToLower(rec.starSystem)] || len(sellEv.Discovered) == 0) {
+				if rec.status == "pending" && rec.timestamp <= lastTimestamp {
 					matchedRecs = append(matchedRecs, rec)
 					delete(unsoldCarto, key)
 				}
@@ -497,30 +676,52 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				for _, matchedRecord := range matchedRecs {
 					totalTheoretical += matchedRecord.theoreticalTotal
 				}
-				// Distribute multi-sell earnings, bonuses, and crew deductions proportionally across matched scan records
-				// according to each body's share of total theoretical scan value.
-				for _, matchedRecord := range matchedRecs {
+				var allocatedGross int64
+				var allocatedBase int64
+				var allocatedBonus int64
+				var allocatedCrew int64
+				for recIdx, matchedRecord := range matchedRecs {
 					matchedRecord.status = "sold"
-					matchedRecord.soldTimestamp = sellEv.Timestamp
+					matchedRecord.soldTimestamp = lastTimestamp
 					ratio := 1.0
 					if totalTheoretical > 0 {
 						ratio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
+					} else if len(matchedRecs) > 0 {
+						ratio = 1.0 / float64(len(matchedRecs))
 					}
-					matchedRecord.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
-					matchedRecord.actualBase = int64(float64(sellEv.BaseValue) * ratio)
-					matchedRecord.actualBonus = int64(float64(sellEv.Bonus) * ratio)
-					if totalCrewWage > 0 {
-						matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
+					if recIdx == len(matchedRecs)-1 {
+						matchedRecord.actualGross = totalEarnings - allocatedGross
+						matchedRecord.actualBase = baseValue - allocatedBase
+						matchedRecord.actualBonus = bonus - allocatedBonus
+						if totalCrewWage > 0 {
+							matchedRecord.crewLoss = totalCrewWage - allocatedCrew
+						}
+					} else {
+						matchedRecord.actualGross = int64(float64(totalEarnings) * ratio)
+						matchedRecord.actualBase = int64(float64(baseValue) * ratio)
+						matchedRecord.actualBonus = int64(float64(bonus) * ratio)
+						allocatedGross += matchedRecord.actualGross
+						allocatedBase += matchedRecord.actualBase
+						allocatedBonus += matchedRecord.actualBonus
+						if totalCrewWage > 0 {
+							matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
+							allocatedCrew += matchedRecord.crewLoss
+						}
 					}
-					if matchedRecord.theoreticalBonus > 0 && sellEv.Bonus == 0 {
-						matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
+
+					// Stolen check: player expected discovery bonus on an undiscovered body, but system was not in Discovered array
+					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
+						normSystem := strings.ToLower(strings.TrimSpace(matchedRecord.starSystem))
+						if !discoveredSet[normSystem] {
+							matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
+						}
 					}
 				}
 			} else {
 				ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
-					timestamp: sellEv.Timestamp,
+					timestamp: lastTimestamp,
 					kind:      "carto",
-					gross:     sellEv.TotalEarnings,
+					gross:     totalEarnings,
 					crewLoss:  totalCrewWage,
 				})
 			}

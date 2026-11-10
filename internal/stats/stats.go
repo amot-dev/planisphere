@@ -459,13 +459,11 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 	return metrics, nil
 }
 
-// firstLogged decides whether the first-logged (5x) bonus applies. The
-// ScanOrganic WasLogged flag is authoritative when the journal provides it;
-// older journals fall back to the parent body's Scan WasFootfalled == false.
+// firstLogged decides whether the first-logged (5x) bonus applies by naively
+// checking the parent body's Scan WasFootfalled == false only.
+// ScanOrganic.WasLogged is intentionally ignored because Frontier journals
+// do not reliably populate it: https://issues.frontierstore.net/issue-detail/81891
 func (engine *Engine) firstLogged(organicEvent *journal.ScanOrganicEvent, scans map[bodyKey]*journal.ScanEvent, missingScans map[bodyKey]bool, timestamp string) (bool, error) {
-	if organicEvent.WasLogged != nil {
-		return !*organicEvent.WasLogged, nil
-	}
 	key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}
 	scan := scans[key]
 	if scan == nil && !missingScans[key] {

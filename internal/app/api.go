@@ -1122,8 +1122,9 @@ type SidebarStats struct {
 	BaselineEnabled     bool          `json:"baselineEnabled"`
 	BaselineSource      string        `json:"baselineSource"`
 	Baseline            stats.Metrics `json:"baseline"`
-	Lifetime            stats.Metrics `json:"lifetime"` // baseline + expedition
-	Realization         stats.RealizationBreakdown `json:"realization"`
+	Lifetime               stats.Metrics              `json:"lifetime"` // baseline + expedition
+	Realization            stats.RealizationBreakdown `json:"realization"`
+	AllJournalsRealization stats.RealizationBreakdown `json:"allJournalsRealization"`
 }
 
 // GetSidebarStats computes the sidebar for an expedition with mode filters.
@@ -1154,6 +1155,9 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	// All-time personal carrier data comes directly from Frontier's lifetime Statistics.
 	if allTimeMetrics, allTimeMetricsError := app.getAllTimeMetrics(); allTimeMetricsError == nil {
 		sidebar.AllJournals = allTimeMetrics
+	}
+	if allRealization, allRealizationError := app.getAllTimeRealization(); allRealizationError == nil {
+		sidebar.AllJournalsRealization = allRealization
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
@@ -1238,7 +1242,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
 		sidebar.Realization, _ = statsEngine.ComputeRealization(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
 	} else {
-		sidebar.Realization, _ = statsEngine.ComputeRealization(stats.Range{}, &filter)
+		sidebar.Realization = sidebar.AllJournalsRealization
 	}
 	return sidebar, nil
 }

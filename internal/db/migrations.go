@@ -1,9 +1,14 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strconv"
 	"time"
 )
 
@@ -76,6 +81,11 @@ var migrations = []migration{
 		key:         "source_file_index_v7",
 		description: "Add index on journal_events source_file column to accelerate commander backfills",
 		apply:       migrateSourceFileIndexV7,
+	},
+	{
+		key:         "sell_organic_uid_dedup_v8",
+		description: "Deduplicate SellOrganicData events and normalize their canonical event_uid",
+		apply:       migrateSellOrganicUIDsV8,
 	},
 }
 
@@ -197,6 +207,80 @@ func migrateRealizationEventsV6(dbConn *sql.DB) error {
 func migrateSourceFileIndexV7(dbConn *sql.DB) error {
 	if _, createIndexError := dbConn.Exec(`CREATE INDEX IF NOT EXISTS idx_journal_events_source ON journal_events(source_file)`); createIndexError != nil {
 		return fmt.Errorf("create idx_journal_events_source: %w", createIndexError)
+	}
+	return nil
+}
+
+func migrateSellOrganicUIDsV8(dbConn *sql.DB) error {
+	rows, queryErr := dbConn.Query(`SELECT id, timestamp, raw_json FROM journal_events WHERE event = 'SellOrganicData' ORDER BY id ASC`)
+	if queryErr != nil {
+		return queryErr
+	}
+	type sellOrganicRow struct {
+		id        int64
+		timestamp string
+		rawJSON   string
+	}
+	var existing []sellOrganicRow
+	for rows.Next() {
+		var row sellOrganicRow
+		if scanErr := rows.Scan(&row.id, &row.timestamp, &row.rawJSON); scanErr != nil {
+			rows.Close()
+			return scanErr
+		}
+		existing = append(existing, row)
+	}
+	if closeErr := rows.Close(); closeErr != nil {
+		return closeErr
+	}
+
+	type sellPayload struct {
+		MarketID *int64 `json:"MarketID"`
+		BioData  []struct {
+			Value int64 `json:"Value"`
+			Bonus int64 `json:"Bonus"`
+		} `json:"BioData"`
+	}
+
+	seenUIDs := make(map[string]bool, len(existing))
+	for _, row := range existing {
+		var payload sellPayload
+		if err := json.Unmarshal([]byte(row.rawJSON), &payload); err != nil {
+			continue
+		}
+		var totalValue, totalBonus int64
+		for _, item := range payload.BioData {
+			totalValue += item.Value
+			totalBonus += item.Bonus
+		}
+		marketIDStr := ""
+		if payload.MarketID != nil {
+			marketIDStr = strconv.FormatInt(*payload.MarketID, 10)
+		}
+		hasher := sha256.New()
+		_, _ = io.WriteString(hasher, row.timestamp)
+		_, _ = io.WriteString(hasher, "\x00SellOrganicData")
+		for _, k := range []string{
+			marketIDStr,
+			strconv.Itoa(len(payload.BioData)),
+			strconv.FormatInt(totalValue, 10),
+			strconv.FormatInt(totalBonus, 10),
+		} {
+			_, _ = io.WriteString(hasher, "\x00")
+			_, _ = io.WriteString(hasher, k)
+		}
+		canonicalUID := hex.EncodeToString(hasher.Sum(nil))
+
+		if seenUIDs[canonicalUID] {
+			if _, delErr := dbConn.Exec(`DELETE FROM journal_events WHERE id = ?`, row.id); delErr != nil {
+				return delErr
+			}
+			continue
+		}
+		seenUIDs[canonicalUID] = true
+		if _, updErr := dbConn.Exec(`UPDATE OR IGNORE journal_events SET event_uid = ? WHERE id = ?`, canonicalUID, row.id); updErr != nil {
+			return updErr
+		}
 	}
 	return nil
 }

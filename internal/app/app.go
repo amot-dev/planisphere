@@ -81,9 +81,11 @@ type App struct {
 	resolvingExpeditions map[int64]bool
 	resolveSem           chan struct{}
 
-	allTimeMu      sync.Mutex
-	allTimeValid   bool
-	allTimeMetrics stats.Metrics
+	allTimeMu               sync.Mutex
+	allTimeValid            bool
+	allTimeMetrics          stats.Metrics
+	allTimeRealizationValid bool
+	allTimeRealization      stats.RealizationBreakdown
 
 	liveStatsMu    sync.Mutex
 	liveStatsCache map[string]stats.Metrics
@@ -340,6 +342,7 @@ func (app *App) invalidateLiveStatsCache() {
 func (app *App) invalidateAllTimeCache() {
 	app.allTimeMu.Lock()
 	app.allTimeValid = false
+	app.allTimeRealizationValid = false
 	app.allTimeMu.Unlock()
 	app.careerStartMu.Lock()
 	app.careerStartValid = false
@@ -375,6 +378,26 @@ func (app *App) getAllTimeMetrics() (stats.Metrics, error) {
 	app.allTimeMetrics = allMetrics
 	app.allTimeValid = true
 	return allMetrics, nil
+}
+
+// getAllTimeRealization computes or retrieves cached lifetime realization across all journals. Caller must hold app.dbMu.RLock.
+func (app *App) getAllTimeRealization() (stats.RealizationBreakdown, error) {
+	app.allTimeMu.Lock()
+	defer app.allTimeMu.Unlock()
+	if app.allTimeRealizationValid {
+		return app.allTimeRealization, nil
+	}
+	if app.db == nil {
+		return stats.RealizationBreakdown{}, errorNotReady
+	}
+	statsEngine := stats.NewEngine(app.db)
+	allRealization, computeError := statsEngine.ComputeRealization(stats.Range{}, nil)
+	if computeError != nil {
+		return stats.RealizationBreakdown{}, computeError
+	}
+	app.allTimeRealization = allRealization
+	app.allTimeRealizationValid = true
+	return allRealization, nil
 }
 
 func (app *App) reevaluateActive() {

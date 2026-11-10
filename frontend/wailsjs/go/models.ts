@@ -376,7 +376,8 @@ export namespace app {
 	    baselineSource: string;
 	    baseline: stats.Metrics;
 	    lifetime: stats.Metrics;
-	    realization?: stats.RealizationBreakdown;
+	    realization: stats.RealizationBreakdown;
+	    allJournalsRealization: stats.RealizationBreakdown;
 	
 	    static createFrom(source: any = {}) {
 	        return new SidebarStats(source);
@@ -406,6 +407,7 @@ export namespace app {
 	        this.baseline = this.convertValues(source["baseline"], stats.Metrics);
 	        this.lifetime = this.convertValues(source["lifetime"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], stats.RealizationBreakdown);
+	        this.allJournalsRealization = this.convertValues(source["allJournalsRealization"], stats.RealizationBreakdown);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -816,7 +818,7 @@ export namespace expedition {
 	    elapsed: string;
 	    prevSystem: string;
 	    metrics: stats.Metrics;
-	    realization?: stats.RealizationBreakdown;
+	    realization: stats.RealizationBreakdown;
 	    estDistFromPrevLy?: number;
 	    estDistFromCurrentLy?: number;
 	    currentSystem: string;
@@ -926,31 +928,6 @@ export namespace modes {
 
 export namespace stats {
 	
-	export class RealizationBreakdown {
-	    totalRealized: number;
-	    cartoLostDeath: number;
-	    organicLostDeath: number;
-	    cartoStolen: number;
-	    organicStolen: number;
-	    npcCrewLoss: number;
-	    pendingValue: number;
-
-	    static createFrom(source: any = {}) {
-	        return new RealizationBreakdown(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.totalRealized = source["totalRealized"] || 0;
-	        this.cartoLostDeath = source["cartoLostDeath"] || 0;
-	        this.organicLostDeath = source["organicLostDeath"] || 0;
-	        this.cartoStolen = source["cartoStolen"] || 0;
-	        this.organicStolen = source["organicStolen"] || 0;
-	        this.npcCrewLoss = source["npcCrewLoss"] || 0;
-	        this.pendingValue = source["pendingValue"] || 0;
-	    }
-	}
-
 	export class ModeSelection {
 	    modeId: number;
 	    travel: boolean;
@@ -1053,6 +1030,31 @@ export namespace stats {
 	        this.organicValueBase = source["organicValueBase"];
 	        this.organicValueBonus = source["organicValueBonus"];
 	        this.firstLogged = source["firstLogged"];
+	    }
+	}
+	
+	export class RealizationBreakdown {
+	    totalRealized: number;
+	    cartoLostDeath: number;
+	    organicLostDeath: number;
+	    cartoStolen: number;
+	    organicStolen: number;
+	    npcCrewLoss: number;
+	    pendingValue: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RealizationBreakdown(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.totalRealized = source["totalRealized"];
+	        this.cartoLostDeath = source["cartoLostDeath"];
+	        this.organicLostDeath = source["organicLostDeath"];
+	        this.cartoStolen = source["cartoStolen"];
+	        this.organicStolen = source["organicStolen"];
+	        this.npcCrewLoss = source["npcCrewLoss"];
+	        this.pendingValue = source["pendingValue"];
 	    }
 	}
 

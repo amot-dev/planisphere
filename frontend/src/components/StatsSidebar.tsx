@@ -93,6 +93,14 @@ export const StatsSidebar = memo(function StatsSidebar({
     return sidebarStats.expedition ?? new stats.Metrics()
   })()
 
+  const displayedRealization: stats.RealizationBreakdown = (() => {
+    if (!sidebarStats) return new stats.RealizationBreakdown()
+    if (viewScope === 'allTime') {
+      return sidebarStats.allJournalsRealization ?? new stats.RealizationBreakdown()
+    }
+    return sidebarStats.realization ?? new stats.RealizationBreakdown()
+  })()
+
   if (collapsed) {
     return (
       <aside className="w-8 shrink-0 h-full bg-[#090705] border-r border-[#3d2816] flex flex-col items-center pt-3 select-none">
@@ -530,7 +538,7 @@ export const StatsSidebar = memo(function StatsSidebar({
                 <span className="text-[10px] text-[#FF7100] shrink-0">{realizedExpanded ? '▾' : '▸'}</span>
               </div>
               <span className="font-mono-tabular text-xs font-extrabold text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatCredits(sidebarStats?.realization?.totalRealized)}
+                {formatCredits(displayedRealization.totalRealized)}
               </span>
             </button>
             {realizedExpanded && (
@@ -538,31 +546,31 @@ export const StatsSidebar = memo(function StatsSidebar({
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                   <span className="truncate">Cartographics Lost (Death)</span>
                   <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                    {formatLoss(sidebarStats?.realization?.cartoLostDeath)}
+                    {formatLoss(displayedRealization.cartoLostDeath)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                   <span className="truncate">Exobiology Lost (Death)</span>
                   <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                    {formatLoss(sidebarStats?.realization?.organicLostDeath)}
+                    {formatLoss(displayedRealization.organicLostDeath)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                   <span className="truncate">Cartographics Stolen</span>
                   <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                    {formatLoss(sidebarStats?.realization?.cartoStolen)}
+                    {formatLoss(displayedRealization.cartoStolen)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                   <span className="truncate">Exobiology Stolen</span>
                   <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                    {formatLoss(sidebarStats?.realization?.organicStolen)}
+                    {formatLoss(displayedRealization.organicStolen)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                   <span className="truncate">NPC Crew Payouts</span>
                   <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                    {formatLoss(sidebarStats?.realization?.npcCrewLoss)}
+                    {formatLoss(displayedRealization.npcCrewLoss)}
                   </span>
                 </div>
               </div>

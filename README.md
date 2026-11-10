@@ -34,6 +34,9 @@ Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router t
 ### Real-time cartography and exobiology payouts
 Get estimated credit values for bodies you scan (FSS, DSS, first discovery, first mapped, and terraformable bonuses) and plants you sample in your Artemis suit (base species value plus the massive first-logged multiplier) right as they hit your journal.
 
+> [!NOTE]
+> **Exobiology first-logged detection ([Frontier Issue #81891](https://issues.frontierstore.net/issue-detail/81891)):** Because Elite Dangerous journals do not reliably populate `WasLogged` on `ScanOrganic` events when another commander has already logged a species, Planisphere works around this by checking `WasFootfalled == false` on the parent body's `Scan` event to estimate first-logged bonuses and detect stolen exobiology bonuses. As a tradeoff, if another commander previously achieved First Footfall on a body without scanning its organics, those samples will only be estimated at base value until sold.
+
 ### Realized earnings and loss accounting
 When you dock and sell exploration data, Planisphere tracks your actual realized earnings alongside theoretical survey totals. It automatically logs credit losses resulting from ship destruction, first-discovery or first-logged bonuses claimed first by other commanders, and active NPC crew wage deductions.
 

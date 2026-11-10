@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"planisphere/internal/expedition"
+	"planisphere/internal/journal"
 	"planisphere/internal/stats"
 )
 
@@ -240,5 +241,64 @@ func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
 		testingContext.Errorf("expected careerStartTimestamp %s, got %s", expectedCareerStart, testApp.careerStartTimestamp)
 	}
 	testApp.careerStartMu.Unlock()
+}
+
+func TestGetSidebarStatsRealizationExpeditionVsAllTime(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "realization_stats_test.sqlite")
+
+	testApp := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := testApp.initialize(ctx, dbPath); err != nil {
+		t.Fatalf("initialize db: %v", err)
+	}
+	defer testApp.shutdown(ctx)
+
+	// Commander Jameson
+	_, _ = testApp.db.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Jameson', 1, '2024-01-01T00:00:00Z')`)
+
+	// Scan 1: Before expedition (2025)
+	uid1 := journal.ComputeUID("2025-01-01T10:00:00Z", "ScanOrganic", "1")
+	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
+		uid1, "2025-01-01T10:00:00Z", "ScanOrganic",
+		`{"timestamp":"2025-01-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":111,"Body":1}`, "2025-01-01T10:00:00Z")
+	uid1Sale := journal.ComputeUID("2025-01-01T12:00:00Z", "SellOrganicData", "1")
+	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
+		uid1Sale, "2025-01-01T12:00:00Z", "SellOrganicData",
+		`{"timestamp":"2025-01-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`, "2025-01-01T12:00:00Z")
+
+	// Create and start expedition at 2026-01-01T00:00:00Z
+	exp, err := testApp.CreateExpedition("2026 Survey", "")
+	if err != nil {
+		t.Fatalf("create expedition: %v", err)
+	}
+	_, _ = testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T00:00:00Z' WHERE id = ?`, exp.ID)
+
+	// Scan 2: During expedition (2026)
+	uid2 := journal.ComputeUID("2026-03-01T10:00:00Z", "ScanOrganic", "2")
+	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
+		uid2, "2026-03-01T10:00:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":222,"Body":1}`, "2026-03-01T10:00:00Z")
+	uid2Sale := journal.ComputeUID("2026-03-01T12:00:00Z", "SellOrganicData", "2")
+	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
+		uid2Sale, "2026-03-01T12:00:00Z", "SellOrganicData",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`, "2026-03-01T12:00:00Z")
+
+	statsRes, err := testApp.GetSidebarStats(exp.ID, stats.Filter{Enabled: false})
+	if err != nil {
+		t.Fatalf("GetSidebarStats failed: %v", err)
+	}
+
+	// Expedition realization should reflect only Scan 2 (19,010,800)
+	if statsRes.Realization.TotalRealized != 19010800 {
+		t.Errorf("expected expedition Realization.TotalRealized 19,010,800, got %d", statsRes.Realization.TotalRealized)
+	}
+
+	// All journals realization should reflect Scan 1 + Scan 2 (38,021,600)
+	if statsRes.AllJournalsRealization.TotalRealized != 38021600 {
+		t.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", statsRes.AllJournalsRealization.TotalRealized)
+	}
 }
 
