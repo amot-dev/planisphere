@@ -1101,29 +1101,29 @@ func (app *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, err
 
 // SidebarStats is the content of the Stats Sidebar.
 type SidebarStats struct {
-	ExpeditionID        int64         `json:"expeditionId"`
-	Status              string        `json:"status"`
-	Started             bool          `json:"started"`
-	Start               string        `json:"start"`
-	End                 string        `json:"end"`
-	StartGalactic       string        `json:"startGalactic"`
-	EndGalactic         string        `json:"endGalactic"`
-	EndIsNow            bool          `json:"endIsNow"`
-	Duration            string        `json:"duration"`
-	CareerStart         string        `json:"careerStart"`
-	CareerStartGalactic string        `json:"careerStartGalactic"`
-	CareerDuration      string        `json:"careerDuration"`
-	FilterActive        bool          `json:"filterActive"`
-	Live                stats.Metrics `json:"live"`        // from journals (mode-filtered)
-	Adjustments         stats.Metrics `json:"adjustments"` // manual
-	Expedition          stats.Metrics `json:"expedition"`  // live + adjustments
-	AllJournals         stats.Metrics `json:"allJournals"` // all ingested journal events (mode-filtered)
-	BaselineEnabled     bool          `json:"baselineEnabled"`
-	BaselineSource      string        `json:"baselineSource"`
-	Baseline            stats.Metrics `json:"baseline"`
-	Lifetime               stats.Metrics              `json:"lifetime"` // baseline + expedition
-	Realization            stats.RealizationBreakdown `json:"realization"`
-	AllJournalsRealization stats.RealizationBreakdown `json:"allJournalsRealization"`
+	ExpeditionID           int64                      `json:"expeditionId"`
+	Status                 string                     `json:"status"`
+	Started                bool                       `json:"started"`
+	Start                  string                     `json:"start"`
+	End                    string                     `json:"end"`
+	StartGalactic          string                     `json:"startGalactic"`
+	EndGalactic            string                     `json:"endGalactic"`
+	EndIsNow               bool                       `json:"endIsNow"`
+	Duration               string                     `json:"duration"`
+	CareerStart            string                     `json:"careerStart"`
+	CareerStartGalactic    string                     `json:"careerStartGalactic"`
+	CareerDuration         string                     `json:"careerDuration"`
+	FilterActive           bool                       `json:"filterActive"`
+	Live                   stats.Metrics              `json:"live"`        // from journals (mode-filtered)
+	Adjustments            stats.Metrics              `json:"adjustments"` // manual
+	Expedition             stats.Metrics              `json:"expedition"`  // live + adjustments
+	AllJournals            stats.Metrics              `json:"allJournals"` // all ingested journal events (unfiltered)
+	BaselineEnabled        bool                       `json:"baselineEnabled"`
+	BaselineSource         string                     `json:"baselineSource"`
+	Baseline               stats.Metrics              `json:"baseline"`
+	Lifetime               stats.Metrics              `json:"lifetime"`               // baseline + expedition
+	Realization            stats.RealizationBreakdown `json:"realization"`            // expedition realized earnings and losses (mode-filtered)
+	AllJournalsRealization stats.RealizationBreakdown `json:"allJournalsRealization"` // all-time realized earnings and losses across all journals (unfiltered)
 }
 
 // GetSidebarStats computes the sidebar for an expedition with mode filters.

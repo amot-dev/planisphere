@@ -75,9 +75,9 @@ type PlanView struct {
 	PlayerSystem       string       `json:"playerSystem,omitempty"`
 	WaypointCount      int          `json:"waypointCount"`
 	VisitedCount       int          `json:"visitedCount"`
-	PlannedLy          float64      `json:"plannedLy"`
-	CoveredLy          float64      `json:"coveredLy"`
-	RemainingLy        float64      `json:"remainingLy"`
+	PlannedLy          float64      `json:"plannedLy"`          // sum of straight-line distances across all planned waypoint legs
+	CoveredLy          float64      `json:"coveredLy"`          // sum of straight-line distances across visited waypoint legs
+	RemainingLy        float64      `json:"remainingLy"`        // straight-line distance from current player position to next waypoint plus remaining unvisited legs
 	PendingTransitions []Transition `json:"pendingTransitions"` // ships flown since the current waypoint
 	ActiveModeID       int64        `json:"activeModeId"`
 	ActiveModeName     string       `json:"activeModeName"`
@@ -613,16 +613,16 @@ func SetActiveLegMode(transaction *sql.Tx, expeditionID int64, modeID int64) err
 
 // WaypointDetails is the content of a waypoint's expandable drawer.
 type WaypointDetails struct {
-	RowID        int64         `json:"rowId"`
-	Kind         string        `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1), "future"
-	Number       int           `json:"number"`
-	From         string        `json:"from"`
-	To           string        `json:"to"`
-	FromGalactic string        `json:"fromGalactic"`
-	ToGalactic   string        `json:"toGalactic"`
-	Elapsed      string        `json:"elapsed"`
-	PrevSystem   string        `json:"prevSystem"`
-	Metrics      stats.Metrics `json:"metrics"`
+	RowID        int64                      `json:"rowId"`
+	Kind         string                     `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1), "future"
+	Number       int                        `json:"number"`
+	From         string                     `json:"from"`
+	To           string                     `json:"to"`
+	FromGalactic string                     `json:"fromGalactic"`
+	ToGalactic   string                     `json:"toGalactic"`
+	Elapsed      string                     `json:"elapsed"`
+	PrevSystem   string                     `json:"prevSystem"`
+	Metrics      stats.Metrics              `json:"metrics"`
 	Realization  stats.RealizationBreakdown `json:"realization"`
 
 	EstDistFromPrevLy    *float64 `json:"estDistFromPrevLy,omitempty"`
