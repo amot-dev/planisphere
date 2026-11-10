@@ -88,7 +88,7 @@ type App struct {
 	allTimeRealization      stats.RealizationBreakdown
 
 	liveStatsMu    sync.Mutex
-	liveStatsCache map[string]stats.Metrics
+	liveStatsCache map[string]cachedLiveStats
 
 	// Career start timestamp caching fields protected by careerStartMu.
 	careerStartMu        sync.Mutex
@@ -100,13 +100,18 @@ type App struct {
 	emit func(event string, data ...any)
 }
 
+type cachedLiveStats struct {
+	metrics     stats.Metrics
+	realization stats.RealizationBreakdown
+}
+
 // New creates the application service.
 func New() *App {
 	return &App{
 		resolving:            map[int64]bool{},
 		resolvingExpeditions: map[int64]bool{},
 		resolveSem:           make(chan struct{}, 1),
-		liveStatsCache:       map[string]stats.Metrics{},
+		liveStatsCache:       map[string]cachedLiveStats{},
 	}
 }
 
@@ -165,6 +170,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
 	app.resolver = systems.NewResolver(dbConn, app.onlineEnabled)
 	app.gec = gec.NewCatalog(dbConn)
+	stats.InvalidateLedgerCache()
 	app.invalidateAllTimeCache()
 	return nil
 }
@@ -340,7 +346,6 @@ func (app *App) invalidateLiveStatsCache() {
 }
 
 func (app *App) invalidateAllTimeCache() {
-	stats.InvalidateLedgerCache()
 	app.allTimeMu.Lock()
 	app.allTimeValid = false
 	app.allTimeRealizationValid = false

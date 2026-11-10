@@ -269,12 +269,25 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(t *testing.T) {
 		uid1Sale, "2025-01-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2025-01-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`, "2025-01-01T12:00:00Z")
 
-	// Create and start expedition at 2026-01-01T00:00:00Z
-	exp, err := testApp.CreateExpedition("2026 Survey", "")
-	if err != nil {
-		t.Fatalf("create expedition: %v", err)
+	// Create expedition (initially unstarted)
+	expeditionRecord, createError := testApp.CreateExpedition("2026 Survey", "")
+	if createError != nil {
+		t.Fatalf("create expedition: %v", createError)
 	}
-	_, _ = testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T00:00:00Z' WHERE id = ?`, exp.ID)
+
+	unstartedSidebarStats, unstartedStatsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
+	if unstartedStatsError != nil {
+		t.Fatalf("GetSidebarStats (unstarted) failed: %v", unstartedStatsError)
+	}
+	if unstartedSidebarStats.Realization.TotalRealized != 0 {
+		t.Errorf("expected unstarted expedition Realization.TotalRealized 0, got %d", unstartedSidebarStats.Realization.TotalRealized)
+	}
+	if unstartedSidebarStats.AllJournalsRealization.TotalRealized != 19010800 {
+		t.Errorf("expected unstarted AllJournalsRealization.TotalRealized 19,010,800, got %d", unstartedSidebarStats.AllJournalsRealization.TotalRealized)
+	}
+
+	// Start expedition at 2026-01-01T00:00:00Z
+	_, _ = testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T00:00:00Z' WHERE id = ?`, expeditionRecord.ID)
 
 	// Scan 2: During expedition (2026)
 	uid2 := journal.ComputeUID("2026-03-01T10:00:00Z", "ScanOrganic", "2")
@@ -285,20 +298,22 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(t *testing.T) {
 	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
 		uid2Sale, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`, "2026-03-01T12:00:00Z")
+	stats.InvalidateLedgerCache()
+	testApp.invalidateAllTimeCache()
 
-	statsRes, err := testApp.GetSidebarStats(exp.ID, stats.Filter{Enabled: false})
-	if err != nil {
-		t.Fatalf("GetSidebarStats failed: %v", err)
+	sidebarStats, statsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
+	if statsError != nil {
+		t.Fatalf("GetSidebarStats failed: %v", statsError)
 	}
 
 	// Expedition realization should reflect only Scan 2 (19,010,800)
-	if statsRes.Realization.TotalRealized != 19010800 {
-		t.Errorf("expected expedition Realization.TotalRealized 19,010,800, got %d", statsRes.Realization.TotalRealized)
+	if sidebarStats.Realization.TotalRealized != 19010800 {
+		t.Errorf("expected expedition Realization.TotalRealized 19,010,800, got %d", sidebarStats.Realization.TotalRealized)
 	}
 
 	// All journals realization should reflect Scan 1 + Scan 2 (38,021,600)
-	if statsRes.AllJournalsRealization.TotalRealized != 38021600 {
-		t.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", statsRes.AllJournalsRealization.TotalRealized)
+	if sidebarStats.AllJournalsRealization.TotalRealized != 38021600 {
+		t.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", sidebarStats.AllJournalsRealization.TotalRealized)
 	}
 }
 

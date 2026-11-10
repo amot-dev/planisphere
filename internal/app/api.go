@@ -229,6 +229,7 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 	}(); err != nil {
 		return Settings{}, err
 	}
+	stats.InvalidateLedgerCache()
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
 	app.changed("journal", 0)
@@ -856,7 +857,6 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 	}(); err != nil {
 		return err
 	}
-	app.invalidateAllTimeCache()
 	app.changed("modes", expeditionID)
 	return nil
 }
@@ -876,7 +876,6 @@ func (app *App) SetActiveLegMode(expeditionID, modeID int64) error {
 	}(); err != nil {
 		return err
 	}
-	app.invalidateAllTimeCache()
 	app.changed("modes", expeditionID)
 	return nil
 }
@@ -1213,15 +1212,18 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		cacheKey := fmt.Sprintf("%d|%s|%s|%s", expeditionID, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, string(filterJSON))
 
 		app.liveStatsMu.Lock()
-		cachedMetrics, isCached := app.liveStatsCache[cacheKey]
+		cachedEntry, isCached := app.liveStatsCache[cacheKey]
 		app.liveStatsMu.Unlock()
 
 		var liveMetrics stats.Metrics
+		var liveRealization stats.RealizationBreakdown
 		if isCached {
-			liveMetrics = cachedMetrics
+			liveMetrics = cachedEntry.metrics
+			liveRealization = cachedEntry.realization
 		} else {
 			var computeError error
-			liveMetrics, computeError = statsEngine.Compute(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
+			expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
+			liveMetrics, computeError = statsEngine.Compute(expeditionRange, &filter)
 			if computeError != nil {
 				return sidebar, computeError
 			}
@@ -1233,16 +1235,22 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 			liveMetrics.CarrierDistanceLy = 0
 			liveMetrics.TritiumUsed = nil
 
+			liveRealization, computeError = statsEngine.ComputeRealization(expeditionRange, &filter)
+			if computeError != nil {
+				return sidebar, computeError
+			}
+
 			app.liveStatsMu.Lock()
-			app.liveStatsCache[cacheKey] = liveMetrics
+			app.liveStatsCache[cacheKey] = cachedLiveStats{
+				metrics:     liveMetrics,
+				realization: liveRealization,
+			}
 			app.liveStatsMu.Unlock()
 		}
 
 		sidebar.Live = liveMetrics
 		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
-		sidebar.Realization, _ = statsEngine.ComputeRealization(stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}, &filter)
-	} else {
-		sidebar.Realization = sidebar.AllJournalsRealization
+		sidebar.Realization = liveRealization
 	}
 	return sidebar, nil
 }

@@ -460,7 +460,11 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 			// https://issues.frontierstore.net/issue-detail/81891 is fixed.
 			if !firstLoggedBonus && eventRow.eventUID != "" {
 				if !realizationLedgerLoaded {
-					realizationLedger, _ = engine.buildLedger()
+					var ledgerError error
+					realizationLedger, ledgerError = engine.buildLedger()
+					if ledgerError != nil {
+						return metrics, ledgerError
+					}
 					realizationLedgerLoaded = true
 				}
 				if realizationLedger.HasRealizedOrganicBonus(eventRow.eventUID) {
