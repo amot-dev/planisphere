@@ -63,7 +63,7 @@ func IsRealizationEvent(eventName string) bool {
 	switch eventName {
 	case "Scan", "SAAScanComplete", "ScanOrganic",
 		"SellExplorationData", "MultiSellExplorationData", "SellOrganicData",
-		"Died", "Resurrect", "NpcCrewPaidWage":
+		"Resurrect", "NpcCrewPaidWage":
 		return true
 	default:
 		return false

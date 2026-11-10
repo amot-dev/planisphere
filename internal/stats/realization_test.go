@@ -104,9 +104,9 @@ func TestRealizationDeathLosses(t *testing.T) {
 	insertEvent(t, conn, "2026-03-01T10:00:00Z", "ScanOrganic",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`)
 
-	// Player dies on foot
-	insertEvent(t, conn, "2026-03-01T11:00:00Z", "Died",
-		`{"timestamp":"2026-03-01T11:00:00Z","event":"Died","KillerShip":"suit_class2","KillerName":"Guard"}`)
+	// Player dies on foot and resurrects in orbit
+	insertEvent(t, conn, "2026-03-01T11:00:05Z", "Resurrect",
+		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":false}`)
 
 	engine := stats.NewEngine(conn)
 	res, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}, nil)
@@ -152,27 +152,45 @@ func TestRealizationNpcCrewCut(t *testing.T) {
 }
 
 func TestRealizationCartoLostDeathAndSold(t *testing.T) {
-	conn := setupRealizationDB(t)
+	databaseConnection := setupRealizationDB(t)
+	engineInstance := stats.NewEngine(databaseConnection)
 
-	// Scan in Sol A 1 (Earth-like or terraformable)
-	insertEvent(t, conn, "2026-03-01T10:00:00Z", "Scan",
+	// Ship destruction with insurance rebuy (Option "rebuy", Cost > 0) loses pending cartography.
+	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1234,"BodyID":1,"BodyName":"Sol A 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T11:00:05Z", "Resurrect",
+		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"rebuy","Cost":2500000,"Bankrupt":false}`)
 
-	// Ship destroyed
-	insertEvent(t, conn, "2026-03-01T11:00:00Z", "Died",
-		`{"timestamp":"2026-03-01T11:00:00Z","event":"Died","KillerShip":"anaconda","KillerName":"Pirate"}`)
+	// Taking a free Sidewinder on ship destruction ("freewinder" with Cost 0) loses pending cartography.
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "Scan",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Achenar","SystemAddress":2345,"BodyID":1,"BodyName":"Achenar 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T13:00:05Z", "Resurrect",
+		`{"timestamp":"2026-03-01T13:00:05Z","event":"Resurrect","Option":"freewinder","Cost":0,"Bankrupt":false}`)
 
-	engine := stats.NewEngine(conn)
-	res, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
-	}
+	// Bankruptcy into a free Sidewinder (Option "free", Cost 0, Bankrupt true) also loses pending cartography.
+	insertEvent(t, databaseConnection, "2026-03-01T14:00:00Z", "Scan",
+		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alioth","SystemAddress":3456,"BodyID":1,"BodyName":"Alioth 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T15:00:05Z", "Resurrect",
+		`{"timestamp":"2026-03-01T15:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":true}`)
 
-	if res.CartoLostDeath <= 0 {
-		t.Errorf("expected CartoLostDeath > 0, got %d", res.CartoLostDeath)
-	}
-	if res.TotalRealized != 0 {
-		t.Errorf("expected TotalRealized 0, got %d", res.TotalRealized)
+	for _, scenario := range []struct {
+		label  string
+		window stats.Range
+	}{
+		{label: "insurance rebuy", window: stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}},
+		{label: "freewinder replacement", window: stats.Range{After: "2026-03-01T11:30:00Z", Until: "2026-03-01T12:30:00Z"}},
+		{label: "bankruptcy replacement", window: stats.Range{After: "2026-03-01T13:30:00Z", Until: "2026-03-01T14:30:00Z"}},
+	} {
+		realizationBreakdown, computeError := engineInstance.ComputeRealization(scenario.window, nil)
+		if computeError != nil {
+			t.Fatalf("ComputeRealization (%s) failed: %v", scenario.label, computeError)
+		}
+		if realizationBreakdown.CartoLostDeath <= 0 {
+			t.Errorf("%s: expected CartoLostDeath > 0, got %d", scenario.label, realizationBreakdown.CartoLostDeath)
+		}
+		if realizationBreakdown.TotalRealized != 0 {
+			t.Errorf("%s: expected TotalRealized 0, got %d", scenario.label, realizationBreakdown.TotalRealized)
+		}
 	}
 }
 
@@ -263,40 +281,40 @@ func TestRealizationOrganicMultiSpeciesVariantSeparation(t *testing.T) {
 }
 
 func TestRealizationOnFootDeathPreservesCarto(t *testing.T) {
-	conn := setupRealizationDB(t)
+	databaseConnection := setupRealizationDB(t)
 
 	// Scan body in ship
-	insertEvent(t, conn, "2026-03-01T10:00:00Z", "Scan",
+	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1234,"BodyID":1,"BodyName":"Sol A 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`)
 
 	// Scan organic on foot
-	insertEvent(t, conn, "2026-03-01T10:30:00Z", "ScanOrganic",
+	insertEvent(t, databaseConnection, "2026-03-01T10:30:00Z", "ScanOrganic",
 		`{"timestamp":"2026-03-01T10:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":1234,"Body":1}`)
 
-	// Player dies on foot (falling / suit) followed by free resurrect
-	insertEvent(t, conn, "2026-03-01T11:00:00Z", "Died",
-		`{"timestamp":"2026-03-01T11:00:00Z","event":"Died","KillerName":"$Death_Falling;"}`)
-	insertEvent(t, conn, "2026-03-01T11:00:05Z", "Resurrect",
+	// On-foot free suit redeploy and detention-center hand-in (with Cost > 0 fine) both preserve shipboard cartography
+	insertEvent(t, databaseConnection, "2026-03-01T11:00:05Z", "Resurrect",
 		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T11:30:05Z", "Resurrect",
+		`{"timestamp":"2026-03-01T11:30:05Z","event":"Resurrect","Option":"handin","Cost":5000,"Bankrupt":false}`)
 
 	// Later sold cartography via MultiSellExplorationData
-	insertEvent(t, conn, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Sol","NumBodies":1}]}`)
 
-	engine := stats.NewEngine(conn)
-	res, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:45:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
+	engineInstance := stats.NewEngine(databaseConnection)
+	realizationBreakdown, computeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:45:00Z"}, nil)
+	if computeError != nil {
+		t.Fatalf("ComputeRealization failed: %v", computeError)
 	}
 
-	if res.CartoLostDeath != 0 {
-		t.Errorf("expected CartoLostDeath 0 for on-foot death, got %d", res.CartoLostDeath)
+	if realizationBreakdown.CartoLostDeath != 0 {
+		t.Errorf("expected CartoLostDeath 0 for on-foot death, got %d", realizationBreakdown.CartoLostDeath)
 	}
-	if res.OrganicLostDeath != 95054000 {
-		t.Errorf("expected OrganicLostDeath 95,054,000, got %d", res.OrganicLostDeath)
+	if realizationBreakdown.OrganicLostDeath != 95054000 {
+		t.Errorf("expected OrganicLostDeath 95,054,000, got %d", realizationBreakdown.OrganicLostDeath)
 	}
-	if res.TotalRealized != 1500000 {
-		t.Errorf("expected TotalRealized 1,500,000, got %d", res.TotalRealized)
+	if realizationBreakdown.TotalRealized != 1500000 {
+		t.Errorf("expected TotalRealized 1,500,000, got %d", realizationBreakdown.TotalRealized)
 	}
 }
 

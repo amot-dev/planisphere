@@ -189,7 +189,6 @@ var realizationEvents = []string{
 	"SellExplorationData",
 	"MultiSellExplorationData",
 	"SellOrganicData",
-	"Died",
 	"Resurrect",
 	"NpcCrewPaidWage",
 }
@@ -323,20 +322,13 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 	unsoldCarto := make(map[cartoKey]*scanRecord)
 	unsoldOrganic := make([]*scanRecord, 0, 100)
 	recentWageEvents := make([]journal.NpcCrewPaidWageEvent, 0, 50)
-	resurrectEvents := make([]journal.ResurrectEvent, 0, 10)
 
-	// First pass: collect wage and resurrect events so they can be matched with concurrent sales and deaths
+	// First pass: collect wage events so they can be matched with concurrent sales
 	for _, ev := range events {
-		switch ev.eventType {
-		case "NpcCrewPaidWage":
+		if ev.eventType == "NpcCrewPaidWage" {
 			var wageEv journal.NpcCrewPaidWageEvent
 			if json.Unmarshal([]byte(ev.rawJSON), &wageEv) == nil {
 				recentWageEvents = append(recentWageEvents, wageEv)
-			}
-		case "Resurrect":
-			var resEv journal.ResurrectEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &resEv) == nil {
-				resurrectEvents = append(resurrectEvents, resEv)
 			}
 		}
 	}
@@ -349,15 +341,6 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 		}
 		return totalWage
-	}
-
-	findNextResurrect := func(diedTimestamp string) *journal.ResurrectEvent {
-		for _, resEv := range resurrectEvents {
-			if resEv.Timestamp >= diedTimestamp && timeDiffSeconds(resEv.Timestamp, diedTimestamp) <= 600.0 {
-				return &resEv
-			}
-		}
-		return nil
 	}
 
 	scans := make(map[cartoKey]*journal.ScanEvent)
@@ -469,41 +452,27 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			unsoldOrganic = append(unsoldOrganic, rec)
 			ledger.records = append(ledger.records, rec)
 
-		case "Died":
-			var diedEv journal.DiedEvent
-			_ = json.Unmarshal([]byte(ev.rawJSON), &diedEv)
-
-			// Determine if this was ship destruction or on-foot suit death
-			isShipDestruction := false
-			if resEv := findNextResurrect(ev.timestamp); resEv != nil {
-				if resEv.Cost > 0 || strings.EqualFold(resEv.Option, "rebuy") {
-					isShipDestruction = true
-				} else {
-					isShipDestruction = false
-				}
-			} else {
-				if diedEv.IsOnFoot() {
-					isShipDestruction = false
-				} else if diedEv.KillerShip != "" {
-					isShipDestruction = true
-				}
+		case "Resurrect":
+			var resurrectEvent journal.ResurrectEvent
+			if unmarshalError := json.Unmarshal([]byte(ev.rawJSON), &resurrectEvent); unmarshalError != nil {
+				continue
 			}
 
-			// Exobiology samples in suit are always lost on death
-			for _, orgRec := range unsoldOrganic {
-				if orgRec.status == "pending" {
-					orgRec.status = "lost_death"
-					orgRec.deathLoss = orgRec.theoreticalTotal
+			// Exobiology samples in suit are always lost upon any death and resurrection
+			for _, organicRecord := range unsoldOrganic {
+				if organicRecord.status == "pending" {
+					organicRecord.status = "lost_death"
+					organicRecord.deathLoss = organicRecord.theoreticalTotal
 				}
 			}
 			unsoldOrganic = unsoldOrganic[:0]
 
 			// Cartographic data is only lost on ship destruction
-			if isShipDestruction {
-				for _, cartoRec := range unsoldCarto {
-					if cartoRec.status == "pending" {
-						cartoRec.status = "lost_death"
-						cartoRec.deathLoss = cartoRec.theoreticalTotal
+			if isShipDestructionResurrect(resurrectEvent) {
+				for _, cartoRecord := range unsoldCarto {
+					if cartoRecord.status == "pending" {
+						cartoRecord.status = "lost_death"
+						cartoRecord.deathLoss = cartoRecord.theoreticalTotal
 					}
 				}
 				clear(unsoldCarto)
@@ -676,6 +645,34 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 	}
 
 	return ledger, nil
+}
+
+// isShipDestructionResurrect reports whether a Resurrect journal event
+// represents respawning from ship destruction (which destroys unsold shipboard
+// cartographic data) rather than recovering from an on-foot suit death or SRV
+// destruction (which preserves shipboard cartographic data).
+//
+// Loss accounting triggers on Resurrect rather than Died because no scans or
+// sales can occur while the commander is on the rebuy or redeployment screen,
+// and Died events for on-foot environmental hazards (heat, cold, or oxygen
+// depletion) omit killer identifiers. Non-ship recovery options ("recover",
+// "rejoin", "escape", "handin", or "free" with zero cost and Bankrupt false)
+// preserve cartographic data, including "handin" where Cost > 0 reflects an
+// on-foot detention-center bounty fine rather than ship insurance. Ship
+// replacement options ("rebuy", "freewinder", Bankrupt true, or positive
+// insurance cost) mark unsold cartography as lost.
+//
+// Edge case: if a commander who can afford their ship insurance (Bankrupt is
+// false) voluntarily declines rebuy to forfeit their ship for a free starter
+// Sidewinder and the journal records Option "free" with Cost 0 instead of
+// "freewinder", Resurrect alone cannot distinguish that voluntary forfeit from
+// a free on-foot redeployment to orbit.
+func isShipDestructionResurrect(resurrectEvent journal.ResurrectEvent) bool {
+	option := strings.ToLower(strings.TrimSpace(resurrectEvent.Option))
+	if option == "handin" || option == "recover" || option == "rejoin" || option == "escape" {
+		return false
+	}
+	return option == "rebuy" || option == "freewinder" || resurrectEvent.Bankrupt || resurrectEvent.Cost > 0
 }
 
 // allocateCartoSalePayout distributes a cartographic sale's gross earnings,
