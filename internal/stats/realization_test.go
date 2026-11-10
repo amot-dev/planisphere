@@ -431,3 +431,51 @@ func TestRealizationFirstFootfallOnlyDeterminesFirstLoggedAndStolen(t *testing.T
 		t.Errorf("expected OrganicStolen 76,043,200 (only Body 2), got %d", res.OrganicStolen)
 	}
 }
+
+func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
+	conn := setupRealizationDB(t)
+	engine := stats.NewEngine(conn)
+
+	// Body already has WasFootfalled: true (another commander landed previously without logging organics).
+	insertEvent(t, conn, "2026-03-01T09:50:00Z", "Scan",
+		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"FootfalledSys","SystemAddress":6001,"BodyID":1,"BodyName":"FootfalledSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
+	insertEvent(t, conn, "2026-03-01T10:00:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":6001,"Body":1}`)
+
+	legWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T10:30:00Z"}
+
+	// Before sale: estimated at base value only (19,010,800 Cr) because WasFootfalled is true.
+	beforeMetrics, err := engine.Compute(legWindow, nil)
+	if err != nil {
+		t.Fatalf("Compute before sale failed: %v", err)
+	}
+	if beforeMetrics.FirstLogged != 0 {
+		t.Errorf("expected FirstLogged 0 before sale, got %d", beforeMetrics.FirstLogged)
+	}
+	if beforeMetrics.OrganicValueTotal != 19010800 {
+		t.Errorf("expected OrganicValueTotal 19,010,800 before sale, got %d", beforeMetrics.OrganicValueTotal)
+	}
+
+	// Sold on a later leg with the 4x first-logged bonus (76,043,200 Cr).
+	insertEvent(t, conn, "2026-03-01T14:00:00Z", "SellOrganicData",
+		`{"timestamp":"2026-03-01T14:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
+			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200}
+		]}`)
+	stats.InvalidateLedgerCache()
+
+	// After sale: the original leg's Exobiology Value upgrades to include the first-logged bonus (95,054,000 Cr).
+	afterMetrics, err := engine.Compute(legWindow, nil)
+	if err != nil {
+		t.Fatalf("Compute after sale failed: %v", err)
+	}
+	if afterMetrics.FirstLogged != 1 {
+		t.Errorf("expected FirstLogged 1 after sale, got %d", afterMetrics.FirstLogged)
+	}
+	if afterMetrics.OrganicValueBonus != 76043200 {
+		t.Errorf("expected OrganicValueBonus 76,043,200 after sale, got %d", afterMetrics.OrganicValueBonus)
+	}
+	if afterMetrics.OrganicValueTotal != 95054000 {
+		t.Errorf("expected OrganicValueTotal 95,054,000 after sale, got %d", afterMetrics.OrganicValueTotal)
+	}
+}
+

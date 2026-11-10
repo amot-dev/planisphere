@@ -38,6 +38,7 @@ func (base RealizationBreakdown) Add(other RealizationBreakdown) RealizationBrea
 }
 
 type scanRecord struct {
+	eventUID           string
 	timestamp          string
 	systemAddress      int64
 	starSystem         string
@@ -139,8 +140,25 @@ func findMatchingOrganic(unsold []*scanRecord, item journal.BioDataItem) int {
 type RealizationLedger struct {
 	mu      sync.RWMutex
 	records []*scanRecord
+	// realizedOrganicBonus maps ScanOrganic event_uid to true when a sample
+	// subsequently sold in SellOrganicData with a positive first-logged bonus.
+	realizedOrganicBonus map[string]bool
 	// Unattributed sales that couldn't be matched to a preceding scan
 	unattributedSales []unattributedSale
+}
+
+// HasRealizedOrganicBonus reports whether the ScanOrganic event with eventUID
+// was subsequently sold in SellOrganicData with a positive first-logged bonus.
+// Required because of Frontier Issue #81891 and remains required for backwards
+// compatibility with older journal files even if or when
+// https://issues.frontierstore.net/issue-detail/81891 is fixed.
+func (ledger *RealizationLedger) HasRealizedOrganicBonus(eventUID string) bool {
+	if ledger == nil || eventUID == "" {
+		return false
+	}
+	ledger.mu.RLock()
+	defer ledger.mu.RUnlock()
+	return ledger.realizedOrganicBonus[eventUID]
 }
 
 type unattributedSale struct {
@@ -279,7 +297,8 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 	}
 
 	ledger := &RealizationLedger{
-		records: make([]*scanRecord, 0, len(events)/2),
+		records:              make([]*scanRecord, 0, len(events)/2),
+		realizedOrganicBonus: make(map[string]bool),
 	}
 
 	type cartoKey struct {
@@ -415,6 +434,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			firstLogged := parentScan != nil && parentScan.WasFootfalled != nil && !*parentScan.WasFootfalled
 			calculatedOrganicValue := ed.OrganicValue(baseVal, firstLogged)
 			rec := &scanRecord{
+				eventUID:           ev.eventUID,
 				timestamp:          ev.timestamp,
 				systemAddress:      organicEv.SystemAddress,
 				bodyID:             organicEv.Body,
@@ -508,6 +528,21 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					matched.actualBonus = item.Bonus
 					matched.actualGross = itemGross
 					matched.crewLoss = allocatedCrew
+
+					// If scan-time estimation did not award a first-logged bonus (because the
+					// parent body already had WasFootfalled == true), but Vista Genomics paid a
+					// positive bonus upon sale, record that this ScanOrganic earned the bonus.
+					// Required because of Frontier Issue #81891 and remains required for backwards
+					// compatibility with older journal files even if or when
+					// https://issues.frontierstore.net/issue-detail/81891 is fixed.
+					if item.Bonus > 0 && matched.eventUID != "" {
+						ledger.realizedOrganicBonus[matched.eventUID] = true
+						if matched.theoreticalBonus == 0 {
+							upgradedVal := ed.OrganicValue(matched.theoreticalBase, true)
+							matched.theoreticalBonus = upgradedVal.Bonus
+							matched.theoreticalTotal = upgradedVal.Total
+						}
+					}
 
 					// Stolen check: only flag as stolen if the body was undiscovered at the time of scan
 					// and the player expected a first-logged bonus, but received none.

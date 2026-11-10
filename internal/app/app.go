@@ -340,6 +340,7 @@ func (app *App) invalidateLiveStatsCache() {
 }
 
 func (app *App) invalidateAllTimeCache() {
+	stats.InvalidateLedgerCache()
 	app.allTimeMu.Lock()
 	app.allTimeValid = false
 	app.allTimeRealizationValid = false

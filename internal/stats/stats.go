@@ -296,6 +296,8 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 		return metrics, loadError
 	}
 	var carrierLegs map[string]CarrierLeg
+	var realizationLedger *RealizationLedger
+	var realizationLedgerLoaded bool
 	scans := map[bodyKey]*journal.ScanEvent{}
 	missingScans := map[bodyKey]bool{}
 	scannedBodies := map[bodyKey]bool{}
@@ -449,6 +451,21 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 			firstLoggedBonus, checkError := engine.firstLogged(&organicEvent, scans, missingScans, eventRow.timestamp)
 			if checkError != nil {
 				return metrics, checkError
+			}
+			// If scan-time estimation did not award a first-logged bonus (because the
+			// parent body already had WasFootfalled == true), check whether this sample
+			// was subsequently sold in SellOrganicData with a positive first-logged bonus.
+			// Required because of Frontier Issue #81891 and remains required for backwards
+			// compatibility with older journal files even if or when
+			// https://issues.frontierstore.net/issue-detail/81891 is fixed.
+			if !firstLoggedBonus && eventRow.eventUID != "" {
+				if !realizationLedgerLoaded {
+					realizationLedger, _ = engine.buildLedger()
+					realizationLedgerLoaded = true
+				}
+				if realizationLedger.HasRealizedOrganicBonus(eventRow.eventUID) {
+					firstLoggedBonus = true
+				}
 			}
 			if firstLoggedBonus {
 				metrics.FirstLogged++
