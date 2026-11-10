@@ -421,6 +421,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				rec = &scanRecord{
 					timestamp:          ev.timestamp,
 					systemAddress:      saaEv.SystemAddress,
+					starSystem:         scan.StarSystem,
 					bodyID:             saaEv.BodyID,
 					bodyName:           saaEv.BodyName,
 					isOrganic:          false,
@@ -601,59 +602,24 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 			// Find matching unsold carto records for sold systems
-			var matchedRecs []*scanRecord
-			for key, rec := range unsoldCarto {
-				if rec.status == "pending" && rec.timestamp <= sellEv.Timestamp {
-					if len(soldSystemSet) == 0 || soldSystemSet[strings.ToLower(rec.starSystem)] {
-						matchedRecs = append(matchedRecs, rec)
+			var matchedRecords []*scanRecord
+			for key, candidateRecord := range unsoldCarto {
+				if candidateRecord.status == "pending" && candidateRecord.timestamp <= sellEv.Timestamp {
+					if len(soldSystemSet) == 0 || soldSystemSet[strings.ToLower(strings.TrimSpace(candidateRecord.starSystem))] {
+						matchedRecords = append(matchedRecords, candidateRecord)
 						delete(unsoldCarto, key)
 					}
 				}
 			}
 
-			if len(matchedRecs) > 0 {
-				var totalTheoretical int64
-				for _, matchedRecord := range matchedRecs {
-					totalTheoretical += matchedRecord.theoreticalTotal
-				}
-				var allocatedGross int64
-				var allocatedBase int64
-				var allocatedBonus int64
-				var allocatedCrew int64
-				for recIdx, matchedRecord := range matchedRecs {
-					matchedRecord.status = "sold"
-					matchedRecord.soldTimestamp = sellEv.Timestamp
-					ratio := 1.0
-					if totalTheoretical > 0 {
-						ratio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
-					} else if len(matchedRecs) > 0 {
-						ratio = 1.0 / float64(len(matchedRecs))
-					}
-					if recIdx == len(matchedRecs)-1 {
-						matchedRecord.actualGross = sellEv.TotalEarnings - allocatedGross
-						matchedRecord.actualBase = sellEv.BaseValue - allocatedBase
-						matchedRecord.actualBonus = sellEv.Bonus - allocatedBonus
-						if totalCrewWage > 0 {
-							matchedRecord.crewLoss = totalCrewWage - allocatedCrew
-						}
-					} else {
-						matchedRecord.actualGross = int64(float64(sellEv.TotalEarnings) * ratio)
-						matchedRecord.actualBase = int64(float64(sellEv.BaseValue) * ratio)
-						matchedRecord.actualBonus = int64(float64(sellEv.Bonus) * ratio)
-						allocatedGross += matchedRecord.actualGross
-						allocatedBase += matchedRecord.actualBase
-						allocatedBonus += matchedRecord.actualBonus
-						if totalCrewWage > 0 {
-							matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
-							allocatedCrew += matchedRecord.crewLoss
-						}
-					}
-
-					// Stolen check: had bonus expectation on an undiscovered body, but body/system was not awarded first discovery
+			if len(matchedRecords) > 0 {
+				allocateCartoSalePayout(matchedRecords, sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, sellEv.Bonus, totalCrewWage)
+				for _, matchedRecord := range matchedRecords {
+					// Stolen check: had bonus expectation on an undiscovered body, but body or system was not awarded first discovery
 					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
-						normBody := strings.ToLower(strings.TrimSpace(matchedRecord.bodyName))
-						normSystem := strings.ToLower(strings.TrimSpace(matchedRecord.starSystem))
-						if !discoveredSet[normBody] && !discoveredSet[normSystem] {
+						normalizedBody := strings.ToLower(strings.TrimSpace(matchedRecord.bodyName))
+						normalizedSystem := strings.ToLower(strings.TrimSpace(matchedRecord.starSystem))
+						if !discoveredSet[normalizedBody] && !discoveredSet[normalizedSystem] {
 							matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
 						}
 					}
@@ -677,102 +643,32 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				continue
 			}
 			seenSales[saleKey] = true
+			totalCrewWage := findCrewWage(sellEv.Timestamp)
 
-			totalEarnings := sellEv.TotalEarnings
-			baseValue := sellEv.BaseValue
-			bonus := sellEv.Bonus
-			lastTimestamp := sellEv.Timestamp
-			discoveredSet := make(map[string]bool, len(sellEv.Discovered))
+			soldSystemSet := make(map[string]bool, len(sellEv.Discovered))
 			for _, discoveredEntry := range sellEv.Discovered {
-				discoveredSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
+				soldSystemSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
 			}
 
-			// Coalesce sequential MultiSellExplorationData events within 60s (e.g. multi-page selling)
-			for evIdx+1 < len(events) && events[evIdx+1].eventType == "MultiSellExplorationData" {
-				var nextSell journal.MultiSellExplorationDataEvent
-				if json.Unmarshal([]byte(events[evIdx+1].rawJSON), &nextSell) == nil {
-					if timeDiffSeconds(nextSell.Timestamp, lastTimestamp) <= 60.0 {
-						nextKey := fmt.Sprintf("carto_multi|%s|%d|%d|%d", nextSell.Timestamp, nextSell.TotalEarnings, nextSell.BaseValue, len(nextSell.Discovered))
-						if !seenSales[nextKey] {
-							seenSales[nextKey] = true
-							totalEarnings += nextSell.TotalEarnings
-							baseValue += nextSell.BaseValue
-							bonus += nextSell.Bonus
-							for _, disc := range nextSell.Discovered {
-								discoveredSet[strings.ToLower(strings.TrimSpace(disc.SystemName))] = true
-							}
-							lastTimestamp = nextSell.Timestamp
-						}
-						evIdx++
-						continue
+			// Match pending cartographic scans belonging to the systems sold on this page
+			var matchedRecords []*scanRecord
+			for key, candidateRecord := range unsoldCarto {
+				if candidateRecord.status == "pending" && candidateRecord.timestamp <= sellEv.Timestamp {
+					if len(soldSystemSet) == 0 || soldSystemSet[strings.ToLower(strings.TrimSpace(candidateRecord.starSystem))] {
+						matchedRecords = append(matchedRecords, candidateRecord)
+						delete(unsoldCarto, key)
 					}
-				}
-				break
-			}
-
-			totalCrewWage := findCrewWage(lastTimestamp)
-
-			// In MultiSellExplorationData, all pending cartographic scans accumulated up to this sale
-			// timestamp are sold.
-			var matchedRecs []*scanRecord
-			for key, rec := range unsoldCarto {
-				if rec.status == "pending" && rec.timestamp <= lastTimestamp {
-					matchedRecs = append(matchedRecs, rec)
-					delete(unsoldCarto, key)
 				}
 			}
 
-			if len(matchedRecs) > 0 {
-				var totalTheoretical int64
-				for _, matchedRecord := range matchedRecs {
-					totalTheoretical += matchedRecord.theoreticalTotal
-				}
-				var allocatedGross int64
-				var allocatedBase int64
-				var allocatedBonus int64
-				var allocatedCrew int64
-				for recIdx, matchedRecord := range matchedRecs {
-					matchedRecord.status = "sold"
-					matchedRecord.soldTimestamp = lastTimestamp
-					ratio := 1.0
-					if totalTheoretical > 0 {
-						ratio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
-					} else if len(matchedRecs) > 0 {
-						ratio = 1.0 / float64(len(matchedRecs))
-					}
-					if recIdx == len(matchedRecs)-1 {
-						matchedRecord.actualGross = totalEarnings - allocatedGross
-						matchedRecord.actualBase = baseValue - allocatedBase
-						matchedRecord.actualBonus = bonus - allocatedBonus
-						if totalCrewWage > 0 {
-							matchedRecord.crewLoss = totalCrewWage - allocatedCrew
-						}
-					} else {
-						matchedRecord.actualGross = int64(float64(totalEarnings) * ratio)
-						matchedRecord.actualBase = int64(float64(baseValue) * ratio)
-						matchedRecord.actualBonus = int64(float64(bonus) * ratio)
-						allocatedGross += matchedRecord.actualGross
-						allocatedBase += matchedRecord.actualBase
-						allocatedBonus += matchedRecord.actualBonus
-						if totalCrewWage > 0 {
-							matchedRecord.crewLoss = int64(float64(totalCrewWage) * ratio)
-							allocatedCrew += matchedRecord.crewLoss
-						}
-					}
-
-					// Stolen check: player expected discovery bonus on an undiscovered body, but system was not in Discovered array
-					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
-						normSystem := strings.ToLower(strings.TrimSpace(matchedRecord.starSystem))
-						if !discoveredSet[normSystem] {
-							matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
-						}
-					}
-				}
+			if len(matchedRecords) > 0 {
+				allocateCartoSalePayout(matchedRecords, sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, sellEv.Bonus, totalCrewWage)
+				allocateMultiSellStolenLoss(matchedRecords, sellEv.Bonus)
 			} else {
 				ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
-					timestamp: lastTimestamp,
+					timestamp: sellEv.Timestamp,
 					kind:      "carto",
-					gross:     totalEarnings,
+					gross:     sellEv.TotalEarnings,
 					crewLoss:  totalCrewWage,
 				})
 			}
@@ -780,4 +676,87 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 	}
 
 	return ledger, nil
+}
+
+// allocateCartoSalePayout distributes a cartographic sale's gross earnings,
+// base value, discovery bonus, and concurrent NPC crew wage across all matched
+// scan records proportionally by each record's theoreticalTotal (falling back
+// to an equal split when totalTheoretical is zero). The final record in
+// matchedRecords receives the unallocated remainder so integer truncation
+// across individual records never causes the sum of realized payouts or crew
+// wages to drift from the journal event totals.
+func allocateCartoSalePayout(matchedRecords []*scanRecord, soldTimestamp string, totalEarnings, baseValue, bonusValue, totalCrewWage int64) {
+	var totalTheoretical int64
+	for _, matchedRecord := range matchedRecords {
+		totalTheoretical += matchedRecord.theoreticalTotal
+	}
+	var allocatedGross int64
+	var allocatedBase int64
+	var allocatedBonus int64
+	var allocatedCrew int64
+	for recordIndex, matchedRecord := range matchedRecords {
+		matchedRecord.status = "sold"
+		matchedRecord.soldTimestamp = soldTimestamp
+		allocationRatio := 1.0 / float64(len(matchedRecords))
+		if totalTheoretical > 0 {
+			allocationRatio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
+		}
+		if recordIndex == len(matchedRecords)-1 {
+			matchedRecord.actualGross = totalEarnings - allocatedGross
+			matchedRecord.actualBase = baseValue - allocatedBase
+			matchedRecord.actualBonus = bonusValue - allocatedBonus
+			if totalCrewWage > 0 {
+				matchedRecord.crewLoss = totalCrewWage - allocatedCrew
+			}
+			continue
+		}
+		matchedRecord.actualGross = int64(float64(totalEarnings) * allocationRatio)
+		matchedRecord.actualBase = int64(float64(baseValue) * allocationRatio)
+		matchedRecord.actualBonus = int64(float64(bonusValue) * allocationRatio)
+		allocatedGross += matchedRecord.actualGross
+		allocatedBase += matchedRecord.actualBase
+		allocatedBonus += matchedRecord.actualBonus
+		if totalCrewWage > 0 {
+			matchedRecord.crewLoss = int64(float64(totalCrewWage) * allocationRatio)
+			allocatedCrew += matchedRecord.crewLoss
+		}
+	}
+}
+
+// allocateMultiSellStolenLoss computes and distributes stolen cartographic
+// bonus losses for a MultiSellExplorationData page. Because Frontier's
+// MultiSellExplorationData event uses its Discovered array to list the star
+// systems sold on the page rather than listing only first-discovered bodies,
+// stolen discovery and mapping bonuses are measured by the shortfall between
+// totalExpectedBonus across undiscovered scans on that page and actualBonus
+// paid by Universal Cartographics. The shortfall is distributed proportionally
+// by theoreticalBonus across those scans, with the final bonus-expecting scan
+// receiving the remainder to avoid integer truncation drift.
+func allocateMultiSellStolenLoss(matchedRecords []*scanRecord, actualBonus int64) {
+	var totalExpectedBonus int64
+	lastBonusRecordIndex := -1
+	for recordIndex, matchedRecord := range matchedRecords {
+		if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
+			totalExpectedBonus += matchedRecord.theoreticalBonus
+			lastBonusRecordIndex = recordIndex
+		}
+	}
+	realizedBonus := max(actualBonus, int64(0))
+	if totalExpectedBonus <= realizedBonus || lastBonusRecordIndex < 0 {
+		return
+	}
+	stolenShortfall := totalExpectedBonus - realizedBonus
+	var allocatedStolenLoss int64
+	for recordIndex, matchedRecord := range matchedRecords {
+		if !matchedRecord.undiscoveredAtScan || matchedRecord.theoreticalBonus <= 0 {
+			continue
+		}
+		if recordIndex == lastBonusRecordIndex {
+			matchedRecord.stolenLoss = stolenShortfall - allocatedStolenLoss
+			break
+		}
+		bonusRatio := float64(matchedRecord.theoreticalBonus) / float64(totalExpectedBonus)
+		matchedRecord.stolenLoss = int64(float64(stolenShortfall) * bonusRatio)
+		allocatedStolenLoss += matchedRecord.stolenLoss
+	}
 }

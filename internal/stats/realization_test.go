@@ -301,36 +301,52 @@ func TestRealizationOnFootDeathPreservesCarto(t *testing.T) {
 }
 
 func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
-	conn := setupRealizationDB(t)
+	databaseConnection := setupRealizationDB(t)
 
-	// Scan 2 systems: Alpha (WasDiscovered: false -> expects bonus), Beta (WasDiscovered: true -> no bonus)
-	insertEvent(t, conn, "2026-03-01T10:00:00Z", "Scan",
+	// Scan two systems during the leg: both Alpha and Beta are undiscovered (WasDiscovered: false) and expect a bonus.
+	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":1001,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, conn, "2026-03-01T10:15:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:15:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Beta","SystemAddress":1002,"BodyID":1,"BodyName":"Beta 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":true,"WasMapped":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:15:00Z", "Scan",
+		`{"timestamp":"2026-03-01T10:15:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Beta","SystemAddress":1002,"BodyID":1,"BodyName":"Beta 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 
-	// Sold in 2 consecutive pages 10s apart.
-	// Page 1 has Alpha (but Alpha is NOT in Discovered array -> someone else turned it in first, so bonus stolen!)
-	insertEvent(t, conn, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[]}`)
-	// Page 2 sold 10s later
-	insertEvent(t, conn, "2026-03-01T12:00:10Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-01T12:00:10Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[]}`)
+	// Page 1 sells only Alpha with Bonus: 0 (someone else turned Alpha in first, while Beta remains unsold).
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[{"SystemName":"Alpha","NumBodies":1}]}`)
 
-	engine := stats.NewEngine(conn)
-	res, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
+	engineInstance := stats.NewEngine(databaseConnection)
+	legWindow := stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}
+
+	afterFirstPageBreakdown, firstPageError := engineInstance.ComputeRealization(legWindow, nil)
+	if firstPageError != nil {
+		t.Fatalf("ComputeRealization after first page failed: %v", firstPageError)
+	}
+	if afterFirstPageBreakdown.TotalRealized != 1000000 {
+		t.Errorf("expected TotalRealized 1,000,000 after first page, got %d", afterFirstPageBreakdown.TotalRealized)
+	}
+	if afterFirstPageBreakdown.CartoStolen != 24188 {
+		t.Errorf("expected CartoStolen 24,188 (only Alpha bonus stolen), got %d", afterFirstPageBreakdown.CartoStolen)
+	}
+	if afterFirstPageBreakdown.PendingValue != 39305 {
+		t.Errorf("expected PendingValue 39,305 for unsold Beta scan, got %d", afterFirstPageBreakdown.PendingValue)
 	}
 
-	if res.TotalRealized != 2000000 {
-		t.Errorf("expected combined TotalRealized 2,000,000 across pages, got %d", res.TotalRealized)
+	// Page 2 is sold a week later and realizes Beta with its full discovery bonus.
+	insertEvent(t, databaseConnection, "2026-03-08T12:00:00Z", "MultiSellExplorationData",
+		`{"timestamp":"2026-03-08T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Beta","NumBodies":1}]}`)
+	stats.InvalidateLedgerCache()
+
+	afterSecondPageBreakdown, secondPageError := engineInstance.ComputeRealization(legWindow, nil)
+	if secondPageError != nil {
+		t.Fatalf("ComputeRealization after second page failed: %v", secondPageError)
 	}
-	if res.CartoStolen <= 0 {
-		t.Errorf("expected CartoStolen > 0 for sniped discovery, got %d", res.CartoStolen)
+	if afterSecondPageBreakdown.TotalRealized != 2500000 {
+		t.Errorf("expected combined TotalRealized 2,500,000 across pages, got %d", afterSecondPageBreakdown.TotalRealized)
 	}
-	if res.PendingValue != 0 {
-		t.Errorf("expected PendingValue 0, got %d", res.PendingValue)
+	if afterSecondPageBreakdown.CartoStolen != 24188 {
+		t.Errorf("expected CartoStolen to remain 24,188 (only Alpha bonus stolen, Beta not marked stolen), got %d", afterSecondPageBreakdown.CartoStolen)
+	}
+	if afterSecondPageBreakdown.PendingValue != 0 {
+		t.Errorf("expected PendingValue 0 after both pages sold, got %d", afterSecondPageBreakdown.PendingValue)
 	}
 }
 
