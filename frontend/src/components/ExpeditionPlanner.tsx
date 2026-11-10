@@ -1099,7 +1099,7 @@ export function ExpeditionPlanner({
   const hasWp1System = Boolean(
     (drafts[firstWaypoint?.row.id ?? 0]?.systemName ?? firstWaypoint?.row.systemName ?? '').trim(),
   )
-  const canComplete = (plan.visitedCount ?? 0) > 0
+  const canComplete = (plan.visitedCount ?? 0) >= 2
 
   return (
     <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#070605]">
@@ -1196,7 +1196,7 @@ export function ExpeditionPlanner({
                 title={
                   canComplete
                     ? 'Complete this expedition and finalize flight logs'
-                    : 'No waypoints visited yet — complete requires at least 1 visited waypoint (or delete flight plan in Plans)'
+                    : 'Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete flight plan in Plans)'
                 }
                 className={`ed-btn-primary ${
                   !canComplete ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''

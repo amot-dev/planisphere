@@ -599,6 +599,11 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     // WP3 (subsequent waypoint) shows distance from previous waypoint (6.0 Ly):
     expect(html).toContain('6.0 Ly')
     expect(html).toContain('Estimated straight-line distance from previous waypoint')
+
+    // With only Waypoint #1 visited (visitedCount: 1), Complete button is disabled until Waypoint #2 is visited:
+    expect(html).toContain(
+      'disabled="" title="Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete flight plan in Plans)"',
+    )
   })
 
   it('renders only Planned Route in planning state', () => {
@@ -707,6 +712,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('5.0 Ly')
     expect(html).not.toContain('PLANNED ROUTE:')
     expect(html).not.toContain('COMPLETED ROUTE:')
+    expect(html).toContain('title="Complete this expedition and finalize flight logs"')
   })
 
   it('renders only Completed Route in completed state', () => {
