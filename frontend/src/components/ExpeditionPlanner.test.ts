@@ -586,10 +586,11 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     )
 
     // Route readout at top:
-    expect(html).toContain('PLANNED ROUTE:')
-    expect(html).toContain('10.3 Ly')
+    expect(html).toContain('COVERED:')
     expect(html).toContain('REMAINING:')
     expect(html).toContain('8.1 Ly')
+    expect(html).not.toContain('PLANNED ROUTE:')
+    expect(html).not.toContain('COMPLETED ROUTE:')
 
     // WP2 (next waypoint) shows player distance (2.1 Ly) with player location tooltip:
     expect(html).toContain('2.1 Ly')
@@ -598,6 +599,170 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     // WP3 (subsequent waypoint) shows distance from previous waypoint (6.0 Ly):
     expect(html).toContain('6.0 Ly')
     expect(html).toContain('Estimated straight-line distance from previous waypoint')
+  })
+
+  it('renders only Planned Route in planning state', () => {
+    const planningPlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 8,
+        name: 'Planning State Expedition',
+        description: '',
+        status: 'planning',
+        armedAt: '',
+        createdAt: '3310-01-01T00:00:00Z',
+        updatedAt: '3310-01-01T00:00:00Z',
+      },
+      rows: [
+        {
+          row: { id: 10, expeditionId: 8, rowType: 'waypoint', systemName: 'Sol', seq: 1 },
+          number: 1,
+          visitState: 'future',
+        },
+        {
+          row: { id: 11, expeditionId: 8, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2 },
+          number: 2,
+          visitState: 'future',
+          distFromPrevLy: 4.3,
+        },
+      ],
+      modes: [],
+      visitedCount: 0,
+      waypointCount: 2,
+      plannedLy: 4.3,
+      remainingLy: 4.3,
+    })
+
+    const html = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: planningPlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    expect(html).toContain('PLANNED ROUTE:')
+    expect(html).toContain('4.3 Ly')
+    expect(html).not.toContain('REMAINING:')
+    expect(html).not.toContain('COVERED:')
+    expect(html).not.toContain('COMPLETED ROUTE:')
+  })
+
+  it('renders Covered and Remaining in active state with visited legs', () => {
+    const activePlanWithCovered = expedition.PlanView.createFrom({
+      expedition: {
+        id: 9,
+        name: 'Midflight Expedition',
+        description: '',
+        status: 'active',
+        armedAt: '',
+        createdAt: '3310-01-01T00:00:00Z',
+        updatedAt: '3310-01-01T00:00:00Z',
+      },
+      rows: [
+        {
+          row: { id: 20, expeditionId: 9, rowType: 'waypoint', systemName: 'Sol', seq: 1, visitedAt: '3310-01-01T10:00:00Z' },
+          number: 1,
+          visitState: 'visited',
+        },
+        {
+          row: { id: 21, expeditionId: 9, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2, visitedAt: '3310-01-01T11:00:00Z' },
+          number: 2,
+          visitState: 'visited',
+          distFromPrevLy: 4.3,
+        },
+        {
+          row: { id: 22, expeditionId: 9, rowType: 'waypoint', systemName: "Barnard's Star", seq: 3 },
+          number: 3,
+          visitState: 'future',
+          isNextWaypoint: true,
+          distFromPrevLy: 6.0,
+          distFromCurrentLy: 5.0,
+        },
+      ],
+      modes: [],
+      visitedCount: 2,
+      waypointCount: 3,
+      plannedLy: 10.3,
+      coveredLy: 4.3,
+      remainingLy: 5.0,
+    })
+
+    const html = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: activePlanWithCovered,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    expect(html).toContain('COVERED:')
+    expect(html).toContain('4.3 Ly')
+    expect(html).toContain('REMAINING:')
+    expect(html).toContain('5.0 Ly')
+    expect(html).not.toContain('PLANNED ROUTE:')
+    expect(html).not.toContain('COMPLETED ROUTE:')
+  })
+
+  it('renders only Completed Route in completed state', () => {
+    const completedPlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 10,
+        name: 'Finished Expedition',
+        description: '',
+        status: 'completed',
+        armedAt: '',
+        createdAt: '3310-01-01T00:00:00Z',
+        updatedAt: '3310-01-01T00:00:00Z',
+      },
+      rows: [
+        {
+          row: { id: 30, expeditionId: 10, rowType: 'waypoint', systemName: 'Sol', seq: 1, visitedAt: '3310-01-01T10:00:00Z' },
+          number: 1,
+          visitState: 'visited',
+        },
+        {
+          row: { id: 31, expeditionId: 10, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2, visitedAt: '3310-01-01T11:00:00Z' },
+          number: 2,
+          visitState: 'visited',
+          distFromPrevLy: 4.3,
+        },
+        {
+          row: { id: 32, expeditionId: 10, rowType: 'waypoint', systemName: "Barnard's Star", seq: 3, visitedAt: '3310-01-01T12:00:00Z' },
+          number: 3,
+          visitState: 'visited',
+          distFromPrevLy: 6.0,
+        },
+      ],
+      modes: [],
+      visitedCount: 3,
+      waypointCount: 3,
+      plannedLy: 10.3,
+      coveredLy: 10.3,
+      remainingLy: 0,
+    })
+
+    const html = renderToString(
+      createElement(ExpeditionPlanner, {
+        plan: completedPlan,
+        onPlanOptimisticUpdate: () => {},
+        onOpenStartModal: () => {},
+        onRefreshPlan: () => {},
+        onRefreshAll: () => {},
+        onBusyChange: () => {},
+      }),
+    )
+
+    expect(html).toContain('COMPLETED ROUTE:')
+    expect(html).toContain('10.3 Ly')
+    expect(html).not.toContain('PLANNED ROUTE:')
+    expect(html).not.toContain('REMAINING:')
+    expect(html).not.toContain('COVERED:')
   })
 })
 

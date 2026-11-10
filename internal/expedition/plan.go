@@ -76,6 +76,7 @@ type PlanView struct {
 	WaypointCount      int          `json:"waypointCount"`
 	VisitedCount       int          `json:"visitedCount"`
 	PlannedLy          float64      `json:"plannedLy"`
+	CoveredLy          float64      `json:"coveredLy"`
 	RemainingLy        float64      `json:"remainingLy"`
 	PendingTransitions []Transition `json:"pendingTransitions"` // ships flown since the current waypoint
 	ActiveModeID       int64        `json:"activeModeId"`
@@ -486,6 +487,9 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 			legDistanceLy := ed.Distance(startPos, endPos)
 			rowViewItem.DistFromPrevLy = &legDistanceLy
 			planView.PlannedLy += legDistanceLy
+			if rowItem.VisitedAt != "" {
+				planView.CoveredLy += legDistanceLy
+			}
 		}
 		if nextWaypointRowID > 0 && rowItem.ID == nextWaypointRowID {
 			rowViewItem.IsNextWaypoint = true

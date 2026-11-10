@@ -728,6 +728,7 @@ export namespace expedition {
 	    waypointCount: number;
 	    visitedCount: number;
 	    plannedLy: number;
+	    coveredLy: number;
 	    remainingLy: number;
 	    pendingTransitions: Transition[];
 	    activeModeId: number;
@@ -752,6 +753,7 @@ export namespace expedition {
 	        this.waypointCount = source["waypointCount"];
 	        this.visitedCount = source["visitedCount"];
 	        this.plannedLy = source["plannedLy"];
+	        this.coveredLy = source["coveredLy"];
 	        this.remainingLy = source["remainingLy"];
 	        this.pendingTransitions = this.convertValues(source["pendingTransitions"], Transition);
 	        this.activeModeId = source["activeModeId"];

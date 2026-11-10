@@ -722,6 +722,9 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	if planPlanning.PlannedLy != 250.0 {
 		t.Errorf("expected planned ly 250.0, got %v", planPlanning.PlannedLy)
 	}
+	if planPlanning.CoveredLy != 0.0 {
+		t.Errorf("expected covered ly 0.0 in planning, got %v", planPlanning.CoveredLy)
+	}
 	if planPlanning.RemainingLy != 250.0 {
 		t.Errorf("expected remaining ly 250.0 in planning, got %v", planPlanning.RemainingLy)
 	}
@@ -815,5 +818,32 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 				t.Errorf("expected wp2 dist from prev (planned leg) to remain 100.0, got %v", waypointRowView.DistFromPrevLy)
 			}
 		}
+	}
+	if planActive2.CoveredLy != 0.0 {
+		t.Errorf("expected covered ly 0.0 before wp2 visit, got %v", planActive2.CoveredLy)
+	}
+
+	// Visit WP2
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T12:00:00Z' WHERE id = ?`, wp2.ID); err != nil {
+		t.Fatal(err)
+	}
+	planActive3, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planActive3.CoveredLy != 100.0 {
+		t.Errorf("expected covered ly 100.0 after wp2 visit, got %v", planActive3.CoveredLy)
+	}
+
+	// Visit WP3
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T13:00:00Z' WHERE id = ?`, wp3.ID); err != nil {
+		t.Fatal(err)
+	}
+	planActive4, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planActive4.CoveredLy != 250.0 {
+		t.Errorf("expected covered ly 250.0 after wp3 visit, got %v", planActive4.CoveredLy)
 	}
 }

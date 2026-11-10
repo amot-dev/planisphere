@@ -1084,6 +1084,17 @@ export function ExpeditionPlanner({
   const isCompleted = currentExpedition.status === 'completed'
   const modesList = plan.modes ?? []
 
+  const coveredLy =
+    plan.coveredLy ??
+    plan.rows?.reduce((sum, rowView) => {
+      if (rowView.row?.rowType === 'waypoint' && rowView.row?.visitedAt && rowView.distFromPrevLy) {
+        return sum + rowView.distFromPrevLy
+      }
+      return sum
+    }, 0) ??
+    0
+  const completedLy = coveredLy > 0 ? coveredLy : plan.plannedLy
+
   const firstWaypoint = plan.rows?.find((rowView) => rowView.row.rowType === 'waypoint')
   const hasWp1System = Boolean(
     (drafts[firstWaypoint?.row.id ?? 0]?.systemName ?? firstWaypoint?.row.systemName ?? '').trim(),
@@ -1114,23 +1125,45 @@ export function ExpeditionPlanner({
         <div className="flex flex-wrap items-center gap-3">
           {/* Route distance readout */}
           <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 border border-[#3d2816] border-l-2 border-l-[#FF7100] bg-[#090705] text-xs">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mr-1.5">
-                PLANNED ROUTE:
-              </span>
-              <span className="font-mono-tabular font-bold text-[#F4ECE4]">
-                {formatLy(plan.plannedLy, 1)}
-              </span>
-            </div>
-            <span className="text-[#3d2816]">|</span>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mr-1.5">
-                REMAINING:
-              </span>
-              <span className="font-mono-tabular font-bold text-[#F4ECE4]">
-                {formatLy(plan.remainingLy, 1)}
-              </span>
-            </div>
+            {isCompleted ? (
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mr-1.5">
+                  COMPLETED ROUTE:
+                </span>
+                <span className="font-mono-tabular font-bold text-[#F4ECE4]">
+                  {formatLy(completedLy, 1)}
+                </span>
+              </div>
+            ) : isActive ? (
+              <>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mr-1.5">
+                    COVERED:
+                  </span>
+                  <span className="font-mono-tabular font-bold text-[#F4ECE4]">
+                    {formatLy(coveredLy, 1)}
+                  </span>
+                </div>
+                <span className="text-[#3d2816]">|</span>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mr-1.5">
+                    REMAINING:
+                  </span>
+                  <span className="font-mono-tabular font-bold text-[#F4ECE4]">
+                    {formatLy(plan.remainingLy, 1)}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mr-1.5">
+                  PLANNED ROUTE:
+                </span>
+                <span className="font-mono-tabular font-bold text-[#F4ECE4]">
+                  {formatLy(plan.plannedLy, 1)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Lifecycle action buttons (Start Time and Reset to Planning removed; use Clone in Plans menu) */}
