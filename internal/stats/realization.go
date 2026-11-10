@@ -50,6 +50,8 @@ type scanRecord struct {
 	speciesLocalised   string
 	variant            string
 	variantLocalised   string
+	normalizedSpecies  string
+	normalizedVariant  string
 	theoreticalBase    int64
 	theoreticalBonus   int64
 	theoreticalTotal   int64
@@ -65,75 +67,87 @@ type scanRecord struct {
 	soldTimestamp string
 }
 
+// normalizeSpecies resolves a canonical lowercase species name from Frontier's
+// journal fields, where codexID uses token syntax such as
+// "$Codex_Ent_Stratum_07_Name;". It checks the exobiology species catalogue
+// first, then falls back to the trimmed localised name, and finally strips
+// leading and trailing "$" and ";" delimiters from the raw codex token.
 func normalizeSpecies(codexID, localised string) string {
-	if sp, ok := ed.LookupSpecies(codexID, localised); ok {
-		return strings.ToLower(sp.Name)
+	if speciesEntry, ok := ed.LookupSpecies(codexID, localised); ok {
+		return strings.ToLower(speciesEntry.Name)
 	}
-	if localised = strings.TrimSpace(localised); localised != "" {
-		return strings.ToLower(localised)
+	if trimmedLocalised := strings.TrimSpace(localised); trimmedLocalised != "" {
+		return strings.ToLower(trimmedLocalised)
 	}
-	trimmed := strings.Trim(strings.TrimSpace(codexID), "$;")
-	return strings.ToLower(trimmed)
+	trimmedCodexID := strings.Trim(strings.TrimSpace(codexID), "$;")
+	return strings.ToLower(trimmedCodexID)
 }
 
+// normalizeVariant resolves a canonical lowercase variant name from Frontier's
+// journal fields, where codexID uses token syntax such as
+// "$Codex_Ent_Stratum_07_A_Name;". It prefers the trimmed localised variant
+// string and falls back to stripping leading and trailing "$" and ";"
+// delimiters from the raw codex token.
 func normalizeVariant(codexID, localised string) string {
-	if localised = strings.TrimSpace(localised); localised != "" {
-		return strings.ToLower(localised)
+	if trimmedLocalised := strings.TrimSpace(localised); trimmedLocalised != "" {
+		return strings.ToLower(trimmedLocalised)
 	}
-	trimmed := strings.Trim(strings.TrimSpace(codexID), "$;")
-	return strings.ToLower(trimmed)
+	trimmedCodexID := strings.Trim(strings.TrimSpace(codexID), "$;")
+	return strings.ToLower(trimmedCodexID)
 }
 
-func findMatchingOrganic(unsold []*scanRecord, item journal.BioDataItem) int {
-	itemSpecies := normalizeSpecies(item.Species, item.SpeciesLocalised)
-	if itemSpecies == "" {
+// organicCandidateTier scores how well a pending ScanOrganic record matches a
+// sold BioData item across three variant tiers (exact non-empty variant match,
+// compatible empty-variant match, and conflicting-variant species fallback),
+// adding a tie-breaker point within each tier when the scan's first-logged
+// bonus expectation matches whether Vista Genomics paid a bonus.
+func organicCandidateTier(candidateRecord *scanRecord, soldSpecies, soldVariant string, expectedBonus bool) int {
+	if candidateRecord.status != "pending" || candidateRecord.normalizedSpecies != soldSpecies {
+		return 0
+	}
+	tierBaseScore := 3
+	if soldVariant != "" && candidateRecord.normalizedVariant != "" {
+		if candidateRecord.normalizedVariant == soldVariant {
+			tierBaseScore = 5
+		} else {
+			tierBaseScore = 1
+		}
+	}
+	if candidateRecord.undiscoveredAtScan == expectedBonus {
+		return tierBaseScore + 1
+	}
+	return tierBaseScore
+}
+
+// findMatchingOrganic returns the index of the best-matching pending ScanOrganic
+// record in unsoldOrganicRecords for the sold bioDataItem, or -1 if none matches.
+//
+// Frontier's SellOrganicData journal event (BioData) does not include
+// SystemAddress, StarSystem, BodyID, or BodyName, so sold samples cannot be
+// joined to ScanOrganic records by body. When a commander scans the same
+// species on both an already-footfalled body and an un-footfalled body before
+// selling at Vista Genomics, tie-breaking within each variant tier by
+// undiscoveredAtScan == (bioDataItem.Bonus > 0) prevents a bonus-paying sample
+// from matching the earlier footfalled-body scan and falsely triggering both a
+// retroactive bonus upgrade and a stolen-bonus loss on the un-footfalled scan.
+func findMatchingOrganic(unsoldOrganicRecords []*scanRecord, bioDataItem journal.BioDataItem) int {
+	soldSpecies := normalizeSpecies(bioDataItem.Species, bioDataItem.SpeciesLocalised)
+	if soldSpecies == "" {
 		return -1
 	}
-	itemVariant := normalizeVariant(item.Variant, item.VariantLocalised)
+	soldVariant := normalizeVariant(bioDataItem.Variant, bioDataItem.VariantLocalised)
+	expectedBonus := bioDataItem.Bonus > 0
 
-	// Pass 1: Match both species and non-empty variant
-	if itemVariant != "" {
-		for i, rec := range unsold {
-			if rec.status != "pending" {
-				continue
-			}
-			recSpecies := normalizeSpecies(rec.species, rec.speciesLocalised)
-			if recSpecies == itemSpecies {
-				recVariant := normalizeVariant(rec.variant, rec.variantLocalised)
-				if recVariant != "" && recVariant == itemVariant {
-					return i
-				}
-			}
+	bestMatchIndex := -1
+	bestMatchTier := 0
+	for recordIndex, candidateRecord := range unsoldOrganicRecords {
+		candidateTier := organicCandidateTier(candidateRecord, soldSpecies, soldVariant, expectedBonus)
+		if candidateTier > bestMatchTier {
+			bestMatchTier = candidateTier
+			bestMatchIndex = recordIndex
 		}
 	}
-
-	// Pass 2: Match species where variant does not conflict
-	for i, rec := range unsold {
-		if rec.status != "pending" {
-			continue
-		}
-		recSpecies := normalizeSpecies(rec.species, rec.speciesLocalised)
-		if recSpecies == itemSpecies {
-			recVariant := normalizeVariant(rec.variant, rec.variantLocalised)
-			if itemVariant != "" && recVariant != "" && itemVariant != recVariant {
-				continue
-			}
-			return i
-		}
-	}
-
-	// Pass 3: Fallback match species even if variants differ
-	for i, rec := range unsold {
-		if rec.status != "pending" {
-			continue
-		}
-		recSpecies := normalizeSpecies(rec.species, rec.speciesLocalised)
-		if recSpecies == itemSpecies {
-			return i
-		}
-	}
-
-	return -1
+	return bestMatchIndex
 }
 
 // RealizationLedger tracks all scans and their final realization outcomes.
@@ -444,6 +458,8 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				speciesLocalised:   organicEv.SpeciesLocalised,
 				variant:            organicEv.Variant,
 				variantLocalised:   organicEv.VariantLocalised,
+				normalizedSpecies:  normalizeSpecies(organicEv.Species, organicEv.SpeciesLocalised),
+				normalizedVariant:  normalizeVariant(organicEv.Variant, organicEv.VariantLocalised),
 				theoreticalBase:    calculatedOrganicValue.Base,
 				theoreticalBonus:   calculatedOrganicValue.Bonus,
 				theoreticalTotal:   calculatedOrganicValue.Total,

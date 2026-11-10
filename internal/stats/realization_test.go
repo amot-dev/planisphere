@@ -479,3 +479,43 @@ func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
 	}
 }
 
+func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T) {
+	databaseConnection := setupRealizationDB(t)
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	// First scan Stratum Tectonicas on an already-footfalled body (WasFootfalled: true),
+	// then scan the same species on an un-footfalled body (WasFootfalled: false).
+	insertEvent(t, databaseConnection, "2026-03-01T09:50:00Z", "Scan",
+		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":1,"BodyName":"TieBreakSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":1}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "Scan",
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":2,"BodyName":"TieBreakSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:10:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":2}`)
+
+	// Sell both in one SellOrganicData event with the bonus-paying sample listed first.
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
+			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200},
+			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":0}
+		]}`)
+
+	legWindow := stats.Range{After: "2026-03-01T09:45:00Z", Until: "2026-03-01T11:00:00Z"}
+	realizationResult, realizationError := engineInstance.ComputeRealization(legWindow, nil)
+	if realizationError != nil {
+		t.Fatalf("ComputeRealization failed: %v", realizationError)
+	}
+	if realizationResult.OrganicStolen != 0 {
+		t.Errorf("expected OrganicStolen 0, got %d", realizationResult.OrganicStolen)
+	}
+
+	legMetrics, computeError := engineInstance.Compute(legWindow, nil)
+	if computeError != nil {
+		t.Fatalf("Compute failed: %v", computeError)
+	}
+	if legMetrics.FirstLogged != 1 {
+		t.Errorf("expected FirstLogged 1, got %d", legMetrics.FirstLogged)
+	}
+}
+
