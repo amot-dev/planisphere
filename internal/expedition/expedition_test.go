@@ -684,30 +684,30 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 
 	expedition.InvalidateShipCache()
 
-	exp, err := expedition.Create(dbConn, "Route Telemetry Test", "")
+	expeditionRecord, err := expedition.Create(dbConn, "Route Telemetry Test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rows, err := expedition.ListRows(dbConn, exp.ID)
+	rows, err := expedition.ListRows(dbConn, expeditionRecord.ID)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
-	wp1 := rows[0]
+	firstWaypoint := rows[0]
 	solName := "Sol"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, wp1.ID); err != nil {
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, firstWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	wp2 := mustInsert(t, dbConn, exp.ID, wp1.ID, expedition.RowWaypoint, 0)
-	wp2Name := "Alpha Centauri"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 100, y = 0, z = 0 WHERE id = ?`, wp2Name, wp2.ID); err != nil {
+	secondWaypoint := mustInsert(t, dbConn, expeditionRecord.ID, firstWaypoint.ID, expedition.RowWaypoint, 0)
+	secondWaypointName := "Alpha Centauri"
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 100, y = 0, z = 0 WHERE id = ?`, secondWaypointName, secondWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	wp3 := mustInsert(t, dbConn, exp.ID, wp2.ID, expedition.RowWaypoint, 0)
-	wp3Name := "Barnard's Star"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 250, y = 0, z = 0 WHERE id = ?`, wp3Name, wp3.ID); err != nil {
+	thirdWaypoint := mustInsert(t, dbConn, expeditionRecord.ID, secondWaypoint.ID, expedition.RowWaypoint, 0)
+	thirdWaypointName := "Barnard's Star"
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 250, y = 0, z = 0 WHERE id = ?`, thirdWaypointName, thirdWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -715,7 +715,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	// PlannedLy = 100 + 150 = 250 Ly.
 	// RemainingLy = 250 Ly.
 	// No row is next waypoint.
-	planPlanning, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	planPlanning, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -734,15 +734,15 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		}
 	}
 
-	// Start expedition at WP1:
-	// Visit WP1 at 2026-03-01T10:00:00Z.
+	// Start expedition at firstWaypoint:
+	// Visit firstWaypoint at 2026-03-01T10:00:00Z.
 	if txErr := db.WithTx(dbConn, func(tx *sql.Tx) error {
-		return expedition.Start(tx, exp.ID, "2026-03-01T10:00:00Z")
+		return expedition.Start(tx, expeditionRecord.ID, "2026-03-01T10:00:00Z")
 	}); txErr != nil {
 		t.Fatal(txErr)
 	}
 	visitedAt := "2026-03-01T10:00:00Z"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = ? WHERE id = ?`, visitedAt, wp1.ID); err != nil {
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = ? WHERE id = ?`, visitedAt, firstWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -753,97 +753,97 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	planActive1, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	planAtOrigin, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planActive1.NextWaypointRowID != wp2.ID {
-		t.Errorf("expected NextWaypointRowID %d (wp2), got %d", wp2.ID, planActive1.NextWaypointRowID)
+	if planAtOrigin.NextWaypointRowID != secondWaypoint.ID {
+		t.Errorf("expected NextWaypointRowID %d (secondWaypoint), got %d", secondWaypoint.ID, planAtOrigin.NextWaypointRowID)
 	}
-	// WP2 is next waypoint, distance from player (0,0,0) to WP2 (100,0,0) is 100.
-	// RemainingLy = 100 (player to WP2) + 150 (WP2 to WP3) = 250.
-	if planActive1.RemainingLy != 250.0 {
-		t.Errorf("expected remaining ly 250.0, got %v", planActive1.RemainingLy)
-	}
-
-	var wp2Row, wp3Row expedition.RowView
-	for _, waypointRowView := range planActive1.Rows {
-		if waypointRowView.Row.ID == wp2.ID {
-			wp2Row = waypointRowView
-		}
-		if waypointRowView.Row.ID == wp3.ID {
-			wp3Row = waypointRowView
-		}
-	}
-	if !wp2Row.IsNextWaypoint {
-		t.Errorf("expected wp2 to be next waypoint")
-	}
-	if wp2Row.DistFromCurrentLy == nil || *wp2Row.DistFromCurrentLy != 100.0 {
-		t.Errorf("expected wp2 dist from player 100.0, got %v", wp2Row.DistFromCurrentLy)
-	}
-	if wp3Row.IsNextWaypoint {
-		t.Errorf("expected wp3 NOT to be next waypoint")
-	}
-	if wp3Row.DistFromPrevLy == nil || *wp3Row.DistFromPrevLy != 150.0 {
-		t.Errorf("expected wp3 dist from prev 150.0, got %v", wp3Row.DistFromPrevLy)
+	// secondWaypoint is next waypoint, distance from player (0,0,0) to secondWaypoint (100,0,0) is 100.
+	// RemainingLy = 100 (player to secondWaypoint) + 150 (secondWaypoint to thirdWaypoint) = 250.
+	if planAtOrigin.RemainingLy != 250.0 {
+		t.Errorf("expected remaining ly 250.0, got %v", planAtOrigin.RemainingLy)
 	}
 
-	// Player jumps closer to WP2: Waypoint "Interim System" at (60, 0, 0)
+	var secondWaypointRow, thirdWaypointRow expedition.RowView
+	for _, waypointRowView := range planAtOrigin.Rows {
+		if waypointRowView.Row.ID == secondWaypoint.ID {
+			secondWaypointRow = waypointRowView
+		}
+		if waypointRowView.Row.ID == thirdWaypoint.ID {
+			thirdWaypointRow = waypointRowView
+		}
+	}
+	if !secondWaypointRow.IsNextWaypoint {
+		t.Errorf("expected secondWaypoint to be next waypoint")
+	}
+	if secondWaypointRow.DistFromCurrentLy == nil || *secondWaypointRow.DistFromCurrentLy != 100.0 {
+		t.Errorf("expected secondWaypoint dist from player 100.0, got %v", secondWaypointRow.DistFromCurrentLy)
+	}
+	if thirdWaypointRow.IsNextWaypoint {
+		t.Errorf("expected thirdWaypoint NOT to be next waypoint")
+	}
+	if thirdWaypointRow.DistFromPrevLy == nil || *thirdWaypointRow.DistFromPrevLy != 150.0 {
+		t.Errorf("expected thirdWaypoint dist from prev 150.0, got %v", thirdWaypointRow.DistFromPrevLy)
+	}
+
+	// Player jumps closer to secondWaypoint: Waypoint "Interim System" at (60, 0, 0)
 	_, err = dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, star_x, star_y, star_z, raw_json, ingested_at)
 		VALUES ('ev-jump1', '2026-03-01T11:00:00Z', 'FSDJump', 'Interim System', 60.0, 0.0, 0.0, '{}', '2026-03-01T11:00:00Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	planActive2, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	planAfterFirstJump, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Distance from player (60,0,0) to WP2 (100,0,0) is 40.0 Ly.
-	// WP2 to WP3 is 150.0 Ly.
+	// Distance from player (60,0,0) to secondWaypoint (100,0,0) is 40.0 Ly.
+	// secondWaypoint to thirdWaypoint is 150.0 Ly.
 	// RemainingLy = 40.0 + 150.0 = 190.0 Ly!
 	// PlannedLy stays 250.0 Ly!
-	if planActive2.PlannedLy != 250.0 {
-		t.Errorf("expected planned ly to remain 250.0, got %v", planActive2.PlannedLy)
+	if planAfterFirstJump.PlannedLy != 250.0 {
+		t.Errorf("expected planned ly to remain 250.0, got %v", planAfterFirstJump.PlannedLy)
 	}
-	if planActive2.RemainingLy != 190.0 {
-		t.Errorf("expected remaining ly 190.0 after jump, got %v", planActive2.RemainingLy)
+	if planAfterFirstJump.RemainingLy != 190.0 {
+		t.Errorf("expected remaining ly 190.0 after jump, got %v", planAfterFirstJump.RemainingLy)
 	}
-	for _, waypointRowView := range planActive2.Rows {
-		if waypointRowView.Row.ID == wp2.ID {
+	for _, waypointRowView := range planAfterFirstJump.Rows {
+		if waypointRowView.Row.ID == secondWaypoint.ID {
 			if waypointRowView.DistFromCurrentLy == nil || *waypointRowView.DistFromCurrentLy != 40.0 {
-				t.Errorf("expected wp2 dist from player 40.0, got %v", waypointRowView.DistFromCurrentLy)
+				t.Errorf("expected secondWaypoint dist from player 40.0, got %v", waypointRowView.DistFromCurrentLy)
 			}
 			if waypointRowView.DistFromPrevLy == nil || *waypointRowView.DistFromPrevLy != 100.0 {
-				t.Errorf("expected wp2 dist from prev (planned leg) to remain 100.0, got %v", waypointRowView.DistFromPrevLy)
+				t.Errorf("expected secondWaypoint dist from prev (planned leg) to remain 100.0, got %v", waypointRowView.DistFromPrevLy)
 			}
 		}
 	}
-	if planActive2.CoveredLy != 0.0 {
-		t.Errorf("expected covered ly 0.0 before wp2 visit, got %v", planActive2.CoveredLy)
+	if planAfterFirstJump.CoveredLy != 0.0 {
+		t.Errorf("expected covered ly 0.0 before secondWaypoint visit, got %v", planAfterFirstJump.CoveredLy)
 	}
 
-	// Visit WP2
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T12:00:00Z' WHERE id = ?`, wp2.ID); err != nil {
+	// Visit secondWaypoint
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T12:00:00Z' WHERE id = ?`, secondWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
-	planActive3, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	planAfterSecondWaypointVisit, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planActive3.CoveredLy != 100.0 {
-		t.Errorf("expected covered ly 100.0 after wp2 visit, got %v", planActive3.CoveredLy)
+	if planAfterSecondWaypointVisit.CoveredLy != 100.0 {
+		t.Errorf("expected covered ly 100.0 after secondWaypoint visit, got %v", planAfterSecondWaypointVisit.CoveredLy)
 	}
 
-	// Visit WP3
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T13:00:00Z' WHERE id = ?`, wp3.ID); err != nil {
+	// Visit thirdWaypoint
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T13:00:00Z' WHERE id = ?`, thirdWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
-	planActive4, err := expedition.BuildPlan(dbConn, exp.ID, nil)
+	planAfterFinalWaypointVisit, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planActive4.CoveredLy != 250.0 {
-		t.Errorf("expected covered ly 250.0 after wp3 visit, got %v", planActive4.CoveredLy)
+	if planAfterFinalWaypointVisit.CoveredLy != 250.0 {
+		t.Errorf("expected covered ly 250.0 after thirdWaypoint visit, got %v", planAfterFinalWaypointVisit.CoveredLy)
 	}
 }

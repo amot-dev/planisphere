@@ -2,11 +2,8 @@ package stats
 
 import (
 	"encoding/json"
-	"fmt"
-	"math"
 	"strings"
 	"sync"
-	"time"
 
 	"planisphere/internal/ed"
 	"planisphere/internal/journal"
@@ -38,23 +35,25 @@ func (base RealizationBreakdown) Add(other RealizationBreakdown) RealizationBrea
 }
 
 type scanRecord struct {
-	eventUID           string
-	timestamp          string
-	systemAddress      int64
-	starSystem         string
-	bodyID             int64
-	bodyName           string
-	isOrganic          bool
-	undiscoveredAtScan bool
-	species            string
-	speciesLocalised   string
-	variant            string
-	variantLocalised   string
-	normalizedSpecies  string
-	normalizedVariant  string
-	theoreticalBase    int64
-	theoreticalBonus   int64
-	theoreticalTotal   int64
+	eventUID             string
+	timestamp            string
+	systemAddress        int64
+	starSystem           string
+	normalizedStarSystem string
+	bodyID               int64
+	bodyName             string
+	normalizedBodyName   string
+	isOrganic            bool
+	undiscoveredAtScan   bool
+	species              string
+	speciesLocalised     string
+	variant              string
+	variantLocalised     string
+	normalizedSpecies    string
+	normalizedVariant    string
+	theoreticalBase      int64
+	theoreticalBonus     int64
+	theoreticalTotal     int64
 
 	// Realized outcome
 	status        string // "pending", "sold", "lost_death"
@@ -152,7 +151,6 @@ func findMatchingOrganic(unsoldOrganicRecords []*scanRecord, bioDataItem journal
 
 // RealizationLedger tracks all scans and their final realization outcomes.
 type RealizationLedger struct {
-	mu      sync.RWMutex
 	records []*scanRecord
 	// realizedOrganicBonus maps ScanOrganic event_uid to true when a sample
 	// subsequently sold in SellOrganicData with a positive first-logged bonus.
@@ -170,8 +168,6 @@ func (ledger *RealizationLedger) HasRealizedOrganicBonus(eventUID string) bool {
 	if ledger == nil || eventUID == "" {
 		return false
 	}
-	ledger.mu.RLock()
-	defer ledger.mu.RUnlock()
 	return ledger.realizedOrganicBonus[eventUID]
 }
 
@@ -195,45 +191,43 @@ var realizationEvents = []string{
 
 // ComputeRealization computes the realization breakdown for the given time range.
 func (engine *Engine) ComputeRealization(timeRange Range, filter *Filter) (RealizationBreakdown, error) {
-	ledger, err := engine.buildLedger()
-	if err != nil {
-		return RealizationBreakdown{}, err
+	ledger, buildError := engine.buildLedger()
+	if buildError != nil {
+		return RealizationBreakdown{}, buildError
 	}
 
 	after, until := timeRange.bounds()
 	var filterSet *filterSets
 	if filter != nil && filter.Enabled {
-		var prepErr error
-		filterSet, prepErr = filter.prepare(engine.DB)
-		if prepErr != nil {
-			return RealizationBreakdown{}, prepErr
+		var prepareError error
+		filterSet, prepareError = filter.prepare(engine.DB)
+		if prepareError != nil {
+			return RealizationBreakdown{}, prepareError
 		}
 	}
 
 	var breakdown RealizationBreakdown
-	ledger.mu.RLock()
-	defer ledger.mu.RUnlock()
 
-	for _, rec := range ledger.records {
-		if rec.timestamp <= after || rec.timestamp > until {
+	for _, scanEntry := range ledger.records {
+		if scanEntry.timestamp <= after || scanEntry.timestamp > until {
 			continue
 		}
-		if filterSet != nil && !filterSet.allow(rec.timestamp, true) {
+		if filterSet != nil && !filterSet.allow(scanEntry.timestamp, true) {
 			continue
 		}
 
-		if rec.isOrganic {
-			breakdown.OrganicLostDeath += rec.deathLoss
-			breakdown.OrganicStolen += rec.stolenLoss
+		if scanEntry.isOrganic {
+			breakdown.OrganicLostDeath += scanEntry.deathLoss
+			breakdown.OrganicStolen += scanEntry.stolenLoss
 		} else {
-			breakdown.CartoLostDeath += rec.deathLoss
-			breakdown.CartoStolen += rec.stolenLoss
+			breakdown.CartoLostDeath += scanEntry.deathLoss
+			breakdown.CartoStolen += scanEntry.stolenLoss
 		}
-		breakdown.TotalRealized += rec.actualGross
-		breakdown.NpcCrewLoss += rec.crewLoss
+		breakdown.TotalRealized += scanEntry.actualGross
+		breakdown.NpcCrewLoss += scanEntry.crewLoss
 
-		if rec.status == "pending" {
-			breakdown.PendingValue += rec.theoreticalTotal
+		if scanEntry.status == "pending" {
+			breakdown.PendingValue += scanEntry.theoreticalTotal
 		}
 	}
 
@@ -252,15 +246,12 @@ func (engine *Engine) ComputeRealization(timeRange Range, filter *Filter) (Reali
 	return breakdown, nil
 }
 
-func parseTime(ts string) time.Time {
-	t, _ := ed.ParseISO(ts)
-	return t
-}
-
-func timeDiffSeconds(ts1, ts2 string) float64 {
-	t1 := parseTime(ts1)
-	t2 := parseTime(ts2)
-	return math.Abs(t1.Sub(t2).Seconds())
+func parseUnixSeconds(timestamp string) (int64, bool) {
+	parsedTime, parseError := ed.ParseISO(timestamp)
+	if parseError != nil {
+		return 0, false
+	}
+	return parsedTime.Unix(), true
 }
 
 var (
@@ -304,9 +295,9 @@ func (engine *Engine) buildLedger() (*RealizationLedger, error) {
 
 // constructLedger builds the full chronological lifecycle ledger from journal events.
 func (engine *Engine) constructLedger() (*RealizationLedger, error) {
-	events, err := engine.loadEvents("", "9999-12-31T23:59:59Z", realizationEvents)
-	if err != nil {
-		return nil, err
+	events, loadError := engine.loadEvents("", "9999-12-31T23:59:59Z", realizationEvents)
+	if loadError != nil {
+		return nil, loadError
 	}
 
 	ledger := &RealizationLedger{
@@ -319,39 +310,63 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		bodyID        int64
 	}
 
+	type parsedWageEvent struct {
+		unixSeconds int64
+		amount      int64
+	}
+
 	unsoldCarto := make(map[cartoKey]*scanRecord)
 	unsoldOrganic := make([]*scanRecord, 0, 100)
-	recentWageEvents := make([]journal.NpcCrewPaidWageEvent, 0, 50)
+	recentWageEvents := make([]parsedWageEvent, 0, 50)
 
 	// First pass: collect wage events so they can be matched with concurrent sales
-	for _, ev := range events {
-		if ev.eventType == "NpcCrewPaidWage" {
-			var wageEv journal.NpcCrewPaidWageEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &wageEv) == nil {
-				recentWageEvents = append(recentWageEvents, wageEv)
+	for _, journalEvent := range events {
+		if journalEvent.eventType == "NpcCrewPaidWage" {
+			var wageEvent journal.NpcCrewPaidWageEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &wageEvent) == nil {
+				if unixSeconds, ok := parseUnixSeconds(wageEvent.Timestamp); ok {
+					recentWageEvents = append(recentWageEvents, parsedWageEvent{
+						unixSeconds: unixSeconds,
+						amount:      wageEvent.Amount,
+					})
+				}
 			}
 		}
 	}
 
 	findCrewWage := func(saleTimestamp string) int64 {
+		saleUnixSeconds, ok := parseUnixSeconds(saleTimestamp)
+		if !ok {
+			return 0
+		}
 		var totalWage int64
 		for _, wageEvent := range recentWageEvents {
-			if timeDiffSeconds(wageEvent.Timestamp, saleTimestamp) <= 5.0 {
-				totalWage += wageEvent.Amount
+			diffSeconds := wageEvent.unixSeconds - saleUnixSeconds
+			if diffSeconds >= -5 && diffSeconds <= 5 {
+				totalWage += wageEvent.amount
 			}
 		}
 		return totalWage
 	}
 
-	scans := make(map[cartoKey]*journal.ScanEvent)
-	seenSales := make(map[string]bool)
+	type saleDedupKey struct {
+		kind       string
+		timestamp  string
+		primaryID  int64
+		itemCount  int
+		totalValue int64
+		totalBonus int64
+	}
 
-	for evIdx := 0; evIdx < len(events); evIdx++ {
-		ev := events[evIdx]
-		switch ev.eventType {
+	scans := make(map[cartoKey]*journal.ScanEvent)
+	seenSales := make(map[saleDedupKey]bool)
+
+	for eventIndex := 0; eventIndex < len(events); eventIndex++ {
+		journalEvent := events[eventIndex]
+		switch journalEvent.eventType {
 		case "Scan":
 			var scanEv journal.ScanEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &scanEv) != nil || scanEv.IsBeltCluster() {
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &scanEv) != nil || scanEv.IsBeltCluster() {
 				continue
 			}
 			key := cartoKey{scanEv.SystemAddress, scanEv.BodyID}
@@ -362,25 +377,27 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				continue
 			}
 			estimatedBodyValue := ed.EstimateBodyValue(toBodyScan(&scanEv), ed.MappingInfo{}, engine.Odyssey)
-			rec := &scanRecord{
-				timestamp:          ev.timestamp,
-				systemAddress:      scanEv.SystemAddress,
-				starSystem:         scanEv.StarSystem,
-				bodyID:             scanEv.BodyID,
-				bodyName:           scanEv.BodyName,
-				isOrganic:          false,
-				undiscoveredAtScan: !scanEv.WasDiscovered,
-				theoreticalBase:    estimatedBodyValue.Base,
-				theoreticalBonus:   estimatedBodyValue.Bonus,
-				theoreticalTotal:   estimatedBodyValue.Total,
-				status:             "pending",
+			scanEntry := &scanRecord{
+				timestamp:            journalEvent.timestamp,
+				systemAddress:        scanEv.SystemAddress,
+				starSystem:           scanEv.StarSystem,
+				normalizedStarSystem: strings.ToLower(strings.TrimSpace(scanEv.StarSystem)),
+				bodyID:               scanEv.BodyID,
+				bodyName:             scanEv.BodyName,
+				normalizedBodyName:   strings.ToLower(strings.TrimSpace(scanEv.BodyName)),
+				isOrganic:            false,
+				undiscoveredAtScan:   !scanEv.WasDiscovered,
+				theoreticalBase:      estimatedBodyValue.Base,
+				theoreticalBonus:     estimatedBodyValue.Bonus,
+				theoreticalTotal:     estimatedBodyValue.Total,
+				status:               "pending",
 			}
-			unsoldCarto[key] = rec
-			ledger.records = append(ledger.records, rec)
+			unsoldCarto[key] = scanEntry
+			ledger.records = append(ledger.records, scanEntry)
 
 		case "SAAScanComplete":
 			var saaEv journal.SAAScanCompleteEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &saaEv) != nil {
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &saaEv) != nil {
 				continue
 			}
 			key := cartoKey{saaEv.SystemAddress, saaEv.BodyID}
@@ -391,36 +408,38 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			mappingInfo := ed.MappingInfo{Mapped: true, ProbesUsed: saaEv.ProbesUsed, EfficiencyTarget: saaEv.EfficiencyTarget}
 			mappingIncrement := ed.EstimateMappingIncrement(toBodyScan(scan), mappingInfo, engine.Odyssey)
 
-			rec := unsoldCarto[key]
-			if rec != nil {
-				rec.theoreticalBase += mappingIncrement.Base
-				rec.theoreticalBonus += mappingIncrement.Bonus
-				rec.theoreticalTotal += mappingIncrement.Total
+			scanEntry := unsoldCarto[key]
+			if scanEntry != nil {
+				scanEntry.theoreticalBase += mappingIncrement.Base
+				scanEntry.theoreticalBonus += mappingIncrement.Bonus
+				scanEntry.theoreticalTotal += mappingIncrement.Total
 				if !scan.WasMapped {
-					rec.undiscoveredAtScan = true
+					scanEntry.undiscoveredAtScan = true
 				}
 			} else {
 				// Mapped without existing pending scan in current batch
-				rec = &scanRecord{
-					timestamp:          ev.timestamp,
-					systemAddress:      saaEv.SystemAddress,
-					starSystem:         scan.StarSystem,
-					bodyID:             saaEv.BodyID,
-					bodyName:           saaEv.BodyName,
-					isOrganic:          false,
-					undiscoveredAtScan: !scan.WasDiscovered || !scan.WasMapped,
-					theoreticalBase:    mappingIncrement.Base,
-					theoreticalBonus:   mappingIncrement.Bonus,
-					theoreticalTotal:   mappingIncrement.Total,
-					status:             "pending",
+				scanEntry = &scanRecord{
+					timestamp:            journalEvent.timestamp,
+					systemAddress:        saaEv.SystemAddress,
+					starSystem:           scan.StarSystem,
+					normalizedStarSystem: strings.ToLower(strings.TrimSpace(scan.StarSystem)),
+					bodyID:               saaEv.BodyID,
+					bodyName:             saaEv.BodyName,
+					normalizedBodyName:   strings.ToLower(strings.TrimSpace(saaEv.BodyName)),
+					isOrganic:            false,
+					undiscoveredAtScan:   !scan.WasDiscovered || !scan.WasMapped,
+					theoreticalBase:      mappingIncrement.Base,
+					theoreticalBonus:     mappingIncrement.Bonus,
+					theoreticalTotal:     mappingIncrement.Total,
+					status:               "pending",
 				}
-				unsoldCarto[key] = rec
-				ledger.records = append(ledger.records, rec)
+				unsoldCarto[key] = scanEntry
+				ledger.records = append(ledger.records, scanEntry)
 			}
 
 		case "ScanOrganic":
 			var organicEv journal.ScanOrganicEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &organicEv) != nil || !strings.EqualFold(organicEv.ScanType, "Analyse") {
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &organicEv) != nil || !strings.EqualFold(organicEv.ScanType, "Analyse") {
 				continue
 			}
 			baseVal := ed.SpeciesBaseValue(organicEv.Species, organicEv.SpeciesLocalised, organicEv.Genus)
@@ -431,9 +450,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			// do not reliably populate it: https://issues.frontierstore.net/issue-detail/81891
 			firstLogged := parentScan != nil && parentScan.WasFootfalled != nil && !*parentScan.WasFootfalled
 			calculatedOrganicValue := ed.OrganicValue(baseVal, firstLogged)
-			rec := &scanRecord{
-				eventUID:           ev.eventUID,
-				timestamp:          ev.timestamp,
+			scanEntry := &scanRecord{
+				eventUID:           journalEvent.eventUID,
+				timestamp:          journalEvent.timestamp,
 				systemAddress:      organicEv.SystemAddress,
 				bodyID:             organicEv.Body,
 				isOrganic:          true,
@@ -449,12 +468,12 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				theoreticalTotal:   calculatedOrganicValue.Total,
 				status:             "pending",
 			}
-			unsoldOrganic = append(unsoldOrganic, rec)
-			ledger.records = append(ledger.records, rec)
+			unsoldOrganic = append(unsoldOrganic, scanEntry)
+			ledger.records = append(ledger.records, scanEntry)
 
 		case "Resurrect":
 			var resurrectEvent journal.ResurrectEvent
-			if unmarshalError := json.Unmarshal([]byte(ev.rawJSON), &resurrectEvent); unmarshalError != nil {
+			if unmarshalError := json.Unmarshal([]byte(journalEvent.rawJSON), &resurrectEvent); unmarshalError != nil {
 				continue
 			}
 
@@ -480,7 +499,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 
 		case "SellOrganicData":
 			var sellEv journal.SellOrganicDataEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &sellEv) != nil {
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEv) != nil {
 				continue
 			}
 			var totalSaleValue, totalSaleBonus int64
@@ -489,7 +508,14 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				totalSaleBonus += item.Bonus
 			}
 			totalSaleGross := totalSaleValue + totalSaleBonus
-			saleKey := fmt.Sprintf("organic|%s|%d|%d|%d|%d", sellEv.Timestamp, sellEv.MarketID, len(sellEv.BioData), totalSaleValue, totalSaleBonus)
+			saleKey := saleDedupKey{
+				kind:       "organic",
+				timestamp:  sellEv.Timestamp,
+				primaryID:  sellEv.MarketID,
+				itemCount:  len(sellEv.BioData),
+				totalValue: totalSaleValue,
+				totalBonus: totalSaleBonus,
+			}
 			if seenSales[saleKey] {
 				continue
 			}
@@ -504,16 +530,16 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				}
 
 				// Find matching pending unsold specimen using robust species matching
-				matchedIdx := findMatchingOrganic(unsoldOrganic, item)
+				matchedIndex := findMatchingOrganic(unsoldOrganic, item)
 
-				if matchedIdx >= 0 {
-					matched := unsoldOrganic[matchedIdx]
-					matched.status = "sold"
-					matched.soldTimestamp = sellEv.Timestamp
-					matched.actualBase = item.Value
-					matched.actualBonus = item.Bonus
-					matched.actualGross = itemGross
-					matched.crewLoss = allocatedCrew
+				if matchedIndex >= 0 {
+					matchedRecord := unsoldOrganic[matchedIndex]
+					matchedRecord.status = "sold"
+					matchedRecord.soldTimestamp = sellEv.Timestamp
+					matchedRecord.actualBase = item.Value
+					matchedRecord.actualBonus = item.Bonus
+					matchedRecord.actualGross = itemGross
+					matchedRecord.crewLoss = allocatedCrew
 
 					// If scan-time estimation did not award a first-logged bonus (because the
 					// parent body already had WasFootfalled == true), but Vista Genomics paid a
@@ -521,23 +547,23 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					// Required because of Frontier Issue #81891 and remains required for backwards
 					// compatibility with older journal files even if or when
 					// https://issues.frontierstore.net/issue-detail/81891 is fixed.
-					if item.Bonus > 0 && matched.eventUID != "" {
-						ledger.realizedOrganicBonus[matched.eventUID] = true
-						if matched.theoreticalBonus == 0 {
-							upgradedVal := ed.OrganicValue(matched.theoreticalBase, true)
-							matched.theoreticalBonus = upgradedVal.Bonus
-							matched.theoreticalTotal = upgradedVal.Total
+					if item.Bonus > 0 && matchedRecord.eventUID != "" {
+						ledger.realizedOrganicBonus[matchedRecord.eventUID] = true
+						if matchedRecord.theoreticalBonus == 0 {
+							upgradedOrganicValue := ed.OrganicValue(matchedRecord.theoreticalBase, true)
+							matchedRecord.theoreticalBonus = upgradedOrganicValue.Bonus
+							matchedRecord.theoreticalTotal = upgradedOrganicValue.Total
 						}
 					}
 
 					// Stolen check: only flag as stolen if the body was undiscovered at the time of scan
 					// and the player expected a first-logged bonus, but received none.
-					if matched.undiscoveredAtScan && matched.theoreticalBonus > 0 && item.Bonus == 0 {
-						matched.stolenLoss = matched.theoreticalBonus
+					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 && item.Bonus == 0 {
+						matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
 					}
 
 					// Remove from unsold queue
-					unsoldOrganic = append(unsoldOrganic[:matchedIdx], unsoldOrganic[matchedIdx+1:]...)
+					unsoldOrganic = append(unsoldOrganic[:matchedIndex], unsoldOrganic[matchedIndex+1:]...)
 				} else {
 					// Unattributed organic sale
 					ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
@@ -551,10 +577,17 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 
 		case "SellExplorationData":
 			var sellEv journal.SellExplorationDataEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &sellEv) != nil {
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEv) != nil {
 				continue
 			}
-			saleKey := fmt.Sprintf("carto|%s|%d|%d|%d", sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, len(sellEv.Systems))
+			saleKey := saleDedupKey{
+				kind:       "carto",
+				timestamp:  sellEv.Timestamp,
+				primaryID:  sellEv.TotalEarnings,
+				itemCount:  len(sellEv.Systems),
+				totalValue: sellEv.BaseValue,
+				totalBonus: sellEv.Bonus,
+			}
 			if seenSales[saleKey] {
 				continue
 			}
@@ -571,10 +604,10 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 			// Find matching unsold carto records for sold systems
-			var matchedRecords []*scanRecord
+			matchedRecords := make([]*scanRecord, 0, len(unsoldCarto))
 			for key, candidateRecord := range unsoldCarto {
 				if candidateRecord.status == "pending" && candidateRecord.timestamp <= sellEv.Timestamp {
-					if len(soldSystemSet) == 0 || soldSystemSet[strings.ToLower(strings.TrimSpace(candidateRecord.starSystem))] {
+					if len(soldSystemSet) == 0 || soldSystemSet[candidateRecord.normalizedStarSystem] {
 						matchedRecords = append(matchedRecords, candidateRecord)
 						delete(unsoldCarto, key)
 					}
@@ -586,9 +619,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				for _, matchedRecord := range matchedRecords {
 					// Stolen check: had bonus expectation on an undiscovered body, but body or system was not awarded first discovery
 					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
-						normalizedBody := strings.ToLower(strings.TrimSpace(matchedRecord.bodyName))
-						normalizedSystem := strings.ToLower(strings.TrimSpace(matchedRecord.starSystem))
-						if !discoveredSet[normalizedBody] && !discoveredSet[normalizedSystem] {
+						if !discoveredSet[matchedRecord.normalizedBodyName] && !discoveredSet[matchedRecord.normalizedStarSystem] {
 							matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
 						}
 					}
@@ -604,10 +635,17 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 
 		case "MultiSellExplorationData":
 			var sellEv journal.MultiSellExplorationDataEvent
-			if json.Unmarshal([]byte(ev.rawJSON), &sellEv) != nil {
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEv) != nil {
 				continue
 			}
-			saleKey := fmt.Sprintf("carto_multi|%s|%d|%d|%d", sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, len(sellEv.Discovered))
+			saleKey := saleDedupKey{
+				kind:       "carto_multi",
+				timestamp:  sellEv.Timestamp,
+				primaryID:  sellEv.TotalEarnings,
+				itemCount:  len(sellEv.Discovered),
+				totalValue: sellEv.BaseValue,
+				totalBonus: sellEv.Bonus,
+			}
 			if seenSales[saleKey] {
 				continue
 			}
@@ -620,10 +658,10 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 			// Match pending cartographic scans belonging to the systems sold on this page
-			var matchedRecords []*scanRecord
+			matchedRecords := make([]*scanRecord, 0, len(unsoldCarto))
 			for key, candidateRecord := range unsoldCarto {
 				if candidateRecord.status == "pending" && candidateRecord.timestamp <= sellEv.Timestamp {
-					if len(soldSystemSet) == 0 || soldSystemSet[strings.ToLower(strings.TrimSpace(candidateRecord.starSystem))] {
+					if len(soldSystemSet) == 0 || soldSystemSet[candidateRecord.normalizedStarSystem] {
 						matchedRecords = append(matchedRecords, candidateRecord)
 						delete(unsoldCarto, key)
 					}
