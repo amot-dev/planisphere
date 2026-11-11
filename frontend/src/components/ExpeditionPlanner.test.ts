@@ -5,6 +5,7 @@ import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { CarrierRouteBottomPanel } from './PlannerWidgets'
 import { StatsSidebar } from './StatsSidebar'
+import { WaypointRowItem } from './WaypointRowItem'
 import { app, expedition, stats } from '../../wailsjs/go/models'
 
 describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
@@ -657,13 +658,14 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(loadingHtml).toContain('whitespace-nowrap')
   })
 
-  it('StatsSidebar renders LOG JUMP button in Expedition scope instead of CARRIER LOG', () => {
+  it('StatsSidebar renders LOG JUMP button in Expedition scope, disables it when carrierRouteOpen is true, and hides it when completed', () => {
+    const emptyFilter = stats.Filter.createFrom({ enabled: false, modes: [] })
     const html = renderToString(
       createElement(StatsSidebar, {
         sidebarStats: null,
         statsLoading: false,
         modesState: null,
-        filter: stats.Filter.createFrom({ enabled: false, modes: [] }),
+        filter: emptyFilter,
         onFilterChange: () => {},
         onQuickSwitchMode: () => {},
         onLogCarrierJump: () => {},
@@ -672,9 +674,40 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     expect(html).toContain('LOG JUMP')
     expect(html).not.toContain('CARRIER LOG')
+    expect(html).not.toMatch(/disabled=""[^>]*>LOG JUMP/)
+
+    const openRouteHtml = renderToString(
+      createElement(StatsSidebar, {
+        sidebarStats: null,
+        statsLoading: false,
+        modesState: null,
+        filter: emptyFilter,
+        carrierRouteOpen: true,
+        onFilterChange: () => {},
+        onQuickSwitchMode: () => {},
+        onLogCarrierJump: () => {},
+      }),
+    )
+
+    expect(openRouteHtml).toContain('Carrier routing panel is already open')
+    expect(openRouteHtml).toMatch(/disabled=""[^>]*>LOG JUMP/)
+
+    const completedHtml = renderToString(
+      createElement(StatsSidebar, {
+        sidebarStats: app.SidebarStats.createFrom({ status: 'completed' }),
+        statsLoading: false,
+        modesState: null,
+        filter: emptyFilter,
+        onFilterChange: () => {},
+        onQuickSwitchMode: () => {},
+        onLogCarrierJump: () => {},
+      }),
+    )
+
+    expect(completedHtml).not.toContain('LOG JUMP')
   })
 
-  it('CarrierRouteBottomPanel renders Close button with tooltip, start/end indicator with ??? fallback, and Mark Arrival button', () => {
+  it('CarrierRouteBottomPanel renders Close button with tooltip, start/end indicator with ??? fallback, and Mark FC Stop Arrival button', () => {
     const manualWithStop = renderToString(
       createElement(CarrierRouteBottomPanel, {
         route: app.CarrierRouteResult.createFrom({
@@ -711,9 +744,12 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(manualWithStop).toContain('Existing jumps remain logged in your expedition statistics.')
     expect(manualWithStop).toContain('Sol')
     expect(manualWithStop).toContain('Colonia')
-    expect(manualWithStop).toContain('Mark Arrival at Colonia')
+    expect(manualWithStop).toContain('Mark FC Stop Arrival')
+    expect(manualWithStop).toContain(
+      'Mark Fleet Carrier arrival at Colonia and close the carrier plotter',
+    )
     expect(manualWithStop).not.toContain('ARRIVE AT WAYPOINT')
-    expect(manualWithStop).not.toMatch(/disabled=""[^>]*>Mark Arrival at Colonia/)
+    expect(manualWithStop).not.toMatch(/disabled=""[^>]*>Mark FC Stop Arrival/)
 
     const manualWithoutStop = renderToString(
       createElement(CarrierRouteBottomPanel, {
@@ -748,8 +784,103 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     expect(manualWithoutStop).toContain('Sol')
     expect(manualWithoutStop).toContain('???')
-    expect(manualWithoutStop).toContain('Mark Arrival at ???')
-    expect(manualWithoutStop).toMatch(/disabled=""[^>]*>Mark Arrival at \?\?\?/)
+    expect(manualWithoutStop).toContain('Mark FC Stop Arrival')
+    expect(manualWithoutStop).toContain(
+      'No next Fleet Carrier stop designated in the expedition plan',
+    )
+    expect(manualWithoutStop).toMatch(/disabled=""[^>]*>Mark FC Stop Arrival/)
+
+    const spanshModeHtml = renderToString(
+      createElement(CarrierRouteBottomPanel, {
+        route: app.CarrierRouteResult.createFrom({
+          origin: 'Sol',
+          destination: 'Colonia',
+          carrierType: 'player',
+          manualMode: false,
+          jumps: [
+            {
+              systemName: 'Rohini',
+              distanceLy: 495.2,
+              tritiumUsed: 68,
+              fuelInTank: 932,
+              hasIcyRing: true,
+            },
+          ],
+        }),
+        jumpIndex: 0,
+        manualMode: false,
+        hasNextFcStop: true,
+        nextFcStopSystem: 'Beagle Point',
+        onCancelRoute: () => {},
+        onToggleManualMode: () => {},
+        onCompleteSpanshJump: () => {},
+        manualDistanceInput: '',
+        onChangeManualDistance: () => {},
+        manualTritiumInput: '',
+        onChangeManualTritium: () => {},
+        onLogManualJump: () => {},
+        manualLegJumps: 0,
+        manualLegDistance: 0,
+        manualLegTritium: 0,
+        loggingJump: false,
+        copiedNextJump: false,
+        onCopySystem: () => {},
+        onArrive: () => {},
+      }),
+    )
+
+    expect(spanshModeHtml).toContain('Colonia')
+    expect(spanshModeHtml).not.toContain('Beagle Point')
+
+    const lockedFcRowHtml = renderToString(
+      createElement(WaypointRowItem, {
+        rowView: expedition.RowView.createFrom({
+          row: {
+            id: 501,
+            expeditionId: 1,
+            rowType: 'waypoint',
+            systemName: 'Rohini',
+            fcStop: true,
+            fcArrived: false,
+          },
+          number: 2,
+          visitState: 'unvisited',
+        }),
+        index: 1,
+        isPlanning: false,
+        isLocked: false,
+        isFcStopLocked: true,
+        isBeingDragged: false,
+        isDragTarget: false,
+        isExpanded: false,
+        isNextFcStop: false,
+        hasActiveCarrierRoute: true,
+        draft: { systemName: 'Rohini', poiName: '', notes: '' },
+        copiedSystemRowId: null,
+        insertMenuOpen: false,
+        lastVisitedIndex: 0,
+        totalRows: 3,
+        rowStyle: {},
+        dropProps: {},
+        onToggleExpand: () => {},
+        onDraftChange: () => {},
+        onFieldFocus: () => {},
+        onFieldBlur: () => {},
+        onCopySystem: () => {},
+        onToggleFcStop: () => {},
+        onOpenCarrierRoutePrompt: () => {},
+        onToggleInsertMenu: () => {},
+        onInsert: () => {},
+        onMove: () => {},
+        onDelete: () => {},
+        onDragStart: () => {},
+        onDragEnd: () => {},
+      }),
+    )
+
+    expect(lockedFcRowHtml).toContain('ROUTING')
+    expect(lockedFcRowHtml).not.toContain('Remove Fleet Carrier stop designation')
+    expect(lockedFcRowHtml).not.toContain('+ FC STOP')
   })
 })
 

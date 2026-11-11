@@ -9,6 +9,7 @@ export interface StatsSidebarProps {
   modesState: app.ModesState | null
   filter: stats.Filter
   collapsed?: boolean
+  carrierRouteOpen?: boolean
   onFilterChange: (next: stats.Filter) => void
   onQuickSwitchMode: (modeId: number) => void
   onToggleCollapse?: () => void
@@ -22,6 +23,7 @@ export const StatsSidebar = memo(function StatsSidebar({
   modesState,
   filter,
   collapsed = false,
+  carrierRouteOpen = false,
   onFilterChange,
   onQuickSwitchMode,
   onToggleCollapse,
@@ -397,16 +399,25 @@ export const StatsSidebar = memo(function StatsSidebar({
               <span className="text-[9px] text-[#a6907c] font-mono-tabular">
                 OWNED VESSEL
               </span>
-            ) : (
+            ) : sidebarStats?.status !== 'completed' ? (
               <button
                 type="button"
+                disabled={carrierRouteOpen}
                 onClick={onLogCarrierJump}
-                title="Open Fleet Carrier plotter in manual jump logging mode"
-                className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] transition cursor-pointer whitespace-nowrap"
+                title={
+                  carrierRouteOpen
+                    ? 'Carrier routing panel is already open'
+                    : 'Open Fleet Carrier plotter in manual jump logging mode'
+                }
+                className={`px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase tracking-wider border transition whitespace-nowrap ${
+                  carrierRouteOpen
+                    ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
+                    : 'bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer'
+                }`}
               >
                 LOG JUMP
               </button>
-            )}
+            ) : null}
           </div>
           <div className="divide-y divide-[#24180e]">
             <StatRow

@@ -81,9 +81,10 @@ export default function App() {
   const statsReqSeq = useRef(0)
   const filterRef = useRef(filter)
   const openManualPlotterRef = useRef<(() => void) | null>(null)
+  const [carrierRouteOpen, setCarrierRouteOpen] = useState(false)
 
-  const handleRegisterManualPlotter = useCallback((fn: () => void) => {
-    openManualPlotterRef.current = fn
+  const handleRegisterManualPlotter = useCallback((openManualPlotter: () => void) => {
+    openManualPlotterRef.current = openManualPlotter
   }, [])
 
   const handleLogCarrierJump = useCallback(() => {
@@ -501,6 +502,7 @@ export default function App() {
             modesState={modesState}
             filter={filter}
             collapsed={sidebarCollapsed}
+            carrierRouteOpen={carrierRouteOpen}
             onFilterChange={setFilter}
             onQuickSwitchMode={handleQuickSwitchMode}
             onToggleCollapse={toggleSidebarCollapsed}
@@ -518,6 +520,7 @@ export default function App() {
             onRefreshAll={refreshPlanAndStats}
             onBusyChange={setBusyAction}
             onRegisterManualPlotter={handleRegisterManualPlotter}
+            onCarrierRouteOpenChange={setCarrierRouteOpen}
           />
         </ErrorBoundary>
       </main>

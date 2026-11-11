@@ -14,6 +14,7 @@ export interface WaypointRowItemProps {
   index: number
   isPlanning: boolean
   isLocked: boolean
+  isFcStopLocked?: boolean
   isBeingDragged: boolean
   isDragTarget: boolean
   isExpanded: boolean
@@ -117,6 +118,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   index,
   isPlanning,
   isLocked,
+  isFcStopLocked = false,
   isBeingDragged,
   isDragTarget,
   isExpanded,
@@ -336,15 +338,17 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   </span>
                 )}
 
-                {!isPlanning && isNextFcStop && (
-                  hasActiveCarrierRoute ? (
-                    <span
-                      title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
-                      className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
-                    >
-                      ROUTING
-                    </span>
-                  ) : (
+                {!isPlanning && hasActiveCarrierRoute ? (
+                  <span
+                    title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
+                    className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
+                  >
+                    ROUTING
+                  </span>
+                ) : (
+                  !isPlanning &&
+                  isNextFcStop &&
+                  !isFcStopLocked && (
                     <button
                       type="button"
                       onClick={() => onOpenCarrierRoutePrompt(index, row)}
@@ -356,7 +360,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   )
                 )}
 
-                {!isLocked && (
+                {!isLocked && !isFcStopLocked && (
                   <button
                     type="button"
                     onClick={() => onToggleFcStop(row)}
@@ -367,7 +371,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   </button>
                 )}
               </>
-            ) : !isLocked ? (
+            ) : !isLocked && !isFcStopLocked ? (
               <button
                 type="button"
                 onClick={() => onToggleFcStop(row)}

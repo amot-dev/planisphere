@@ -41,6 +41,7 @@ export interface ExpeditionPlannerProps {
   onRefreshAll: () => void
   onBusyChange: (busyMessage: string | null) => void
   onRegisterManualPlotter?: (openManualPlotter: () => void) => void
+  onCarrierRouteOpenChange?: (isOpen: boolean) => void
 }
 
 const rowStyle: CSSProperties = {
@@ -58,6 +59,7 @@ export function ExpeditionPlanner({
   onRefreshAll,
   onBusyChange,
   onRegisterManualPlotter,
+  onCarrierRouteOpenChange,
 }: ExpeditionPlannerProps) {
   const [expandedRowIds, setExpandedRowIds] = useState<Record<number, boolean>>({})
   const expandedRowIdsRef = useRef<Record<number, boolean>>(expandedRowIds)
@@ -316,6 +318,57 @@ export function ExpeditionPlanner({
     return maxIndex
   }, [plan, isPlanning])
 
+  const nextFcStopEntry = useMemo(() => {
+    if (!plan?.rows) return null
+    if (plan.nextFcStopRowId > 0) {
+      const nextStopIndex = plan.rows.findIndex(
+        (rowView) => rowView?.row?.id === plan.nextFcStopRowId,
+      )
+      if (
+        nextStopIndex >= 0 &&
+        plan.rows[nextStopIndex].row.fcStop &&
+        !plan.rows[nextStopIndex].row.fcArrived
+      ) {
+        return { row: plan.rows[nextStopIndex].row, index: nextStopIndex }
+      }
+    }
+    const fallbackIndex = plan.rows.findIndex(
+      (rowView) =>
+        rowView?.row?.rowType === 'waypoint' &&
+        rowView.row.fcStop &&
+        !rowView.row.fcArrived,
+    )
+    if (fallbackIndex >= 0) {
+      return { row: plan.rows[fallbackIndex].row, index: fallbackIndex }
+    }
+    return null
+  }, [plan])
+
+  const nextFcStopSystem = nextFcStopEntry
+    ? (drafts[nextFcStopEntry.row.id]?.systemName ?? nextFcStopEntry.row.systemName ?? '').trim()
+    : ''
+
+  const isManualCarrierRoute =
+    manualModeOverride ||
+    Boolean(activeCarrierRoute?.manualMode) ||
+    !activeCarrierRoute?.jumps?.length
+
+  const routedCarrierStopIndex = useMemo(() => {
+    if (!activeCarrierRoute || !plan?.rows) return -1
+    if (isManualCarrierRoute) {
+      return nextFcStopEntry ? nextFcStopEntry.index : -1
+    }
+    if (activeCarrierTargetRowId > 0) {
+      const targetRowIndex = plan.rows.findIndex(
+        (rowView) => rowView?.row?.id === activeCarrierTargetRowId,
+      )
+      if (targetRowIndex >= 0) {
+        return targetRowIndex
+      }
+    }
+    return nextFcStopEntry ? nextFcStopEntry.index : -1
+  }, [activeCarrierRoute, activeCarrierTargetRowId, isManualCarrierRoute, nextFcStopEntry, plan?.rows])
+
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const lastOpenedKeyRef = useRef<string | null>(null)
 
@@ -438,6 +491,17 @@ export function ExpeditionPlanner({
 
   async function toggleFcStop(row: expedition.Row) {
     if (!plan) return
+    if (activeCarrierRoute && routedCarrierStopIndex >= 0) {
+      const rowIndex = plan.rows.findIndex((rowView) => rowView?.row?.id === row.id)
+      if (
+        rowIndex >= 0 &&
+        (isManualCarrierRoute
+          ? rowIndex < routedCarrierStopIndex
+          : rowIndex <= routedCarrierStopIndex)
+      ) {
+        return
+      }
+    }
     const nextFcStop = !row.fcStop
     const optimisticRows = plan.rows.map((rowView) => {
       if (rowView.row.id !== row.id) return rowView
@@ -666,27 +730,6 @@ export function ExpeditionPlanner({
     }
   }
 
-  const nextFcStopEntry = useMemo(() => {
-    if (!plan?.rows) return null
-    if (plan.nextFcStopRowId > 0) {
-      const idx = plan.rows.findIndex((rv) => rv?.row?.id === plan.nextFcStopRowId)
-      if (idx >= 0 && plan.rows[idx].row.fcStop && !plan.rows[idx].row.fcArrived) {
-        return { row: plan.rows[idx].row, index: idx }
-      }
-    }
-    const fallbackIdx = plan.rows.findIndex(
-      (rv) => rv?.row?.rowType === 'waypoint' && rv.row.fcStop && !rv.row.fcArrived,
-    )
-    if (fallbackIdx >= 0) {
-      return { row: plan.rows[fallbackIdx].row, index: fallbackIdx }
-    }
-    return null
-  }, [plan])
-
-  const nextFcStopSystem = nextFcStopEntry
-    ? (drafts[nextFcStopEntry.row.id]?.systemName ?? nextFcStopEntry.row.systemName ?? '').trim()
-    : ''
-
   async function resolveCarrierStartSystem(upToIndex: number): Promise<string> {
     if (!plan) return ''
     let startSystem = ''
@@ -777,20 +820,14 @@ export function ExpeditionPlanner({
   }
 
   async function openManualCarrierPlotter() {
-    if (!plan) return
-    if (activeCarrierRoute) {
-      if (!manualModeOverride && !activeCarrierRoute.manualMode) {
-        switchActiveRouteToManualMode()
-      }
-      return
-    }
+    if (!plan || plan.expedition?.status === 'completed' || activeCarrierRoute) return
 
     const upToIndex = nextFcStopEntry
       ? nextFcStopEntry.index
       : lastVisitedIndex >= 0
         ? lastVisitedIndex + 1
         : (plan.rows?.length ?? 0)
-    const targetId = nextFcStopEntry ? nextFcStopEntry.row.id : 0
+    const targetRowId = nextFcStopEntry ? nextFcStopEntry.row.id : 0
     const destination = nextFcStopSystem
     const [startSystem, defaults] = await Promise.all([
       resolveCarrierStartSystem(upToIndex),
@@ -809,7 +846,7 @@ export function ExpeditionPlanner({
       totalTritium: 0,
       jumps: [],
     })
-    setActiveCarrierTargetRowId(targetId)
+    setActiveCarrierTargetRowId(targetRowId)
     setActiveCarrierRoute(manualRoute)
     setCarrierJumpIndex(0)
     setManualModeOverride(true)
@@ -820,7 +857,7 @@ export function ExpeditionPlanner({
     setManualTritiumInput('')
     persistRouteState({
       route: manualRoute,
-      targetRowId: targetId,
+      targetRowId,
       jumpIdx: 0,
       manualMode: true,
       manualLegJumps: 0,
@@ -831,9 +868,13 @@ export function ExpeditionPlanner({
     })
   }
 
-  if (onRegisterManualPlotter) {
-    onRegisterManualPlotter(openManualCarrierPlotter)
-  }
+  useEffect(() => {
+    onRegisterManualPlotter?.(openManualCarrierPlotter)
+  })
+
+  useEffect(() => {
+    onCarrierRouteOpenChange?.(Boolean(activeCarrierRoute))
+  }, [activeCarrierRoute, onCarrierRouteOpenChange])
 
   async function openCarrierRoutePrompt(rowIndex: number, targetRow: expedition.Row) {
     if (!plan) return
@@ -1087,15 +1128,17 @@ export function ExpeditionPlanner({
   }
 
   async function handleCarrierArriveAtWaypoint() {
-    const targetId = nextFcStopEntry?.row.id || activeCarrierTargetRowId
+    const targetRowId = isManualCarrierRoute
+      ? (nextFcStopEntry?.row.id ?? 0)
+      : activeCarrierTargetRowId || (nextFcStopEntry?.row.id ?? 0)
     const expeditionId = plan?.expedition?.id
     if (expeditionId) {
       ClearActiveCarrierRoute(expeditionId).catch(console.error)
     }
     setActiveCarrierRoute(null)
     setActiveCarrierTargetRowId(0)
-    if (targetId > 0) {
-      await setFcArrived(targetId, true)
+    if (targetRowId > 0) {
+      await setFcArrived(targetRowId, true)
     }
   }
 
@@ -1559,7 +1602,15 @@ export function ExpeditionPlanner({
               )
               const isNextWaypoint = Boolean(rowView.isNextWaypoint || (plan.nextWaypointRowId && row.id === plan.nextWaypointRowId))
               const hasActiveCarrierRoute = Boolean(
-                activeCarrierRoute && (activeCarrierTargetRowId === row.id || isNextFcStop),
+                activeCarrierRoute &&
+                  (isManualCarrierRoute ? isNextFcStop : activeCarrierTargetRowId === row.id),
+              )
+              const isFcStopLocked = Boolean(
+                activeCarrierRoute &&
+                  routedCarrierStopIndex >= 0 &&
+                  (isManualCarrierRoute
+                    ? index < routedCarrierStopIndex
+                    : index <= routedCarrierStopIndex),
               )
 
               return (
@@ -1569,10 +1620,11 @@ export function ExpeditionPlanner({
                   index={index}
                   isPlanning={isPlanning}
                   isLocked={isLocked}
+                  isFcStopLocked={isFcStopLocked}
                   isBeingDragged={isBeingDragged}
                   isDragTarget={isDragTarget}
                   isExpanded={isExpanded}
-                  isNextFcStop={isNextFcStop}
+                  isNextFcStop={isNextFcStop && !activeCarrierRoute}
                   isNextWaypoint={isNextWaypoint}
                   playerSystem={plan.playerSystem}
                   hasActiveCarrierRoute={hasActiveCarrierRoute}
@@ -1676,11 +1728,7 @@ export function ExpeditionPlanner({
         <CarrierRouteBottomPanel
           route={activeCarrierRoute}
           jumpIndex={carrierJumpIndex}
-          manualMode={
-            manualModeOverride ||
-            Boolean(activeCarrierRoute.manualMode) ||
-            !activeCarrierRoute.jumps?.length
-          }
+          manualMode={isManualCarrierRoute}
           hasNextFcStop={Boolean(nextFcStopEntry)}
           nextFcStopSystem={nextFcStopSystem}
           onCancelRoute={handleCancelCarrierRoute}

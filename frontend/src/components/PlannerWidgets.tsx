@@ -881,15 +881,19 @@ export function CarrierRouteBottomPanel({
 }: CarrierRouteBottomPanelProps) {
   const jumps = route.jumps ?? []
   const hasSpanshJumps = jumps.length > 0
+  // In Spansh mode (!manualMode), the plotted route has a fixed destination (route.destination).
+  // In manual mode, dynamically track nextFcStopSystem when a next FC stop is designated.
   const effectiveHasNextFcStop =
     hasNextFcStop !== undefined ? hasNextFcStop : Boolean(route.destination?.trim())
-  const destinationSystem = effectiveHasNextFcStop
-    ? (nextFcStopSystem ?? route.destination ?? '').trim()
-    : !manualMode
-      ? (route.destination ?? '').trim()
+  const destinationSystem = !manualMode
+    ? (route.destination ?? '').trim()
+    : effectiveHasNextFcStop
+      ? (nextFcStopSystem ?? route.destination ?? '').trim()
       : ''
   const destinationDisplay = destinationSystem || '???'
-  const canMarkArrival = effectiveHasNextFcStop && Boolean(destinationSystem)
+  const canMarkArrival = !manualMode
+    ? Boolean(destinationSystem)
+    : effectiveHasNextFcStop && Boolean(destinationSystem)
   const currentDepot =
     depotTritium !== undefined
       ? depotTritium
@@ -1157,12 +1161,12 @@ export function CarrierRouteBottomPanel({
             onClick={onArrive}
             title={
               canMarkArrival
-                ? `Mark Fleet Carrier arrival at ${destinationDisplay}`
+                ? `Mark Fleet Carrier arrival at ${destinationDisplay} and close the carrier plotter`
                 : 'No next Fleet Carrier stop designated in the expedition plan'
             }
             className="ed-btn-cyan"
           >
-            {`Mark Arrival at ${destinationDisplay}`}
+            Mark FC Stop Arrival
           </button>
         </div>
       )}
