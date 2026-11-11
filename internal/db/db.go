@@ -116,38 +116,57 @@ func SaveConfiguredPath(dbPath string) error {
 // sourcePath (along with any non-empty WAL companion file) using read-only
 // file descriptors so the source database is never opened or mutated by SQLite.
 func CreateDebugSnapshot(sourcePath string) (string, error) {
+	trimmedSourcePath := strings.TrimSpace(sourcePath)
+	hasNonEmptySource := false
+	if trimmedSourcePath != "" && trimmedSourcePath != ":memory:" {
+		sourceInfo, statError := os.Stat(trimmedSourcePath)
+		if statError != nil && !errors.Is(statError, os.ErrNotExist) {
+			return "", fmt.Errorf("stat source database %s: %w", trimmedSourcePath, statError)
+		}
+		hasNonEmptySource = statError == nil && sourceInfo.Size() > 0
+	}
+
 	tempFile, createTempError := os.CreateTemp("", "planisphere-debug-*.db")
 	if createTempError != nil {
 		return "", fmt.Errorf("create debug snapshot temp file: %w", createTempError)
 	}
 	tempPath := tempFile.Name()
-	_ = tempFile.Close()
 
-	trimmedSourcePath := strings.TrimSpace(sourcePath)
-	if trimmedSourcePath == "" || trimmedSourcePath == ":memory:" {
+	if !hasNonEmptySource {
+		_ = tempFile.Close()
 		_ = os.Remove(tempPath)
 		return tempPath, nil
 	}
 
-	sourceInfo, statError := os.Stat(trimmedSourcePath)
-	if errors.Is(statError, os.ErrNotExist) {
+	sourceFile, openSourceError := os.Open(trimmedSourcePath)
+	if openSourceError != nil {
+		_ = tempFile.Close()
 		_ = os.Remove(tempPath)
-		return tempPath, nil
-	}
-	if statError != nil {
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("stat source database %s: %w", trimmedSourcePath, statError)
-	}
-	if sourceInfo.Size() == 0 {
-		_ = os.Remove(tempPath)
-		return tempPath, nil
+		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, openSourceError)
 	}
 
-	if copyError := copyFileReadOnly(trimmedSourcePath, tempPath); copyError != nil {
+	_, copyError := io.Copy(tempFile, sourceFile)
+	_ = sourceFile.Close()
+	if copyError != nil {
+		_ = tempFile.Close()
 		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, copyError)
 	}
+	if syncError := tempFile.Sync(); syncError != nil {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, syncError)
+	}
+	if closeError := tempFile.Close(); closeError != nil {
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, closeError)
+	}
 
+	// Copy any non-empty -wal companion file alongside the main database file so
+	// uncheckpointed WAL frames are preserved in the snapshot. The -shm companion
+	// file is intentionally omitted because SQLite reconstructs the shared-memory
+	// WAL index from -wal on open, and copying a live -shm file could carry stale
+	// lock state.
 	sourceWALPath := trimmedSourcePath + "-wal"
 	if walInfo, walStatError := os.Stat(sourceWALPath); walStatError == nil && walInfo.Size() > 0 {
 		if walCopyError := copyFileReadOnly(sourceWALPath, tempPath+"-wal"); walCopyError != nil {
@@ -178,14 +197,18 @@ func copyFileReadOnly(sourcePath, destinationPath string) error {
 	}
 	defer sourceFile.Close()
 
-	destinationFile, openDestError := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if openDestError != nil {
-		return openDestError
+	destinationFile, openDestinationError := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if openDestinationError != nil {
+		return openDestinationError
 	}
 
 	if _, copyError := io.Copy(destinationFile, sourceFile); copyError != nil {
 		_ = destinationFile.Close()
 		return copyError
+	}
+	if syncError := destinationFile.Sync(); syncError != nil {
+		_ = destinationFile.Close()
+		return syncError
 	}
 	return destinationFile.Close()
 }

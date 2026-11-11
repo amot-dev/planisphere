@@ -108,6 +108,54 @@ func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
 	return deleteError
 }
 
+// latestCarrierStats returns the most recent parsed CarrierStats event and its
+// timestamp from journal_events, caching the result until journal or commander
+// state changes. Caller must hold app.dbMu.RLock.
+func (app *App) latestCarrierStats() (journal.CarrierStatsEvent, string, bool) {
+	app.carrierStatsMu.Lock()
+	if app.carrierStatsValid {
+		cachedEvent := app.carrierStatsEvent
+		cachedTimestamp := app.carrierStatsTimestamp
+		cachedFound := app.carrierStatsFound
+		app.carrierStatsMu.Unlock()
+		return cachedEvent, cachedTimestamp, cachedFound
+	}
+	carrierStatsGeneration := app.carrierStatsGen
+	app.carrierStatsMu.Unlock()
+
+	var parsedEvent journal.CarrierStatsEvent
+	var statsTimestamp string
+	var foundStats bool
+
+	var rawCarrierStats string
+	queryError := app.db.QueryRow(`SELECT raw_json, timestamp FROM journal_events
+		WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
+		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawCarrierStats, &statsTimestamp)
+	if queryError == nil && rawCarrierStats != "" {
+		if json.Unmarshal([]byte(rawCarrierStats), &parsedEvent) == nil {
+			foundStats = true
+		}
+	}
+	if !foundStats {
+		statsTimestamp = ""
+	}
+
+	app.carrierStatsMu.Lock()
+	if !app.carrierStatsValid && app.carrierStatsGen == carrierStatsGeneration {
+		app.carrierStatsEvent = parsedEvent
+		app.carrierStatsTimestamp = statsTimestamp
+		app.carrierStatsFound = foundStats
+		app.carrierStatsValid = true
+	} else if app.carrierStatsValid {
+		parsedEvent = app.carrierStatsEvent
+		statsTimestamp = app.carrierStatsTimestamp
+		foundStats = app.carrierStatsFound
+	}
+	app.carrierStatsMu.Unlock()
+
+	return parsedEvent, statsTimestamp, foundStats
+}
+
 // GetCarrierLastLocation returns the system name of the most recent known Fleet Carrier location.
 // It checks CarrierJump events, docking and location events aboard the fleet carrier,
 // and CarrierJumpRequest events, choosing whichever candidate has the most recent timestamp.
@@ -121,15 +169,9 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 	// Identify player carrier ID and callsign from the latest CarrierStats
 	var playerCarrierID int64
 	var playerCallsign string
-	var rawStats string
-	if err := app.db.QueryRow(`SELECT raw_json FROM journal_events
-		WHERE event = 'CarrierStats' AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawStats); err == nil && rawStats != "" {
-		var stats journal.CarrierStatsEvent
-		if json.Unmarshal([]byte(rawStats), &stats) == nil {
-			playerCarrierID = stats.CarrierID
-			playerCallsign = strings.TrimSpace(stats.Callsign)
-		}
+	if carrierStats, _, foundStats := app.latestCarrierStats(); foundStats {
+		playerCarrierID = carrierStats.CarrierID
+		playerCallsign = strings.TrimSpace(carrierStats.Callsign)
 	}
 
 	// Candidate from CarrierJump events
@@ -225,22 +267,15 @@ func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 		return info, readyError
 	}
 
-	var rawCarrierStats string
-	var statsTimestamp string
-	statsQueryError := app.db.QueryRow(`SELECT raw_json, timestamp FROM journal_events
-		WHERE event = 'CarrierStats' AND `+journal.CmdrFilterSQL+`
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawCarrierStats, &statsTimestamp)
-	if statsQueryError == nil && rawCarrierStats != "" {
-		var carrierStats journal.CarrierStatsEvent
-		if json.Unmarshal([]byte(rawCarrierStats), &carrierStats) == nil {
-			if used := carrierStats.UsedCapacity(); used > 0 {
-				info.UsedCapacity = used
-			}
-			if carrierStats.FuelLevel > 0 {
-				info.DepotTritium = carrierStats.FuelLevel
-			}
-			info.Cargo = carrierStats.SpaceUsage.Cargo
+	carrierStats, statsTimestamp, foundStats := app.latestCarrierStats()
+	if foundStats {
+		if usedCapacity := carrierStats.UsedCapacity(); usedCapacity > 0 {
+			info.UsedCapacity = usedCapacity
 		}
+		if carrierStats.FuelLevel > 0 {
+			info.DepotTritium = carrierStats.FuelLevel
+		}
+		info.Cargo = carrierStats.SpaceUsage.Cargo
 	}
 
 	var rawDeposit string

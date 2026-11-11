@@ -7,7 +7,6 @@ import {
   GetActiveCarrierRoute,
   GetCarrierDepotInfo,
   GetCarrierLastLocation,
-  GetDefaultCarrierCapacity,
   GetWaypointDetails,
   MoveRow,
   PlotCarrierRoute,
@@ -819,11 +818,7 @@ export function ExpeditionPlanner({
         if (depotInfo.depotTritium > 0) depot = depotInfo.depotTritium
       }
     } catch {
-      try {
-        capacity = await GetDefaultCarrierCapacity()
-      } catch {
-        capacity = 5000
-      }
+      capacity = 5000
       depot = 1000
     }
     return { capacity, depot }

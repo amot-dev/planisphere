@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -212,9 +213,16 @@ func (engine *Engine) ComputeRealization(timeRange Range, filter *Filter) (Reali
 
 	var breakdown RealizationBreakdown
 
-	for _, scanEntry := range ledger.records {
-		if scanEntry.timestamp <= after || scanEntry.timestamp > until {
-			continue
+	// Both ledger.records and ledger.unattributedSales are appended in
+	// chronological timestamp order from loadEvents (ORDER BY timestamp, id),
+	// allowing binary search for the (after, until] window bounds.
+	firstRecordIndex := sort.Search(len(ledger.records), func(recordIndex int) bool {
+		return ledger.records[recordIndex].timestamp > after
+	})
+	for recordIndex := firstRecordIndex; recordIndex < len(ledger.records); recordIndex++ {
+		scanEntry := ledger.records[recordIndex]
+		if scanEntry.timestamp > until {
+			break
 		}
 		if filterSet != nil && !filterSet.allow(scanEntry.timestamp, true) {
 			continue
@@ -235,16 +243,20 @@ func (engine *Engine) ComputeRealization(timeRange Range, filter *Filter) (Reali
 		}
 	}
 
-	// Include unattributed sales whose sale timestamp falls into the window
-	for _, sale := range ledger.unattributedSales {
-		if sale.timestamp <= after || sale.timestamp > until {
+	// Include unattributed sales whose sale timestamp falls into the (after, until] window
+	firstSaleIndex := sort.Search(len(ledger.unattributedSales), func(saleIndex int) bool {
+		return ledger.unattributedSales[saleIndex].timestamp > after
+	})
+	for saleIndex := firstSaleIndex; saleIndex < len(ledger.unattributedSales); saleIndex++ {
+		unattributedSaleEntry := ledger.unattributedSales[saleIndex]
+		if unattributedSaleEntry.timestamp > until {
+			break
+		}
+		if filterSet != nil && !filterSet.allow(unattributedSaleEntry.timestamp, true) {
 			continue
 		}
-		if filterSet != nil && !filterSet.allow(sale.timestamp, true) {
-			continue
-		}
-		breakdown.TotalRealized += sale.gross
-		breakdown.NpcCrewLoss += sale.crewLoss
+		breakdown.TotalRealized += unattributedSaleEntry.gross
+		breakdown.NpcCrewLoss += unattributedSaleEntry.crewLoss
 	}
 
 	return breakdown, nil
@@ -341,17 +353,31 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		}
 	}
 
+	// Elite Dangerous logs NpcCrewPaidWage as a separate journal entry within a
+	// few seconds of the corresponding cartographic or exobiology sale event, so
+	// wage events are matched within a 5-second window around the sale timestamp.
+	// Because recentWageEvents is populated from events ordered by timestamp, it
+	// is sorted in non-decreasing unixSeconds order and can be binary-searched.
 	findCrewWage := func(saleTimestamp string) int64 {
-		saleUnixSeconds, ok := parseUnixSeconds(saleTimestamp)
-		if !ok {
+		if len(recentWageEvents) == 0 {
 			return 0
 		}
+		saleUnixSeconds, parsedOk := parseUnixSeconds(saleTimestamp)
+		if !parsedOk {
+			return 0
+		}
+		minimumWageUnixSeconds := saleUnixSeconds - 5
+		maximumWageUnixSeconds := saleUnixSeconds + 5
+		firstWageIndex := sort.Search(len(recentWageEvents), func(wageIndex int) bool {
+			return recentWageEvents[wageIndex].unixSeconds >= minimumWageUnixSeconds
+		})
 		var totalWage int64
-		for _, wageEvent := range recentWageEvents {
-			diffSeconds := wageEvent.unixSeconds - saleUnixSeconds
-			if diffSeconds >= -5 && diffSeconds <= 5 {
-				totalWage += wageEvent.amount
+		for wageIndex := firstWageIndex; wageIndex < len(recentWageEvents); wageIndex++ {
+			wageEvent := recentWageEvents[wageIndex]
+			if wageEvent.unixSeconds > maximumWageUnixSeconds {
+				break
 			}
+			totalWage += wageEvent.amount
 		}
 		return totalWage
 	}

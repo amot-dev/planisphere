@@ -119,8 +119,10 @@ type ModeSelection struct {
 // Filter restricts metrics to events that occurred while selected modes were
 // active. A nil Filter (or Enabled == false) includes everything.
 type Filter struct {
-	Enabled bool            `json:"enabled"`
-	Modes   []ModeSelection `json:"modes"`
+	Enabled      bool            `json:"enabled"`
+	Modes        []ModeSelection `json:"modes"`
+	preparedSets *filterSets
+	preparedDB   db.Queryer
 }
 
 type filterSets struct {
@@ -131,6 +133,9 @@ type filterSets struct {
 func (filter *Filter) prepare(queryer db.Queryer) (*filterSets, error) {
 	if filter == nil || !filter.Enabled {
 		return nil, nil
+	}
+	if filter.preparedSets != nil && filter.preparedDB == queryer {
+		return filter.preparedSets, nil
 	}
 	timeline, loadError := modes.LoadTimeline(queryer)
 	if loadError != nil {
@@ -145,6 +150,8 @@ func (filter *Filter) prepare(queryer db.Queryer) (*filterSets, error) {
 			sets.discovery[modeSelection.ModeID] = true
 		}
 	}
+	filter.preparedSets = sets
+	filter.preparedDB = queryer
 	return sets, nil
 }
 

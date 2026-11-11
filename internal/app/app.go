@@ -101,6 +101,14 @@ type App struct {
 	careerStartValid     bool
 	careerStartGen       uint64
 
+	// Latest CarrierStats caching fields protected by carrierStatsMu.
+	carrierStatsMu        sync.Mutex
+	carrierStatsEvent     journal.CarrierStatsEvent
+	carrierStatsTimestamp string
+	carrierStatsFound     bool
+	carrierStatsValid     bool
+	carrierStatsGen       uint64
+
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
 }
@@ -386,6 +394,13 @@ func (app *App) invalidateAllTimeCache() {
 	app.careerStartValid = false
 	app.careerStartGen++
 	app.careerStartMu.Unlock()
+	app.carrierStatsMu.Lock()
+	app.carrierStatsEvent = journal.CarrierStatsEvent{}
+	app.carrierStatsTimestamp = ""
+	app.carrierStatsFound = false
+	app.carrierStatsValid = false
+	app.carrierStatsGen++
+	app.carrierStatsMu.Unlock()
 	app.invalidateLiveStatsCache()
 	expedition.InvalidateShipCache()
 }

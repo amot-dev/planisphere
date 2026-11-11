@@ -194,6 +194,29 @@ func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
 			testingContext.Errorf("expected %s%s to be removed, stat err: %v", snapshotPath, suffix, statError)
 		}
 	}
+
+	// Empty, :memory:, missing, or zero-byte source paths allocate a removed temp path ready for db.Open.
+	zeroBytePath := filepath.Join(tempDir, "empty.db")
+	if writeEmptyError := os.WriteFile(zeroBytePath, nil, 0o600); writeEmptyError != nil {
+		testingContext.Fatalf("WriteFile zeroBytePath: %v", writeEmptyError)
+	}
+	for _, emptySourceCandidate := range []string{"", ":memory:", filepath.Join(tempDir, "nonexistent.db"), zeroBytePath} {
+		candidateSnapshotPath, candidateError := db.CreateDebugSnapshot(emptySourceCandidate)
+		if candidateError != nil {
+			testingContext.Fatalf("CreateDebugSnapshot(%q): %v", emptySourceCandidate, candidateError)
+		}
+		if _, statError := os.Stat(candidateSnapshotPath); !os.IsNotExist(statError) {
+			db.RemoveDebugSnapshot(candidateSnapshotPath)
+			testingContext.Fatalf("expected temp file %s for source %q to be removed before db.Open, stat err: %v", candidateSnapshotPath, emptySourceCandidate, statError)
+		}
+	}
+
+	// A stat error other than ErrNotExist (such as a file component in the directory path) fails immediately without creating a snapshot.
+	invalidNestedPath := filepath.Join(sourceDBPath, "nested.db")
+	if failedSnapshotPath, invalidStatError := db.CreateDebugSnapshot(invalidNestedPath); invalidStatError == nil {
+		db.RemoveDebugSnapshot(failedSnapshotPath)
+		testingContext.Fatalf("expected error when stating invalid source path %s, got snapshot %s", invalidNestedPath, failedSnapshotPath)
+	}
 }
 
 func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {

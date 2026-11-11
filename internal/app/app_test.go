@@ -56,6 +56,7 @@ func insertTestJournalEvent(testingContext *testing.T, testApp *App, timestamp, 
 	if insertError != nil {
 		testingContext.Fatalf("insert %s journal event: %v", eventName, insertError)
 	}
+	testApp.invalidateAllTimeCache()
 }
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
@@ -445,6 +446,14 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	testApp.careerStartValid = true
 	testApp.careerStartMu.Unlock()
 
+	testApp.carrierStatsMu.Lock()
+	initialCarrierStatsGeneration := testApp.carrierStatsGen
+	testApp.carrierStatsEvent = journal.CarrierStatsEvent{CarrierID: 98765, Callsign: "ABC-123", FuelLevel: 850}
+	testApp.carrierStatsTimestamp = "2025-01-01T00:00:00Z"
+	testApp.carrierStatsFound = true
+	testApp.carrierStatsValid = true
+	testApp.carrierStatsMu.Unlock()
+
 	testApp.liveStatsMu.Lock()
 	testApp.liveStatsCache["another-key"] = cachedLiveStats{}
 	testApp.liveStatsMu.Unlock()
@@ -466,6 +475,24 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 	if careerStartTimestampAfterInvalidation != "" || careerStartGalacticAfterInvalidation != "" {
 		testingContext.Errorf("expected careerStart cached strings to be cleared, got timestamp=%q galactic=%q", careerStartTimestampAfterInvalidation, careerStartGalacticAfterInvalidation)
+	}
+
+	testApp.carrierStatsMu.Lock()
+	afterAllTimeCarrierGeneration := testApp.carrierStatsGen
+	carrierStatsValidAfterInvalidation := testApp.carrierStatsValid
+	carrierStatsFoundAfterInvalidation := testApp.carrierStatsFound
+	carrierStatsTimestampAfterInvalidation := testApp.carrierStatsTimestamp
+	carrierStatsIDAfterInvalidation := testApp.carrierStatsEvent.CarrierID
+	testApp.carrierStatsMu.Unlock()
+
+	if afterAllTimeCarrierGeneration != initialCarrierStatsGeneration+1 {
+		testingContext.Errorf("expected carrierStatsGen to increment from %d to %d, got %d", initialCarrierStatsGeneration, initialCarrierStatsGeneration+1, afterAllTimeCarrierGeneration)
+	}
+	if carrierStatsValidAfterInvalidation || carrierStatsFoundAfterInvalidation {
+		testingContext.Errorf("expected carrierStatsValid and carrierStatsFound to be false after invalidateAllTimeCache")
+	}
+	if carrierStatsTimestampAfterInvalidation != "" || carrierStatsIDAfterInvalidation != 0 {
+		testingContext.Errorf("expected carrierStats cached fields to be cleared, got timestamp=%q carrierID=%d", carrierStatsTimestampAfterInvalidation, carrierStatsIDAfterInvalidation)
 	}
 
 	testApp.liveStatsMu.Lock()

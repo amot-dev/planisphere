@@ -577,3 +577,49 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 	}
 }
 
+func TestRealizationCrewWageWindowAndBinarySearchBounds(testingContext *testing.T) {
+	databaseConnection := setupRealizationDB(testingContext)
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	// Record at exact After boundary (excluded), inside window (included), and after Until boundary (excluded).
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":1}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:15:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:15:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":2}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:01Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:30:01Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":3}`)
+
+	// Unattributed cartographic sales at exact After boundary (excluded), exact Until boundary (included), and after Until (excluded).
+	// Also test NpcCrewPaidWage 5-second window boundaries around the 10:30:00Z sale:
+	// -6s (10:29:54Z, excluded), -5s (10:29:55Z, included: 10,000), +5s (10:30:05Z, included: 20,000), +6s (10:30:06Z, excluded).
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:00:00Z", "SellExplorationData",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"SellExplorationData","Systems":["BeforeSys"],"Discovered":[],"BaseValue":100000,"Bonus":0,"TotalEarnings":100000}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:29:54Z", "NpcCrewPaidWage",
+		`{"timestamp":"2026-03-01T10:29:54Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":99999}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:29:55Z", "NpcCrewPaidWage",
+		`{"timestamp":"2026-03-01T10:29:55Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":10000}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:00Z", "SellExplorationData",
+		`{"timestamp":"2026-03-01T10:30:00Z","event":"SellExplorationData","Systems":["InsideSys"],"Discovered":[],"BaseValue":500000,"Bonus":0,"TotalEarnings":500000}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:05Z", "NpcCrewPaidWage",
+		`{"timestamp":"2026-03-01T10:30:05Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":20000}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:06Z", "NpcCrewPaidWage",
+		`{"timestamp":"2026-03-01T10:30:06Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":88888}`)
+	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:01Z", "SellExplorationData",
+		`{"timestamp":"2026-03-01T10:30:01Z","event":"SellExplorationData","Systems":["AfterSys"],"Discovered":[],"BaseValue":700000,"Bonus":0,"TotalEarnings":700000}`)
+
+	window := stats.Range{After: "2026-03-01T10:00:00Z", Until: "2026-03-01T10:30:00Z"}
+	breakdown, computeError := engineInstance.ComputeRealization(window, nil)
+	if computeError != nil {
+		testingContext.Fatalf("ComputeRealization failed: %v", computeError)
+	}
+	if breakdown.PendingValue != 19010800 {
+		testingContext.Errorf("expected PendingValue 19,010,800 from single in-window organic scan, got %d", breakdown.PendingValue)
+	}
+	if breakdown.TotalRealized != 500000 {
+		testingContext.Errorf("expected TotalRealized 500,000 from single in-window unattributed sale, got %d", breakdown.TotalRealized)
+	}
+	if breakdown.NpcCrewLoss != 30000 {
+		testingContext.Errorf("expected NpcCrewLoss 30,000 from wage events within 5-second window, got %d", breakdown.NpcCrewLoss)
+	}
+}
+

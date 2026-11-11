@@ -310,3 +310,50 @@ func TestPreloadScansForMappedBodies(t *testing.T) {
 		t.Fatalf("expected positive scan value total from preloaded scan, got %d", res.ScanValueTotal)
 	}
 }
+
+type timelineQueryCountingQueryer struct {
+	db.Queryer
+	timelineQueryCount int
+}
+
+func (countingQueryer *timelineQueryCountingQueryer) Query(query string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(query, "FROM mode_windows") {
+		countingQueryer.timelineQueryCount++
+	}
+	return countingQueryer.Queryer.Query(query, args...)
+}
+
+func TestFilterPreparedSetsReuse(testingContext *testing.T) {
+	databaseConnection, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatal(openError)
+	}
+	defer databaseConnection.Close()
+	defer stats.InvalidateLedgerCache()
+
+	modeList, listError := modes.List(databaseConnection)
+	if listError != nil || len(modeList) == 0 {
+		testingContext.Fatalf("expected default modes, got %v (%v)", modeList, listError)
+	}
+
+	countingQueryer := &timelineQueryCountingQueryer{Queryer: databaseConnection}
+	engineInstance := stats.NewEngine(countingQueryer)
+	sharedFilter := stats.Filter{
+		Enabled: true,
+		Modes: []stats.ModeSelection{
+			{ModeID: modeList[0].ID, Travel: true, Discovery: true},
+		},
+	}
+
+	timeWindow := stats.Range{After: "2026-01-01T00:00:00Z", Until: "2026-01-02T00:00:00Z"}
+	if _, computeError := engineInstance.Compute(timeWindow, &sharedFilter); computeError != nil {
+		testingContext.Fatalf("Compute failed: %v", computeError)
+	}
+	if _, realizationError := engineInstance.ComputeRealization(timeWindow, &sharedFilter); realizationError != nil {
+		testingContext.Fatalf("ComputeRealization failed: %v", realizationError)
+	}
+
+	if countingQueryer.timelineQueryCount != 1 {
+		testingContext.Fatalf("expected mode_windows timeline query to execute once when reusing Filter, got %d", countingQueryer.timelineQueryCount)
+	}
+}
