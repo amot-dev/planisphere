@@ -21,17 +21,20 @@ import {
 } from '../../wailsjs/go/app/App'
 import { app, expedition } from '../../wailsjs/go/models'
 import { fromGalacticTime, nowGalacticTime } from '../utils/galacticTime'
+import { APP_VERSION } from '../version'
 import { SquareCheckbox } from './SquareCheckbox'
 
 function ModalShell({
   title,
   subtitle,
+  badge,
   onClose,
   children,
   maxWidth = 'max-w-xl',
 }: {
   title: string
   subtitle?: string
+  badge?: string
   onClose: () => void
   children: React.ReactNode
   maxWidth?: string
@@ -43,9 +46,16 @@ function ModalShell({
       >
         <div className="px-5 py-3.5 border-b border-[#3d2816] bg-[#140e09] flex items-center justify-between">
           <div>
-            <h3 className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#FF7100]">
-              {title}
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#FF7100]">
+                {title}
+              </h3>
+              {badge && (
+                <span className="px-1.5 py-0.5 bg-[#08151c] border border-[#00D2FF]/50 font-mono-tabular text-[10px] font-bold text-[#00D2FF]">
+                  {badge}
+                </span>
+              )}
+            </div>
             {subtitle && <p className="text-[11px] text-[#a6907c] mt-0.5">{subtitle}</p>}
           </div>
           <button
@@ -380,6 +390,7 @@ export function SettingsModal({
   return (
     <ModalShell
       title="Terminal Configuration"
+      badge={`v${APP_VERSION}`}
       onClose={onClose}
       maxWidth="max-w-2xl"
     >
