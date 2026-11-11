@@ -474,3 +474,106 @@ func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T
 	}
 }
 
+func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) {
+	databaseConnection := setupRealizationDB(t)
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	// Initial AutoScan of DedupeSys 1.
+	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+
+	firstLegWindow := stats.Range{After: "2026-03-01T09:50:00Z", Until: "2026-03-01T10:30:00Z"}
+	afterInitialScan, initialScanError := engineInstance.ComputeRealization(firstLegWindow, nil)
+	if initialScanError != nil {
+		t.Fatalf("ComputeRealization after initial scan failed: %v", initialScanError)
+	}
+	bodyScanOnlyValue := afterInitialScan.PendingValue
+	if bodyScanOnlyValue <= 0 {
+		t.Fatalf("expected positive PendingValue after initial scan, got %d", bodyScanOnlyValue)
+	}
+
+	// Map DedupeSys 1 with DSS and emit a duplicate SAAScanComplete plus a follow-up Detailed Scan.
+	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "SAAScanComplete",
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:06:00Z", "SAAScanComplete",
+		`{"timestamp":"2026-03-01T10:06:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:10:00Z", "Scan",
+		`{"timestamp":"2026-03-01T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	stats.InvalidateLedgerCache()
+
+	afterMappingAndDuplicateScan, duplicateScanError := engineInstance.ComputeRealization(firstLegWindow, nil)
+	if duplicateScanError != nil {
+		t.Fatalf("ComputeRealization after mapping and duplicate scan failed: %v", duplicateScanError)
+	}
+	if afterMappingAndDuplicateScan.PendingValue <= bodyScanOnlyValue {
+		t.Fatalf("expected PendingValue after DSS mapping (%d) to exceed scan-only value (%d) without being overwritten by follow-up Scan",
+			afterMappingAndDuplicateScan.PendingValue, bodyScanOnlyValue)
+	}
+
+	// Selling DedupeSys must clear all pending value without leaving an orphaned pending record from the second Scan.
+	insertEvent(t, databaseConnection, "2026-03-01T11:00:00Z", "MultiSellExplorationData",
+		`{"timestamp":"2026-03-01T11:00:00Z","event":"MultiSellExplorationData","BaseValue":1500000,"Bonus":500000,"TotalEarnings":2000000,"Discovered":[{"SystemName":"DedupeSys","NumBodies":1}]}`)
+	stats.InvalidateLedgerCache()
+
+	afterSale, afterSaleError := engineInstance.ComputeRealization(firstLegWindow, nil)
+	if afterSaleError != nil {
+		t.Fatalf("ComputeRealization after sale failed: %v", afterSaleError)
+	}
+	if afterSale.PendingValue != 0 {
+		t.Errorf("expected PendingValue 0 after selling DedupeSys, got %d", afterSale.PendingValue)
+	}
+	if afterSale.TotalRealized != 2000000 {
+		t.Errorf("expected TotalRealized 2,000,000 after selling DedupeSys, got %d", afterSale.TotalRealized)
+	}
+
+	// Re-scanning or re-mapping an already-sold body later in the career must not create a new pending record.
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "Scan",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":true,"WasMapped":true}`)
+	insertEvent(t, databaseConnection, "2026-03-01T12:05:00Z", "SAAScanComplete",
+		`{"timestamp":"2026-03-01T12:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`)
+	stats.InvalidateLedgerCache()
+
+	rescanSoldWindow := stats.Range{After: "2026-03-01T11:30:00Z", Until: "2026-03-01T12:30:00Z"}
+	afterSoldRescan, soldRescanError := engineInstance.ComputeRealization(rescanSoldWindow, nil)
+	if soldRescanError != nil {
+		t.Fatalf("ComputeRealization after re-scanning sold body failed: %v", soldRescanError)
+	}
+	if afterSoldRescan.PendingValue != 0 {
+		t.Errorf("expected PendingValue 0 when re-scanning an already-sold body, got %d", afterSoldRescan.PendingValue)
+	}
+
+	// Scanning a body, losing it to ship destruction, and then re-scanning it must create a new payable pending record.
+	insertEvent(t, databaseConnection, "2026-03-01T13:00:00Z", "Scan",
+		`{"timestamp":"2026-03-01T13:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T13:30:00Z", "Resurrect",
+		`{"timestamp":"2026-03-01T13:30:00Z","event":"Resurrect","Option":"rebuy","Cost":1000000,"Bankrupt":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T14:00:00Z", "Scan",
+		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	stats.InvalidateLedgerCache()
+
+	postRebuyWindow := stats.Range{After: "2026-03-01T13:45:00Z", Until: "2026-03-01T14:30:00Z"}
+	afterPostRebuyRescan, postRebuyRescanError := engineInstance.ComputeRealization(postRebuyWindow, nil)
+	if postRebuyRescanError != nil {
+		t.Fatalf("ComputeRealization after post-rebuy rescan failed: %v", postRebuyRescanError)
+	}
+	if afterPostRebuyRescan.PendingValue != bodyScanOnlyValue {
+		t.Errorf("expected PendingValue %d after re-scanning lost body post-rebuy, got %d", bodyScanOnlyValue, afterPostRebuyRescan.PendingValue)
+	}
+
+	// Selling the post-rebuy re-scan realizes the payout on the new record.
+	insertEvent(t, databaseConnection, "2026-03-01T15:00:00Z", "MultiSellExplorationData",
+		`{"timestamp":"2026-03-01T15:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"RebuySys","NumBodies":1}]}`)
+	stats.InvalidateLedgerCache()
+
+	afterPostRebuySale, postRebuySaleError := engineInstance.ComputeRealization(postRebuyWindow, nil)
+	if postRebuySaleError != nil {
+		t.Fatalf("ComputeRealization after post-rebuy sale failed: %v", postRebuySaleError)
+	}
+	if afterPostRebuySale.PendingValue != 0 {
+		t.Errorf("expected PendingValue 0 after selling post-rebuy rescan, got %d", afterPostRebuySale.PendingValue)
+	}
+	if afterPostRebuySale.TotalRealized != 1500000 {
+		t.Errorf("expected TotalRealized 1,500,000 after selling post-rebuy rescan, got %d", afterPostRebuySale.TotalRealized)
+	}
+}
+

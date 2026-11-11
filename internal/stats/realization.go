@@ -1,7 +1,9 @@
 package stats
 
 import (
+	"cmp"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 
@@ -44,6 +46,8 @@ type scanRecord struct {
 	bodyName             string
 	normalizedBodyName   string
 	isOrganic            bool
+	hasScan              bool
+	hasMapped            bool
 	undiscoveredAtScan   bool
 	species              string
 	speciesLocalised     string
@@ -315,7 +319,10 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		amount      int64
 	}
 
-	unsoldCarto := make(map[cartoKey]*scanRecord)
+	unsoldCarto := make(map[cartoKey]*scanRecord, len(events)/2)
+	unsoldCartoBySystem := make(map[string][]*scanRecord, len(events)/8)
+	soldScan := make(map[cartoKey]bool, len(events)/2)
+	soldMapped := make(map[cartoKey]bool, len(events)/8)
 	unsoldOrganic := make([]*scanRecord, 0, 100)
 	recentWageEvents := make([]parsedWageEvent, 0, 50)
 
@@ -358,82 +365,192 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		totalBonus int64
 	}
 
-	scans := make(map[cartoKey]*journal.ScanEvent)
-	seenSales := make(map[saleDedupKey]bool)
+	scans := make(map[cartoKey]*journal.ScanEvent, len(events)/2)
+	seenSales := make(map[saleDedupKey]bool, len(events)/16)
+
+	// matchSoldCartoRecords claims all pending cartographic scan records up to
+	// saleTimestamp for the systems in soldSystemSet (or all pending systems
+	// when soldSystemSet is empty), removes them from unsold tracking, marks
+	// their scan and mapping state as sold, and returns them in deterministic
+	// chronological and body order.
+	matchSoldCartoRecords := func(soldSystemSet map[string]bool, saleTimestamp string) []*scanRecord {
+		var matchedRecords []*scanRecord
+		if len(soldSystemSet) > 0 {
+			matchedRecords = make([]*scanRecord, 0, len(soldSystemSet)*4)
+			for normalizedSystem := range soldSystemSet {
+				systemRecords := unsoldCartoBySystem[normalizedSystem]
+				if len(systemRecords) == 0 {
+					continue
+				}
+				remainingRecords := systemRecords[:0]
+				for _, candidateRecord := range systemRecords {
+					if candidateRecord.status == "pending" && candidateRecord.timestamp <= saleTimestamp {
+						matchedRecords = append(matchedRecords, candidateRecord)
+						key := cartoKey{systemAddress: candidateRecord.systemAddress, bodyID: candidateRecord.bodyID}
+						delete(unsoldCarto, key)
+						if candidateRecord.hasScan {
+							soldScan[key] = true
+						}
+						if candidateRecord.hasMapped {
+							soldMapped[key] = true
+						}
+					} else if candidateRecord.status == "pending" {
+						remainingRecords = append(remainingRecords, candidateRecord)
+					}
+				}
+				if len(remainingRecords) == 0 {
+					delete(unsoldCartoBySystem, normalizedSystem)
+				} else {
+					unsoldCartoBySystem[normalizedSystem] = remainingRecords
+				}
+			}
+		} else {
+			matchedRecords = make([]*scanRecord, 0, len(unsoldCarto))
+			for key, candidateRecord := range unsoldCarto {
+				if candidateRecord.status == "pending" && candidateRecord.timestamp <= saleTimestamp {
+					matchedRecords = append(matchedRecords, candidateRecord)
+					delete(unsoldCarto, key)
+					if candidateRecord.hasScan {
+						soldScan[key] = true
+					}
+					if candidateRecord.hasMapped {
+						soldMapped[key] = true
+					}
+				}
+			}
+			if len(unsoldCarto) == 0 {
+				clear(unsoldCartoBySystem)
+			} else {
+				for normalizedSystem, systemRecords := range unsoldCartoBySystem {
+					remainingRecords := systemRecords[:0]
+					for _, systemRecord := range systemRecords {
+						recordKey := cartoKey{systemAddress: systemRecord.systemAddress, bodyID: systemRecord.bodyID}
+						if unsoldCarto[recordKey] == systemRecord {
+							remainingRecords = append(remainingRecords, systemRecord)
+						}
+					}
+					if len(remainingRecords) == 0 {
+						delete(unsoldCartoBySystem, normalizedSystem)
+					} else {
+						unsoldCartoBySystem[normalizedSystem] = remainingRecords
+					}
+				}
+			}
+		}
+
+		slices.SortFunc(matchedRecords, func(leftRecord, rightRecord *scanRecord) int {
+			return cmp.Or(
+				cmp.Compare(leftRecord.timestamp, rightRecord.timestamp),
+				cmp.Compare(leftRecord.systemAddress, rightRecord.systemAddress),
+				cmp.Compare(leftRecord.bodyID, rightRecord.bodyID),
+			)
+		})
+		return matchedRecords
+	}
 
 	for eventIndex := 0; eventIndex < len(events); eventIndex++ {
 		journalEvent := events[eventIndex]
 		switch journalEvent.eventType {
 		case "Scan":
-			var scanEv journal.ScanEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &scanEv) != nil || scanEv.IsBeltCluster() {
+			var scanEvent journal.ScanEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &scanEvent) != nil || scanEvent.IsBeltCluster() {
 				continue
 			}
-			key := cartoKey{scanEv.SystemAddress, scanEv.BodyID}
-			scanCopy := scanEv
+			key := cartoKey{systemAddress: scanEvent.SystemAddress, bodyID: scanEvent.BodyID}
+			scanCopy := scanEvent
 			scans[key] = &scanCopy
 
-			if scanEv.ScanType == "NavBeaconDetail" {
+			// NavBeaconDetail dumps system data without awarding exploration payout,
+			// and bodies whose scan was already sold earlier in the commander's career
+			// cannot be sold a second time.
+			if scanEvent.ScanType == "NavBeaconDetail" || soldScan[key] {
 				continue
 			}
-			estimatedBodyValue := ed.EstimateBodyValue(toBodyScan(&scanEv), ed.MappingInfo{}, engine.Odyssey)
+			if existingEntry := unsoldCarto[key]; existingEntry != nil && existingEntry.status == "pending" {
+				if !existingEntry.hasScan {
+					estimatedBodyValue := ed.EstimateBodyValue(toBodyScan(&scanEvent), ed.MappingInfo{}, engine.Odyssey)
+					existingEntry.theoreticalBase += estimatedBodyValue.Base
+					existingEntry.theoreticalBonus += estimatedBodyValue.Bonus
+					existingEntry.theoreticalTotal += estimatedBodyValue.Total
+					existingEntry.hasScan = true
+					if !scanEvent.WasDiscovered {
+						existingEntry.undiscoveredAtScan = true
+					}
+				}
+				continue
+			}
+			estimatedBodyValue := ed.EstimateBodyValue(toBodyScan(&scanEvent), ed.MappingInfo{}, engine.Odyssey)
+			normalizedSystemName := strings.ToLower(strings.TrimSpace(scanEvent.StarSystem))
 			scanEntry := &scanRecord{
 				timestamp:            journalEvent.timestamp,
-				systemAddress:        scanEv.SystemAddress,
-				starSystem:           scanEv.StarSystem,
-				normalizedStarSystem: strings.ToLower(strings.TrimSpace(scanEv.StarSystem)),
-				bodyID:               scanEv.BodyID,
-				bodyName:             scanEv.BodyName,
-				normalizedBodyName:   strings.ToLower(strings.TrimSpace(scanEv.BodyName)),
+				systemAddress:        scanEvent.SystemAddress,
+				starSystem:           scanEvent.StarSystem,
+				normalizedStarSystem: normalizedSystemName,
+				bodyID:               scanEvent.BodyID,
+				bodyName:             scanEvent.BodyName,
+				normalizedBodyName:   strings.ToLower(strings.TrimSpace(scanEvent.BodyName)),
 				isOrganic:            false,
-				undiscoveredAtScan:   !scanEv.WasDiscovered,
+				hasScan:              true,
+				undiscoveredAtScan:   !scanEvent.WasDiscovered,
 				theoreticalBase:      estimatedBodyValue.Base,
 				theoreticalBonus:     estimatedBodyValue.Bonus,
 				theoreticalTotal:     estimatedBodyValue.Total,
 				status:               "pending",
 			}
 			unsoldCarto[key] = scanEntry
+			unsoldCartoBySystem[normalizedSystemName] = append(unsoldCartoBySystem[normalizedSystemName], scanEntry)
 			ledger.records = append(ledger.records, scanEntry)
 
 		case "SAAScanComplete":
-			var saaEv journal.SAAScanCompleteEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &saaEv) != nil {
+			var mappingEvent journal.SAAScanCompleteEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &mappingEvent) != nil {
 				continue
 			}
-			key := cartoKey{saaEv.SystemAddress, saaEv.BodyID}
-			scan := scans[key]
-			if scan == nil {
+			key := cartoKey{systemAddress: mappingEvent.SystemAddress, bodyID: mappingEvent.BodyID}
+			parentScan := scans[key]
+			if parentScan == nil || soldMapped[key] {
 				continue
 			}
-			mappingInfo := ed.MappingInfo{Mapped: true, ProbesUsed: saaEv.ProbesUsed, EfficiencyTarget: saaEv.EfficiencyTarget}
-			mappingIncrement := ed.EstimateMappingIncrement(toBodyScan(scan), mappingInfo, engine.Odyssey)
+			existingEntry := unsoldCarto[key]
+			if existingEntry != nil && existingEntry.status == "pending" && existingEntry.hasMapped {
+				continue
+			}
+			mappingInfo := ed.MappingInfo{
+				Mapped:           true,
+				ProbesUsed:       mappingEvent.ProbesUsed,
+				EfficiencyTarget: mappingEvent.EfficiencyTarget,
+			}
+			mappingIncrement := ed.EstimateMappingIncrement(toBodyScan(parentScan), mappingInfo, engine.Odyssey)
 
-			scanEntry := unsoldCarto[key]
-			if scanEntry != nil {
-				scanEntry.theoreticalBase += mappingIncrement.Base
-				scanEntry.theoreticalBonus += mappingIncrement.Bonus
-				scanEntry.theoreticalTotal += mappingIncrement.Total
-				if !scan.WasMapped {
-					scanEntry.undiscoveredAtScan = true
+			if existingEntry != nil && existingEntry.status == "pending" {
+				existingEntry.theoreticalBase += mappingIncrement.Base
+				existingEntry.theoreticalBonus += mappingIncrement.Bonus
+				existingEntry.theoreticalTotal += mappingIncrement.Total
+				existingEntry.hasMapped = true
+				if !parentScan.WasMapped {
+					existingEntry.undiscoveredAtScan = true
 				}
 			} else {
-				// Mapped without existing pending scan in current batch
-				scanEntry = &scanRecord{
+				// Mapped without an existing pending scan in the current unsold batch
+				normalizedSystemName := strings.ToLower(strings.TrimSpace(parentScan.StarSystem))
+				scanEntry := &scanRecord{
 					timestamp:            journalEvent.timestamp,
-					systemAddress:        saaEv.SystemAddress,
-					starSystem:           scan.StarSystem,
-					normalizedStarSystem: strings.ToLower(strings.TrimSpace(scan.StarSystem)),
-					bodyID:               saaEv.BodyID,
-					bodyName:             saaEv.BodyName,
-					normalizedBodyName:   strings.ToLower(strings.TrimSpace(saaEv.BodyName)),
+					systemAddress:        mappingEvent.SystemAddress,
+					starSystem:           parentScan.StarSystem,
+					normalizedStarSystem: normalizedSystemName,
+					bodyID:               mappingEvent.BodyID,
+					bodyName:             mappingEvent.BodyName,
+					normalizedBodyName:   strings.ToLower(strings.TrimSpace(mappingEvent.BodyName)),
 					isOrganic:            false,
-					undiscoveredAtScan:   !scan.WasDiscovered || !scan.WasMapped,
+					hasMapped:            true,
+					undiscoveredAtScan:   !parentScan.WasDiscovered || !parentScan.WasMapped,
 					theoreticalBase:      mappingIncrement.Base,
 					theoreticalBonus:     mappingIncrement.Bonus,
 					theoreticalTotal:     mappingIncrement.Total,
 					status:               "pending",
 				}
 				unsoldCarto[key] = scanEntry
+				unsoldCartoBySystem[normalizedSystemName] = append(unsoldCartoBySystem[normalizedSystemName], scanEntry)
 				ledger.records = append(ledger.records, scanEntry)
 			}
 
@@ -495,6 +612,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 					}
 				}
 				clear(unsoldCarto)
+				clear(unsoldCartoBySystem)
 			}
 
 		case "SellOrganicData":
@@ -576,46 +694,38 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 		case "SellExplorationData":
-			var sellEv journal.SellExplorationDataEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEv) != nil {
+			var sellEvent journal.SellExplorationDataEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEvent) != nil {
 				continue
 			}
 			saleKey := saleDedupKey{
 				kind:       "carto",
-				timestamp:  sellEv.Timestamp,
-				primaryID:  sellEv.TotalEarnings,
-				itemCount:  len(sellEv.Systems),
-				totalValue: sellEv.BaseValue,
-				totalBonus: sellEv.Bonus,
+				timestamp:  sellEvent.Timestamp,
+				primaryID:  sellEvent.TotalEarnings,
+				itemCount:  len(sellEvent.Systems),
+				totalValue: sellEvent.BaseValue,
+				totalBonus: sellEvent.Bonus,
 			}
 			if seenSales[saleKey] {
 				continue
 			}
 			seenSales[saleKey] = true
-			totalCrewWage := findCrewWage(sellEv.Timestamp)
-			discoveredSet := make(map[string]bool, len(sellEv.Discovered))
-			for _, discoveredBody := range sellEv.Discovered {
+			totalCrewWage := findCrewWage(sellEvent.Timestamp)
+			discoveredSet := make(map[string]bool, len(sellEvent.Discovered))
+			for _, discoveredBody := range sellEvent.Discovered {
 				discoveredSet[strings.ToLower(strings.TrimSpace(discoveredBody))] = true
 			}
 
-			soldSystemSet := make(map[string]bool, len(sellEv.Systems))
-			for _, soldSystemName := range sellEv.Systems {
+			soldSystemSet := make(map[string]bool, len(sellEvent.Systems))
+			for _, soldSystemName := range sellEvent.Systems {
 				soldSystemSet[strings.ToLower(strings.TrimSpace(soldSystemName))] = true
 			}
 
-			// Find matching unsold carto records for sold systems
-			matchedRecords := make([]*scanRecord, 0, len(unsoldCarto))
-			for key, candidateRecord := range unsoldCarto {
-				if candidateRecord.status == "pending" && candidateRecord.timestamp <= sellEv.Timestamp {
-					if len(soldSystemSet) == 0 || soldSystemSet[candidateRecord.normalizedStarSystem] {
-						matchedRecords = append(matchedRecords, candidateRecord)
-						delete(unsoldCarto, key)
-					}
-				}
-			}
+			// Find matching unsold cartographic records for sold systems
+			matchedRecords := matchSoldCartoRecords(soldSystemSet, sellEvent.Timestamp)
 
 			if len(matchedRecords) > 0 {
-				allocateCartoSalePayout(matchedRecords, sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, sellEv.Bonus, totalCrewWage)
+				allocateCartoSalePayout(matchedRecords, sellEvent.Timestamp, sellEvent.TotalEarnings, sellEvent.BaseValue, sellEvent.Bonus, totalCrewWage)
 				for _, matchedRecord := range matchedRecords {
 					// Stolen check: had bonus expectation on an undiscovered body, but body or system was not awarded first discovery
 					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
@@ -626,56 +736,48 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				}
 			} else {
 				ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
-					timestamp: sellEv.Timestamp,
+					timestamp: sellEvent.Timestamp,
 					kind:      "carto",
-					gross:     sellEv.TotalEarnings,
+					gross:     sellEvent.TotalEarnings,
 					crewLoss:  totalCrewWage,
 				})
 			}
 
 		case "MultiSellExplorationData":
-			var sellEv journal.MultiSellExplorationDataEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEv) != nil {
+			var multiSellEvent journal.MultiSellExplorationDataEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &multiSellEvent) != nil {
 				continue
 			}
 			saleKey := saleDedupKey{
 				kind:       "carto_multi",
-				timestamp:  sellEv.Timestamp,
-				primaryID:  sellEv.TotalEarnings,
-				itemCount:  len(sellEv.Discovered),
-				totalValue: sellEv.BaseValue,
-				totalBonus: sellEv.Bonus,
+				timestamp:  multiSellEvent.Timestamp,
+				primaryID:  multiSellEvent.TotalEarnings,
+				itemCount:  len(multiSellEvent.Discovered),
+				totalValue: multiSellEvent.BaseValue,
+				totalBonus: multiSellEvent.Bonus,
 			}
 			if seenSales[saleKey] {
 				continue
 			}
 			seenSales[saleKey] = true
-			totalCrewWage := findCrewWage(sellEv.Timestamp)
+			totalCrewWage := findCrewWage(multiSellEvent.Timestamp)
 
-			soldSystemSet := make(map[string]bool, len(sellEv.Discovered))
-			for _, discoveredEntry := range sellEv.Discovered {
+			soldSystemSet := make(map[string]bool, len(multiSellEvent.Discovered))
+			for _, discoveredEntry := range multiSellEvent.Discovered {
 				soldSystemSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
 			}
 
 			// Match pending cartographic scans belonging to the systems sold on this page
-			matchedRecords := make([]*scanRecord, 0, len(unsoldCarto))
-			for key, candidateRecord := range unsoldCarto {
-				if candidateRecord.status == "pending" && candidateRecord.timestamp <= sellEv.Timestamp {
-					if len(soldSystemSet) == 0 || soldSystemSet[candidateRecord.normalizedStarSystem] {
-						matchedRecords = append(matchedRecords, candidateRecord)
-						delete(unsoldCarto, key)
-					}
-				}
-			}
+			matchedRecords := matchSoldCartoRecords(soldSystemSet, multiSellEvent.Timestamp)
 
 			if len(matchedRecords) > 0 {
-				allocateCartoSalePayout(matchedRecords, sellEv.Timestamp, sellEv.TotalEarnings, sellEv.BaseValue, sellEv.Bonus, totalCrewWage)
-				allocateMultiSellStolenLoss(matchedRecords, sellEv.Bonus)
+				allocateCartoSalePayout(matchedRecords, multiSellEvent.Timestamp, multiSellEvent.TotalEarnings, multiSellEvent.BaseValue, multiSellEvent.Bonus, totalCrewWage)
+				allocateMultiSellStolenLoss(matchedRecords, multiSellEvent.Bonus)
 			} else {
 				ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
-					timestamp: sellEv.Timestamp,
+					timestamp: multiSellEvent.Timestamp,
 					kind:      "carto",
-					gross:     sellEv.TotalEarnings,
+					gross:     multiSellEvent.TotalEarnings,
 					crewLoss:  totalCrewWage,
 				})
 			}
