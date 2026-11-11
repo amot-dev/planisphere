@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -12,6 +13,47 @@ import (
 	"planisphere/internal/journal"
 	"planisphere/internal/stats"
 )
+
+func setupTestApp(testingContext *testing.T) *App {
+	testingContext.Helper()
+	temporaryDirectory := testingContext.TempDir()
+	databasePath := filepath.Join(temporaryDirectory, "test.sqlite")
+
+	testApp := New()
+	applicationContext, cancelFunction := context.WithCancel(context.Background())
+	if initializeError := testApp.initialize(applicationContext, databasePath); initializeError != nil {
+		cancelFunction()
+		testingContext.Fatalf("initialize db: %v", initializeError)
+	}
+	testingContext.Cleanup(func() {
+		cancelFunction()
+		testApp.shutdown(applicationContext)
+		stats.InvalidateLedgerCache()
+	})
+	return testApp
+}
+
+func insertTestJournalEvent(testingContext *testing.T, testApp *App, timestamp, eventName, keyIdentifier, rawJSON string) {
+	testingContext.Helper()
+	var systemPayload struct {
+		StarSystem string `json:"StarSystem"`
+		SystemName string `json:"SystemName"`
+	}
+	_ = json.Unmarshal([]byte(rawJSON), &systemPayload)
+	systemName := systemPayload.StarSystem
+	if systemName == "" {
+		systemName = systemPayload.SystemName
+	}
+
+	eventUID := journal.ComputeUID(timestamp, eventName, keyIdentifier)
+	_, insertError := testApp.db.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		eventUID, timestamp, eventName, systemName, rawJSON, timestamp,
+	)
+	if insertError != nil {
+		testingContext.Fatalf("insert %s journal event: %v", eventName, insertError)
+	}
+}
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
 	tempDir := t.TempDir()
@@ -161,37 +203,17 @@ func TestResolveRowSync_SemaphoreReleased(t *testing.T) {
 	}
 }
 
-func TestMoveRow_NonexistentRow(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test.sqlite")
+func TestMoveRow_NonexistentRow(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
 
-	testApp := New()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := testApp.initialize(ctx, dbPath); err != nil {
-		t.Fatalf("initialize db: %v", err)
-	}
-	defer testApp.shutdown(ctx)
-
-	err := testApp.MoveRow(99999, 0)
-	if err == nil {
-		t.Fatalf("expected error when moving nonexistent row, got nil")
+	moveError := testApp.MoveRow(99999, 0)
+	if moveError == nil {
+		testingContext.Fatalf("expected error when moving nonexistent row, got nil")
 	}
 }
 
 func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
-	temporaryDirectory := testingContext.TempDir()
-	databasePath := filepath.Join(temporaryDirectory, "career_test.sqlite")
-
-	testApp := New()
-	applicationContext, cancelFunction := context.WithCancel(context.Background())
-	defer cancelFunction()
-
-	if initializeError := testApp.initialize(applicationContext, databasePath); initializeError != nil {
-		testingContext.Fatalf("initialize db: %v", initializeError)
-	}
-	defer testApp.shutdown(applicationContext)
+	testApp := setupTestApp(testingContext)
 
 	// Insert commander record with first_seen timestamp
 	expectedCareerStart := "2024-03-15T12:00:00Z"
@@ -243,77 +265,59 @@ func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
 	testApp.careerStartMu.Unlock()
 }
 
-func TestGetSidebarStatsRealizationExpeditionVsAllTime(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "realization_stats_test.sqlite")
-
-	testApp := New()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := testApp.initialize(ctx, dbPath); err != nil {
-		t.Fatalf("initialize db: %v", err)
-	}
-	defer testApp.shutdown(ctx)
+func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
 
 	// Commander Jameson
 	_, _ = testApp.db.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Jameson', 1, '2024-01-01T00:00:00Z')`)
 
 	// Scan 1: Before expedition (2025)
-	uid1 := journal.ComputeUID("2025-01-01T10:00:00Z", "ScanOrganic", "1")
-	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
-		uid1, "2025-01-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2025-01-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":111,"Body":1}`, "2025-01-01T10:00:00Z")
-	uid1Sale := journal.ComputeUID("2025-01-01T12:00:00Z", "SellOrganicData", "1")
-	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
-		uid1Sale, "2025-01-01T12:00:00Z", "SellOrganicData",
-		`{"timestamp":"2025-01-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`, "2025-01-01T12:00:00Z")
+	insertTestJournalEvent(testingContext, testApp, "2025-01-01T10:00:00Z", "ScanOrganic", "1",
+		`{"timestamp":"2025-01-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":111,"Body":1}`)
+	insertTestJournalEvent(testingContext, testApp, "2025-01-01T12:00:00Z", "SellOrganicData", "1",
+		`{"timestamp":"2025-01-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
 
 	// Create expedition (initially unstarted)
 	expeditionRecord, createError := testApp.CreateExpedition("2026 Survey", "")
 	if createError != nil {
-		t.Fatalf("create expedition: %v", createError)
+		testingContext.Fatalf("create expedition: %v", createError)
 	}
 
 	unstartedSidebarStats, unstartedStatsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
 	if unstartedStatsError != nil {
-		t.Fatalf("GetSidebarStats (unstarted) failed: %v", unstartedStatsError)
+		testingContext.Fatalf("GetSidebarStats (unstarted) failed: %v", unstartedStatsError)
 	}
 	if unstartedSidebarStats.Realization.TotalRealized != 0 {
-		t.Errorf("expected unstarted expedition Realization.TotalRealized 0, got %d", unstartedSidebarStats.Realization.TotalRealized)
+		testingContext.Errorf("expected unstarted expedition Realization.TotalRealized 0, got %d", unstartedSidebarStats.Realization.TotalRealized)
 	}
 	if unstartedSidebarStats.AllJournalsRealization.TotalRealized != 19010800 {
-		t.Errorf("expected unstarted AllJournalsRealization.TotalRealized 19,010,800, got %d", unstartedSidebarStats.AllJournalsRealization.TotalRealized)
+		testingContext.Errorf("expected unstarted AllJournalsRealization.TotalRealized 19,010,800, got %d", unstartedSidebarStats.AllJournalsRealization.TotalRealized)
 	}
 
 	// Start expedition at 2026-01-01T00:00:00Z
 	_, _ = testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T00:00:00Z' WHERE id = ?`, expeditionRecord.ID)
 
 	// Scan 2: During expedition (2026)
-	uid2 := journal.ComputeUID("2026-03-01T10:00:00Z", "ScanOrganic", "2")
-	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
-		uid2, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":222,"Body":1}`, "2026-03-01T10:00:00Z")
-	uid2Sale := journal.ComputeUID("2026-03-01T12:00:00Z", "SellOrganicData", "2")
-	_, _ = testApp.db.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
-		uid2Sale, "2026-03-01T12:00:00Z", "SellOrganicData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`, "2026-03-01T12:00:00Z")
+	insertTestJournalEvent(testingContext, testApp, "2026-03-01T10:00:00Z", "ScanOrganic", "2",
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":222,"Body":1}`)
+	insertTestJournalEvent(testingContext, testApp, "2026-03-01T12:00:00Z", "SellOrganicData", "2",
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
 	stats.InvalidateLedgerCache()
 	testApp.invalidateAllTimeCache()
 
 	sidebarStats, statsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
 	if statsError != nil {
-		t.Fatalf("GetSidebarStats failed: %v", statsError)
+		testingContext.Fatalf("GetSidebarStats failed: %v", statsError)
 	}
 
 	// Expedition realization should reflect only Scan 2 (19,010,800)
 	if sidebarStats.Realization.TotalRealized != 19010800 {
-		t.Errorf("expected expedition Realization.TotalRealized 19,010,800, got %d", sidebarStats.Realization.TotalRealized)
+		testingContext.Errorf("expected expedition Realization.TotalRealized 19,010,800, got %d", sidebarStats.Realization.TotalRealized)
 	}
 
 	// All journals realization should reflect Scan 1 + Scan 2 (38,021,600)
 	if sidebarStats.AllJournalsRealization.TotalRealized != 38021600 {
-		t.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", sidebarStats.AllJournalsRealization.TotalRealized)
+		testingContext.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", sidebarStats.AllJournalsRealization.TotalRealized)
 	}
 }
 
