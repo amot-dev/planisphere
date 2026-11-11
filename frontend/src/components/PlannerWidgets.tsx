@@ -855,7 +855,7 @@ export interface CarrierRouteBottomPanelProps {
  * CarrierRouteBottomPanel renders the active fleet carrier navigation drawer,
  * supporting both Spansh 500 Ly calculated routes and manual jump logging.
  */
-export function CarrierRouteBottomPanel({
+export const CarrierRouteBottomPanel = memo(function CarrierRouteBottomPanel({
   route,
   jumpIndex,
   manualMode,
@@ -879,6 +879,17 @@ export function CarrierRouteBottomPanel({
   depotTritium,
   onRefillDepot,
 }: CarrierRouteBottomPanelProps) {
+  const [distanceDraft, setDistanceDraft] = useState(manualDistanceInput)
+  const [tritiumDraft, setTritiumDraft] = useState(manualTritiumInput)
+
+  useEffect(() => {
+    setDistanceDraft(manualDistanceInput)
+  }, [manualDistanceInput, manualLegJumps])
+
+  useEffect(() => {
+    setTritiumDraft(manualTritiumInput)
+  }, [manualTritiumInput, manualLegJumps])
+
   const jumps = route.jumps ?? []
   const hasSpanshJumps = jumps.length > 0
   // In Spansh mode (!manualMode), the plotted route has a fixed destination (route.destination).
@@ -908,12 +919,13 @@ export function CarrierRouteBottomPanel({
   const hopTritiumRequired = nextHop?.tritiumUsed ?? 0
   const isDepotInsufficient = nextHop !== null && currentDepot < hopTritiumRequired
   const remainingJumps = Math.max(0, jumps.length - jumpIndex)
-  const remainingDistLy = jumps
-    .slice(jumpIndex)
-    .reduce((totalDistance, jump) => totalDistance + (jump.distanceLy || 0), 0)
-  const remainingTrit = jumps
-    .slice(jumpIndex)
-    .reduce((totalTritium, jump) => totalTritium + (jump.tritiumUsed || 0), 0)
+  let remainingDistanceLy = 0
+  let remainingTritiumTonnes = 0
+  for (let hopIndex = Math.max(0, jumpIndex); hopIndex < jumps.length; hopIndex++) {
+    const jump = jumps[hopIndex]
+    remainingDistanceLy += jump.distanceLy || 0
+    remainingTritiumTonnes += jump.tritiumUsed || 0
+  }
 
   return (
     <div className="border-t-2 border-[#00D2FF] bg-[#0b0907] px-3 sm:px-5 py-2.5 sm:py-3 shadow-2xl text-xs">
@@ -1063,8 +1075,8 @@ export function CarrierRouteBottomPanel({
               </span>
               <span className="font-mono-tabular text-xs text-[#F4ECE4]">
                 {remainingJumps} {remainingJumps === 1 ? 'JUMP' : 'JUMPS'} ·{' '}
-                <span className="text-[#FF7100] font-bold">{formatLy(remainingDistLy, 1)}</span> ·{' '}
-                <span className="text-[#a6907c]">~{formatInt(remainingTrit)} t</span>
+                <span className="text-[#FF7100] font-bold">{formatLy(remainingDistanceLy, 1)}</span> ·{' '}
+                <span className="text-[#a6907c]">~{formatInt(remainingTritiumTonnes)} t</span>
               </span>
             </div>
           </div>
@@ -1120,8 +1132,12 @@ export function CarrierRouteBottomPanel({
                   step="0.01"
                   min="0"
                   max="500"
-                  value={manualDistanceInput}
-                  onChange={(event) => onChangeManualDistance(event.target.value)}
+                  value={distanceDraft}
+                  onChange={(event) => {
+                    const nextDistance = event.target.value
+                    setDistanceDraft(nextDistance)
+                    onChangeManualDistance(nextDistance)
+                  }}
                   placeholder="e.g. 498.4"
                   className="w-32 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />
@@ -1135,8 +1151,12 @@ export function CarrierRouteBottomPanel({
                   type="number"
                   step="1"
                   min="0"
-                  value={manualTritiumInput}
-                  onChange={(event) => onChangeManualTritium(event.target.value)}
+                  value={tritiumDraft}
+                  onChange={(event) => {
+                    const nextTritium = event.target.value
+                    setTritiumDraft(nextTritium)
+                    onChangeManualTritium(nextTritium)
+                  }}
                   placeholder="e.g. 68"
                   className="w-28 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
                 />
@@ -1172,7 +1192,7 @@ export function CarrierRouteBottomPanel({
       )}
     </div>
   )
-}
+})
 
 const TEXTAREA_LINE_HEIGHT = 20 // 1.25rem = 20px (leading-5)
 const TEXTAREA_VERTICAL_PAD = 8 // py-[3px] (6px) + border (2px) = 8px; total 1-line height = 28px (h-7)

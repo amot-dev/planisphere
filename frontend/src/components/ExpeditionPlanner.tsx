@@ -90,6 +90,9 @@ export function ExpeditionPlanner({
   const [manualModeOverride, setManualModeOverride] = useState(false)
   const [manualDistanceInput, setManualDistanceInput] = useState('')
   const [manualTritiumInput, setManualTritiumInput] = useState('')
+  const manualDistanceInputRef = useRef('')
+  const manualTritiumInputRef = useRef('')
+  const persistManualInputsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [manualLegJumps, setManualLegJumps] = useState(0)
   const [manualLegDistance, setManualLegDistance] = useState(0)
   const [manualLegTritium, setManualLegTritium] = useState(0)
@@ -103,6 +106,7 @@ export function ExpeditionPlanner({
     return () => {
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
       if (copiedNextJumpTimerRef.current) clearTimeout(copiedNextJumpTimerRef.current)
+      if (persistManualInputsTimerRef.current) clearTimeout(persistManualInputsTimerRef.current)
     }
   }, [])
 
@@ -148,6 +152,10 @@ export function ExpeditionPlanner({
 
   // Load persisted carrier route state on mount or when active expedition changes
   useEffect(() => {
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
     const expeditionId = plan?.expedition?.id
     if (!expeditionId || expeditionId <= 0) {
       setActiveCarrierRoute(null)
@@ -166,12 +174,16 @@ export function ExpeditionPlanner({
             saved.route.manualMode ||
             (saved.route.jumps && saved.route.jumps.length > 0))
         ) {
+          const savedDistanceInput = saved.manualDistInput || ''
+          const savedTritiumInput = saved.manualTritInput || ''
+          manualDistanceInputRef.current = savedDistanceInput
+          manualTritiumInputRef.current = savedTritiumInput
           setActiveCarrierRoute(saved.route)
           setActiveCarrierTargetRowId(saved.targetRowId)
           setCarrierJumpIndex(saved.jumpIdx || 0)
           setManualModeOverride(Boolean(saved.manualMode))
-          setManualDistanceInput(saved.manualDistInput || '')
-          setManualTritiumInput(saved.manualTritInput || '')
+          setManualDistanceInput(savedDistanceInput)
+          setManualTritiumInput(savedTritiumInput)
           setManualLegJumps(saved.manualLegJumps || 0)
           setManualLegDistance(saved.manualLegDist || 0)
           setManualLegTritium(saved.manualLegTrit || 0)
@@ -212,8 +224,14 @@ export function ExpeditionPlanner({
       route,
       jumpIdx: updates.jumpIdx !== undefined ? updates.jumpIdx : carrierJumpIndex,
       manualMode: updates.manualMode !== undefined ? updates.manualMode : manualModeOverride,
-      manualDistInput: updates.manualDistInput !== undefined ? updates.manualDistInput : manualDistanceInput,
-      manualTritInput: updates.manualTritInput !== undefined ? updates.manualTritInput : manualTritiumInput,
+      manualDistInput:
+        updates.manualDistInput !== undefined
+          ? updates.manualDistInput
+          : manualDistanceInputRef.current,
+      manualTritInput:
+        updates.manualTritInput !== undefined
+          ? updates.manualTritInput
+          : manualTritiumInputRef.current,
       manualLegJumps: updates.manualLegJumps !== undefined ? updates.manualLegJumps : manualLegJumps,
       manualLegDist: updates.manualLegDist !== undefined ? updates.manualLegDist : manualLegDistance,
       manualLegTrit: updates.manualLegTrit !== undefined ? updates.manualLegTrit : manualLegTritium,
@@ -221,7 +239,24 @@ export function ExpeditionPlanner({
     SaveActiveCarrierRoute(state).catch(console.error)
   }
 
+  function schedulePersistManualInputs() {
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+    }
+    persistManualInputsTimerRef.current = setTimeout(() => {
+      persistManualInputsTimerRef.current = null
+      persistRouteState({
+        manualDistInput: manualDistanceInputRef.current,
+        manualTritInput: manualTritiumInputRef.current,
+      })
+    }, 250)
+  }
+
   function handleCancelCarrierRoute() {
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
     const expeditionId = plan?.expedition?.id
     if (expeditionId) {
       ClearActiveCarrierRoute(expeditionId).catch(console.error)
@@ -795,27 +830,33 @@ export function ExpeditionPlanner({
   }
 
   function switchActiveRouteToManualMode() {
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
     setManualModeOverride(true)
-    let dist = ''
-    let trit = ''
+    let initialDistanceInput = ''
+    let initialTritiumInput = ''
     if (
       activeCarrierRoute?.jumps &&
       carrierJumpIndex < activeCarrierRoute.jumps.length
     ) {
       const currentHop = activeCarrierRoute.jumps[carrierJumpIndex]
       if (currentHop?.distanceLy !== undefined && currentHop.distanceLy > 0) {
-        dist = String(Math.round(currentHop.distanceLy * 100) / 100)
+        initialDistanceInput = String(Math.round(currentHop.distanceLy * 100) / 100)
       }
       if (currentHop?.tritiumUsed !== undefined && currentHop.tritiumUsed > 0) {
-        trit = String(currentHop.tritiumUsed)
+        initialTritiumInput = String(currentHop.tritiumUsed)
       }
     }
-    setManualDistanceInput(dist)
-    setManualTritiumInput(trit)
+    manualDistanceInputRef.current = initialDistanceInput
+    manualTritiumInputRef.current = initialTritiumInput
+    setManualDistanceInput(initialDistanceInput)
+    setManualTritiumInput(initialTritiumInput)
     persistRouteState({
       manualMode: true,
-      manualDistInput: dist,
-      manualTritInput: trit,
+      manualDistInput: initialDistanceInput,
+      manualTritInput: initialTritiumInput,
     })
   }
 
@@ -846,6 +887,12 @@ export function ExpeditionPlanner({
       totalTritium: 0,
       jumps: [],
     })
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
+    manualDistanceInputRef.current = ''
+    manualTritiumInputRef.current = ''
     setActiveCarrierTargetRowId(targetRowId)
     setActiveCarrierRoute(manualRoute)
     setCarrierJumpIndex(0)
@@ -910,6 +957,12 @@ export function ExpeditionPlanner({
         routePrompt.carrierType,
         carrierDepot,
       )
+      if (persistManualInputsTimerRef.current) {
+        clearTimeout(persistManualInputsTimerRef.current)
+        persistManualInputsTimerRef.current = null
+      }
+      manualDistanceInputRef.current = ''
+      manualTritiumInputRef.current = ''
       setActiveCarrierTargetRowId(targetId)
       setActiveCarrierRoute(routeResult)
       setCarrierJumpIndex(0)
@@ -945,6 +998,12 @@ export function ExpeditionPlanner({
         totalTritium: 0,
         jumps: [],
       })
+      if (persistManualInputsTimerRef.current) {
+        clearTimeout(persistManualInputsTimerRef.current)
+        persistManualInputsTimerRef.current = null
+      }
+      manualDistanceInputRef.current = ''
+      manualTritiumInputRef.current = ''
       setActiveCarrierTargetRowId(targetId)
       setActiveCarrierRoute(errorRoute)
       setCarrierJumpIndex(0)
@@ -952,6 +1011,8 @@ export function ExpeditionPlanner({
       setManualLegJumps(0)
       setManualLegDistance(0)
       setManualLegTritium(0)
+      setManualDistanceInput('')
+      setManualTritiumInput('')
       setRoutePrompt(null)
       persistRouteState({
         route: errorRoute,
@@ -1097,9 +1158,13 @@ export function ExpeditionPlanner({
 
   async function handleLogManualJump() {
     if (!plan || !activeCarrierRoute || loggingJump) return
-    const jumpDistance = parseFloat(manualDistanceInput) || 0
-    const tritiumAmount = Math.max(0, parseInt(manualTritiumInput, 10) || 0)
+    const jumpDistance = parseFloat(manualDistanceInputRef.current) || 0
+    const tritiumAmount = Math.max(0, parseInt(manualTritiumInputRef.current, 10) || 0)
     if (jumpDistance <= 0 && tritiumAmount <= 0) return
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
     setLoggingJump(true)
     onBusyChange('LOGGING MANUAL CARRIER JUMP')
     try {
@@ -1107,6 +1172,8 @@ export function ExpeditionPlanner({
       const nextJumps = manualLegJumps + 1
       const nextTotalDistance = manualLegDistance + Math.max(0, jumpDistance)
       const nextTotalTritium = manualLegTritium + tritiumAmount
+      manualDistanceInputRef.current = ''
+      manualTritiumInputRef.current = ''
       setManualLegJumps(nextJumps)
       setManualLegDistance(nextTotalDistance)
       setManualLegTritium(nextTotalTritium)
@@ -1128,6 +1195,10 @@ export function ExpeditionPlanner({
   }
 
   async function handleCarrierArriveAtWaypoint() {
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
     const targetRowId = isManualCarrierRoute
       ? (nextFcStopEntry?.row.id ?? 0)
       : activeCarrierTargetRowId || (nextFcStopEntry?.row.id ?? 0)
@@ -1736,13 +1807,13 @@ export function ExpeditionPlanner({
           onCompleteSpanshJump={handleCompleteSpanshJump}
           manualDistanceInput={manualDistanceInput}
           onChangeManualDistance={(value) => {
-            setManualDistanceInput(value)
-            persistRouteState({ manualDistInput: value })
+            manualDistanceInputRef.current = value
+            schedulePersistManualInputs()
           }}
           manualTritiumInput={manualTritiumInput}
           onChangeManualTritium={(value) => {
-            setManualTritiumInput(value)
-            persistRouteState({ manualTritInput: value })
+            manualTritiumInputRef.current = value
+            schedulePersistManualInputs()
           }}
           onLogManualJump={handleLogManualJump}
           manualLegJumps={manualLegJumps}

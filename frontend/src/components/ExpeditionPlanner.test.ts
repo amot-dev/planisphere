@@ -724,9 +724,9 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         onCancelRoute: () => {},
         onToggleManualMode: () => {},
         onCompleteSpanshJump: () => {},
-        manualDistanceInput: '',
+        manualDistanceInput: '412.5',
         onChangeManualDistance: () => {},
-        manualTritiumInput: '',
+        manualTritiumInput: '59',
         onChangeManualTritium: () => {},
         onLogManualJump: () => {},
         manualLegJumps: 2,
@@ -744,6 +744,8 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(manualWithStop).toContain('Existing jumps remain logged in your expedition statistics.')
     expect(manualWithStop).toContain('Sol')
     expect(manualWithStop).toContain('Colonia')
+    expect(manualWithStop).toContain('value="412.5"')
+    expect(manualWithStop).toContain('value="59"')
     expect(manualWithStop).toContain('Mark FC Stop Arrival')
     expect(manualWithStop).toContain(
       'Mark Fleet Carrier arrival at Colonia and close the carrier plotter',
@@ -805,6 +807,13 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
               fuelInTank: 932,
               hasIcyRing: true,
             },
+            {
+              systemName: 'Gandharvi',
+              distanceLy: 310.4,
+              tritiumUsed: 44,
+              fuelInTank: 888,
+              hasIcyRing: false,
+            },
           ],
         }),
         jumpIndex: 0,
@@ -831,6 +840,8 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     expect(spanshModeHtml).toContain('Colonia')
     expect(spanshModeHtml).not.toContain('Beagle Point')
+    expect(spanshModeHtml).toContain('805.6 Ly')
+    expect(spanshModeHtml).toMatch(/~(?:<!-- -->)?112(?:<!-- -->)? t/)
 
     const lockedFcRowHtml = renderToString(
       createElement(WaypointRowItem, {
