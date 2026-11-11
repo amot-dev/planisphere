@@ -847,3 +847,96 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Errorf("expected covered ly 250.0 after thirdWaypoint visit, got %v", planAfterFinalWaypointVisit.CoveredLy)
 	}
 }
+
+func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testing.T) {
+	databaseConnection, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatal(openError)
+	}
+	defer databaseConnection.Close()
+
+	stats.InvalidateLedgerCache()
+	expedition.InvalidateOriginMetricsCache()
+
+	if _, execError := databaseConnection.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Jameson', 1, '2026-01-01T00:00:00Z')`); execError != nil {
+		testingContext.Fatal(execError)
+	}
+
+	// Insert pre-expedition organic scan and sale so origin realization is non-zero.
+	if _, execError := databaseConnection.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, raw_json, ingested_at)
+		VALUES ('ev-org-scan', '2026-01-01T10:00:00Z', 'ScanOrganic', 'Sol', 10477373803, 1, '{"timestamp":"2026-01-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":10477373803,"Body":1}', '2026-01-01T10:00:00Z')`); execError != nil {
+		testingContext.Fatal(execError)
+	}
+	if _, execError := databaseConnection.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, raw_json, ingested_at)
+		VALUES ('ev-org-sell', '2026-01-01T11:00:00Z', 'SellOrganicData', 'Sol', 10477373803, 1, '{"timestamp":"2026-01-01T11:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}', '2026-01-01T11:00:00Z')`); execError != nil {
+		testingContext.Fatal(execError)
+	}
+
+	expeditionRecord, createError := expedition.Create(databaseConnection, "Realization Cache Test", "")
+	if createError != nil {
+		testingContext.Fatal(createError)
+	}
+	if _, execError := databaseConnection.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T12:00:00Z' WHERE id = ?`, expeditionRecord.ID); execError != nil {
+		testingContext.Fatal(execError)
+	}
+
+	existingRows, listRowsError := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listRowsError != nil || len(existingRows) != 1 {
+		testingContext.Fatalf("expected 1 initial row, got %d (error: %v)", len(existingRows), listRowsError)
+	}
+	originWaypoint := existingRows[0]
+	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 18)
+
+	originVisitedAt := "2026-01-01T12:00:00Z"
+	secondVisitedAt := "2026-01-02T12:00:00Z"
+	if _, execError := databaseConnection.Exec(`UPDATE expedition_rows SET system_name = 'Sol', visited_at = ? WHERE id = ?`, originVisitedAt, originWaypoint.ID); execError != nil {
+		testingContext.Fatal(execError)
+	}
+	if _, execError := databaseConnection.Exec(`UPDATE expedition_rows SET system_name = 'Acamar', visited_at = ? WHERE id = ?`, secondVisitedAt, secondWaypoint.ID); execError != nil {
+		testingContext.Fatal(execError)
+	}
+
+	// First call populates the origin cache (both Metrics and Realization).
+	firstOriginDetails, firstDetailsError := expedition.Details(databaseConnection, originWaypoint.ID)
+	if firstDetailsError != nil {
+		testingContext.Fatalf("first Details call for origin waypoint failed: %v", firstDetailsError)
+	}
+	if firstOriginDetails.Realization.TotalRealized != 19010800 {
+		testingContext.Fatalf("expected origin TotalRealized 19010800, got %d", firstOriginDetails.Realization.TotalRealized)
+	}
+
+	// Insert a corrupt SellExplorationData row with non-integer system_address and invalidate the ledger cache.
+	// Engine.Compute ignores SellExplorationData, whereas Engine.ComputeRealization scans it and returns a scan error.
+	if _, execError := databaseConnection.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, ingested_at)
+		VALUES ('ev-corrupt-sale', '2026-01-02T00:00:00Z', 'SellExplorationData', 'Acamar', 'not-an-integer', '{}', '2026-01-02T00:00:00Z')`); execError != nil {
+		testingContext.Fatal(execError)
+	}
+	stats.InvalidateLedgerCache()
+
+	// Because origin Realization is cached in originCacheEntry alongside Metrics, calling Details on originWaypoint succeeds from cache.
+	cachedOriginDetails, cachedDetailsError := expedition.Details(databaseConnection, originWaypoint.ID)
+	if cachedDetailsError != nil {
+		testingContext.Fatalf("expected cached origin Details to succeed without recomputing realization, got error: %v", cachedDetailsError)
+	}
+	if cachedOriginDetails.Realization.TotalRealized != 19010800 {
+		testingContext.Errorf("expected cached origin TotalRealized 19010800, got %d", cachedOriginDetails.Realization.TotalRealized)
+	}
+
+	// Calling Details on secondWaypoint (leg kind) must propagate the ComputeRealization error.
+	if _, legDetailsError := expedition.Details(databaseConnection, secondWaypoint.ID); legDetailsError == nil {
+		testingContext.Errorf("expected Details on leg waypoint to propagate ComputeRealization error, got nil")
+	}
+
+	// After InvalidateOriginMetricsCache, calling Details on originWaypoint must recompute and propagate the ComputeRealization error.
+	expedition.InvalidateOriginMetricsCache()
+	if _, recomputedOriginError := expedition.Details(databaseConnection, originWaypoint.ID); recomputedOriginError == nil {
+		testingContext.Errorf("expected Details on origin waypoint after cache invalidation to propagate ComputeRealization error, got nil")
+	}
+
+	// Clean up corrupt row and caches so subsequent tests start cleanly.
+	if _, execError := databaseConnection.Exec(`DELETE FROM journal_events WHERE event_uid = 'ev-corrupt-sale'`); execError != nil {
+		testingContext.Fatal(execError)
+	}
+	stats.InvalidateLedgerCache()
+	expedition.InvalidateOriginMetricsCache()
+}

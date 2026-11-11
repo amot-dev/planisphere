@@ -95,19 +95,26 @@ type shipState struct {
 	name      string
 }
 
+type originCacheEntry struct {
+	metrics     stats.Metrics
+	realization stats.RealizationBreakdown
+}
+
 var (
 	shipCacheMu      sync.Mutex
 	shipCacheMap           = make(map[string][]shipState)
 	lastMaxJournalID int64 = -1
 
 	originMetricsMu    sync.Mutex
-	originMetricsCache = make(map[string]stats.Metrics)
+	originMetricsCache = make(map[string]originCacheEntry)
+	originMetricsGen   uint64
 )
 
-// InvalidateOriginMetricsCache clears the cached origin waypoint metrics.
+// InvalidateOriginMetricsCache clears the cached origin waypoint metrics and realization breakdown.
 func InvalidateOriginMetricsCache() {
 	originMetricsMu.Lock()
-	originMetricsCache = make(map[string]stats.Metrics)
+	originMetricsCache = make(map[string]originCacheEntry)
+	originMetricsGen++
 	originMetricsMu.Unlock()
 }
 
@@ -703,32 +710,46 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 		return waypointDetails, nil
 	}
 
-	engine := stats.NewEngine(conn)
+	statsEngine := stats.NewEngine(conn)
 
 	if selfNumber == 1 {
 		waypointDetails.Kind = "origin"
 		waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, ed.ToGalactic(targetRow.VisitedAt)
-		var first sql.NullString
-		_ = conn.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&first)
-		waypointDetails.From, waypointDetails.FromGalactic = first.String, ed.ToGalactic(first.String)
+		var firstTimestamp sql.NullString
+		_ = conn.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstTimestamp)
+		waypointDetails.From, waypointDetails.FromGalactic = firstTimestamp.String, ed.ToGalactic(firstTimestamp.String)
 
-		cacheKey := fmt.Sprintf("%d|%s|%s", targetRow.ExpeditionID, first.String, targetRow.VisitedAt)
+		cacheKey := fmt.Sprintf("%d|%s|%s", targetRow.ExpeditionID, firstTimestamp.String, targetRow.VisitedAt)
 		originMetricsMu.Lock()
-		cached, ok := originMetricsCache[cacheKey]
+		cachedOriginEntry, isOriginCached := originMetricsCache[cacheKey]
+		originMetricsGeneration := originMetricsGen
 		originMetricsMu.Unlock()
-		if ok {
-			waypointDetails.Metrics = cached
+		if isOriginCached {
+			waypointDetails.Metrics = cachedOriginEntry.metrics
+			waypointDetails.Realization = cachedOriginEntry.realization
 		} else {
-			computed, computeError := engine.Compute(stats.Range{After: "", Until: targetRow.VisitedAt}, nil)
+			originRange := stats.Range{After: "", Until: targetRow.VisitedAt}
+			originMetrics, computeError := statsEngine.Compute(originRange, nil)
 			if computeError != nil {
 				return waypointDetails, computeError
 			}
-			waypointDetails.Metrics = computed
+			originRealization, realizationError := statsEngine.ComputeRealization(originRange, nil)
+			if realizationError != nil {
+				return waypointDetails, realizationError
+			}
+			waypointDetails.Metrics = originMetrics
+			waypointDetails.Realization = originRealization
+			// Guard cache write-back with originMetricsGen so an invalidation that ran while
+			// originMetricsMu was unlocked during computation cannot be overwritten by stale results.
 			originMetricsMu.Lock()
-			originMetricsCache[cacheKey] = computed
+			if originMetricsGen == originMetricsGeneration {
+				originMetricsCache[cacheKey] = originCacheEntry{
+					metrics:     originMetrics,
+					realization: originRealization,
+				}
+			}
 			originMetricsMu.Unlock()
 		}
-		waypointDetails.Realization, _ = engine.ComputeRealization(stats.Range{After: "", Until: targetRow.VisitedAt}, nil)
 	} else {
 		waypointDetails.Kind = "leg"
 		// The leg starts at the visit of the waypoint visited immediately before this one.
@@ -740,18 +761,23 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 			}
 		}
 		if afterTimestamp == "" {
-			var startTs sql.NullString
-			_ = conn.QueryRow(`SELECT COALESCE(start_timestamp, '') FROM expeditions WHERE id = ?`, targetRow.ExpeditionID).Scan(&startTs)
-			afterTimestamp = startTs.String
+			var startTimestamp sql.NullString
+			_ = conn.QueryRow(`SELECT COALESCE(start_timestamp, '') FROM expeditions WHERE id = ?`, targetRow.ExpeditionID).Scan(&startTimestamp)
+			afterTimestamp = startTimestamp.String
 		}
 		waypointDetails.From, waypointDetails.FromGalactic = afterTimestamp, ed.ToGalactic(afterTimestamp)
 		waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, ed.ToGalactic(targetRow.VisitedAt)
+		legRange := stats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}
 		var computeError error
-		waypointDetails.Metrics, computeError = engine.Compute(stats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, nil)
+		waypointDetails.Metrics, computeError = statsEngine.Compute(legRange, nil)
 		if computeError != nil {
 			return waypointDetails, computeError
 		}
-		waypointDetails.Realization, _ = engine.ComputeRealization(stats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, nil)
+		var realizationError error
+		waypointDetails.Realization, realizationError = statsEngine.ComputeRealization(legRange, nil)
+		if realizationError != nil {
+			return waypointDetails, realizationError
+		}
 	}
 	if startTime, parseStartError := ed.ParseISO(waypointDetails.From); parseStartError == nil {
 		if endTime, parseEndError := ed.ParseISO(waypointDetails.To); parseEndError == nil {

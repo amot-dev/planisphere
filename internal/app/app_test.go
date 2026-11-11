@@ -416,4 +416,70 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 	}
 }
 
+func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+
+	testApp.liveStatsMu.Lock()
+	initialLiveStatsGeneration := testApp.liveStatsGen
+	testApp.liveStatsCache["sample-key"] = cachedLiveStats{}
+	testApp.liveStatsMu.Unlock()
+
+	testApp.invalidateLiveStatsCache()
+
+	testApp.liveStatsMu.Lock()
+	afterLiveInvalidationGeneration := testApp.liveStatsGen
+	liveCacheSizeAfterLiveInvalidation := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+
+	if afterLiveInvalidationGeneration != initialLiveStatsGeneration+1 {
+		testingContext.Errorf("expected liveStatsGen to increment from %d to %d, got %d", initialLiveStatsGeneration, initialLiveStatsGeneration+1, afterLiveInvalidationGeneration)
+	}
+	if liveCacheSizeAfterLiveInvalidation != 0 {
+		testingContext.Errorf("expected liveStatsCache to be empty after invalidateLiveStatsCache, got %d entries", liveCacheSizeAfterLiveInvalidation)
+	}
+
+	testApp.careerStartMu.Lock()
+	initialCareerStartGeneration := testApp.careerStartGen
+	testApp.careerStartTimestamp = "2025-01-01T00:00:00Z"
+	testApp.careerStartGalactic = "01 JAN 3311"
+	testApp.careerStartValid = true
+	testApp.careerStartMu.Unlock()
+
+	testApp.liveStatsMu.Lock()
+	testApp.liveStatsCache["another-key"] = cachedLiveStats{}
+	testApp.liveStatsMu.Unlock()
+
+	testApp.invalidateAllTimeCache()
+
+	testApp.careerStartMu.Lock()
+	afterAllTimeCareerGeneration := testApp.careerStartGen
+	careerStartValidAfterInvalidation := testApp.careerStartValid
+	careerStartTimestampAfterInvalidation := testApp.careerStartTimestamp
+	careerStartGalacticAfterInvalidation := testApp.careerStartGalactic
+	testApp.careerStartMu.Unlock()
+
+	if afterAllTimeCareerGeneration != initialCareerStartGeneration+1 {
+		testingContext.Errorf("expected careerStartGen to increment from %d to %d, got %d", initialCareerStartGeneration, initialCareerStartGeneration+1, afterAllTimeCareerGeneration)
+	}
+	if careerStartValidAfterInvalidation {
+		testingContext.Errorf("expected careerStartValid to be false after invalidateAllTimeCache")
+	}
+	if careerStartTimestampAfterInvalidation != "" || careerStartGalacticAfterInvalidation != "" {
+		testingContext.Errorf("expected careerStart cached strings to be cleared, got timestamp=%q galactic=%q", careerStartTimestampAfterInvalidation, careerStartGalacticAfterInvalidation)
+	}
+
+	testApp.liveStatsMu.Lock()
+	afterAllTimeLiveGeneration := testApp.liveStatsGen
+	liveCacheSizeAfterAllTimeInvalidation := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+
+	if afterAllTimeLiveGeneration != afterLiveInvalidationGeneration+1 {
+		testingContext.Errorf("expected liveStatsGen to increment from %d to %d on invalidateAllTimeCache, got %d", afterLiveInvalidationGeneration, afterLiveInvalidationGeneration+1, afterAllTimeLiveGeneration)
+	}
+	if liveCacheSizeAfterAllTimeInvalidation != 0 {
+		testingContext.Errorf("expected liveStatsCache to be empty after invalidateAllTimeCache, got %d entries", liveCacheSizeAfterAllTimeInvalidation)
+	}
+}
+
+
 

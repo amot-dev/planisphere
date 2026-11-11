@@ -92,12 +92,14 @@ type App struct {
 
 	liveStatsMu    sync.Mutex
 	liveStatsCache map[string]cachedLiveStats
+	liveStatsGen   uint64
 
 	// Career start timestamp caching fields protected by careerStartMu.
 	careerStartMu        sync.Mutex
 	careerStartTimestamp string
 	careerStartGalactic  string
 	careerStartValid     bool
+	careerStartGen       uint64
 
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
@@ -369,6 +371,7 @@ func (app *App) onJournalBatch(scanResult journal.Result) {
 func (app *App) invalidateLiveStatsCache() {
 	app.liveStatsMu.Lock()
 	clear(app.liveStatsCache)
+	app.liveStatsGen++
 	app.liveStatsMu.Unlock()
 }
 
@@ -378,7 +381,10 @@ func (app *App) invalidateAllTimeCache() {
 	app.allTimeRealizationValid = false
 	app.allTimeMu.Unlock()
 	app.careerStartMu.Lock()
+	app.careerStartTimestamp = ""
+	app.careerStartGalactic = ""
 	app.careerStartValid = false
+	app.careerStartGen++
 	app.careerStartMu.Unlock()
 	app.invalidateLiveStatsCache()
 	expedition.InvalidateShipCache()

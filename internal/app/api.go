@@ -1191,6 +1191,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		careerStartGalactic = app.careerStartGalactic
 		app.careerStartMu.Unlock()
 	} else {
+		careerStartGeneration := app.careerStartGen
 		app.careerStartMu.Unlock()
 
 		var earliestSeenTimestamp sql.NullString
@@ -1199,19 +1200,26 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 			_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&earliestSeenTimestamp)
 		}
 
-		app.careerStartMu.Lock()
-		if !app.careerStartValid {
-			if earliestSeenTimestamp.Valid && earliestSeenTimestamp.String != "" {
-				app.careerStartTimestamp = earliestSeenTimestamp.String
-				app.careerStartGalactic = ed.ToGalactic(earliestSeenTimestamp.String)
-			} else {
-				app.careerStartTimestamp = ""
-				app.careerStartGalactic = ""
-			}
-			app.careerStartValid = true
+		var computedCareerStart string
+		var computedCareerStartGalactic string
+		if earliestSeenTimestamp.Valid && earliestSeenTimestamp.String != "" {
+			computedCareerStart = earliestSeenTimestamp.String
+			computedCareerStartGalactic = ed.ToGalactic(earliestSeenTimestamp.String)
 		}
-		careerStart = app.careerStartTimestamp
-		careerStartGalactic = app.careerStartGalactic
+		careerStart = computedCareerStart
+		careerStartGalactic = computedCareerStartGalactic
+
+		// Guard cache write-back with careerStartGen so an invalidation via invalidateAllTimeCache
+		// that ran while careerStartMu was unlocked during the database query cannot be overwritten by stale results.
+		app.careerStartMu.Lock()
+		if !app.careerStartValid && app.careerStartGen == careerStartGeneration {
+			app.careerStartTimestamp = computedCareerStart
+			app.careerStartGalactic = computedCareerStartGalactic
+			app.careerStartValid = true
+		} else if app.careerStartValid {
+			careerStart = app.careerStartTimestamp
+			careerStartGalactic = app.careerStartGalactic
+		}
 		app.careerStartMu.Unlock()
 	}
 
@@ -1235,6 +1243,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 
 		app.liveStatsMu.Lock()
 		cachedEntry, isCached := app.liveStatsCache[cacheKey]
+		liveStatsGeneration := app.liveStatsGen
 		app.liveStatsMu.Unlock()
 
 		var liveMetrics stats.Metrics
@@ -1262,10 +1271,14 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 				return sidebar, computeError
 			}
 
+			// Guard cache write-back with liveStatsGen so an invalidation that ran while
+			// liveStatsMu was unlocked during computation cannot be overwritten by stale results.
 			app.liveStatsMu.Lock()
-			app.liveStatsCache[cacheKey] = cachedLiveStats{
-				metrics:     liveMetrics,
-				realization: liveRealization,
+			if app.liveStatsGen == liveStatsGeneration {
+				app.liveStatsCache[cacheKey] = cachedLiveStats{
+					metrics:     liveMetrics,
+					realization: liveRealization,
+				}
 			}
 			app.liveStatsMu.Unlock()
 		}
