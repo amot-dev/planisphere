@@ -830,6 +830,8 @@ export interface CarrierRouteBottomPanelProps {
   route: app.CarrierRouteResult
   jumpIndex: number
   manualMode: boolean
+  hasNextFcStop?: boolean
+  nextFcStopSystem?: string
   onCancelRoute?: () => void
   onToggleManualMode: () => void
   onCompleteSpanshJump: () => void
@@ -857,6 +859,8 @@ export function CarrierRouteBottomPanel({
   route,
   jumpIndex,
   manualMode,
+  hasNextFcStop,
+  nextFcStopSystem,
   onCancelRoute,
   onToggleManualMode,
   onCompleteSpanshJump,
@@ -877,6 +881,15 @@ export function CarrierRouteBottomPanel({
 }: CarrierRouteBottomPanelProps) {
   const jumps = route.jumps ?? []
   const hasSpanshJumps = jumps.length > 0
+  const effectiveHasNextFcStop =
+    hasNextFcStop !== undefined ? hasNextFcStop : Boolean(route.destination?.trim())
+  const destinationSystem = effectiveHasNextFcStop
+    ? (nextFcStopSystem ?? route.destination ?? '').trim()
+    : !manualMode
+      ? (route.destination ?? '').trim()
+      : ''
+  const destinationDisplay = destinationSystem || '???'
+  const canMarkArrival = effectiveHasNextFcStop && Boolean(destinationSystem)
   const currentDepot =
     depotTritium !== undefined
       ? depotTritium
@@ -885,8 +898,8 @@ export function CarrierRouteBottomPanel({
         : 1000
   const currentSystem =
     jumpIndex === 0
-      ? route.origin || 'Origin'
-      : jumps[Math.min(jumpIndex - 1, jumps.length - 1)]?.systemName || route.destination
+      ? route.origin || '???'
+      : jumps[Math.min(jumpIndex - 1, jumps.length - 1)]?.systemName || destinationDisplay
   const nextHop = jumpIndex < jumps.length ? jumps[jumpIndex] : null
   const hopTritiumRequired = nextHop?.tritiumUsed ?? 0
   const isDepotInsufficient = nextHop !== null && currentDepot < hopTritiumRequired
@@ -908,8 +921,8 @@ export function CarrierRouteBottomPanel({
               : 'PERSONAL CARRIER PLOTTER'}
           </span>
           <span className="font-mono-tabular font-bold text-[#F4ECE4]">
-            {route.origin || 'Origin'} <span className="text-[#a6907c]">→</span>{' '}
-            <span className="text-[#FF7100]">{route.destination || 'Target Waypoint'}</span>
+            {route.origin || '???'} <span className="text-[#a6907c]">→</span>{' '}
+            <span className="text-[#FF7100]">{destinationDisplay}</span>
           </span>
           {!manualMode && (
             <>
@@ -945,10 +958,10 @@ export function CarrierRouteBottomPanel({
             <button
               type="button"
               onClick={onCancelRoute}
-              title="Cancel the remaining hops of this route. Completed jumps will remain logged in your expedition statistics."
-              className="ed-btn-danger"
+              title="Close the carrier plotter. Existing jumps remain logged in your expedition statistics."
+              className="ed-btn"
             >
-              Cancel Remaining Route
+              Close
             </button>
           )}
         </div>
@@ -1140,10 +1153,16 @@ export function CarrierRouteBottomPanel({
 
           <button
             type="button"
+            disabled={!canMarkArrival}
             onClick={onArrive}
+            title={
+              canMarkArrival
+                ? `Mark Fleet Carrier arrival at ${destinationDisplay}`
+                : 'No next Fleet Carrier stop designated in the expedition plan'
+            }
             className="ed-btn-cyan"
           >
-            ARRIVE AT WAYPOINT
+            {`Mark Arrival at ${destinationDisplay}`}
           </button>
         </div>
       )}

@@ -1251,6 +1251,8 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		sidebar.Live = liveMetrics
 		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
 		sidebar.Realization = liveRealization
+	} else {
+		sidebar.Expedition = expeditionRecord.Adjustments
 	}
 	return sidebar, nil
 }

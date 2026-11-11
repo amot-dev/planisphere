@@ -156,6 +156,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  white-space: nowrap;
   background-color: #16100b;
   color: #f4ece4;
   border: 1px solid #472e19;
@@ -188,6 +189,7 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+  white-space: nowrap;
   background-color: #ff7100;
   color: #050506;
   border: 1px solid #ff8c24;
@@ -216,6 +218,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  white-space: nowrap;
   background-color: #08151c;
   color: #00d2ff;
   border: 1px solid #16485c;
@@ -248,6 +251,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  white-space: nowrap;
   background-color: #190909;
   color: #ff4d3d;
   border: 1px solid #4d1915;

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
-import { expedition } from '../../wailsjs/go/models'
+import { CarrierRouteModal } from './CarrierRouteModal'
+import { CarrierRouteBottomPanel } from './PlannerWidgets'
+import { StatsSidebar } from './StatsSidebar'
+import { app, expedition, stats } from '../../wailsjs/go/models'
 
 describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
   const renderPlanner = (plan: expedition.PlanView | null) =>
@@ -609,6 +612,144 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).not.toContain('PLANNED ROUTE:')
     expect(html).not.toContain('REMAINING:')
     expect(html).not.toContain('COVERED:')
+  })
+
+  it('CarrierRouteModal omits Manual Entry Mode and keeps QUERYING SPANSH... single-line', () => {
+    const idleHtml = renderToString(
+      createElement(CarrierRouteModal, {
+        prompt: {
+          targetRowId: 10,
+          origin: 'Sol',
+          destination: 'Colonia',
+          capacityUsed: '5000',
+          depotTritium: '1000',
+          carrierType: 'player',
+          loading: false,
+        },
+        onClose: () => {},
+        onUpdate: () => {},
+        onStart: () => {},
+      }),
+    )
+
+    expect(idleHtml).not.toContain('Manual Entry Mode')
+    expect(idleHtml).toContain('PLOT VIA SPANSH')
+    expect(idleHtml).toContain('whitespace-nowrap')
+
+    const loadingHtml = renderToString(
+      createElement(CarrierRouteModal, {
+        prompt: {
+          targetRowId: 10,
+          origin: 'Sol',
+          destination: 'Colonia',
+          capacityUsed: '5000',
+          depotTritium: '1000',
+          carrierType: 'player',
+          loading: true,
+        },
+        onClose: () => {},
+        onUpdate: () => {},
+        onStart: () => {},
+      }),
+    )
+
+    expect(loadingHtml).toContain('QUERYING SPANSH...')
+    expect(loadingHtml).toContain('whitespace-nowrap')
+  })
+
+  it('StatsSidebar renders LOG JUMP button in Expedition scope instead of CARRIER LOG', () => {
+    const html = renderToString(
+      createElement(StatsSidebar, {
+        sidebarStats: null,
+        statsLoading: false,
+        modesState: null,
+        filter: stats.Filter.createFrom({ enabled: false, modes: [] }),
+        onFilterChange: () => {},
+        onQuickSwitchMode: () => {},
+        onLogCarrierJump: () => {},
+      }),
+    )
+
+    expect(html).toContain('LOG JUMP')
+    expect(html).not.toContain('CARRIER LOG')
+  })
+
+  it('CarrierRouteBottomPanel renders Close button with tooltip, start/end indicator with ??? fallback, and Mark Arrival button', () => {
+    const manualWithStop = renderToString(
+      createElement(CarrierRouteBottomPanel, {
+        route: app.CarrierRouteResult.createFrom({
+          origin: 'Sol',
+          destination: 'Colonia',
+          carrierType: 'player',
+          manualMode: true,
+          jumps: [],
+        }),
+        jumpIndex: 0,
+        manualMode: true,
+        hasNextFcStop: true,
+        nextFcStopSystem: 'Colonia',
+        onCancelRoute: () => {},
+        onToggleManualMode: () => {},
+        onCompleteSpanshJump: () => {},
+        manualDistanceInput: '',
+        onChangeManualDistance: () => {},
+        manualTritiumInput: '',
+        onChangeManualTritium: () => {},
+        onLogManualJump: () => {},
+        manualLegJumps: 2,
+        manualLegDistance: 950,
+        manualLegTritium: 180,
+        loggingJump: false,
+        copiedNextJump: false,
+        onCopySystem: () => {},
+        onArrive: () => {},
+      }),
+    )
+
+    expect(manualWithStop).not.toContain('Cancel Remaining Route')
+    expect(manualWithStop).toContain('Close')
+    expect(manualWithStop).toContain('Existing jumps remain logged in your expedition statistics.')
+    expect(manualWithStop).toContain('Sol')
+    expect(manualWithStop).toContain('Colonia')
+    expect(manualWithStop).toContain('Mark Arrival at Colonia')
+    expect(manualWithStop).not.toContain('ARRIVE AT WAYPOINT')
+    expect(manualWithStop).not.toMatch(/disabled=""[^>]*>Mark Arrival at Colonia/)
+
+    const manualWithoutStop = renderToString(
+      createElement(CarrierRouteBottomPanel, {
+        route: app.CarrierRouteResult.createFrom({
+          origin: 'Sol',
+          destination: '',
+          carrierType: 'player',
+          manualMode: true,
+          jumps: [],
+        }),
+        jumpIndex: 0,
+        manualMode: true,
+        hasNextFcStop: false,
+        nextFcStopSystem: '',
+        onCancelRoute: () => {},
+        onToggleManualMode: () => {},
+        onCompleteSpanshJump: () => {},
+        manualDistanceInput: '',
+        onChangeManualDistance: () => {},
+        manualTritiumInput: '',
+        onChangeManualTritium: () => {},
+        onLogManualJump: () => {},
+        manualLegJumps: 0,
+        manualLegDistance: 0,
+        manualLegTritium: 0,
+        loggingJump: false,
+        copiedNextJump: false,
+        onCopySystem: () => {},
+        onArrive: () => {},
+      }),
+    )
+
+    expect(manualWithoutStop).toContain('Sol')
+    expect(manualWithoutStop).toContain('???')
+    expect(manualWithoutStop).toContain('Mark Arrival at ???')
+    expect(manualWithoutStop).toMatch(/disabled=""[^>]*>Mark Arrival at \?\?\?/)
   })
 })
 

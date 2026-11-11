@@ -12,7 +12,7 @@ export interface CarrierRouteModalProps {
   prompt: CarrierRoutePromptState
   onClose: () => void
   onUpdate: (updater: (prev: CarrierRoutePromptState) => CarrierRoutePromptState) => void
-  onStart: (forceManual: boolean) => void
+  onStart: () => void
 }
 
 export function CarrierRouteModal({
@@ -144,33 +144,23 @@ export function CarrierRouteModal({
           </div>
         </div>
 
-        <div className="px-4 py-3 bg-[#140e09] border-t border-[#3d2816] flex items-center justify-between gap-2">
+        <div className="px-4 py-3 bg-[#140e09] border-t border-[#3d2816] flex items-center justify-end gap-2">
           <button
             type="button"
             disabled={prompt.loading}
-            onClick={() => onStart(true)}
-            className="ed-btn"
+            onClick={onClose}
+            className="px-3 py-1.5 text-[#a6907c] hover:text-[#F4ECE4] uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
           >
-            Manual Entry Mode
+            Cancel
           </button>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={prompt.loading}
-              onClick={onClose}
-              className="px-3 py-1.5 text-[#a6907c] hover:text-[#F4ECE4] uppercase font-bold tracking-wider cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={prompt.loading}
-              onClick={() => onStart(false)}
-              className="ed-btn-cyan"
-            >
-              {prompt.loading ? 'QUERYING SPANSH...' : 'PLOT VIA SPANSH'}
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={prompt.loading}
+            onClick={onStart}
+            className="ed-btn-cyan whitespace-nowrap"
+          >
+            {prompt.loading ? 'QUERYING SPANSH...' : 'PLOT VIA SPANSH'}
+          </button>
         </div>
       </div>
     </div>

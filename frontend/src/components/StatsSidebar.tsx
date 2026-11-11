@@ -13,6 +13,7 @@ export interface StatsSidebarProps {
   onQuickSwitchMode: (modeId: number) => void
   onToggleCollapse?: () => void
   onRefreshStats?: () => void
+  onLogCarrierJump?: () => void
 }
 
 export const StatsSidebar = memo(function StatsSidebar({
@@ -24,6 +25,7 @@ export const StatsSidebar = memo(function StatsSidebar({
   onFilterChange,
   onQuickSwitchMode,
   onToggleCollapse,
+  onLogCarrierJump,
 }: StatsSidebarProps) {
   const [scanExpanded, setScanExpanded] = useState(true)
   const [organicExpanded, setOrganicExpanded] = useState(true)
@@ -391,9 +393,20 @@ export const StatsSidebar = memo(function StatsSidebar({
                 ? 'Personal Carrier Operations'
                 : 'Expedition Carrier Operations'}
             </span>
-            <span className="text-[9px] text-[#a6907c] font-mono-tabular">
-              {viewScope === 'allTime' ? 'OWNED VESSEL' : 'CARRIER LOG'}
-            </span>
+            {viewScope === 'allTime' ? (
+              <span className="text-[9px] text-[#a6907c] font-mono-tabular">
+                OWNED VESSEL
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={onLogCarrierJump}
+                title="Open Fleet Carrier plotter in manual jump logging mode"
+                className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] transition cursor-pointer whitespace-nowrap"
+              >
+                LOG JUMP
+              </button>
+            )}
           </div>
           <div className="divide-y divide-[#24180e]">
             <StatRow

@@ -40,6 +40,7 @@ export interface ExpeditionPlannerProps {
   onRefreshPlan: () => void
   onRefreshAll: () => void
   onBusyChange: (busyMessage: string | null) => void
+  onRegisterManualPlotter?: (openManualPlotter: () => void) => void
 }
 
 const rowStyle: CSSProperties = {
@@ -56,6 +57,7 @@ export function ExpeditionPlanner({
   onRefreshPlan,
   onRefreshAll,
   onBusyChange,
+  onRegisterManualPlotter,
 }: ExpeditionPlannerProps) {
   const [expandedRowIds, setExpandedRowIds] = useState<Record<number, boolean>>({})
   const expandedRowIdsRef = useRef<Record<number, boolean>>(expandedRowIds)
@@ -154,7 +156,14 @@ export function ExpeditionPlanner({
     GetActiveCarrierRoute(expeditionId)
       .then((saved) => {
         if (cancelled) return
-        if (saved && saved.route && saved.targetRowId > 0) {
+        if (
+          saved &&
+          saved.route &&
+          (saved.targetRowId > 0 ||
+            saved.manualMode ||
+            saved.route.manualMode ||
+            (saved.route.jumps && saved.route.jumps.length > 0))
+        ) {
           setActiveCarrierRoute(saved.route)
           setActiveCarrierTargetRowId(saved.targetRowId)
           setCarrierJumpIndex(saved.jumpIdx || 0)
@@ -191,7 +200,7 @@ export function ExpeditionPlanner({
     if (!expeditionId || expeditionId <= 0) return
     const route = updates.route !== undefined ? updates.route : activeCarrierRoute
     const targetRowId = updates.targetRowId !== undefined ? updates.targetRowId : activeCarrierTargetRowId
-    if (!route || targetRowId <= 0) {
+    if (!route) {
       ClearActiveCarrierRoute(expeditionId).catch(console.error)
       return
     }
@@ -437,10 +446,18 @@ export function ExpeditionPlanner({
         row: { ...rowView.row, fcStop: nextFcStop, fcArrived: nextFcStop ? rowView.row.fcArrived : false },
       })
     })
+    let nextFcId = 0
+    for (const rowView of optimisticRows) {
+      if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && !rowView.row.fcArrived) {
+        nextFcId = rowView.row.id
+        break
+      }
+    }
     onPlanOptimisticUpdate(
       expedition.PlanView.createFrom({
         ...plan,
         rows: optimisticRows,
+        nextFcStopRowId: nextFcId,
       }),
     )
 
@@ -649,10 +666,29 @@ export function ExpeditionPlanner({
     }
   }
 
-  async function openCarrierRoutePrompt(rowIndex: number, targetRow: expedition.Row) {
-    if (!plan) return
+  const nextFcStopEntry = useMemo(() => {
+    if (!plan?.rows) return null
+    if (plan.nextFcStopRowId > 0) {
+      const idx = plan.rows.findIndex((rv) => rv?.row?.id === plan.nextFcStopRowId)
+      if (idx >= 0 && plan.rows[idx].row.fcStop && !plan.rows[idx].row.fcArrived) {
+        return { row: plan.rows[idx].row, index: idx }
+      }
+    }
+    const fallbackIdx = plan.rows.findIndex(
+      (rv) => rv?.row?.rowType === 'waypoint' && rv.row.fcStop && !rv.row.fcArrived,
+    )
+    if (fallbackIdx >= 0) {
+      return { row: plan.rows[fallbackIdx].row, index: fallbackIdx }
+    }
+    return null
+  }, [plan])
 
-    // Primary: use the latest known carrier location from the journal archive
+  const nextFcStopSystem = nextFcStopEntry
+    ? (drafts[nextFcStopEntry.row.id]?.systemName ?? nextFcStopEntry.row.systemName ?? '').trim()
+    : ''
+
+  async function resolveCarrierStartSystem(upToIndex: number): Promise<string> {
+    if (!plan) return ''
     let startSystem = ''
     try {
       const lastKnownCarrierLocation = await GetCarrierLastLocation()
@@ -663,11 +699,14 @@ export function ExpeditionPlanner({
       startSystem = ''
     }
 
+    const rows = plan.rows ?? []
+    const searchFrom = Math.min(upToIndex - 1, rows.length - 1)
+
     // Fallback: most recent preceding Fleet Carrier stop in the expedition plan
     if (!startSystem) {
-      for (let i = rowIndex - 1; i >= 0; i--) {
-        const candidate = plan.rows[i].row
-        if (candidate.rowType === 'waypoint' && candidate.fcStop && candidate.systemName?.trim()) {
+      for (let i = searchFrom; i >= 0; i--) {
+        const candidate = rows[i]?.row
+        if (candidate?.rowType === 'waypoint' && candidate.fcStop && candidate.systemName?.trim()) {
           startSystem = candidate.systemName.trim()
           break
         }
@@ -676,84 +715,149 @@ export function ExpeditionPlanner({
 
     // Secondary fallback: immediately preceding waypoint in the plan
     if (!startSystem) {
-      for (let i = rowIndex - 1; i >= 0; i--) {
-        const candidate = plan.rows[i].row
-        if (candidate.rowType === 'waypoint' && candidate.systemName?.trim()) {
+      for (let i = searchFrom; i >= 0; i--) {
+        const candidate = rows[i]?.row
+        if (candidate?.rowType === 'waypoint' && candidate.systemName?.trim()) {
           startSystem = candidate.systemName.trim()
           break
         }
       }
     }
 
-    let defaultCapacity = 5000
-    let defaultDepot = 1000
+    if (!startSystem && plan.playerSystem?.trim()) {
+      startSystem = plan.playerSystem.trim()
+    }
+
+    return startSystem
+  }
+
+  async function resolveCarrierDefaults(): Promise<{ capacity: number; depot: number }> {
+    let capacity = 5000
+    let depot = 1000
     try {
       const depotInfo = await GetCarrierDepotInfo()
       if (depotInfo) {
-        if (depotInfo.usedCapacity > 0) defaultCapacity = depotInfo.usedCapacity
-        if (depotInfo.depotTritium > 0) defaultDepot = depotInfo.depotTritium
+        if (depotInfo.usedCapacity > 0) capacity = depotInfo.usedCapacity
+        if (depotInfo.depotTritium > 0) depot = depotInfo.depotTritium
       }
     } catch {
       try {
-        defaultCapacity = await GetDefaultCarrierCapacity()
+        capacity = await GetDefaultCarrierCapacity()
       } catch {
-        defaultCapacity = 5000
+        capacity = 5000
       }
-      defaultDepot = 1000
+      depot = 1000
     }
+    return { capacity, depot }
+  }
+
+  function switchActiveRouteToManualMode() {
+    setManualModeOverride(true)
+    let dist = ''
+    let trit = ''
+    if (
+      activeCarrierRoute?.jumps &&
+      carrierJumpIndex < activeCarrierRoute.jumps.length
+    ) {
+      const currentHop = activeCarrierRoute.jumps[carrierJumpIndex]
+      if (currentHop?.distanceLy !== undefined && currentHop.distanceLy > 0) {
+        dist = String(Math.round(currentHop.distanceLy * 100) / 100)
+      }
+      if (currentHop?.tritiumUsed !== undefined && currentHop.tritiumUsed > 0) {
+        trit = String(currentHop.tritiumUsed)
+      }
+    }
+    setManualDistanceInput(dist)
+    setManualTritiumInput(trit)
+    persistRouteState({
+      manualMode: true,
+      manualDistInput: dist,
+      manualTritInput: trit,
+    })
+  }
+
+  async function openManualCarrierPlotter() {
+    if (!plan) return
+    if (activeCarrierRoute) {
+      if (!manualModeOverride && !activeCarrierRoute.manualMode) {
+        switchActiveRouteToManualMode()
+      }
+      return
+    }
+
+    const upToIndex = nextFcStopEntry
+      ? nextFcStopEntry.index
+      : lastVisitedIndex >= 0
+        ? lastVisitedIndex + 1
+        : (plan.rows?.length ?? 0)
+    const targetId = nextFcStopEntry ? nextFcStopEntry.row.id : 0
+    const destination = nextFcStopSystem
+    const [startSystem, defaults] = await Promise.all([
+      resolveCarrierStartSystem(upToIndex),
+      resolveCarrierDefaults(),
+    ])
+
+    const manualRoute = app.CarrierRouteResult.createFrom({
+      origin: startSystem,
+      destination,
+      carrierType: 'player',
+      capacityUsed: defaults.capacity,
+      depotTritium: defaults.depot,
+      manualMode: true,
+      totalJumps: 0,
+      totalDistLy: 0,
+      totalTritium: 0,
+      jumps: [],
+    })
+    setActiveCarrierTargetRowId(targetId)
+    setActiveCarrierRoute(manualRoute)
+    setCarrierJumpIndex(0)
+    setManualModeOverride(true)
+    setManualLegJumps(0)
+    setManualLegDistance(0)
+    setManualLegTritium(0)
+    setManualDistanceInput('')
+    setManualTritiumInput('')
+    persistRouteState({
+      route: manualRoute,
+      targetRowId: targetId,
+      jumpIdx: 0,
+      manualMode: true,
+      manualLegJumps: 0,
+      manualLegDist: 0,
+      manualLegTrit: 0,
+      manualDistInput: '',
+      manualTritInput: '',
+    })
+  }
+
+  if (onRegisterManualPlotter) {
+    onRegisterManualPlotter(openManualCarrierPlotter)
+  }
+
+  async function openCarrierRoutePrompt(rowIndex: number, targetRow: expedition.Row) {
+    if (!plan) return
+    const [startSystem, defaults] = await Promise.all([
+      resolveCarrierStartSystem(rowIndex),
+      resolveCarrierDefaults(),
+    ])
     setRoutePrompt({
       targetRowId: targetRow.id,
       origin: startSystem,
       destination: (drafts[targetRow.id]?.systemName ?? targetRow.systemName ?? '').trim(),
-      capacityUsed: String(defaultCapacity),
-      depotTritium: String(defaultDepot),
+      capacityUsed: String(defaults.capacity),
+      depotTritium: String(defaults.depot),
       carrierType: 'player',
       loading: false,
     })
   }
 
-  async function handleStartCarrierRoute(forceManual: boolean) {
+  async function handleStartCarrierRoute() {
     if (!routePrompt) return
     const targetId = routePrompt.targetRowId
     const maxCap = routePrompt.carrierType === 'squadron' ? 60000 : 25000
     const carrierCapacity = Math.max(0, Math.min(maxCap, parseInt(routePrompt.capacityUsed, 10) || 0))
     const carrierDepot = Math.max(0, Math.min(1000, parseInt(routePrompt.depotTritium, 10) || 1000))
-    if (forceManual) {
-      const manualRoute = app.CarrierRouteResult.createFrom({
-        origin: routePrompt.origin.trim(),
-        destination: routePrompt.destination.trim(),
-        carrierType: routePrompt.carrierType,
-        capacityUsed: carrierCapacity,
-        depotTritium: carrierDepot,
-        manualMode: true,
-        totalJumps: 0,
-        totalDistLy: 0,
-        totalTritium: 0,
-        jumps: [],
-      })
-      setActiveCarrierTargetRowId(targetId)
-      setActiveCarrierRoute(manualRoute)
-      setCarrierJumpIndex(0)
-      setManualModeOverride(true)
-      setManualLegJumps(0)
-      setManualLegDistance(0)
-      setManualLegTritium(0)
-      setManualDistanceInput('')
-      setManualTritiumInput('')
-      setRoutePrompt(null)
-      persistRouteState({
-        route: manualRoute,
-        targetRowId: targetId,
-        jumpIdx: 0,
-        manualMode: true,
-        manualLegJumps: 0,
-        manualLegDist: 0,
-        manualLegTrit: 0,
-        manualDistInput: '',
-        manualTritInput: '',
-      })
-      return
-    }
 
     setRoutePrompt((previous) => (previous ? { ...previous, loading: true } : null))
     onBusyChange('PLOTTING SPANSH CARRIER ROUTE')
@@ -983,7 +1087,7 @@ export function ExpeditionPlanner({
   }
 
   async function handleCarrierArriveAtWaypoint() {
-    const targetId = activeCarrierTargetRowId
+    const targetId = nextFcStopEntry?.row.id || activeCarrierTargetRowId
     const expeditionId = plan?.expedition?.id
     if (expeditionId) {
       ClearActiveCarrierRoute(expeditionId).catch(console.error)
@@ -1450,9 +1554,13 @@ export function ExpeditionPlanner({
                 poiName: row.poiName ?? '',
                 notes: row.notes ?? '',
               }
-              const isNextFcStop = Boolean(row.fcStop && !row.fcArrived && row.id === plan.nextFcStopRowId)
+              const isNextFcStop = Boolean(
+                row.fcStop && !row.fcArrived && nextFcStopEntry && row.id === nextFcStopEntry.row.id,
+              )
               const isNextWaypoint = Boolean(rowView.isNextWaypoint || (plan.nextWaypointRowId && row.id === plan.nextWaypointRowId))
-              const hasActiveCarrierRoute = Boolean(activeCarrierRoute && activeCarrierTargetRowId === row.id)
+              const hasActiveCarrierRoute = Boolean(
+                activeCarrierRoute && (activeCarrierTargetRowId === row.id || isNextFcStop),
+              )
 
               return (
                 <WaypointRowItem
@@ -1573,34 +1681,10 @@ export function ExpeditionPlanner({
             Boolean(activeCarrierRoute.manualMode) ||
             !activeCarrierRoute.jumps?.length
           }
+          hasNextFcStop={Boolean(nextFcStopEntry)}
+          nextFcStopSystem={nextFcStopSystem}
           onCancelRoute={handleCancelCarrierRoute}
-          onToggleManualMode={() => {
-            // Once in manual mode, always in manual mode: in manual mode the user can go
-            // wherever they want. After even just one jump, the Spansh route is completely
-            // invalid. Do not allow reverting to Spansh mode once switched.
-            setManualModeOverride(true)
-            let dist = ''
-            let trit = ''
-            if (
-              activeCarrierRoute?.jumps &&
-              carrierJumpIndex < activeCarrierRoute.jumps.length
-            ) {
-              const currentHop = activeCarrierRoute.jumps[carrierJumpIndex]
-              if (currentHop?.distanceLy !== undefined && currentHop.distanceLy > 0) {
-                dist = String(Math.round(currentHop.distanceLy * 100) / 100)
-              }
-              if (currentHop?.tritiumUsed !== undefined && currentHop.tritiumUsed > 0) {
-                trit = String(currentHop.tritiumUsed)
-              }
-            }
-            setManualDistanceInput(dist)
-            setManualTritiumInput(trit)
-            persistRouteState({
-              manualMode: true,
-              manualDistInput: dist,
-              manualTritInput: trit,
-            })
-          }}
+          onToggleManualMode={switchActiveRouteToManualMode}
           onCompleteSpanshJump={handleCompleteSpanshJump}
           manualDistanceInput={manualDistanceInput}
           onChangeManualDistance={(value) => {

@@ -80,6 +80,15 @@ export default function App() {
   const planReqSeq = useRef(0)
   const statsReqSeq = useRef(0)
   const filterRef = useRef(filter)
+  const openManualPlotterRef = useRef<(() => void) | null>(null)
+
+  const handleRegisterManualPlotter = useCallback((fn: () => void) => {
+    openManualPlotterRef.current = fn
+  }, [])
+
+  const handleLogCarrierJump = useCallback(() => {
+    openManualPlotterRef.current?.()
+  }, [])
 
   useEffect(() => {
     activeExpeditionIdRef.current = activeExpeditionId
@@ -496,6 +505,7 @@ export default function App() {
             onQuickSwitchMode={handleQuickSwitchMode}
             onToggleCollapse={toggleSidebarCollapsed}
             onRefreshStats={handleRefreshStats}
+            onLogCarrierJump={handleLogCarrierJump}
           />
         </ErrorBoundary>
 
@@ -507,6 +517,7 @@ export default function App() {
             onRefreshPlan={handleRefreshPlan}
             onRefreshAll={refreshPlanAndStats}
             onBusyChange={setBusyAction}
+            onRegisterManualPlotter={handleRegisterManualPlotter}
           />
         </ErrorBoundary>
       </main>
