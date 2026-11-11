@@ -135,23 +135,45 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 
 	app.dbMu.RLock()
 	currentPath := app.dbPath
+	isDebugMode := app.debugMode
 	app.dbMu.RUnlock()
 
 	if dbPath != currentPath {
-		if openError := app.openAndWireDB(dbPath); openError != nil {
+		targetPath := dbPath
+		if isDebugMode && dbPath != ":memory:" {
+			snapshotPath, snapshotError := db.CreateDebugSnapshot(dbPath)
+			if snapshotError != nil {
+				return Settings{}, snapshotError
+			}
+			targetPath = snapshotPath
+		}
+		if openError := app.openAndWireDB(targetPath); openError != nil {
+			if isDebugMode && targetPath != dbPath {
+				db.RemoveDebugSnapshot(targetPath)
+			}
 			return Settings{}, openError
 		}
-		app.dbMu.RLock()
+		var previousTempPath string
+		app.dbMu.Lock()
+		if isDebugMode && targetPath != dbPath {
+			previousTempPath = app.debugTempDBPath
+			app.debugTempDBPath = targetPath
+		}
 		setupDone := app.setupCompleted()
 		watcher := app.watcher
 		jDir := app.journalDir()
-		app.dbMu.RUnlock()
+		app.dbMu.Unlock()
+		if previousTempPath != "" && previousTempPath != targetPath {
+			db.RemoveDebugSnapshot(previousTempPath)
+		}
 		if setupDone && watcher != nil {
 			watcher.Start(app.ctx, jDir)
 		}
 	}
-	if saveError := db.SaveConfiguredPath(dbPath); saveError != nil {
-		return Settings{}, saveError
+	if !isDebugMode {
+		if saveError := db.SaveConfiguredPath(dbPath); saveError != nil {
+			return Settings{}, saveError
+		}
 	}
 	app.changed("settings", 0)
 	return app.GetSettings()

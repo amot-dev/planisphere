@@ -15,21 +15,32 @@ WAILS ?= $(shell command -v wails 2>/dev/null || \
 # Modern Linux distros (Ubuntu 24.04+, Debian 12+, Arch, Fedora) use WebKitGTK 4.1
 UNAME_S := $(shell uname -s)
 BUILD_TAGS :=
+DEBUG_BUILD_TAGS := -tags debug
 ifeq ($(UNAME_S),Linux)
   ifeq ($(shell pkg-config --exists webkit2gtk-4.1 2>/dev/null && echo yes),yes)
     BUILD_TAGS := -tags webkit2_41
+    DEBUG_BUILD_TAGS := -tags webkit2_41,debug
   endif
 endif
 
 ifeq ($(OS),Windows_NT)
   TARGET_BIN := build/bin/planisphere.exe
   RUN_CMD := $(TARGET_BIN)
+  DEBUG_BIN := build/bin/planisphere-debug.exe
+  DEBUG_OUT := planisphere-debug.exe
+  DEBUG_RUN_CMD := $(DEBUG_BIN)
 else ifeq ($(UNAME_S),Darwin)
   TARGET_BIN := build/bin/Planisphere.app
   RUN_CMD := open $(TARGET_BIN)
+  DEBUG_BIN := build/bin/Planisphere-debug.app
+  DEBUG_OUT := Planisphere-debug.app
+  DEBUG_RUN_CMD := open $(DEBUG_BIN)
 else
   TARGET_BIN := build/bin/planisphere
   RUN_CMD := ./$(TARGET_BIN)
+  DEBUG_BIN := build/bin/planisphere-debug
+  DEBUG_OUT := planisphere-debug
+  DEBUG_RUN_CMD := ./$(DEBUG_BIN)
 endif
 
 # Source file dependencies for incremental compilation
@@ -71,10 +82,15 @@ all: build
 # Build the desktop binary
 build: $(TARGET_BIN)
 
-# Start live development server with hot reloading
-dev: internal/version/version.go $(NODE_MODULES_STAMP)
-	@echo "==> Starting Wails live development server..."
-	$(WAILS) dev $(BUILD_TAGS)
+# Compile debug desktop binary with temporary database isolation
+$(DEBUG_BIN): $(GO_SOURCES) $(FRONTEND_SOURCES) internal/version/version.go $(NODE_MODULES_STAMP) wails.json
+	@echo "==> Building debug binary with Wails ($(WAILS))..."
+	$(WAILS) build $(DEBUG_BUILD_TAGS) -o $(DEBUG_OUT)
+
+# Build and run the debug desktop application using a temporary /tmp database snapshot
+dev: $(DEBUG_BIN)
+	@echo "==> Running Planisphere (Debug Mode)..."
+	$(DEBUG_RUN_CMD)
 
 # Run the desktop application (smart incremental execution)
 run: $(TARGET_BIN)

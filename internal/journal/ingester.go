@@ -251,7 +251,10 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 				first_timestamp = excluded.first_timestamp, last_timestamp = excluded.last_timestamp,
 				updated_at = excluded.updated_at`,
 			name, path, newOffset, state.lines, size, state.stored, state.first, state.last, now)
-		return execError
+		if execError != nil {
+			return execError
+		}
+		return db.AdvanceIngestWatermark(transaction, now)
 	})
 	if txError != nil {
 		return result, txError
@@ -565,7 +568,7 @@ func (ingester *Ingester) ImportEDDiscoveryDB(ctx context.Context, eddPath strin
 				name, filePaths[name], count, count, fileFirst[name], fileLast[name], now)
 			result.FilesUpdated++
 		}
-		return nil
+		return db.AdvanceIngestWatermark(transaction, now)
 	})
 	reportProgress(total, total, result.FilesScanned, "Complete")
 	return result, txError

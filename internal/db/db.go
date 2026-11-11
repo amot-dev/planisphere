@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -108,6 +109,85 @@ func SaveConfiguredPath(dbPath string) error {
 		return marshalError
 	}
 	return os.WriteFile(cfgFile, append(data, '\n'), 0o644)
+}
+
+// CreateDebugSnapshot allocates a unique temporary database path in the OS
+// temporary directory and, if sourcePath exists and is non-empty, copies
+// sourcePath (along with any non-empty WAL companion file) using read-only
+// file descriptors so the source database is never opened or mutated by SQLite.
+func CreateDebugSnapshot(sourcePath string) (string, error) {
+	tempFile, createTempError := os.CreateTemp("", "planisphere-debug-*.db")
+	if createTempError != nil {
+		return "", fmt.Errorf("create debug snapshot temp file: %w", createTempError)
+	}
+	tempPath := tempFile.Name()
+	_ = tempFile.Close()
+
+	trimmedSourcePath := strings.TrimSpace(sourcePath)
+	if trimmedSourcePath == "" || trimmedSourcePath == ":memory:" {
+		_ = os.Remove(tempPath)
+		return tempPath, nil
+	}
+
+	sourceInfo, statError := os.Stat(trimmedSourcePath)
+	if errors.Is(statError, os.ErrNotExist) {
+		_ = os.Remove(tempPath)
+		return tempPath, nil
+	}
+	if statError != nil {
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("stat source database %s: %w", trimmedSourcePath, statError)
+	}
+	if sourceInfo.Size() == 0 {
+		_ = os.Remove(tempPath)
+		return tempPath, nil
+	}
+
+	if copyError := copyFileReadOnly(trimmedSourcePath, tempPath); copyError != nil {
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, copyError)
+	}
+
+	sourceWALPath := trimmedSourcePath + "-wal"
+	if walInfo, walStatError := os.Stat(sourceWALPath); walStatError == nil && walInfo.Size() > 0 {
+		if walCopyError := copyFileReadOnly(sourceWALPath, tempPath+"-wal"); walCopyError != nil {
+			RemoveDebugSnapshot(tempPath)
+			return "", fmt.Errorf("copy source WAL %s to debug snapshot: %w", sourceWALPath, walCopyError)
+		}
+	}
+
+	return tempPath, nil
+}
+
+// RemoveDebugSnapshot deletes a temporary debug snapshot database along with
+// any SQLite WAL or shared-memory companion files.
+func RemoveDebugSnapshot(tempPath string) {
+	trimmedTempPath := strings.TrimSpace(tempPath)
+	if trimmedTempPath == "" || trimmedTempPath == ":memory:" {
+		return
+	}
+	_ = os.Remove(trimmedTempPath)
+	_ = os.Remove(trimmedTempPath + "-wal")
+	_ = os.Remove(trimmedTempPath + "-shm")
+}
+
+func copyFileReadOnly(sourcePath, destinationPath string) error {
+	sourceFile, openSourceError := os.Open(sourcePath)
+	if openSourceError != nil {
+		return openSourceError
+	}
+	defer sourceFile.Close()
+
+	destinationFile, openDestError := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if openDestError != nil {
+		return openDestError
+	}
+
+	if _, copyError := io.Copy(destinationFile, sourceFile); copyError != nil {
+		_ = destinationFile.Close()
+		return copyError
+	}
+	return destinationFile.Close()
 }
 
 // Open opens (creating if needed) the database at path, applies the

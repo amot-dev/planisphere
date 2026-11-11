@@ -11,6 +11,8 @@ import (
 	"io"
 	"strconv"
 	"time"
+
+	"planisphere/internal/version"
 )
 
 //go:embed schema.sql
@@ -29,6 +31,16 @@ var DefaultModes = []struct {
 const (
 	DefaultExpeditionName        = "Deep Space Expedition I"
 	DefaultExpeditionDescription = "Deep Space Exploration and Scientific Survey Route"
+
+	// IngestSchemaWatermarkKey stores the latest ingested_journals.updated_at
+	// timestamp observed under the current ingestion schema so that any
+	// journals ingested while downgraded to an older binary are detected and
+	// healed on startup.
+	IngestSchemaWatermarkKey = "ingest_schema_watermark"
+
+	// LastAppVersionKey records the application version that last migrated
+	// this database.
+	LastAppVersionKey = "last_app_version"
 )
 
 type migration struct {
@@ -117,7 +129,55 @@ func Migrate(dbConn *sql.DB) error {
 		}
 	}
 
+	if healError := healDowngradedJournalIngest(dbConn); healError != nil {
+		return healError
+	}
+
 	return nil
+}
+
+// AdvanceIngestWatermark records timestamp as the latest ingestion schema
+// watermark in settings, preserving any existing watermark that is already
+// lexicographically newer.
+func AdvanceIngestWatermark(queryer Queryer, timestamp string) error {
+	_, execError := queryer.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = CASE WHEN excluded.value > settings.value THEN excluded.value ELSE settings.value END`,
+		IngestSchemaWatermarkKey, timestamp)
+	return execError
+}
+
+func healDowngradedJournalIngest(dbConn *sql.DB) error {
+	watermark, getWatermarkError := GetSetting(dbConn, IngestSchemaWatermarkKey)
+	if getWatermarkError != nil {
+		return getWatermarkError
+	}
+	if watermark != "" {
+		var downgradedJournalCount int
+		if countError := dbConn.QueryRow(`SELECT COUNT(*) FROM ingested_journals WHERE updated_at > ?`, watermark).Scan(&downgradedJournalCount); countError != nil {
+			return countError
+		}
+		if downgradedJournalCount > 0 {
+			if _, resetError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0 WHERE updated_at > ?`, watermark); resetError != nil {
+				return resetError
+			}
+			if dedupError := migrateSellOrganicUIDsV8(dbConn); dedupError != nil {
+				return dedupError
+			}
+		}
+	}
+
+	var latestJournalUpdatedAt string
+	if maxQueryError := dbConn.QueryRow(`SELECT COALESCE(MAX(updated_at), '') FROM ingested_journals`).Scan(&latestJournalUpdatedAt); maxQueryError != nil {
+		return maxQueryError
+	}
+	currentWatermark := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	if latestJournalUpdatedAt > currentWatermark {
+		currentWatermark = latestJournalUpdatedAt
+	}
+	if setWatermarkError := SetSetting(dbConn, IngestSchemaWatermarkKey, currentWatermark); setWatermarkError != nil {
+		return setWatermarkError
+	}
+	return SetSetting(dbConn, LastAppVersionKey, version.Version)
 }
 
 func migrateDefaultModesSeeded(dbConn *sql.DB) error {

@@ -70,8 +70,13 @@ func main() {
 
 	application := app.New()
 
+	windowTitle := fmt.Sprintf("%s — %s", version.ProductName, version.Tagline)
+	if version.Debug {
+		windowTitle = fmt.Sprintf("%s [DEBUG] — %s", version.ProductName, version.Tagline)
+	}
+
 	runError := wails.Run(&options.App{
-		Title:     fmt.Sprintf("%s — %s", version.ProductName, version.Tagline),
+		Title:     windowTitle,
 		Width:     1600,
 		Height:    960,
 		MaxWidth:  math.MaxInt16,

@@ -24,6 +24,7 @@ import (
 	"planisphere/internal/journal"
 	"planisphere/internal/stats"
 	"planisphere/internal/systems"
+	"planisphere/internal/version"
 )
 
 // Frontend event names.
@@ -64,10 +65,12 @@ type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	dbMu     sync.RWMutex
-	db       *sql.DB
-	dbPath   string
-	ingester *journal.Ingester
+	dbMu            sync.RWMutex
+	db              *sql.DB
+	dbPath          string
+	debugMode       bool
+	debugTempDBPath string
+	ingester        *journal.Ingester
 	watcher  *journal.Watcher
 	resolver *systems.Resolver
 	gec                  *gec.Catalog
@@ -108,6 +111,7 @@ type cachedLiveStats struct {
 // New creates the application service.
 func New() *App {
 	return &App{
+		debugMode:            version.Debug,
 		resolving:            map[int64]bool{},
 		resolvingExpeditions: map[int64]bool{},
 		resolveSem:           make(chan struct{}, 1),
@@ -146,6 +150,25 @@ func (app *App) initialize(ctx context.Context, dbPath string) error {
 			return resolveError
 		}
 		dbPath = configuredPath
+	}
+	if app.debugMode && dbPath != ":memory:" {
+		snapshotPath, snapshotError := db.CreateDebugSnapshot(dbPath)
+		if snapshotError != nil {
+			return snapshotError
+		}
+		log.Printf("debug mode: snapshotted %s -> %s", dbPath, snapshotPath)
+		if openError := app.openAndWireDB(snapshotPath); openError != nil {
+			db.RemoveDebugSnapshot(snapshotPath)
+			return openError
+		}
+		app.dbMu.Lock()
+		previousTempPath := app.debugTempDBPath
+		app.debugTempDBPath = snapshotPath
+		app.dbMu.Unlock()
+		if previousTempPath != "" && previousTempPath != snapshotPath {
+			db.RemoveDebugSnapshot(previousTempPath)
+		}
+		return nil
 	}
 	return app.openAndWireDB(dbPath)
 }
@@ -187,6 +210,10 @@ func (app *App) shutdown(ctx context.Context) {
 	}
 	if app.db != nil {
 		_ = app.db.Close()
+	}
+	if app.debugTempDBPath != "" {
+		db.RemoveDebugSnapshot(app.debugTempDBPath)
+		app.debugTempDBPath = ""
 	}
 }
 

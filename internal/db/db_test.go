@@ -1,10 +1,14 @@
 package db_test
 
 import (
+	"bytes"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"planisphere/internal/db"
+	"planisphere/internal/version"
 )
 
 func TestDefaultPath(t *testing.T) {
@@ -40,6 +44,7 @@ func TestMigrateIdempotency(t *testing.T) {
 		"gec_schema_v5",
 		"realization_events_v6",
 		"source_file_index_v7",
+		"sell_organic_uid_dedup_v8",
 	}
 
 	for _, key := range expectedKeys {
@@ -121,5 +126,164 @@ func TestWithTxRollbackOnPanic(t *testing.T) {
 	}
 	if finalValue != "committed_value" {
 		t.Fatalf("expected setting to be %q, got %q", "committed_value", finalValue)
+	}
+}
+
+func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
+	tempDir := testingContext.TempDir()
+	sourceDBPath := filepath.Join(tempDir, "production.db")
+
+	sourceConn, openSourceError := db.Open(sourceDBPath)
+	if openSourceError != nil {
+		testingContext.Fatalf("Open source DB: %v", openSourceError)
+	}
+	if setError := db.SetSetting(sourceConn, "snapshot_marker", "original_value"); setError != nil {
+		sourceConn.Close()
+		testingContext.Fatalf("SetSetting on source DB: %v", setError)
+	}
+	if closeError := sourceConn.Close(); closeError != nil {
+		testingContext.Fatalf("Close source DB: %v", closeError)
+	}
+
+	originalSourceBytes, readSourceError := os.ReadFile(sourceDBPath)
+	if readSourceError != nil {
+		testingContext.Fatalf("ReadFile source DB: %v", readSourceError)
+	}
+
+	snapshotPath, snapshotError := db.CreateDebugSnapshot(sourceDBPath)
+	if snapshotError != nil {
+		testingContext.Fatalf("CreateDebugSnapshot: %v", snapshotError)
+	}
+	defer db.RemoveDebugSnapshot(snapshotPath)
+
+	if snapshotPath == sourceDBPath {
+		testingContext.Fatalf("expected snapshotPath to differ from sourceDBPath")
+	}
+
+	snapshotConn, openSnapshotError := db.Open(snapshotPath)
+	if openSnapshotError != nil {
+		testingContext.Fatalf("Open snapshot DB: %v", openSnapshotError)
+	}
+	markerValue, getMarkerError := db.GetSetting(snapshotConn, "snapshot_marker")
+	if getMarkerError != nil {
+		snapshotConn.Close()
+		testingContext.Fatalf("GetSetting on snapshot DB: %v", getMarkerError)
+	}
+	if markerValue != "original_value" {
+		snapshotConn.Close()
+		testingContext.Fatalf("expected snapshot_marker 'original_value', got %q", markerValue)
+	}
+
+	if mutateError := db.SetSetting(snapshotConn, "snapshot_marker", "mutated_in_debug"); mutateError != nil {
+		snapshotConn.Close()
+		testingContext.Fatalf("mutate snapshot DB: %v", mutateError)
+	}
+	_ = snapshotConn.Close()
+
+	afterSourceBytes, readAfterError := os.ReadFile(sourceDBPath)
+	if readAfterError != nil {
+		testingContext.Fatalf("ReadFile source DB after debug mutation: %v", readAfterError)
+	}
+	if !bytes.Equal(originalSourceBytes, afterSourceBytes) {
+		testingContext.Fatalf("expected source database file bytes to remain completely unchanged")
+	}
+
+	db.RemoveDebugSnapshot(snapshotPath)
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if _, statError := os.Stat(snapshotPath + suffix); !os.IsNotExist(statError) {
+			testingContext.Errorf("expected %s%s to be removed, stat err: %v", snapshotPath, suffix, statError)
+		}
+	}
+}
+
+func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatalf("Open: %v", openError)
+	}
+	defer dbConn.Close()
+
+	lastVersion, versionError := db.GetSetting(dbConn, db.LastAppVersionKey)
+	if versionError != nil {
+		testingContext.Fatalf("GetSetting(%q): %v", db.LastAppVersionKey, versionError)
+	}
+	if lastVersion != version.Version {
+		testingContext.Fatalf("expected %s to be %q, got %q", db.LastAppVersionKey, version.Version, lastVersion)
+	}
+
+	// Set a known watermark representing when v0.4.0 last ingested journals
+	if setWatermarkError := db.SetSetting(dbConn, db.IngestSchemaWatermarkKey, "2026-05-01T00:00:00Z"); setWatermarkError != nil {
+		testingContext.Fatalf("SetSetting watermark: %v", setWatermarkError)
+	}
+
+	// Insert one journal ingested before the watermark and one ingested after (while downgraded)
+	_, insertOldJournalError := dbConn.Exec(`INSERT INTO ingested_journals
+		(file_name, file_path, byte_offset, line_count, file_size, events_stored, updated_at)
+		VALUES ('Journal.2026-04-01T000000.01.log', '/tmp/old.log', 4096, 50, 4096, 10, '2026-04-01T00:00:00Z')`)
+	if insertOldJournalError != nil {
+		testingContext.Fatalf("insert old journal: %v", insertOldJournalError)
+	}
+
+	_, insertDowngradedJournalError := dbConn.Exec(`INSERT INTO ingested_journals
+		(file_name, file_path, byte_offset, line_count, file_size, events_stored, updated_at)
+		VALUES ('Journal.2099-01-01T000000.01.log', '/tmp/downgraded.log', 8192, 100, 8192, 20, '2099-01-01T00:00:00Z')`)
+	if insertDowngradedJournalError != nil {
+		testingContext.Fatalf("insert downgraded journal: %v", insertDowngradedJournalError)
+	}
+
+	// Insert duplicate SellOrganicData events (one legacy raw_json UID + one canonical UID)
+	rawOrganicJSON := `{"timestamp":"2026-04-15T12:00:00Z","event":"SellOrganicData","MarketID":12345,"BioData":[{"Species":"Stratum","Value":19000000,"Bonus":0}]}`
+	_, insertLegacyOrganicError := dbConn.Exec(`INSERT INTO journal_events
+		(event_uid, timestamp, event, raw_json, ingested_at)
+		VALUES ('legacy-uid-from-v032', '2026-04-15T12:00:00Z', 'SellOrganicData', ?, '2099-01-01T00:00:00Z')`, rawOrganicJSON)
+	if insertLegacyOrganicError != nil {
+		testingContext.Fatalf("insert legacy SellOrganicData: %v", insertLegacyOrganicError)
+	}
+	_, insertDuplicateOrganicError := dbConn.Exec(`INSERT INTO journal_events
+		(event_uid, timestamp, event, raw_json, ingested_at)
+		VALUES ('second-legacy-uid-from-v032', '2026-04-15T12:00:00Z', 'SellOrganicData', ?, '2099-01-01T00:00:00Z')`, rawOrganicJSON)
+	if insertDuplicateOrganicError != nil {
+		testingContext.Fatalf("insert duplicate SellOrganicData: %v", insertDuplicateOrganicError)
+	}
+
+	// Re-running Migrate simulates upgrading back to v0.4.0+
+	if migrateError := db.Migrate(dbConn); migrateError != nil {
+		testingContext.Fatalf("Migrate on re-upgrade: %v", migrateError)
+	}
+
+	var oldOffset, oldLines int64
+	if scanOldError := dbConn.QueryRow(`SELECT byte_offset, line_count FROM ingested_journals WHERE file_name = 'Journal.2026-04-01T000000.01.log'`).Scan(&oldOffset, &oldLines); scanOldError != nil {
+		testingContext.Fatalf("query old journal offset: %v", scanOldError)
+	}
+	if oldOffset != 4096 || oldLines != 50 {
+		testingContext.Errorf("expected pre-watermark journal offset/lines to remain 4096/50, got %d/%d", oldOffset, oldLines)
+	}
+
+	var healedOffset, healedLines int64
+	if scanHealedError := dbConn.QueryRow(`SELECT byte_offset, line_count FROM ingested_journals WHERE file_name = 'Journal.2099-01-01T000000.01.log'`).Scan(&healedOffset, &healedLines); scanHealedError != nil {
+		testingContext.Fatalf("query healed journal offset: %v", scanHealedError)
+	}
+	if healedOffset != 0 || healedLines != 0 {
+		testingContext.Errorf("expected downgraded journal offset/lines to be reset to 0/0, got %d/%d", healedOffset, healedLines)
+	}
+
+	var organicEventCount int
+	var survivingUID string
+	if countOrganicError := dbConn.QueryRow(`SELECT COUNT(*), MIN(event_uid) FROM journal_events WHERE event = 'SellOrganicData'`).Scan(&organicEventCount, &survivingUID); countOrganicError != nil {
+		testingContext.Fatalf("query SellOrganicData count: %v", countOrganicError)
+	}
+	if organicEventCount != 1 {
+		testingContext.Errorf("expected duplicate SellOrganicData rows to be deduplicated to 1 row, got %d", organicEventCount)
+	}
+	if survivingUID == "legacy-uid-from-v032" || survivingUID == "second-legacy-uid-from-v032" {
+		testingContext.Errorf("expected surviving SellOrganicData UID to be normalized to canonical hash, got %q", survivingUID)
+	}
+
+	updatedWatermark, getUpdatedWatermarkError := db.GetSetting(dbConn, db.IngestSchemaWatermarkKey)
+	if getUpdatedWatermarkError != nil {
+		testingContext.Fatalf("GetSetting updated watermark: %v", getUpdatedWatermarkError)
+	}
+	if updatedWatermark != "2099-01-01T00:00:00Z" {
+		testingContext.Errorf("expected watermark to advance to '2099-01-01T00:00:00Z', got %q", updatedWatermark)
 	}
 }
