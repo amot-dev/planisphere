@@ -237,10 +237,10 @@ func (app *App) backgroundStart() {
 	app.runScan()
 	app.dbMu.RLock()
 	watcher := app.watcher
-	jDir := app.journalDir()
+	configuredJournalDir := app.journalDir()
 	app.dbMu.RUnlock()
 	if watcher != nil {
-		watcher.Start(app.ctx, jDir)
+		watcher.Start(app.ctx, configuredJournalDir)
 	}
 	app.maybeRefreshGEC()
 	go app.maybeCatchUpEDD()

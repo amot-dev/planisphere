@@ -326,51 +326,51 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T
 }
 
 func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
-	tempDir := testingContext.TempDir()
-	productionDBPath := filepath.Join(tempDir, "production.sqlite")
+	temporaryDirectory := testingContext.TempDir()
+	productionDBPath := filepath.Join(temporaryDirectory, "production.sqlite")
 
 	// Seed a production database with an existing expedition
 	productionApp := New()
 	productionApp.debugMode = false
-	prodCtx, prodCancel := context.WithCancel(context.Background())
-	if initError := productionApp.initialize(prodCtx, productionDBPath); initError != nil {
-		prodCancel()
+	productionContext, cancelProduction := context.WithCancel(context.Background())
+	if initError := productionApp.initialize(productionContext, productionDBPath); initError != nil {
+		cancelProduction()
 		testingContext.Fatalf("initialize production app: %v", initError)
 	}
 	if _, createError := productionApp.CreateExpedition("Production Expedition", "Saved in production DB"); createError != nil {
-		prodCancel()
-		productionApp.shutdown(prodCtx)
+		cancelProduction()
+		productionApp.shutdown(productionContext)
 		testingContext.Fatalf("create production expedition: %v", createError)
 	}
-	prodCancel()
-	productionApp.shutdown(prodCtx)
+	cancelProduction()
+	productionApp.shutdown(productionContext)
 
-	originalProdBytes, readOrigError := os.ReadFile(productionDBPath)
-	if readOrigError != nil {
-		testingContext.Fatalf("read production DB bytes: %v", readOrigError)
+	originalProductionBytes, readOriginalError := os.ReadFile(productionDBPath)
+	if readOriginalError != nil {
+		testingContext.Fatalf("read production DB bytes: %v", readOriginalError)
 	}
 
 	// Launch a debug-mode app pointing at the same production database path
 	debugApp := New()
 	debugApp.debugMode = true
-	debugCtx, debugCancel := context.WithCancel(context.Background())
-	defer debugCancel()
+	debugContext, cancelDebug := context.WithCancel(context.Background())
+	defer cancelDebug()
 
-	if initDebugError := debugApp.initialize(debugCtx, productionDBPath); initDebugError != nil {
+	if initDebugError := debugApp.initialize(debugContext, productionDBPath); initDebugError != nil {
 		testingContext.Fatalf("initialize debug app: %v", initDebugError)
 	}
 
 	settings, settingsError := debugApp.GetSettings()
 	if settingsError != nil {
-		debugApp.shutdown(debugCtx)
+		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("GetSettings in debug app: %v", settingsError)
 	}
 	if settings.DBPath == productionDBPath {
-		debugApp.shutdown(debugCtx)
+		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("expected debug app DBPath to point to temporary snapshot, got %s", settings.DBPath)
 	}
 	if !strings.Contains(filepath.Base(settings.DBPath), "planisphere-debug-") {
-		debugApp.shutdown(debugCtx)
+		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("expected debug snapshot filename to contain 'planisphere-debug-', got %s", settings.DBPath)
 	}
 	snapshotPath := settings.DBPath
@@ -378,29 +378,29 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 	// Verify production data is present in the debug snapshot
 	expeditionsInDebug, listError := debugApp.ListExpeditions()
 	if listError != nil {
-		debugApp.shutdown(debugCtx)
+		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("ListExpeditions in debug app: %v", listError)
 	}
-	foundProdExpedition := false
-	for _, expItem := range expeditionsInDebug {
-		if expItem.Name == "Production Expedition" {
-			foundProdExpedition = true
+	foundProductionExpedition := false
+	for _, expeditionItem := range expeditionsInDebug {
+		if expeditionItem.Name == "Production Expedition" {
+			foundProductionExpedition = true
 			break
 		}
 	}
-	if !foundProdExpedition {
-		debugApp.shutdown(debugCtx)
+	if !foundProductionExpedition {
+		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("expected 'Production Expedition' to be present in debug snapshot")
 	}
 
 	// Mutate data inside debug app
 	if _, createDebugError := debugApp.CreateExpedition("Debug Scratch Expedition", "Must not persist to production DB"); createDebugError != nil {
-		debugApp.shutdown(debugCtx)
+		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("create expedition in debug app: %v", createDebugError)
 	}
 
 	// Shut down debug app and verify temporary snapshot is deleted
-	debugApp.shutdown(debugCtx)
+	debugApp.shutdown(debugContext)
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if _, statError := os.Stat(snapshotPath + suffix); !os.IsNotExist(statError) {
 			testingContext.Errorf("expected debug snapshot %s%s to be removed on shutdown, stat err: %v", snapshotPath, suffix, statError)
@@ -408,11 +408,11 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 	}
 
 	// Verify production DB file on disk was not modified
-	afterProdBytes, readAfterError := os.ReadFile(productionDBPath)
+	afterProductionBytes, readAfterError := os.ReadFile(productionDBPath)
 	if readAfterError != nil {
 		testingContext.Fatalf("read production DB bytes after debug shutdown: %v", readAfterError)
 	}
-	if !bytes.Equal(originalProdBytes, afterProdBytes) {
+	if !bytes.Equal(originalProductionBytes, afterProductionBytes) {
 		testingContext.Fatalf("expected production DB bytes to remain untouched after debug session")
 	}
 }

@@ -113,18 +113,18 @@ func Migrate(dbConn *sql.DB) error {
 		return fmt.Errorf("apply schema: %w", schemaError)
 	}
 
-	for _, m := range migrations {
-		val, checkError := GetSetting(dbConn, m.key)
+	for _, migrationStep := range migrations {
+		settingValue, checkError := GetSetting(dbConn, migrationStep.key)
 		if checkError != nil {
 			return checkError
 		}
-		if val != "" {
+		if settingValue != "" {
 			continue
 		}
-		if applyError := m.apply(dbConn); applyError != nil {
+		if applyError := migrationStep.apply(dbConn); applyError != nil {
 			return applyError
 		}
-		if setSettingError := SetSetting(dbConn, m.key, "1"); setSettingError != nil {
+		if setSettingError := SetSetting(dbConn, migrationStep.key, "1"); setSettingError != nil {
 			return setSettingError
 		}
 	}
@@ -146,6 +146,16 @@ func AdvanceIngestWatermark(queryer Queryer, timestamp string) error {
 	return execError
 }
 
+// healDowngradedJournalIngest detects and repairs journal files that were
+// ingested while the user ran an older binary against this database. Newer
+// binaries advance settings.ingest_schema_watermark whenever journals are
+// ingested, whereas older binaries do not know about the watermark setting and
+// only advance ingested_journals.updated_at. Any row with updated_at > watermark
+// was therefore touched by an older parser (potentially skipping newer event
+// types or generating legacy UIDs), so its byte_offset is reset for re-ingestion
+// and SellOrganicData UIDs are re-normalized. Finally, currentWatermark takes
+// max(now, latestJournalUpdatedAt) so that future-dated updated_at timestamps
+// from clock skew do not trigger an infinite re-healing loop on subsequent launches.
 func healDowngradedJournalIngest(dbConn *sql.DB) error {
 	watermark, getWatermarkError := GetSetting(dbConn, IngestSchemaWatermarkKey)
 	if getWatermarkError != nil {

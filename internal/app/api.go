@@ -120,6 +120,8 @@ func (app *App) BrowseDBPath() (string, error) {
 
 // SetDatabasePath updates the active SQLite database location, persists it in
 // bootstrap.json, and hot-switches the running database connection if changed.
+// In debug mode, it creates and switches to an isolated temporary snapshot of
+// the target database without modifying bootstrap.json.
 func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" {
@@ -161,13 +163,13 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 		}
 		setupDone := app.setupCompleted()
 		watcher := app.watcher
-		jDir := app.journalDir()
+		configuredJournalDir := app.journalDir()
 		app.dbMu.Unlock()
 		if previousTempPath != "" && previousTempPath != targetPath {
 			db.RemoveDebugSnapshot(previousTempPath)
 		}
 		if setupDone && watcher != nil {
-			watcher.Start(app.ctx, jDir)
+			watcher.Start(app.ctx, configuredJournalDir)
 		}
 	}
 	if !isDebugMode {
@@ -200,10 +202,10 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 	app.runScan()
 	app.dbMu.RLock()
 	watcher := app.watcher
-	jDir := app.journalDir()
+	configuredJournalDir := app.journalDir()
 	app.dbMu.RUnlock()
 	if watcher != nil {
-		watcher.Start(app.ctx, jDir)
+		watcher.Start(app.ctx, configuredJournalDir)
 	}
 	app.changed("journal", 0)
 	return app.GetIngestStatus()
@@ -333,10 +335,10 @@ func (app *App) SetJournalDir(dir string) (Settings, error) {
 		app.runScan()
 		app.dbMu.RLock()
 		watcher := app.watcher
-		jDir := app.journalDir()
+		configuredJournalDir := app.journalDir()
 		app.dbMu.RUnlock()
 		if watcher != nil {
-			watcher.Start(app.ctx, jDir)
+			watcher.Start(app.ctx, configuredJournalDir)
 		}
 	}()
 	return app.GetSettings()
@@ -613,7 +615,7 @@ func (app *App) SwitchMode(modeID int64) (ModesState, error) {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(tx *sql.Tx) error { return modes.Switch(tx, modeID, "") })
+		return db.WithTx(app.db, func(transaction *sql.Tx) error { return modes.Switch(transaction, modeID, "") })
 	}(); err != nil {
 		return ModesState{}, err
 	}
@@ -639,8 +641,8 @@ func (app *App) SaveModeWindow(in ModeWindowInput) (ModesState, error) {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(tx *sql.Tx) error {
-			return modes.SetWindow(tx, in.ID, in.ModeID, in.Start, in.End)
+		return db.WithTx(app.db, func(transaction *sql.Tx) error {
+			return modes.SetWindow(transaction, in.ID, in.ModeID, in.Start, in.End)
 		})
 	}(); err != nil {
 		return ModesState{}, err
@@ -803,9 +805,9 @@ func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID 
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		txError = db.WithTx(app.db, func(tx *sql.Tx) error {
+		txError = db.WithTx(app.db, func(transaction *sql.Tx) error {
 			var insertError error
-			newRow, insertError = expedition.InsertRow(tx, expeditionID, afterRowID, rowType, regionID)
+			newRow, insertError = expedition.InsertRow(transaction, expeditionID, afterRowID, rowType, regionID)
 			return insertError
 		})
 		return txError
@@ -871,9 +873,9 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(tx *sql.Tx) error {
+		return db.WithTx(app.db, func(transaction *sql.Tx) error {
 			var setModeError error
-			expeditionID, setModeError = expedition.SetLegMode(tx, rowID, modeID)
+			expeditionID, setModeError = expedition.SetLegMode(transaction, rowID, modeID)
 			return setModeError
 		})
 	}(); err != nil {
@@ -892,8 +894,8 @@ func (app *App) SetActiveLegMode(expeditionID, modeID int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(tx *sql.Tx) error {
-			return expedition.SetActiveLegMode(tx, expeditionID, modeID)
+		return db.WithTx(app.db, func(transaction *sql.Tx) error {
+			return expedition.SetActiveLegMode(transaction, expeditionID, modeID)
 		})
 	}(); err != nil {
 		return err
@@ -939,9 +941,9 @@ func (app *App) DeleteRow(rowID int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(tx *sql.Tx) error {
+		return db.WithTx(app.db, func(transaction *sql.Tx) error {
 			var deleteRowError error
-			expeditionID, deleteRowError = expedition.DeleteRow(tx, rowID)
+			expeditionID, deleteRowError = expedition.DeleteRow(transaction, rowID)
 			return deleteRowError
 		})
 	}(); err != nil {
@@ -967,9 +969,9 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 		if getError != nil {
 			return getError
 		}
-		return db.WithTx(app.db, func(tx *sql.Tx) error {
+		return db.WithTx(app.db, func(transaction *sql.Tx) error {
 			var moveRowError error
-			expeditionID, moveRowError = expedition.MoveRow(tx, rowID, toIndex)
+			expeditionID, moveRowError = expedition.MoveRow(transaction, rowID, toIndex)
 			return moveRowError
 		})
 	}(); err != nil {

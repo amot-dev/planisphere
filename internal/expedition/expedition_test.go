@@ -332,15 +332,15 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 	}
 
 	// Start at 2026-01-18T10:00:00Z, complete at 2026-01-21T10:00:00Z
-	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
-		return expedition.Start(tx, exp.ID, "2026-01-18T10:00:00Z")
+	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, exp.ID, "2026-01-18T10:00:00Z")
 	})
-	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
-		_, err := expedition.Reevaluate(tx, exp.ID)
+	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		_, err := expedition.Reevaluate(transaction, exp.ID)
 		return err
 	})
-	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
-		return expedition.Complete(tx, exp.ID, "2026-01-21T10:00:00Z")
+	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Complete(transaction, exp.ID, "2026-01-21T10:00:00Z")
 	})
 
 	// Build plan
@@ -622,8 +622,8 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 	setSys(wp3.ID, "Epsilon")
 
 	// Start expedition
-	_ = db.WithTx(dbConn, func(tx *sql.Tx) error {
-		return expedition.Start(tx, expeditionRecord.ID, "2026-02-01T10:00:00Z")
+	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-02-01T10:00:00Z")
 	})
 
 	// Add an arrival that skips Beta and visits Gamma directly, triggering out-of-order reordering,
@@ -736,10 +736,10 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 
 	// Start expedition at firstWaypoint:
 	// Visit firstWaypoint at 2026-03-01T10:00:00Z.
-	if txErr := db.WithTx(dbConn, func(tx *sql.Tx) error {
-		return expedition.Start(tx, expeditionRecord.ID, "2026-03-01T10:00:00Z")
-	}); txErr != nil {
-		t.Fatal(txErr)
+	if transactionError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z")
+	}); transactionError != nil {
+		t.Fatal(transactionError)
 	}
 	visitedAt := "2026-03-01T10:00:00Z"
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = ? WHERE id = ?`, visitedAt, firstWaypoint.ID); err != nil {

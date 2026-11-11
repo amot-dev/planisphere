@@ -9,6 +9,10 @@ import {
   RowManipulationButtons,
 } from './PlannerWidgets'
 
+/**
+ * WaypointRowItemProps defines the row data, interaction flags, inline draft
+ * values, and event callbacks for a single waypoint row in the flight planner table.
+ */
 export interface WaypointRowItemProps {
   rowView: expedition.RowView
   index: number

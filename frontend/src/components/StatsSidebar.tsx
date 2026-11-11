@@ -3,6 +3,10 @@ import { app, modes, stats } from '../../wailsjs/go/models'
 import { formatCredits, formatInt, formatLoss, formatLy } from '../utils/galacticTime'
 import { SquareCheckbox } from './SquareCheckbox'
 
+/**
+ * StatsSidebarProps defines the telemetry data, mode filter state, and user
+ * action callbacks for the expedition and career statistics sidebar.
+ */
 export interface StatsSidebarProps {
   sidebarStats: app.SidebarStats | null
   statsLoading: boolean

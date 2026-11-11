@@ -144,128 +144,100 @@ func TestGetCarrierLastLocation(testingContext *testing.T) {
 	}
 }
 
-func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(t *testing.T) {
+func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *testing.T) {
 	testCases := []struct {
-		name        string
-		setupCtx    func(pollStarted chan struct{}) (context.Context, context.CancelFunc)
-		expectedErr error
+		name         string
+		pollInterval time.Duration
+		setupCtx     func(pollStarted chan struct{}) (context.Context, context.CancelFunc)
+		expectedErr  error
 	}{
 		{
 			name: "ContextCanceledDuringPollDo",
 			setupCtx: func(pollStarted chan struct{}) (context.Context, context.CancelFunc) {
-				ctx, cancel := context.WithCancel(context.Background())
+				requestContext, cancelFunction := context.WithCancel(context.Background())
 				go func() {
 					<-pollStarted
-					cancel()
+					cancelFunction()
 				}()
-				return ctx, cancel
+				return requestContext, cancelFunction
 			},
 			expectedErr: context.Canceled,
 		},
 		{
 			name: "ContextDeadlineExceeded",
 			setupCtx: func(pollStarted chan struct{}) (context.Context, context.CancelFunc) {
-				ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-				return ctx, cancel
+				requestContext, cancelFunction := context.WithTimeout(context.Background(), 50*time.Millisecond)
+				return requestContext, cancelFunction
 			},
 			expectedErr: context.DeadlineExceeded,
 		},
+		{
+			name:         "ContextCanceledDuringTickerWait",
+			pollInterval: 1 * time.Second,
+			setupCtx: func(pollStarted chan struct{}) (context.Context, context.CancelFunc) {
+				requestContext, cancelFunction := context.WithCancel(context.Background())
+				go func() {
+					time.Sleep(30 * time.Millisecond)
+					cancelFunction()
+				}()
+				return requestContext, cancelFunction
+			},
+			expectedErr: context.Canceled,
+		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			originalURL := spanshBaseURL
-			originalInterval := spanshPollInterval
-			t.Cleanup(func() {
-				spanshBaseURL = originalURL
-				spanshPollInterval = originalInterval
+	for _, testCase := range testCases {
+		testingContext.Run(testCase.name, func(testingContext *testing.T) {
+			originalBaseURL := spanshBaseURL
+			originalPollInterval := spanshPollInterval
+			testingContext.Cleanup(func() {
+				spanshBaseURL = originalBaseURL
+				spanshPollInterval = originalPollInterval
 			})
-			spanshPollInterval = 5 * time.Millisecond
+			if testCase.pollInterval > 0 {
+				spanshPollInterval = testCase.pollInterval
+			} else {
+				spanshPollInterval = 5 * time.Millisecond
+			}
 
 			pollStarted := make(chan struct{})
-			testServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-				if req.URL.Path == "/api/fleetcarrier/route" {
-					rw.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(rw).Encode(map[string]string{"job": "job-test"})
+			testServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+				if httpRequest.URL.Path == "/api/fleetcarrier/route" {
+					responseWriter.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-test"})
 					return
 				}
-				if strings.HasPrefix(req.URL.Path, "/api/results/") {
+				if strings.HasPrefix(httpRequest.URL.Path, "/api/results/") {
 					select {
 					case <-pollStarted:
 					default:
 						close(pollStarted)
 					}
-					<-req.Context().Done()
+					<-httpRequest.Context().Done()
 					return
 				}
-				http.NotFound(rw, req)
+				http.NotFound(responseWriter, httpRequest)
 			}))
 			defer testServer.Close()
 			spanshBaseURL = testServer.URL
 
-			ctx, cancel := tc.setupCtx(pollStarted)
-			defer cancel()
+			requestContext, cancelFunction := testCase.setupCtx(pollStarted)
+			defer cancelFunction()
 
-			jumps, queryError := querySpanshCarrierRoute(ctx, "Sol", "Colonia", 0, 1000)
+			jumps, queryError := querySpanshCarrierRoute(requestContext, "Sol", "Colonia", 0, 1000)
 			if jumps != nil {
-				t.Fatalf("expected nil jumps, got %v", jumps)
+				testingContext.Fatalf("expected nil jumps, got %v", jumps)
 			}
 			if queryError == nil {
-				t.Fatal("expected error, got nil")
+				testingContext.Fatal("expected error, got nil")
 			}
-			if !errors.Is(queryError, tc.expectedErr) {
-				t.Errorf("expected %v error, got: %v", tc.expectedErr, queryError)
+			if !errors.Is(queryError, testCase.expectedErr) {
+				testingContext.Errorf("expected %v error, got: %v", testCase.expectedErr, queryError)
 			}
 			if !strings.Contains(queryError.Error(), "Spansh route calculation canceled or timed out") {
-				t.Errorf("expected error message to contain cancellation text, got: %v", queryError)
+				testingContext.Errorf("expected error message to contain cancellation text, got: %v", queryError)
 			}
 		})
-	}
-}
-
-func TestQuerySpanshCarrierRoute_ContextCanceledDuringTickerWait(t *testing.T) {
-	originalURL := spanshBaseURL
-	originalInterval := spanshPollInterval
-	t.Cleanup(func() {
-		spanshBaseURL = originalURL
-		spanshPollInterval = originalInterval
-	})
-	// Long poll interval so select case <-ctx.Done() fires while waiting for ticker
-	spanshPollInterval = 1 * time.Second
-
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
-
-	testServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
-		if httpRequest.URL.Path == "/api/fleetcarrier/route" {
-			responseWriter.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-cancel-wait"})
-			return
-		}
-		http.NotFound(responseWriter, httpRequest)
-	}))
-	defer testServer.Close()
-
-	spanshBaseURL = testServer.URL
-
-	// Cancel after short delay so initial route creation completes and loop enters ticker wait
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		cancelFunc()
-	}()
-
-	jumps, queryError := querySpanshCarrierRoute(ctx, "Sol", "Colonia", 0, 1000)
-	if jumps != nil {
-		t.Fatalf("expected nil jumps, got %v", jumps)
-	}
-	if queryError == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(queryError, context.Canceled) {
-		t.Errorf("expected context.Canceled error, got: %v", queryError)
-	}
-	if !strings.Contains(queryError.Error(), "Spansh route calculation canceled or timed out") {
-		t.Errorf("expected error message to contain cancellation text, got: %v", queryError)
 	}
 }
 
@@ -276,17 +248,17 @@ func TestRecordCarrierJump(testingContext *testing.T) {
 	var emitMu sync.Mutex
 	testApp.emit = func(event string, data ...any) {
 		if event == EventDataChanged && len(data) > 0 {
-			if dc, ok := data[0].(DataChanged); ok {
+			if dataChangedEvent, ok := data[0].(DataChanged); ok {
 				emitMu.Lock()
-				emittedEvents = append(emittedEvents, dc)
+				emittedEvents = append(emittedEvents, dataChangedEvent)
 				emitMu.Unlock()
 			}
 		}
 	}
 
-	exp, createErr := testApp.CreateExpedition("Carrier Test", "Testing carrier jumps")
-	if createErr != nil {
-		testingContext.Fatalf("failed to create expedition: %v", createErr)
+	expeditionRecord, createError := testApp.CreateExpedition("Carrier Test", "Testing carrier jumps")
+	if createError != nil {
+		testingContext.Fatalf("failed to create expedition: %v", createError)
 	}
 
 	// Clear events from creation
@@ -295,7 +267,7 @@ func TestRecordCarrierJump(testingContext *testing.T) {
 	emitMu.Unlock()
 
 	// Record a carrier jump of 498.5 Ly using 95t tritium
-	if err := testApp.RecordCarrierJump(exp.ID, 498.5, 95); err != nil {
+	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 498.5, 95); err != nil {
 		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
 	}
 
@@ -307,67 +279,67 @@ func TestRecordCarrierJump(testingContext *testing.T) {
 	if emittedEvents[0].Scope != "adjustments" {
 		testingContext.Errorf("expected scope 'adjustments', got '%s'", emittedEvents[0].Scope)
 	}
-	if emittedEvents[0].ExpeditionID != exp.ID {
-		testingContext.Errorf("expected expeditionID %d, got %d", exp.ID, emittedEvents[0].ExpeditionID)
+	if emittedEvents[0].ExpeditionID != expeditionRecord.ID {
+		testingContext.Errorf("expected expeditionID %d, got %d", expeditionRecord.ID, emittedEvents[0].ExpeditionID)
 	}
 	emitMu.Unlock()
 
 	// Verify adjustments were correctly written
-	planView, getErr := testApp.GetPlan(exp.ID)
-	if getErr != nil {
-		testingContext.Fatalf("GetPlan failed: %v", getErr)
+	planView, getPlanError := testApp.GetPlan(expeditionRecord.ID)
+	if getPlanError != nil {
+		testingContext.Fatalf("GetPlan failed: %v", getPlanError)
 	}
-	adj := planView.Expedition.Adjustments
-	if adj.CarrierJumps != 1 {
-		testingContext.Errorf("expected 1 carrier jump, got %d", adj.CarrierJumps)
+	initialAdjustments := planView.Expedition.Adjustments
+	if initialAdjustments.CarrierJumps != 1 {
+		testingContext.Errorf("expected 1 carrier jump, got %d", initialAdjustments.CarrierJumps)
 	}
-	if adj.CarrierDistanceLy != 498.5 {
-		testingContext.Errorf("expected 498.5 carrier distance, got %f", adj.CarrierDistanceLy)
+	if initialAdjustments.CarrierDistanceLy != 498.5 {
+		testingContext.Errorf("expected 498.5 carrier distance, got %f", initialAdjustments.CarrierDistanceLy)
 	}
-	if adj.TritiumUsed == nil || *adj.TritiumUsed != 95 {
-		testingContext.Errorf("expected 95 tritium, got %v", adj.TritiumUsed)
+	if initialAdjustments.TritiumUsed == nil || *initialAdjustments.TritiumUsed != 95 {
+		testingContext.Errorf("expected 95 tritium, got %v", initialAdjustments.TritiumUsed)
 	}
 
 	// Record a second carrier jump
-	if err := testApp.RecordCarrierJump(exp.ID, 120.0, 25); err != nil {
+	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 120.0, 25); err != nil {
 		testingContext.Fatalf("second RecordCarrierJump failed: %v", err)
 	}
-	planView2, _ := testApp.GetPlan(exp.ID)
-	adj2 := planView2.Expedition.Adjustments
-	if adj2.CarrierJumps != 2 {
-		testingContext.Errorf("expected 2 carrier jumps, got %d", adj2.CarrierJumps)
+	planView2, _ := testApp.GetPlan(expeditionRecord.ID)
+	updatedAdjustments := planView2.Expedition.Adjustments
+	if updatedAdjustments.CarrierJumps != 2 {
+		testingContext.Errorf("expected 2 carrier jumps, got %d", updatedAdjustments.CarrierJumps)
 	}
-	if adj2.CarrierDistanceLy != 618.5 {
-		testingContext.Errorf("expected 618.5 carrier distance, got %f", adj2.CarrierDistanceLy)
+	if updatedAdjustments.CarrierDistanceLy != 618.5 {
+		testingContext.Errorf("expected 618.5 carrier distance, got %f", updatedAdjustments.CarrierDistanceLy)
 	}
-	if adj2.TritiumUsed == nil || *adj2.TritiumUsed != 120 {
-		testingContext.Errorf("expected 120 tritium, got %v", adj2.TritiumUsed)
+	if updatedAdjustments.TritiumUsed == nil || *updatedAdjustments.TritiumUsed != 120 {
+		testingContext.Errorf("expected 120 tritium, got %v", updatedAdjustments.TritiumUsed)
 	}
 }
 
 func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 
-	exp, createErr := testApp.CreateExpedition("Stats Cache Test", "Testing live stats caching")
-	if createErr != nil {
-		testingContext.Fatalf("failed to create expedition: %v", createErr)
+	expeditionRecord, createError := testApp.CreateExpedition("Stats Cache Test", "Testing live stats caching")
+	if createError != nil {
+		testingContext.Fatalf("failed to create expedition: %v", createError)
 	}
 
-	plan, _ := testApp.GetPlan(exp.ID)
+	plan, _ := testApp.GetPlan(expeditionRecord.ID)
 	if len(plan.Rows) > 0 {
-		sysName := "Sol"
-		_ = testApp.UpdateRow(expedition.RowPatch{ID: plan.Rows[0].Row.ID, SystemName: &sysName})
+		originSystemName := "Sol"
+		_ = testApp.UpdateRow(expedition.RowPatch{ID: plan.Rows[0].Row.ID, SystemName: &originSystemName})
 	}
 
 	// Start expedition so stats computing is active
-	if err := testApp.StartExpedition(exp.ID, "2026-01-01T00:00:00Z"); err != nil {
+	if err := testApp.StartExpedition(expeditionRecord.ID, "2026-01-01T00:00:00Z"); err != nil {
 		testingContext.Fatalf("StartExpedition failed: %v", err)
 	}
 
 	filter := stats.Filter{Enabled: false}
 
 	// First call to GetSidebarStats should populate liveStatsCache
-	sidebar1, err := testApp.GetSidebarStats(exp.ID, filter)
+	sidebar1, err := testApp.GetSidebarStats(expeditionRecord.ID, filter)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats failed: %v", err)
 	}
@@ -376,27 +348,27 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	}
 
 	testApp.liveStatsMu.Lock()
-	cacheLen := len(testApp.liveStatsCache)
+	initialCacheEntryCount := len(testApp.liveStatsCache)
 	testApp.liveStatsMu.Unlock()
-	if cacheLen == 0 {
+	if initialCacheEntryCount == 0 {
 		testingContext.Fatal("expected liveStatsCache to have at least 1 entry")
 	}
 
 	// Record carrier jump
-	if err := testApp.RecordCarrierJump(exp.ID, 500.0, 100); err != nil {
+	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 500.0, 100); err != nil {
 		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
 	}
 
 	// liveStatsCache should NOT have been cleared because no raw journal events or modes changed
 	testApp.liveStatsMu.Lock()
-	cacheLenAfter := len(testApp.liveStatsCache)
+	cacheEntryCountAfterJump := len(testApp.liveStatsCache)
 	testApp.liveStatsMu.Unlock()
-	if cacheLenAfter != cacheLen {
-		testingContext.Errorf("expected liveStatsCache length %d to be preserved, got %d", cacheLen, cacheLenAfter)
+	if cacheEntryCountAfterJump != initialCacheEntryCount {
+		testingContext.Errorf("expected liveStatsCache length %d to be preserved, got %d", initialCacheEntryCount, cacheEntryCountAfterJump)
 	}
 
 	// Second call to GetSidebarStats uses the cached live metrics and combines with new adjustments
-	sidebar2, err := testApp.GetSidebarStats(exp.ID, filter)
+	sidebar2, err := testApp.GetSidebarStats(expeditionRecord.ID, filter)
 	if err != nil {
 		testingContext.Fatalf("second GetSidebarStats failed: %v", err)
 	}

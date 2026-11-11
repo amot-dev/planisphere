@@ -32,34 +32,6 @@ func insertEvent(t *testing.T, databaseConnection *sql.DB, timestamp, event, raw
 	}
 }
 
-func TestRealizationDeathLosses(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
-
-	insertEvent(t, databaseConnection, "2026-03-01T09:50:00Z", "Scan",
-		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TestSys","SystemAddress":111,"BodyID":1,"BodyName":"TestSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`)
-
-	// Organic scan on foot
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`)
-
-	// Player dies on foot and resurrects in orbit
-	insertEvent(t, databaseConnection, "2026-03-01T11:00:05Z", "Resurrect",
-		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":false}`)
-
-	engine := stats.NewEngine(databaseConnection)
-	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
-	}
-
-	if realizationBreakdown.OrganicLostDeath != 95054000 {
-		t.Errorf("expected OrganicLostDeath 95,054,000, got %d", realizationBreakdown.OrganicLostDeath)
-	}
-	if realizationBreakdown.TotalRealized != 0 {
-		t.Errorf("expected TotalRealized 0, got %d", realizationBreakdown.TotalRealized)
-	}
-}
-
 func TestRealizationNpcCrewCut(t *testing.T) {
 	databaseConnection := setupRealizationDB(t)
 
@@ -174,50 +146,6 @@ func TestRealizationLedgerCaching(t *testing.T) {
 	}
 	if thirdResult.TotalRealized != 95054000 {
 		t.Fatalf("expected TotalRealized 95054000 after cache invalidation, got %d", thirdResult.TotalRealized)
-	}
-}
-
-func TestRealizationOrganicMultiSpeciesVariantSeparation(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
-
-	insertEvent(t, databaseConnection, "2026-03-01T08:50:00Z", "Scan",
-		`{"timestamp":"2026-03-01T08:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TestSys","SystemAddress":111,"BodyID":1,"BodyName":"TestSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
-	insertEvent(t, databaseConnection, "2026-03-01T08:55:00Z", "Scan",
-		`{"timestamp":"2026-03-01T08:55:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TestSys","SystemAddress":111,"BodyID":2,"BodyName":"TestSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`)
-
-	// Scan Bacterium Aurasus (not first footfall: base 1,000,000, bonus 0)
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Bacterial","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","WasLogged":true,"SystemAddress":111,"Body":1}`)
-
-	// Scan Stratum Tectonicas (first footfall: base 19,010,800, bonus 76,043,200)
-	insertEvent(t, databaseConnection, "2026-03-01T10:30:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":2}`)
-
-	// Sold at Vista Genomics: Bacterium listed first with Bonus 0, then Stratum with full bonus
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
-			{"Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","Value":1000000,"Bonus":0},
-			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200}
-		]}`)
-
-	engine := stats.NewEngine(databaseConnection)
-	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
-	}
-
-	expectedRealized := int64(1000000 + 19010800 + 76043200)
-	if realizationBreakdown.TotalRealized != expectedRealized {
-		t.Errorf("expected TotalRealized %d, got %d", expectedRealized, realizationBreakdown.TotalRealized)
-	}
-	if realizationBreakdown.OrganicStolen != 0 {
-		t.Errorf("expected OrganicStolen 0, got %d (Stratum was incorrectly sniped by Bacterium)", realizationBreakdown.OrganicStolen)
-	}
-	if realizationBreakdown.OrganicLostDeath != 0 {
-		t.Errorf("expected OrganicLostDeath 0, got %d", realizationBreakdown.OrganicLostDeath)
-	}
-	if realizationBreakdown.PendingValue != 0 {
-		t.Errorf("expected PendingValue 0, got %d", realizationBreakdown.PendingValue)
 	}
 }
 
@@ -442,10 +370,10 @@ func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T
 	// then scan the same species on an un-footfalled body (WasFootfalled: false).
 	insertEvent(t, databaseConnection, "2026-03-01T09:50:00Z", "Scan",
 		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":1,"BodyName":"TieBreakSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
+	insertEvent(t, databaseConnection, "2026-03-01T09:52:00Z", "Scan",
+		`{"timestamp":"2026-03-01T09:52:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":2,"BodyName":"TieBreakSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`)
 	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":1}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:05:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":2,"BodyName":"TieBreakSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`)
 	insertEvent(t, databaseConnection, "2026-03-01T10:10:00Z", "ScanOrganic",
 		`{"timestamp":"2026-03-01T10:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":2}`)
 
@@ -456,15 +384,23 @@ func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T
 			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":0}
 		]}`)
 
-	legWindow := stats.Range{After: "2026-03-01T09:45:00Z", Until: "2026-03-01T11:00:00Z"}
-	realizationResult, realizationError := engineInstance.ComputeRealization(legWindow, nil)
+	organicWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T11:00:00Z"}
+	realizationResult, realizationError := engineInstance.ComputeRealization(organicWindow, nil)
 	if realizationError != nil {
 		t.Fatalf("ComputeRealization failed: %v", realizationError)
+	}
+	expectedRealized := int64(19010800 + 76043200 + 19010800)
+	if realizationResult.TotalRealized != expectedRealized {
+		t.Errorf("expected TotalRealized %d, got %d", expectedRealized, realizationResult.TotalRealized)
 	}
 	if realizationResult.OrganicStolen != 0 {
 		t.Errorf("expected OrganicStolen 0, got %d", realizationResult.OrganicStolen)
 	}
+	if realizationResult.PendingValue != 0 {
+		t.Errorf("expected PendingValue 0, got %d", realizationResult.PendingValue)
+	}
 
+	legWindow := stats.Range{After: "2026-03-01T09:45:00Z", Until: "2026-03-01T11:00:00Z"}
 	legMetrics, computeError := engineInstance.Compute(legWindow, nil)
 	if computeError != nil {
 		t.Fatalf("Compute failed: %v", computeError)

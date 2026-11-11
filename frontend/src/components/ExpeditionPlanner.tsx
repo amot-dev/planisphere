@@ -32,6 +32,11 @@ import { SquareCheckbox } from './SquareCheckbox'
 import { CarrierRouteModal, type CarrierRoutePromptState } from './CarrierRouteModal'
 import { WaypointRowItem } from './WaypointRowItem'
 
+/**
+ * ExpeditionPlannerProps defines the active expedition plan state, optimistic
+ * update handlers, lifecycle modal triggers, and carrier plotter registration
+ * callbacks for the main flight planner view.
+ */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
@@ -355,25 +360,25 @@ export function ExpeditionPlanner({
   const nextFcStopEntry = useMemo(() => {
     if (!plan?.rows) return null
     if (plan.nextFcStopRowId > 0) {
-      const nextStopIndex = plan.rows.findIndex(
+      const matchedRowIndex = plan.rows.findIndex(
         (rowView) => rowView?.row?.id === plan.nextFcStopRowId,
       )
       if (
-        nextStopIndex >= 0 &&
-        plan.rows[nextStopIndex].row.fcStop &&
-        !plan.rows[nextStopIndex].row.fcArrived
+        matchedRowIndex >= 0 &&
+        plan.rows[matchedRowIndex].row.fcStop &&
+        !plan.rows[matchedRowIndex].row.fcArrived
       ) {
-        return { row: plan.rows[nextStopIndex].row, index: nextStopIndex }
+        return { row: plan.rows[matchedRowIndex].row, index: matchedRowIndex }
       }
     }
-    const fallbackIndex = plan.rows.findIndex(
+    const fallbackRowIndex = plan.rows.findIndex(
       (rowView) =>
         rowView?.row?.rowType === 'waypoint' &&
         rowView.row.fcStop &&
         !rowView.row.fcArrived,
     )
-    if (fallbackIndex >= 0) {
-      return { row: plan.rows[fallbackIndex].row, index: fallbackIndex }
+    if (fallbackRowIndex >= 0) {
+      return { row: plan.rows[fallbackRowIndex].row, index: fallbackRowIndex }
     }
     return null
   }, [plan])
@@ -544,10 +549,10 @@ export function ExpeditionPlanner({
         row: { ...rowView.row, fcStop: nextFcStop, fcArrived: nextFcStop ? rowView.row.fcArrived : false },
       })
     })
-    let nextFcId = 0
+    let nextCarrierStopRowId = 0
     for (const rowView of optimisticRows) {
       if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && !rowView.row.fcArrived) {
-        nextFcId = rowView.row.id
+        nextCarrierStopRowId = rowView.row.id
         break
       }
     }
@@ -555,7 +560,7 @@ export function ExpeditionPlanner({
       expedition.PlanView.createFrom({
         ...plan,
         rows: optimisticRows,
-        nextFcStopRowId: nextFcId,
+        nextFcStopRowId: nextCarrierStopRowId,
       }),
     )
 
@@ -582,10 +587,10 @@ export function ExpeditionPlanner({
         row: { ...rowView.row, fcArrived: arrived },
       })
     })
-    let nextFcId = 0
+    let nextCarrierStopRowId = 0
     for (const rowView of optimisticRows) {
       if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && !rowView.row.fcArrived) {
-        nextFcId = rowView.row.id
+        nextCarrierStopRowId = rowView.row.id
         break
       }
     }
@@ -593,7 +598,7 @@ export function ExpeditionPlanner({
       expedition.PlanView.createFrom({
         ...plan,
         rows: optimisticRows,
-        nextFcStopRowId: nextFcId,
+        nextFcStopRowId: nextCarrierStopRowId,
       }),
     )
 
@@ -855,6 +860,12 @@ export function ExpeditionPlanner({
     })
   }
 
+  // Opens the bottom carrier plotter directly in manual jump-logging mode.
+  // When no upcoming Fleet Carrier stop is scheduled in the plan, targetRowId
+  // defaults to 0 (targetless manual session): jumps and tritium are still
+  // recorded against the expedition adjustments, while the Mark FC Stop Arrival
+  // action remains disabled unless the commander later flags an upcoming waypoint
+  // as a Carrier Stop.
   async function openManualCarrierPlotter() {
     if (!plan || plan.expedition?.status === 'completed' || activeCarrierRoute) return
 
@@ -937,9 +948,9 @@ export function ExpeditionPlanner({
 
   async function handleStartCarrierRoute() {
     if (!routePrompt) return
-    const targetId = routePrompt.targetRowId
-    const maxCap = routePrompt.carrierType === 'squadron' ? 60000 : 25000
-    const carrierCapacity = Math.max(0, Math.min(maxCap, parseInt(routePrompt.capacityUsed, 10) || 0))
+    const targetWaypointRowId = routePrompt.targetRowId
+    const maxCarrierCapacityTonnes = routePrompt.carrierType === 'squadron' ? 60000 : 25000
+    const carrierCapacity = Math.max(0, Math.min(maxCarrierCapacityTonnes, parseInt(routePrompt.capacityUsed, 10) || 0))
     const carrierDepot = Math.max(0, Math.min(1000, parseInt(routePrompt.depotTritium, 10) || 1000))
 
     setRoutePrompt((previous) => (previous ? { ...previous, loading: true } : null))
@@ -958,7 +969,7 @@ export function ExpeditionPlanner({
       }
       manualDistanceInputRef.current = ''
       manualTritiumInputRef.current = ''
-      setActiveCarrierTargetRowId(targetId)
+      setActiveCarrierTargetRowId(targetWaypointRowId)
       setActiveCarrierRoute(routeResult)
       setCarrierJumpIndex(0)
       setManualModeOverride(Boolean(routeResult.manualMode))
@@ -970,7 +981,7 @@ export function ExpeditionPlanner({
       setRoutePrompt(null)
       persistRouteState({
         route: routeResult,
-        targetRowId: targetId,
+        targetRowId: targetWaypointRowId,
         jumpIdx: 0,
         manualMode: Boolean(routeResult.manualMode),
         manualLegJumps: 0,
@@ -999,7 +1010,7 @@ export function ExpeditionPlanner({
       }
       manualDistanceInputRef.current = ''
       manualTritiumInputRef.current = ''
-      setActiveCarrierTargetRowId(targetId)
+      setActiveCarrierTargetRowId(targetWaypointRowId)
       setActiveCarrierRoute(errorRoute)
       setCarrierJumpIndex(0)
       setManualModeOverride(true)
@@ -1011,7 +1022,7 @@ export function ExpeditionPlanner({
       setRoutePrompt(null)
       persistRouteState({
         route: errorRoute,
-        targetRowId: targetId,
+        targetRowId: targetWaypointRowId,
         jumpIdx: 0,
         manualMode: true,
         manualLegJumps: 0,
@@ -1028,22 +1039,22 @@ export function ExpeditionPlanner({
   function handleUpdateCarrierDepot(newDepot: number, newCapacityUsed?: number) {
     if (!activeCarrierRoute) return
     const clampedDepot = Math.max(0, Math.min(1000, newDepot))
-    const maxCap = activeCarrierRoute.carrierType === 'squadron' ? 60000 : 25000
+    const maxCarrierCapacityTonnes = activeCarrierRoute.carrierType === 'squadron' ? 60000 : 25000
     const updatedCapacity =
       newCapacityUsed !== undefined
-        ? Math.max(0, Math.min(maxCap, newCapacityUsed))
+        ? Math.max(0, Math.min(maxCarrierCapacityTonnes, newCapacityUsed))
         : (activeCarrierRoute.capacityUsed || 0)
 
     const currentJumps = activeCarrierRoute.jumps || []
-    const recalculatedJumps = currentJumps.map((jump, idx) => {
-      if (idx < carrierJumpIndex) {
+    const recalculatedJumps = currentJumps.map((jump, hopIndex) => {
+      if (hopIndex < carrierJumpIndex) {
         return jump
       }
       const recalculatedCost = calculateCarrierJumpFuel(
         jump.distanceLy,
         updatedCapacity,
         clampedDepot,
-        maxCap
+        maxCarrierCapacityTonnes
       )
       return {
         ...jump,
@@ -1053,7 +1064,7 @@ export function ExpeditionPlanner({
     })
 
     const newTotalTritium = recalculatedJumps.reduce(
-      (sum, j) => sum + (j.tritiumUsed || 0),
+      (sum, carrierJump) => sum + (carrierJump.tritiumUsed || 0),
       0
     )
 
@@ -1114,8 +1125,8 @@ export function ExpeditionPlanner({
 
       // Recalculate remaining hops based on the updated depot fuel level
       const currentJumps = activeCarrierRoute.jumps || []
-      const recalculatedJumps = currentJumps.map((jump, idx) => {
-        if (idx < nextJumpIndex) {
+      const recalculatedJumps = currentJumps.map((jump, hopIndex) => {
+        if (hopIndex < nextJumpIndex) {
           return jump
         }
         const recalculatedCost = calculateCarrierJumpFuel(
@@ -1130,7 +1141,7 @@ export function ExpeditionPlanner({
         }
       })
       const newTotalTritium = recalculatedJumps.reduce(
-        (sum, j) => sum + (j.tritiumUsed || 0),
+        (sum, carrierJump) => sum + (carrierJump.tritiumUsed || 0),
         0
       )
 
@@ -1724,10 +1735,10 @@ export function ExpeditionPlanner({
                   onInsert={handleInsert}
                   onMove={(id, targetIndex) => handleMoveRow(id, index, targetIndex)}
                   onDelete={handleDeleteRow}
-                  onDragStart={(idx, id, event) => {
-                    setDraggedIndex(idx)
+                  onDragStart={(dragRowIndex, dragRowId, event) => {
+                    setDraggedIndex(dragRowIndex)
                     event.dataTransfer.effectAllowed = 'move'
-                    event.dataTransfer.setData('text/plain', String(id))
+                    event.dataTransfer.setData('text/plain', String(dragRowId))
                   }}
                   onDragEnd={() => {
                     setDraggedIndex(null)

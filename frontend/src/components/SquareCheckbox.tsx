@@ -1,5 +1,9 @@
 import { memo } from 'react'
 
+/**
+ * SquareCheckboxProps defines the visual appearance, checked state, and
+ * interaction callbacks for the cockpit HUD square checkbox component.
+ */
 export interface SquareCheckboxProps {
   checked?: boolean | 'partial'
   onChange?: (checked: boolean) => void

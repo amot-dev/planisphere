@@ -29,7 +29,7 @@ Separate your flight stats across different styles of transport. If you take a h
 Build your flight plan stop by stop with system names, coordinates, and personal notes. Planisphere watches your journal logs in the background; the moment you jump into a destination system, it marks the waypoint as visited and automatically steps forward to the next leg. During active expeditions, live telemetry displays the remaining distance to your next waypoint and continuously updates remaining route mileage.
 
 ### Fleet carrier routing that isn't a chore
-Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router to plot out 500 Ly jumps with accurate tritium calculations on the fly, tracks your carrier's current location from journal events, and supports manual hop adjustments when you want to chart your own course.
+Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router to plot out 500 Ly jumps with accurate tritium calculations on the fly, tracks your carrier's current location from journal events, and supports manual hop adjustments or logging manual carrier jumps directly from the expedition statistics sidebar even without a scheduled Carrier Stop waypoint.
 
 ### Real-time cartography and exobiology payouts
 Get estimated credit values for bodies you scan (FSS, DSS, first discovery, first mapped, and terraformable bonuses) and plants you sample in your Artemis suit (base species value plus the massive first-logged multiplier) right as they hit your journal.
@@ -134,7 +134,7 @@ make install-frontend
 # Build desktop binary (build/bin/planisphere)
 make build
 
-# Start live development server with hot reload
+# Build and run the debug desktop binary using an isolated temporary database snapshot
 make dev
 
 # Build and run the desktop application

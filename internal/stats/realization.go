@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"planisphere/internal/db"
 	"planisphere/internal/ed"
 	"planisphere/internal/journal"
 )
@@ -273,7 +274,7 @@ func parseUnixSeconds(timestamp string) (int64, bool) {
 var (
 	ledgerCacheMu sync.RWMutex
 	cachedLedger  *RealizationLedger
-	cachedDB      any
+	cachedDB      db.Queryer
 )
 
 // InvalidateLedgerCache clears the in-memory cached realization ledger.
@@ -581,31 +582,31 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 		case "ScanOrganic":
-			var organicEv journal.ScanOrganicEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &organicEv) != nil || !strings.EqualFold(organicEv.ScanType, "Analyse") {
+			var scanOrganicEvent journal.ScanOrganicEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &scanOrganicEvent) != nil || !strings.EqualFold(scanOrganicEvent.ScanType, "Analyse") {
 				continue
 			}
-			baseVal := ed.SpeciesBaseValue(organicEv.Species, organicEv.SpeciesLocalised, organicEv.Genus)
-			parentKey := cartoKey{organicEv.SystemAddress, organicEv.Body}
+			speciesBaseValue := ed.SpeciesBaseValue(scanOrganicEvent.Species, scanOrganicEvent.SpeciesLocalised, scanOrganicEvent.Genus)
+			parentKey := cartoKey{scanOrganicEvent.SystemAddress, scanOrganicEvent.Body}
 			parentScan := scans[parentKey]
 			// Naively check the parent body's Scan WasFootfalled == false only.
 			// ScanOrganic.WasLogged is intentionally ignored because Frontier journals
 			// do not reliably populate it: https://issues.frontierstore.net/issue-detail/81891
 			firstLogged := parentScan != nil && parentScan.WasFootfalled != nil && !*parentScan.WasFootfalled
-			calculatedOrganicValue := ed.OrganicValue(baseVal, firstLogged)
+			calculatedOrganicValue := ed.OrganicValue(speciesBaseValue, firstLogged)
 			scanEntry := &scanRecord{
 				eventUID:           journalEvent.eventUID,
 				timestamp:          journalEvent.timestamp,
-				systemAddress:      organicEv.SystemAddress,
-				bodyID:             organicEv.Body,
+				systemAddress:      scanOrganicEvent.SystemAddress,
+				bodyID:             scanOrganicEvent.Body,
 				isOrganic:          true,
 				undiscoveredAtScan: firstLogged,
-				species:            organicEv.Species,
-				speciesLocalised:   organicEv.SpeciesLocalised,
-				variant:            organicEv.Variant,
-				variantLocalised:   organicEv.VariantLocalised,
-				normalizedSpecies:  normalizeSpecies(organicEv.Species, organicEv.SpeciesLocalised),
-				normalizedVariant:  normalizeVariant(organicEv.Variant, organicEv.VariantLocalised),
+				species:            scanOrganicEvent.Species,
+				speciesLocalised:   scanOrganicEvent.SpeciesLocalised,
+				variant:            scanOrganicEvent.Variant,
+				variantLocalised:   scanOrganicEvent.VariantLocalised,
+				normalizedSpecies:  normalizeSpecies(scanOrganicEvent.Species, scanOrganicEvent.SpeciesLocalised),
+				normalizedVariant:  normalizeVariant(scanOrganicEvent.Variant, scanOrganicEvent.VariantLocalised),
 				theoreticalBase:    calculatedOrganicValue.Base,
 				theoreticalBonus:   calculatedOrganicValue.Bonus,
 				theoreticalTotal:   calculatedOrganicValue.Total,
@@ -642,21 +643,21 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 		case "SellOrganicData":
-			var sellEv journal.SellOrganicDataEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEv) != nil {
+			var sellOrganicEvent journal.SellOrganicDataEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellOrganicEvent) != nil {
 				continue
 			}
 			var totalSaleValue, totalSaleBonus int64
-			for _, item := range sellEv.BioData {
+			for _, item := range sellOrganicEvent.BioData {
 				totalSaleValue += item.Value
 				totalSaleBonus += item.Bonus
 			}
 			totalSaleGross := totalSaleValue + totalSaleBonus
 			saleKey := saleDedupKey{
 				kind:       "organic",
-				timestamp:  sellEv.Timestamp,
-				primaryID:  sellEv.MarketID,
-				itemCount:  len(sellEv.BioData),
+				timestamp:  sellOrganicEvent.Timestamp,
+				primaryID:  sellOrganicEvent.MarketID,
+				itemCount:  len(sellOrganicEvent.BioData),
 				totalValue: totalSaleValue,
 				totalBonus: totalSaleBonus,
 			}
@@ -664,9 +665,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				continue
 			}
 			seenSales[saleKey] = true
-			totalCrewWage := findCrewWage(sellEv.Timestamp)
+			totalCrewWage := findCrewWage(sellOrganicEvent.Timestamp)
 
-			for _, item := range sellEv.BioData {
+			for _, item := range sellOrganicEvent.BioData {
 				itemGross := item.Value + item.Bonus
 				var allocatedCrew int64
 				if totalSaleGross > 0 && totalCrewWage > 0 {
@@ -679,7 +680,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				if matchedIndex >= 0 {
 					matchedRecord := unsoldOrganic[matchedIndex]
 					matchedRecord.status = "sold"
-					matchedRecord.soldTimestamp = sellEv.Timestamp
+					matchedRecord.soldTimestamp = sellOrganicEvent.Timestamp
 					matchedRecord.actualBase = item.Value
 					matchedRecord.actualBonus = item.Bonus
 					matchedRecord.actualGross = itemGross
@@ -711,7 +712,7 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				} else {
 					// Unattributed organic sale
 					ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
-						timestamp: sellEv.Timestamp,
+						timestamp: sellOrganicEvent.Timestamp,
 						kind:      "organic",
 						gross:     itemGross,
 						crewLoss:  allocatedCrew,
@@ -720,38 +721,38 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 			}
 
 		case "SellExplorationData":
-			var sellEvent journal.SellExplorationDataEvent
-			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellEvent) != nil {
+			var sellExplorationEvent journal.SellExplorationDataEvent
+			if json.Unmarshal([]byte(journalEvent.rawJSON), &sellExplorationEvent) != nil {
 				continue
 			}
 			saleKey := saleDedupKey{
 				kind:       "carto",
-				timestamp:  sellEvent.Timestamp,
-				primaryID:  sellEvent.TotalEarnings,
-				itemCount:  len(sellEvent.Systems),
-				totalValue: sellEvent.BaseValue,
-				totalBonus: sellEvent.Bonus,
+				timestamp:  sellExplorationEvent.Timestamp,
+				primaryID:  sellExplorationEvent.TotalEarnings,
+				itemCount:  len(sellExplorationEvent.Systems),
+				totalValue: sellExplorationEvent.BaseValue,
+				totalBonus: sellExplorationEvent.Bonus,
 			}
 			if seenSales[saleKey] {
 				continue
 			}
 			seenSales[saleKey] = true
-			totalCrewWage := findCrewWage(sellEvent.Timestamp)
-			discoveredSet := make(map[string]bool, len(sellEvent.Discovered))
-			for _, discoveredBody := range sellEvent.Discovered {
+			totalCrewWage := findCrewWage(sellExplorationEvent.Timestamp)
+			discoveredSet := make(map[string]bool, len(sellExplorationEvent.Discovered))
+			for _, discoveredBody := range sellExplorationEvent.Discovered {
 				discoveredSet[strings.ToLower(strings.TrimSpace(discoveredBody))] = true
 			}
 
-			soldSystemSet := make(map[string]bool, len(sellEvent.Systems))
-			for _, soldSystemName := range sellEvent.Systems {
+			soldSystemSet := make(map[string]bool, len(sellExplorationEvent.Systems))
+			for _, soldSystemName := range sellExplorationEvent.Systems {
 				soldSystemSet[strings.ToLower(strings.TrimSpace(soldSystemName))] = true
 			}
 
 			// Find matching unsold cartographic records for sold systems
-			matchedRecords := matchSoldCartoRecords(soldSystemSet, sellEvent.Timestamp)
+			matchedRecords := matchSoldCartoRecords(soldSystemSet, sellExplorationEvent.Timestamp)
 
 			if len(matchedRecords) > 0 {
-				allocateCartoSalePayout(matchedRecords, sellEvent.Timestamp, sellEvent.TotalEarnings, sellEvent.BaseValue, sellEvent.Bonus, totalCrewWage)
+				allocateCartoSalePayout(matchedRecords, sellExplorationEvent.Timestamp, sellExplorationEvent.TotalEarnings, sellExplorationEvent.BaseValue, sellExplorationEvent.Bonus, totalCrewWage)
 				for _, matchedRecord := range matchedRecords {
 					// Stolen check: had bonus expectation on an undiscovered body, but body or system was not awarded first discovery
 					if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
@@ -762,9 +763,9 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 				}
 			} else {
 				ledger.unattributedSales = append(ledger.unattributedSales, unattributedSale{
-					timestamp: sellEvent.Timestamp,
+					timestamp: sellExplorationEvent.Timestamp,
 					kind:      "carto",
-					gross:     sellEvent.TotalEarnings,
+					gross:     sellExplorationEvent.TotalEarnings,
 					crewLoss:  totalCrewWage,
 				})
 			}

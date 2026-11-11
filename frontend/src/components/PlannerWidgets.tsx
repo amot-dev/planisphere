@@ -31,6 +31,10 @@ export function GalacticClockBadge({ className = '' }: { className?: string }) {
   )
 }
 
+/**
+ * RegionDropdownProps defines the current region selection and change callback
+ * for a Galactic Region header row in the expedition planner.
+ */
 export interface RegionDropdownProps {
   expeditionId: number
   rowId: number
@@ -728,6 +732,10 @@ export const CoordStatusIndicator = memo(function CoordStatusIndicator({
   )
 })
 
+/**
+ * RowManipulationButtonsProps defines the row position boundaries, menu state,
+ * and action callbacks for reordering, inserting, and deleting planner rows.
+ */
 export interface RowManipulationButtonsProps {
   index: number
   minIndex: number
@@ -826,6 +834,10 @@ export const RowManipulationButtons = memo(function RowManipulationButtons({
   )
 })
 
+/**
+ * CarrierRouteBottomPanelProps defines the active route state, hop progress,
+ * manual override inputs, and action callbacks for the bottom carrier navigation drawer.
+ */
 export interface CarrierRouteBottomPanelProps {
   route: app.CarrierRouteResult
   jumpIndex: number

@@ -48,22 +48,22 @@ func TestMigrateIdempotency(t *testing.T) {
 	}
 
 	for _, key := range expectedKeys {
-		val, err := db.GetSetting(dbConn, key)
+		settingValue, err := db.GetSetting(dbConn, key)
 		if err != nil {
 			t.Fatalf("GetSetting(%q): %v", key, err)
 		}
-		if val != "1" {
-			t.Errorf("expected setting %q to be '1', got %q", key, val)
+		if settingValue != "1" {
+			t.Errorf("expected setting %q to be '1', got %q", key, settingValue)
 		}
 	}
 
 	// Verify default expedition was seeded
-	var expName string
-	if err := dbConn.QueryRow("SELECT name FROM expeditions LIMIT 1").Scan(&expName); err != nil {
+	var expeditionName string
+	if err := dbConn.QueryRow("SELECT name FROM expeditions LIMIT 1").Scan(&expeditionName); err != nil {
 		t.Fatalf("query default expedition: %v", err)
 	}
-	if expName != db.DefaultExpeditionName {
-		t.Errorf("expected expedition %q, got %q", db.DefaultExpeditionName, expName)
+	if expeditionName != db.DefaultExpeditionName {
+		t.Errorf("expected expedition %q, got %q", db.DefaultExpeditionName, expeditionName)
 	}
 
 	// Verify idx_journal_events_source index exists
@@ -130,8 +130,8 @@ func TestWithTxRollbackOnPanic(t *testing.T) {
 }
 
 func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
-	tempDir := testingContext.TempDir()
-	sourceDBPath := filepath.Join(tempDir, "production.db")
+	temporaryDirectory := testingContext.TempDir()
+	sourceDBPath := filepath.Join(temporaryDirectory, "production.db")
 
 	sourceConn, openSourceError := db.Open(sourceDBPath)
 	if openSourceError != nil {
@@ -196,11 +196,11 @@ func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
 	}
 
 	// Empty, :memory:, missing, or zero-byte source paths allocate a removed temp path ready for db.Open.
-	zeroBytePath := filepath.Join(tempDir, "empty.db")
+	zeroBytePath := filepath.Join(temporaryDirectory, "empty.db")
 	if writeEmptyError := os.WriteFile(zeroBytePath, nil, 0o600); writeEmptyError != nil {
 		testingContext.Fatalf("WriteFile zeroBytePath: %v", writeEmptyError)
 	}
-	for _, emptySourceCandidate := range []string{"", ":memory:", filepath.Join(tempDir, "nonexistent.db"), zeroBytePath} {
+	for _, emptySourceCandidate := range []string{"", ":memory:", filepath.Join(temporaryDirectory, "nonexistent.db"), zeroBytePath} {
 		candidateSnapshotPath, candidateError := db.CreateDebugSnapshot(emptySourceCandidate)
 		if candidateError != nil {
 			testingContext.Fatalf("CreateDebugSnapshot(%q): %v", emptySourceCandidate, candidateError)

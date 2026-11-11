@@ -1,3 +1,7 @@
+/**
+ * CarrierRoutePromptState holds the form inputs and loading status for the
+ * Fleet Carrier Spansh route configuration modal before plotting begins.
+ */
 export interface CarrierRoutePromptState {
   targetRowId: number
   origin: string
@@ -8,6 +12,10 @@ export interface CarrierRoutePromptState {
   loading: boolean
 }
 
+/**
+ * CarrierRouteModalProps defines the state and event callbacks for the Fleet
+ * Carrier Spansh route setup dialog.
+ */
 export interface CarrierRouteModalProps {
   prompt: CarrierRoutePromptState
   onClose: () => void
