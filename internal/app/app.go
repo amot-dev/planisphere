@@ -70,6 +70,8 @@ type App struct {
 	dbPath          string
 	debugMode       bool
 	debugTempDBPath string
+	startupDone     chan struct{}
+	startupOnce     sync.Once
 	ingester        *journal.Ingester
 	watcher  *journal.Watcher
 	resolver *systems.Resolver
@@ -133,18 +135,46 @@ var timeNow = func() time.Time { return time.Now().UTC() }
 
 // StartupHook returns the Wails OnStartup callback. Lifecycle hooks are
 // package-level functions (not methods) so Wails does not bind them to JS.
-func StartupHook(app *App) func(ctx context.Context) { return app.startup }
+func StartupHook(app *App) func(ctx context.Context) {
+	app.startupDone = make(chan struct{})
+	return app.startup
+}
 
 // ShutdownHook returns the Wails OnShutdown callback.
 func ShutdownHook(app *App) func(ctx context.Context) { return app.shutdown }
 
+func (app *App) markStartupComplete() {
+	app.startupOnce.Do(func() {
+		if app.startupDone != nil {
+			close(app.startupDone)
+		}
+	})
+}
+
+// waitStartupLocked waits for the asynchronous Wails OnStartup database
+// initialization to finish when app.db is not yet populated. Caller must hold
+// app.dbMu.RLock, which is temporarily released while waiting so startup can
+// acquire app.dbMu.Lock.
+func (app *App) waitStartupLocked() {
+	if app.db == nil && app.startupDone != nil {
+		startupDone := app.startupDone
+		app.dbMu.RUnlock()
+		<-startupDone
+		app.dbMu.RLock()
+	}
+}
+
 func (app *App) startup(ctx context.Context) {
 	app.emit = func(event string, data ...any) { runtime.EventsEmit(ctx, event, data...) }
-	if initError := app.initialize(ctx, os.Getenv("ED_PLANNER_DB")); initError != nil {
+	initError := app.initialize(ctx, os.Getenv("ED_PLANNER_DB"))
+	if initError != nil {
 		log.Printf("startup: %v", initError)
 		app.setError(initError.Error())
+		app.markStartupComplete()
 		return
 	}
+	app.markStartupComplete()
+	app.changed("settings", 0)
 	go app.backgroundStart()
 }
 
@@ -209,6 +239,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 }
 
 func (app *App) shutdown(ctx context.Context) {
+	app.markStartupComplete()
 	app.dbMu.Lock()
 	defer app.dbMu.Unlock()
 

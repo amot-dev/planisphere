@@ -508,5 +508,104 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 }
 
+func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
+	temporaryDirectory := testingContext.TempDir()
+	productionDBPath := filepath.Join(temporaryDirectory, "startup-race.sqlite")
+
+	// Seed a database with an expedition so we can verify callers receive real state
+	seedApp := New()
+	seedApp.debugMode = false
+	seedContext, cancelSeed := context.WithCancel(context.Background())
+	if initError := seedApp.initialize(seedContext, productionDBPath); initError != nil {
+		cancelSeed()
+		testingContext.Fatalf("seed initialize: %v", initError)
+	}
+	if _, createError := seedApp.CreateExpedition("Startup Race Expedition", "Verify concurrent RPCs wait for OnStartup"); createError != nil {
+		cancelSeed()
+		seedApp.shutdown(seedContext)
+		testingContext.Fatalf("seed CreateExpedition: %v", createError)
+	}
+	cancelSeed()
+	seedApp.shutdown(seedContext)
+
+	testingContext.Setenv("ED_PLANNER_DB", productionDBPath)
+
+	debugApp := New()
+	debugApp.debugMode = true
+	onStartup := StartupHook(debugApp)
+	onShutdown := ShutdownHook(debugApp)
+
+	appContext, cancelApp := context.WithCancel(context.Background())
+	defer cancelApp()
+	defer onShutdown(appContext)
+
+	// Launch frontend RPC callers BEFORE OnStartup even begins, simulating Wails
+	// spawning OnStartup in a goroutine while the WebView immediately requests core state.
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(4)
+
+	go func() {
+		defer waitGroup.Done()
+		settings, err := debugApp.GetSettings()
+		if err != nil {
+			testingContext.Errorf("GetSettings during startup returned error: %v", err)
+			return
+		}
+		if settings.DBPath == "" {
+			testingContext.Errorf("expected non-empty DBPath from GetSettings after startup")
+		}
+	}()
+
+	go func() {
+		defer waitGroup.Done()
+		modesState, err := debugApp.GetModesState()
+		if err != nil {
+			testingContext.Errorf("GetModesState during startup returned error: %v", err)
+			return
+		}
+		if len(modesState.Modes) == 0 {
+			testingContext.Errorf("expected seeded modes from GetModesState after startup")
+		}
+	}()
+
+	go func() {
+		defer waitGroup.Done()
+		expeditionsList, err := debugApp.ListExpeditions()
+		if err != nil {
+			testingContext.Errorf("ListExpeditions during startup returned error: %v", err)
+			return
+		}
+		if len(expeditionsList) == 0 {
+			testingContext.Errorf("expected expeditions from ListExpeditions after startup")
+		}
+	}()
+
+	go func() {
+		defer waitGroup.Done()
+		ingestStatus, err := debugApp.GetIngestStatus()
+		if err != nil {
+			testingContext.Errorf("GetIngestStatus during startup returned error: %v", err)
+			return
+		}
+		if ingestStatus.LastError != "" {
+			testingContext.Errorf("expected empty LastError from GetIngestStatus, got %q", ingestStatus.LastError)
+		}
+	}()
+
+	// Delay startup slightly so RPCs are guaranteed to hit ready() while app.db == nil
+	time.Sleep(15 * time.Millisecond)
+	debugApp.emit = func(string, ...any) {}
+	if initError := debugApp.initialize(appContext, os.Getenv("ED_PLANNER_DB")); initError != nil {
+		debugApp.setError(initError.Error())
+		debugApp.markStartupComplete()
+		testingContext.Fatalf("debugApp.initialize failed: %v", initError)
+	}
+	debugApp.markStartupComplete()
+	_ = onStartup
+
+	waitGroup.Wait()
+}
+
+
 
 

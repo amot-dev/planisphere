@@ -359,6 +359,7 @@ func (app *App) canonicalSystemName(name string) string {
 	name = strings.TrimSpace(name)
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
+	app.waitStartupLocked()
 	if name == "" || app.db == nil {
 		return name
 	}

@@ -26,6 +26,7 @@ var errorNotReady = errors.New("database is not available — check the startup 
 
 // ready checks if the database is available. Caller must hold app.dbMu.RLock.
 func (app *App) ready() error {
+	app.waitStartupLocked()
 	if app.db == nil {
 		if startupError := app.getError(); startupError != "" {
 			return fmt.Errorf("database is not available: %s", startupError)
@@ -101,6 +102,7 @@ func (app *App) BrowseDBPath() (string, error) {
 	defaultDir := ""
 	defaultFilename := db.DefaultDBFileName
 	app.dbMu.RLock()
+	app.waitStartupLocked()
 	currentDBPath := app.dbPath
 	app.dbMu.RUnlock()
 	if currentDBPath != "" {
@@ -136,6 +138,7 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 	dbPath = filepath.Clean(dbPath)
 
 	app.dbMu.RLock()
+	app.waitStartupLocked()
 	currentPath := app.dbPath
 	isDebugMode := app.debugMode
 	app.dbMu.RUnlock()
@@ -347,6 +350,7 @@ func (app *App) SetJournalDir(dir string) (Settings, error) {
 // BrowseJournalDir opens a native directory picker and returns the choice ("" if cancelled).
 func (app *App) BrowseJournalDir() (string, error) {
 	app.dbMu.RLock()
+	app.waitStartupLocked()
 	defaultDir := app.journalDir()
 	app.dbMu.RUnlock()
 	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
@@ -396,10 +400,11 @@ type IngestStatus struct {
 
 // GetIngestStatus returns the journal ingestion status.
 func (app *App) GetIngestStatus() (IngestStatus, error) {
-	status := IngestStatus{Scanning: app.scanning.Load(), LastError: app.getError()}
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
+	readyError := app.ready()
+	status := IngestStatus{Scanning: app.scanning.Load(), LastError: app.getError()}
+	if readyError != nil {
 		return status, nil
 	}
 	if app.watcher != nil {
