@@ -204,7 +204,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 		return Settings{}, err
 	}
 	if shouldRefresh {
-		go app.maybeRefreshGEC()
+		app.spawnBackground(app.maybeRefreshGEC)
 	}
 	app.changed("settings", 0)
 	return app.GetSettings()
@@ -300,16 +300,17 @@ func (app *App) SetJournalDir(dir string) (Settings, error) {
 	}(); err != nil {
 		return Settings{}, err
 	}
-	go func() {
+	app.spawnBackground(func() {
 		app.runScan()
 		app.dbMu.RLock()
+		isCanceled := app.ctx != nil && app.ctx.Err() != nil
 		watcher := app.watcher
 		configuredJournalDir := app.journalDir()
 		app.dbMu.RUnlock()
-		if watcher != nil {
+		if !isCanceled && watcher != nil {
 			watcher.Start(app.ctx, configuredJournalDir)
 		}
-	}()
+	})
 	return app.GetSettings()
 }
 
@@ -342,7 +343,7 @@ func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
 		return Settings{}, err
 	}
 	if enabled {
-		go app.maybeRefreshGEC()
+		app.spawnBackground(app.maybeRefreshGEC)
 	}
 	return app.GetSettings()
 }

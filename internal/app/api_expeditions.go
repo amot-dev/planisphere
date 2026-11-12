@@ -60,7 +60,7 @@ func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 	}(); err != nil {
 		return clonedExpedition, err
 	}
-	go app.kickResolution(clonedExpedition.ID, false)
+	app.kickResolution(clonedExpedition.ID, false)
 	app.changed("plan", clonedExpedition.ID)
 	return clonedExpedition, nil
 }
@@ -108,7 +108,7 @@ func (app *App) SetActiveExpedition(id int64) error {
 	}(); err != nil {
 		return err
 	}
-	go app.kickResolution(id, false)
+	app.kickResolution(id, false)
 	return nil
 }
 

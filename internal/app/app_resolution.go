@@ -92,7 +92,13 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	app.resolvingExpeditions[expeditionID] = true
 	app.resolveMu.Unlock()
 
-	go app.runExpeditionResolutionWorker(expeditionID, allowRetry)
+	if !app.spawnBackground(func() {
+		app.runExpeditionResolutionWorker(expeditionID, allowRetry)
+	}) {
+		app.resolveMu.Lock()
+		delete(app.resolvingExpeditions, expeditionID)
+		app.resolveMu.Unlock()
+	}
 }
 
 func (app *App) lookupRowSystemInfo(systemName string, online bool) (*systems.Info, error, bool) {
@@ -187,7 +193,7 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 }
 
 func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
-	go func() {
+	app.spawnBackground(func() {
 		resolvedCoords, updated := app.resolveRowSync(rowItem, online)
 		if updated {
 			if resolvedCoords {
@@ -195,7 +201,7 @@ func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 			}
 			app.changed("plan", rowItem.ExpeditionID)
 		}
-	}()
+	})
 }
 
 func (app *App) populateMissingPOIs() {

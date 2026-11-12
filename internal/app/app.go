@@ -80,6 +80,10 @@ type App struct {
 	gec             *gec.Catalog
 	gecRefreshing   atomic.Bool
 
+	backgroundMu sync.Mutex
+	shuttingDown bool
+	backgroundWg sync.WaitGroup
+
 	scanning             atomic.Bool
 	lastErrorMu          sync.Mutex
 	lastError            string
@@ -153,6 +157,24 @@ func (app *App) markStartupComplete() {
 	})
 }
 
+// spawnBackground launches task in a tracked goroutine unless shutdown has
+// already begun, preventing WaitGroup Add calls from racing with Wait.
+func (app *App) spawnBackground(task func()) bool {
+	app.backgroundMu.Lock()
+	if app.shuttingDown {
+		app.backgroundMu.Unlock()
+		return false
+	}
+	app.backgroundWg.Add(1)
+	app.backgroundMu.Unlock()
+
+	go func() {
+		defer app.backgroundWg.Done()
+		task()
+	}()
+	return true
+}
+
 // waitStartupLocked waits for the asynchronous Wails OnStartup database
 // initialization to finish when app.db is not yet populated. Caller must hold
 // app.dbMu.RLock, which is temporarily released while waiting so startup can
@@ -195,7 +217,7 @@ func (app *App) startup(ctx context.Context) {
 	}
 	app.prepareInitialState()
 	app.markStartupComplete()
-	go app.backgroundStart()
+	app.spawnBackground(app.backgroundStart)
 }
 
 // openTargetDatabase opens dbPath directly in production mode, or creates and
@@ -233,10 +255,12 @@ func (app *App) openTargetDatabase(dbPath string, isDebugMode bool, logSnapshot 
 
 // initialize opens the database and wires up services. dbPath "" uses the configured or default path.
 func (app *App) initialize(ctx context.Context, dbPath string) error {
+	app.dbMu.Lock()
 	app.ctx, app.cancel = context.WithCancel(ctx)
 	if app.emit == nil {
 		app.emit = func(string, ...any) {}
 	}
+	app.dbMu.Unlock()
 	if dbPath == "" {
 		configuredPath, resolveError := db.ResolveConfiguredPath()
 		if resolveError != nil {
@@ -275,21 +299,48 @@ func (app *App) openAndWireDB(dbPath string) error {
 
 func (app *App) shutdown(ctx context.Context) {
 	app.markStartupComplete()
-	app.dbMu.Lock()
-	defer app.dbMu.Unlock()
 
-	if app.watcher != nil {
-		app.watcher.Stop()
+	// Gate new background tasks before waiting so WaitGroup.Add cannot race Wait.
+	app.backgroundMu.Lock()
+	app.shuttingDown = true
+	app.backgroundMu.Unlock()
+
+	// Release dbMu before stopping the watcher and awaiting workers because
+	// active ingestion and resolution tasks acquire dbMu.RLock.
+	app.dbMu.RLock()
+	activeWatcher := app.watcher
+	cancelFunc := app.cancel
+	app.dbMu.RUnlock()
+
+	if cancelFunc != nil {
+		cancelFunc()
 	}
+	if activeWatcher != nil {
+		activeWatcher.Stop()
+	}
+
+	app.backgroundWg.Wait()
+
+	app.dbMu.Lock()
+	remainingWatcher := app.watcher
+	app.watcher = nil
 	if app.cancel != nil {
 		app.cancel()
 	}
-	if app.db != nil {
-		_ = app.db.Close()
+	databaseToClose := app.db
+	app.db = nil
+	tempDBPath := app.debugTempDBPath
+	app.debugTempDBPath = ""
+	app.dbMu.Unlock()
+
+	if remainingWatcher != nil {
+		remainingWatcher.Stop()
 	}
-	if app.debugTempDBPath != "" {
-		db.RemoveDebugSnapshot(app.debugTempDBPath)
-		app.debugTempDBPath = ""
+	if databaseToClose != nil {
+		_ = databaseToClose.Close()
+	}
+	if tempDBPath != "" {
+		db.RemoveDebugSnapshot(tempDBPath)
 	}
 }
 
@@ -322,7 +373,7 @@ func (app *App) backgroundStart() {
 		return
 	}
 	app.maybeRefreshGEC()
-	go app.maybeCatchUpEDD()
+	app.spawnBackground(app.maybeCatchUpEDD)
 }
 
 func (app *App) setError(errorMessage string) {

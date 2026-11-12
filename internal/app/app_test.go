@@ -732,3 +732,120 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 	}
 }
 
+func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *testing.T) {
+	temporaryDirectory := testingContext.TempDir()
+	productionDBPath := filepath.Join(temporaryDirectory, "shutdown-sync.sqlite")
+
+	seedApp := New()
+	seedApp.debugMode = false
+	seedContext, cancelSeed := context.WithCancel(context.Background())
+	if initError := seedApp.initialize(seedContext, productionDBPath); initError != nil {
+		cancelSeed()
+		testingContext.Fatalf("seed initialize: %v", initError)
+	}
+	if _, createError := seedApp.CreateExpedition("Shutdown Sync Expedition", ""); createError != nil {
+		cancelSeed()
+		seedApp.shutdown(seedContext)
+		testingContext.Fatalf("seed CreateExpedition: %v", createError)
+	}
+	cancelSeed()
+	seedApp.shutdown(seedContext)
+
+	debugApp := New()
+	debugApp.debugMode = true
+	applicationContext, cancelApplication := context.WithCancel(context.Background())
+	defer cancelApplication()
+	if initError := debugApp.initialize(applicationContext, productionDBPath); initError != nil {
+		testingContext.Fatalf("debug initialize: %v", initError)
+	}
+
+	loadedSettings, settingsError := debugApp.GetSettings()
+	if settingsError != nil {
+		debugApp.shutdown(applicationContext)
+		testingContext.Fatalf("GetSettings: %v", settingsError)
+	}
+	snapshotPath := loadedSettings.DBPath
+
+	workerStarted := make(chan struct{})
+	allowWorkerFinish := make(chan struct{})
+	shutdownDone := make(chan struct{})
+	workerQueryError := make(chan error, 1)
+
+	testingContext.Cleanup(func() {
+		select {
+		case <-allowWorkerFinish:
+		default:
+			close(allowWorkerFinish)
+		}
+		select {
+		case <-shutdownDone:
+		default:
+			debugApp.shutdown(applicationContext)
+		}
+	})
+
+	spawned := debugApp.spawnBackground(func() {
+		close(workerStarted)
+		<-debugApp.ctx.Done()
+
+		debugApp.dbMu.RLock()
+		var workerError error
+		if debugApp.db == nil {
+			workerError = fmt.Errorf("database was closed before background worker finished")
+		} else {
+			var expeditionCount int
+			if queryError := debugApp.db.QueryRow(`SELECT COUNT(*) FROM expeditions`).Scan(&expeditionCount); queryError != nil {
+				workerError = fmt.Errorf("query expeditions during shutdown: %w", queryError)
+			} else if _, statError := os.Stat(snapshotPath); statError != nil {
+				workerError = fmt.Errorf("expected debug snapshot to remain intact during shutdown: %w", statError)
+			}
+		}
+		debugApp.dbMu.RUnlock()
+
+		workerQueryError <- workerError
+		<-allowWorkerFinish
+	})
+	if !spawned {
+		testingContext.Fatalf("expected spawnBackground to launch worker before shutdown")
+	}
+
+	<-workerStarted
+	go func() {
+		debugApp.shutdown(applicationContext)
+		close(shutdownDone)
+	}()
+
+	select {
+	case workerError := <-workerQueryError:
+		if workerError != nil {
+			testingContext.Fatalf("background worker observed premature cleanup: %v", workerError)
+		}
+	case <-time.After(2 * time.Second):
+		testingContext.Fatal("timed out waiting for background worker to query database after context cancellation")
+	}
+
+	select {
+	case <-shutdownDone:
+		testingContext.Fatal("shutdown returned before background worker completed")
+	default:
+	}
+
+	if debugApp.spawnBackground(func() {}) {
+		testingContext.Fatal("expected spawnBackground to reject new tasks once shutdown has begun")
+	}
+
+	close(allowWorkerFinish)
+	select {
+	case <-shutdownDone:
+	case <-time.After(2 * time.Second):
+		testingContext.Fatal("timed out waiting for shutdown to complete after background worker exited")
+	}
+
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if _, statError := os.Stat(snapshotPath + suffix); !os.IsNotExist(statError) {
+			testingContext.Errorf("expected debug snapshot %s%s to be removed after shutdown, stat err: %v", snapshotPath, suffix, statError)
+		}
+	}
+}
+
+
