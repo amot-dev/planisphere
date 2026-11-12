@@ -131,64 +131,6 @@ func DefaultJournalDir() string {
 	return ""
 }
 
-// DiscoverEDDiscoveryDBPath dynamically locates an existing EDDiscovery SQLite
-// database (EDDUser.sqlite) using OS / XDG standard data and config directories.
-func DiscoverEDDiscoveryDBPath() string {
-	home, _ := os.UserHomeDir()
-	configDir, _ := os.UserConfigDir()
-	cacheDir, _ := os.UserCacheDir()
-	xdgData := os.Getenv("XDG_DATA_HOME")
-	if xdgData == "" && home != "" {
-		xdgData = filepath.Join(home, ".local", "share")
-	}
-
-	var roots []string
-	for _, rootPath := range []string{xdgData, cacheDir, configDir, os.Getenv("LOCALAPPDATA"), os.Getenv("APPDATA")} {
-		if rootPath != "" {
-			roots = append(roots, rootPath)
-		}
-	}
-	for _, rootPath := range roots {
-		candidateFile := filepath.Join(rootPath, "EDDiscovery", "EDDUser.sqlite")
-		if fileInfo, statError := os.Stat(candidateFile); statError == nil && !fileInfo.IsDir() {
-			return candidateFile
-		}
-	}
-	return ""
-}
-
-// DefaultEDDiscoveryDBPath returns an existing EDDUser.sqlite path if discovered,
-// or the standard OS-specific default path where EDDiscovery stores EDDUser.sqlite.
-func DefaultEDDiscoveryDBPath() string {
-	if found := DiscoverEDDiscoveryDBPath(); found != "" {
-		return found
-	}
-	home, _ := os.UserHomeDir()
-	configDir, _ := os.UserConfigDir()
-	switch runtime.GOOS {
-	case "windows":
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return filepath.Join(local, "EDDiscovery", "EDDUser.sqlite")
-		}
-		if home != "" {
-			return filepath.Join(home, "AppData", "Local", "EDDiscovery", "EDDUser.sqlite")
-		}
-	case "darwin":
-		if configDir != "" {
-			return filepath.Join(configDir, "EDDiscovery", "EDDUser.sqlite")
-		}
-	default:
-		xdgData := os.Getenv("XDG_DATA_HOME")
-		if xdgData == "" && home != "" {
-			xdgData = filepath.Join(home, ".local", "share")
-		}
-		if xdgData != "" {
-			return filepath.Join(xdgData, "EDDiscovery", "EDDUser.sqlite")
-		}
-	}
-	return filepath.Join("EDDiscovery", "EDDUser.sqlite")
-}
-
 // DirExists reports whether dir exists and is a directory.
 func DirExists(dir string) bool {
 	fileInfo, statError := os.Stat(dir)

@@ -68,11 +68,11 @@ func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, can
 	if listError != nil {
 		return "", nil, listError
 	}
-	i := firstWaypoint(rows)
-	if i < 0 || strings.TrimSpace(rows[i].SystemName) == "" {
+	firstIndex := firstWaypoint(rows)
+	if firstIndex < 0 || strings.TrimSpace(rows[firstIndex].SystemName) == "" {
 		return "", nil, errors.New("waypoint #1 needs a system name before the expedition can start")
 	}
-	waypoint := rows[i]
+	waypoint := rows[firstIndex]
 	var arrivals []Arrival
 	var arrivalsError error
 	if waypoint.SystemAddress != 0 {
@@ -100,7 +100,7 @@ func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error
 	if listError != nil {
 		return listError
 	}
-	if i := firstWaypoint(rows); i < 0 || rows[i].SystemName == "" {
+	if firstIndex := firstWaypoint(rows); firstIndex < 0 || rows[firstIndex].SystemName == "" {
 		return errors.New("waypoint #1 needs a system name before the expedition can start")
 	}
 	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, normalizedStartTimestamp, nil, nil); lifecycleError != nil {
@@ -130,7 +130,7 @@ func Arm(transaction *sql.Tx, expeditionID int64) error {
 }
 
 // initCarrierStops initializes carrier stops for an active expedition.
-// The first carrier stop serves as the carrier's origin/starting location,
+// The first carrier stop serves as the carrier's origin or starting location,
 // so it starts as arrived; subsequent carrier stops start as pending.
 func initCarrierStops(queryer db.Queryer, expeditionID int64) error {
 	if _, updateError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE expedition_id = ?`, expeditionID); updateError != nil {
@@ -198,93 +198,43 @@ func ResetToPlanning(transaction *sql.Tx, expeditionID int64) error {
 	return clearVisits(transaction, expeditionID)
 }
 
-// Reevaluate replays journal arrivals from the expedition start (in
-// chronological order) and recomputes which waypoints were visited, applying
-// the out-of-order auto-reordering rule:
-//
-//   - Waypoint #1 is visited at the start timestamp.
-//   - Arrivals before the start timestamp are ignored entirely.
-//   - An arrival only counts when the system differs from the previous
-//     arrival's system (logging in where you already are is not a visit).
-//   - The first unvisited waypoint matching the arrival is marked visited; if
-//     it is not directly after the current (last visited) waypoint it is moved
-//     there, shifting the skipped waypoints down.
-//
-// The replay is deterministic and idempotent: running it again over the
-// reordered plan yields the same result. It returns whether anything changed.
-func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
-	expeditionRecord, getError := Get(queryer, expeditionID)
-	if getError != nil {
-		return false, getError
-	}
-	if expeditionRecord.Status == StatusPlanning {
+func resolveArmedExpeditionStart(queryer db.Queryer, expeditionRecord *Expedition, rows *[]Row, firstWaypointIndex int) (bool, error) {
+	if expeditionRecord.ArmedAt == "" {
 		return false, nil
 	}
-	rows, listError := ListRows(queryer, expeditionID)
+	candidateArrivals, loadError := loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.ArmedAt)
+	if loadError != nil {
+		return false, loadError
+	}
+	for _, arrival := range candidateArrivals {
+		if matches((*rows)[firstWaypointIndex], arrival) {
+			expeditionRecord.StartTimestamp = arrival.Timestamp
+			break
+		}
+	}
+	if expeditionRecord.StartTimestamp == "" {
+		return false, nil
+	}
+	if lifecycleError := setLifecycle(queryer, expeditionRecord.ID, StatusActive, expeditionRecord.StartTimestamp, nil, nil); lifecycleError != nil {
+		return false, lifecycleError
+	}
+	if initError := initCarrierStops(queryer, expeditionRecord.ID); initError != nil {
+		return false, initError
+	}
+	reloadedRows, listError := ListRows(queryer, expeditionRecord.ID)
 	if listError != nil {
 		return false, listError
 	}
-	firstWaypointIndex := firstWaypoint(rows)
-	if firstWaypointIndex < 0 {
-		return false, nil
-	}
+	*rows = reloadedRows
+	return true, nil
+}
 
-	// "Wait for first arrival": pick the first arrival at W1 after armed_at.
-	if expeditionRecord.StartTimestamp == "" {
-		if expeditionRecord.ArmedAt == "" {
-			return false, nil
-		}
-		candidateArrivals, loadError := loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.ArmedAt)
-		if loadError != nil {
-			return false, loadError
-		}
-		for _, arrival := range candidateArrivals {
-			if matches(rows[firstWaypointIndex], arrival) {
-				expeditionRecord.StartTimestamp = arrival.Timestamp
-				break
-			}
-		}
-		if expeditionRecord.StartTimestamp == "" {
-			return false, nil
-		}
-		if lifecycleError := setLifecycle(queryer, expeditionID, StatusActive, expeditionRecord.StartTimestamp, nil, nil); lifecycleError != nil {
-			return false, lifecycleError
-		}
-		if initError := initCarrierStops(queryer, expeditionID); initError != nil {
-			return false, initError
-		}
-		var listError error
-		rows, listError = ListRows(queryer, expeditionID)
-		if listError != nil {
-			return false, listError
-		}
-	}
-
-	originalRowsByID := make(map[int64]Row, len(rows))
-	for _, rowItem := range rows {
-		originalRowsByID[rowItem.ID] = rowItem
-	}
-	for i := range rows {
-		rows[i].VisitedAt, rows[i].VisitEventUID = "", ""
-	}
-	modeTimeline, _ := modes.LoadTimeline(queryer)
-
-	var arrivals []Arrival
-	var arrivalsError error
-	if expeditionRecord.EndTimestamp != "" {
-		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ? AND timestamp <= ?`, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-	} else {
-		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.StartTimestamp)
-	}
-	if arrivalsError != nil {
-		return false, arrivalsError
-	}
-
+func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp string, arrivals []Arrival, modeTimeline *modes.Timeline) []Row {
 	// Waypoint #1 is visited at the start timestamp.
-	rows[firstWaypointIndex].VisitedAt = expeditionRecord.StartTimestamp
+	rows[firstWaypointIndex].VisitedAt = startTimestamp
 	lastSystemName := strings.ToLower(strings.TrimSpace(rows[firstWaypointIndex].SystemName))
 	for _, arrival := range arrivals {
-		if arrival.Timestamp == expeditionRecord.StartTimestamp && matches(rows[firstWaypointIndex], arrival) {
+		if arrival.Timestamp == startTimestamp && matches(rows[firstWaypointIndex], arrival) {
 			rows[firstWaypointIndex].VisitEventUID = arrival.UID
 			if arrival.SystemName != "" {
 				lastSystemName = strings.ToLower(strings.TrimSpace(arrival.SystemName))
@@ -295,7 +245,7 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	currentIndex := firstWaypointIndex
 
 	for _, arrival := range arrivals {
-		if arrival.Timestamp == expeditionRecord.StartTimestamp && arrival.UID == rows[firstWaypointIndex].VisitEventUID {
+		if arrival.Timestamp == startTimestamp && arrival.UID == rows[firstWaypointIndex].VisitEventUID {
 			continue
 		}
 		systemName := strings.ToLower(strings.TrimSpace(arrival.SystemName))
@@ -334,8 +284,11 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		}
 		currentIndex = targetIndex
 	}
+	return rows
+}
 
-	var stmt *sql.Stmt
+func persistEvaluatedRowChanges(queryer db.Queryer, rows []Row, originalRowsByID map[int64]Row) (bool, error) {
+	var updateStatement *sql.Stmt
 	changed := false
 	for i := range rows {
 		rowItem := rows[i]
@@ -350,13 +303,13 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		}
 
 		changed = true
-		if stmt == nil {
+		if updateStatement == nil {
 			var prepError error
-			stmt, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ?, visited_at = ?, visit_event_uid = ?, fc_arrived = ?, leg_mode_id = ? WHERE id = ?`)
+			updateStatement, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ?, visited_at = ?, visit_event_uid = ?, fc_arrived = ?, leg_mode_id = ? WHERE id = ?`)
 			if prepError != nil {
 				return false, fmt.Errorf("prepare update row: %w", prepError)
 			}
-			defer stmt.Close()
+			defer updateStatement.Close()
 		}
 
 		var visitedAtValue, visitUIDValue any
@@ -366,11 +319,74 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		if rowItem.VisitEventUID != "" {
 			visitUIDValue = rowItem.VisitEventUID
 		}
-		if _, updateError := stmt.Exec(newPosition, visitedAtValue, visitUIDValue, rowItem.FCArrived, rowItem.LegModeID, rowItem.ID); updateError != nil {
+		if _, updateError := updateStatement.Exec(newPosition, visitedAtValue, visitUIDValue, rowItem.FCArrived, rowItem.LegModeID, rowItem.ID); updateError != nil {
 			return false, fmt.Errorf("update row %d: %w", rowItem.ID, updateError)
 		}
 	}
 	return changed, nil
+}
+
+// Reevaluate replays journal arrivals from the expedition start (in
+// chronological order) and recomputes which waypoints were visited, applying
+// the out-of-order auto-reordering rule:
+//
+//   - Waypoint #1 is visited at the start timestamp.
+//   - Arrivals before the start timestamp are ignored entirely.
+//   - An arrival only counts when the system differs from the previous
+//     arrival's system (logging in where you already are is not a visit).
+//   - The first unvisited waypoint matching the arrival is marked visited; if
+//     it is not directly after the current (last visited) waypoint it is moved
+//     there, shifting the skipped waypoints down.
+//
+// The replay is deterministic and idempotent: running it again over the
+// reordered plan yields the same result. It returns whether anything changed.
+func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
+	expeditionRecord, getError := Get(queryer, expeditionID)
+	if getError != nil {
+		return false, getError
+	}
+	if expeditionRecord.Status == StatusPlanning {
+		return false, nil
+	}
+	rows, listError := ListRows(queryer, expeditionID)
+	if listError != nil {
+		return false, listError
+	}
+	firstWaypointIndex := firstWaypoint(rows)
+	if firstWaypointIndex < 0 {
+		return false, nil
+	}
+
+	// Wait for first arrival: pick the first arrival at Waypoint #1 after armed_at.
+	if expeditionRecord.StartTimestamp == "" {
+		started, armError := resolveArmedExpeditionStart(queryer, &expeditionRecord, &rows, firstWaypointIndex)
+		if armError != nil || !started {
+			return false, armError
+		}
+	}
+
+	originalRowsByID := make(map[int64]Row, len(rows))
+	for _, rowItem := range rows {
+		originalRowsByID[rowItem.ID] = rowItem
+	}
+	for i := range rows {
+		rows[i].VisitedAt, rows[i].VisitEventUID = "", ""
+	}
+	modeTimeline, _ := modes.LoadTimeline(queryer)
+
+	var arrivals []Arrival
+	var arrivalsError error
+	if expeditionRecord.EndTimestamp != "" {
+		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ? AND timestamp <= ?`, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	} else {
+		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.StartTimestamp)
+	}
+	if arrivalsError != nil {
+		return false, arrivalsError
+	}
+
+	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals, modeTimeline)
+	return persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
 }
 
 // ActiveExpeditionIDs returns expeditions that need re-evaluation on new
@@ -391,4 +407,3 @@ func ActiveExpeditionIDs(queryer db.Queryer) ([]int64, error) {
 	}
 	return expeditionIDs, rows.Err()
 }
-
