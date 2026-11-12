@@ -22,54 +22,39 @@ That's where Planisphere comes in.
 
 ## Features
 
-### Keep your expedition stats pure with flight modes
-Separate your flight stats across different styles of transport. If you take a high-speed detour back to the Bubble, switch modes so thousands of buckyballing light years don't ruin your expedition's jump averages and distance logs. You can even use partial filtering to let scan values and exobiology bio-data count toward your wallet totals while keeping the travel mileage strictly isolated.
+### Flight Modes
+When an expedition spans months, you don't always fly the same way. Flight Modes let you isolate your stats depending on what you're doing in the cockpit.
 
-### Waypoint flight planning without the spreadsheet
-Build your flight plan stop by stop with system names, coordinates, and personal notes. Planisphere watches your journal logs in the background; the moment you jump into a destination system, it marks the waypoint as visited and automatically steps forward to the next leg. During active expeditions, live telemetry displays the remaining distance to your next waypoint and continuously updates remaining route mileage.
+- **Separate Travel Profiles:** Switch modes when you take a high-speed detour back to the Bubble so neutron highway jumps don't skew your expedition's average jump range or distance totals.
+- **Partial Filtering:** Toggle any mode in the sidebar between full inclusion, scan-only inclusion, or complete exclusion. Scan-only mode lets cartography and exobiology discoveries count toward your wallet while keeping travel mileage isolated.
+- **Per-Leg Tracking:** Assign flight modes to individual expedition legs to record how you traveled between each stop. Leg modes can always be changed later, even after a waypoint has been visited.
+- **Custom Modes:** Create your own flight modes in Settings with custom names, descriptions, and color tags.
 
-### Fleet carrier routing that isn't a chore
-Flag waypoints as Carrier Stops. Planisphere queries the Spansh carrier router to plot out 500 Ly jumps with accurate tritium calculations on the fly, tracks your carrier's current location from journal events, and supports manual hop adjustments or logging manual carrier jumps directly from the expedition statistics sidebar even without a scheduled Carrier Stop waypoint.
+### Expedition Planning
+Plan your route stop by stop without juggling external spreadsheets.
 
-### Real-time cartography and exobiology payouts
-Get estimated credit values for bodies you scan (FSS, session-aware Horizons or Odyssey DSS mapping, terraformable, first discovery, and first mapped bonuses) and plants you sample in your Artemis suit (base species value plus first-logged multiplier) right as they hit your journal. First-bonus estimates automatically exclude populated systems and pre-seeded tag-locked Bubble worlds where discovery tags cannot be claimed.
+- **Multiple Plans and Cloning:** Create and switch between multiple expedition plans, or clone an existing expedition (preserving its waypoints and region headers) into a fresh plan.
+- **Waypoints and Galactic Regions:** Build your flight plan with system names, coordinates, and personal notes, and organize stops with Galactic Region headers that automatically suggest the region matching your next waypoint and prioritize adjacent regions.
+- **Coordinate Resolution and Visit History:** Waypoint coordinates resolve from your local journal history first and fall back to EDSM for unvisited systems. Because the status badge distinguishes local journal matches from EDSM lookups, you can see while planning whether you have previously visited a system (assuming your journal history is accurate).
+- **Built-in POI Catalog:** Systems matching EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP) are flagged automatically with one-click links to EDAstro, Inara, and EDSM.
+- **Flexible Expedition Start:** Engage an expedition from a recorded historical visit to Waypoint #1 (retroactively replaying all subsequent journal events across your route), arm it to start automatically when your ship or carrier arrives at Waypoint #1, or enter a custom Galactic Standard Time timestamp. Complete an expedition to lock its end timestamp, or reopen it if you closed it early by mistake.
+- **Automatic Progression:** Planisphere watches your journal in the background. The moment you jump into a destination system, that waypoint is marked visited and the planner advances to the next leg, updating remaining distance to the next stop and total remaining route mileage in real time.
+- **Per-Leg Telemetry Drawer:** Expand any visited waypoint to inspect that leg's elapsed duration, vessels jumped, distance split between ship FSD and carrier passenger travel, hyperspace jumps, scans, and leg-specific estimated vs. realized earnings. Expanding Waypoint #1 displays your pre-expedition historical baseline.
 
-> [!NOTE]
-> **Exobiology first-logged detection ([Frontier Issue #81891](https://issues.frontierstore.net/issue-detail/81891)):** Because Elite Dangerous journals do not reliably populate `WasLogged` on `ScanOrganic` events when another commander has already logged a species, Planisphere works around this by checking `WasFootfalled == false` on the parent body's `Scan` event (falling back to unmapped and undiscovered checks on pre-2025 journals that predate `WasFootfalled`) to estimate first-logged bonuses and detect stolen exobiology bonuses. As a tradeoff, if another commander previously achieved First Footfall on a body without scanning its organics, those samples are initially estimated at base value and automatically upgraded to include the first-logged bonus once sold at Vista Genomics.
+### Fleet Carrier Routing
+Whether you're taking your own carrier into the black, flying with a squadron, or hitching a ride, carrier jumps are built into the planner.
 
-### Realized earnings and loss accounting
-When you dock and sell exploration data, Planisphere tracks your actual net realized earnings alongside theoretical survey totals. It automatically logs credit deductions and losses resulting from death (distinguishing on-foot suit or SRV deaths, which only lose unsold exobiology samples in your suit while preserving shipboard cartography, from ship destruction, which loses both), first-discovery or first-logged bonuses claimed first by other commanders, the 25 percent Fleet Carrier Universal Cartographics tariff, and active NPC crew wage deductions.
+- **Interactive Spansh Plotter:** Flag any waypoint as a Carrier Stop to plot 500 Ly hops with per-jump and total tritium calculations, `[ICY RING]` mining indicators on intermediate systems, live tritium depot tracking, and a one-click depot refill button that recalculates remaining fuel costs.
+- **Personal and Squadron Carriers:** Supports both Personal Carriers (`25,000 t` capacity) and Squadron Carriers (`60,000 t` capacity) when plotting routes and calculating tritium burn.
+- **Manual Jump Logging:** Switch to manual mode or log unscheduled carrier jumps straight from the telemetry sidebar even without a scheduled Carrier Stop waypoint.
 
-> [!NOTE]
-> **What happens if you die?** Elite Dangerous journals never erase past entries. Whether you die on foot or lose your ship out in the black, Planisphere preserves all the scans, organic samples, and theoretical estimated values you gathered before respawning, while recording unsold suit exobiology samples (on any death) and shipboard cartography (on ship destruction) as death losses under realized accounting. Because death losses are classified from the journal's `Resurrect` event, if you can afford your ship's insurance (`Bankrupt: false`) but voluntarily forfeit your ship for a free starter Sidewinder and the journal logs `Option: "free"` with `Cost: 0` instead of `"freewinder"`, that respawn cannot be distinguished from a free on-foot redeployment to orbit. Respawning also won't inflate your jump distance or advance your waypoints.
+### Exploration Valuation and Realized Earnings
+See what your discoveries are worth as you scan them, and track what actually hits your bank account when you cash in.
 
-### Optional historical import from EDDiscovery
-If your older raw journal files have been purged or archived, Planisphere can optionally recover your flight history directly from an existing EDDiscovery database (`EDDUser.sqlite`) on an as-needed basis during setup or through Settings.
-
-### Built-in POI catalog
-Automatically flags systems listed in EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP). When your route passes a notable landmark or planetary nebula, you get the POI name and one-click shortcuts to EDAstro, Inara, and EDSM.
-
-
-## Valuation and Realization Design
-
-### What Realized Value Represents
-`Realized Value` tracks **net credits pocketed** by the commander after all station tariffs and crew cuts:
-- **Universal Cartographics** (`SellExplorationData` and `MultiSellExplorationData`) logs `TotalEarnings` already net of both the 25 percent Fleet Carrier tariff and active NPC crew wage shares.
-- **Vista Genomics** (`SellOrganicData`) logs gross `Value + Bonus` before crew deductions, so Planisphere subtracts matched `NpcCrewPaidWage` events logged within five seconds of the sale.
-
-Every subline displayed beneath `Realized Value` (`Cartographics Lost (Death)`, `Exobiology Lost (Death)`, `Cartographics Stolen`, `Exobiology Stolen`, `Carrier Tariffs`, and `NPC Crew Payouts`) is an **informational breakdown of deductions and unrealized losses already absent from `Realized Value`** rather than an additional fee to subtract again. When all data has been sold, `Realized Value` stays at or below `(Cartographics Value + Exobiology Value) - Sum(Sublines)` up to minor cartography formula variance; any larger gap represents unsold pending scans still aboard your ship or suit.
-
-### Community Goal and Historical Era Exceptions
-Permanent, current-era game constants live in `internal/ed/` (including `Radicoida Unica` at its permanent `119,037 Cr` standard base value), while time-bounded and station-bounded pricing overrides are isolated in `internal/ed/exceptions/`:
-- **Historical Era Pricing (`era_pre_update14.go`)**: Prior to Update 14 (`2022-11-29T08:00:00Z`), Vista Genomics used lower legacy species base values and a `2x` (`1x` bonus) first-logged multiplier instead of the modern `5x` (`4x` bonus) multiplier. Because Frontier evaluates exobiology payouts under the table active at redemption time rather than scan time, era rules evaluate against the sale timestamp when sold (so pre-Update-14 samples sold after Update 14 receive modern payouts) and against the scan timestamp when unsold or lost to death.
-- **Community Goal Overrides (`cg_*.go`)**: Temporary event multipliers are maintained as separate per-event files added post-event once exact parameters are verified. For example, `cg_2025_11_hip87621.go` models the November 2025 `HIP 87621` Exobiology Initiative (`8x` base value = `952,296 Cr` per `Radicoida Unica` sample sold at `Exogene Sciences`), paired with multi-sample batch consumption when Vista Genomics aggregates repeated scans of the same species into a single `BioData` sale entry.
-
-### Known Limitations and Potential Inaccuracies
-Several journal edge cases cannot be reconstructed deterministically from Frontier's logs and are intentionally left unguessed to avoid introducing phantom losses:
-- **Uncurated Community Goals**: Live or historical Community Goals without an entry in `internal/ed/exceptions/` use standard species or body estimates until a post-event rule file is added, while realized totals still record actual net credits paid.
-- **Bulk `MultiSellExplorationData` opacity and cartography rounding**: Unlike single-system `SellExplorationData` (which lists `Discovered` bodies), bulk `MultiSellExplorationData` bakes first-discovery and first-mapped bonuses directly into `BaseValue` and reserves `Bonus` strictly for flat system-completion bonuses. Because per-body discovery flags are omitted on bulk pages, Planisphere cannot detect stolen discovery bonuses on multi-system sales and does not infer losses from `Estimated - BaseValue`, which naturally varies by roughly 1 to 2 percent due to mass-curve rounding and passive star or asteroid-belt honks without `Scan` events.
-- **Pre-death first-logged bonuses on previously footfalled worlds**: On a body where an earlier visitor already set `WasFootfalled: true` without sampling every species, the journal provides no per-species `WasLogged` truth prior to sale. If you die before selling at Vista Genomics, lost samples on that body can only be valued at base species value (`1x`) rather than `5x`.
-- **Unlogged Vista Genomics NPC crew cuts**: Frontier occasionally deducts an active NPC pilot's cut from Vista Genomics payouts without writing an `NpcCrewPaidWage` journal event. Planisphere only deducts explicitly logged `NpcCrewPaidWage` events within five seconds of a sale rather than estimating cuts from `Statistics` ledger deltas, which blend combat, trade, and exploration crew wages across sessions.
+- **Live Cartography Estimates:** Calculates credit values for FSS body scans (`Scan`) and Horizons or Odyssey DSS surface mapping (`SAAScanComplete`) as they happen, including terraformable, First Discovery, and First Mapped bonuses.
+- **Live Exobiology Estimates:** Values organic species sampled in your Artemis suit (`ScanOrganic`), including the First Logged multiplier on untouched worlds.
+- **Realized Earnings Breakdown:** Compares your estimated survey value against the net credits you actually pocket at Universal Cartographics and Vista Genomics, breaking down losses from death, stolen first-discovery or first-logged bonuses, the 25 percent Fleet Carrier tariff, and active NPC crew cuts.
+- **Expedition and All-Time Scopes:** Switch the telemetry sidebar between your active expedition (with flight mode filters) and all-time career totals across your entire journal archive, with travel distance broken down between ship FSD jumps and carrier passenger rides.
 
 
 ## Installation
@@ -126,6 +111,57 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
    make run
    ```
 
+### First-Launch Setup
+
+Everything in Planisphere is stored in a local SQLite database on your machine: your journals, route waypoints, and cached coordinates stay local and work offline. Planisphere never modifies your game files.
+
+- **Journal Directory:** Point Planisphere to your Elite Dangerous journal folder on first launch. Planisphere ingests your existing `Journal.*.log` files and watches the folder for live events while you fly.
+- **Optional EDDiscovery Backfill:** If your older raw journal files have been purged or archived, Planisphere can optionally recover past flight history directly from an existing EDDiscovery database (`EDDUser.sqlite`) during setup or later through Settings.
+
+> [!WARNING]
+> The Elite Dangerous journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent directories do not emit kernel filesystem notifications and are not supported for live telemetry.
+
+
+## Design Choices
+
+### Estimated vs. Realized Value
+Planisphere tracks two separate credit totals: what your scans were worth in theory when you collected them (**Cartographics Value** and **Exobiology Value**), and the **net credits pocketed** after station tariffs and crew cuts (**Realized Value**):
+
+- **Scan-Time Leg and Mode Attribution:** When you sell exploration data, the realized earnings and any associated deductions (tariffs, crew wages, stolen bonuses, or death losses) are attributed back to the **expedition leg and flight mode where each scan was originally taken**, rather than dumping the entire payout into whichever leg or mode is active when you dock at a station. (Sales that have no matching prior scan in the database fall back to the sale timestamp.)
+- **Universal Cartographics** (`SellExplorationData` and `MultiSellExplorationData`) logs `TotalEarnings` already net of both the 25 percent Fleet Carrier tariff and active NPC crew wage shares.
+- **Vista Genomics** (`SellOrganicData`) logs gross `Value + Bonus` before crew deductions, so Planisphere subtracts matched `NpcCrewPaidWage` events logged within five seconds of the sale.
+
+Every subline displayed beneath `Realized Value` (`Cartographics Lost (Death)`, `Exobiology Lost (Death)`, `Cartographics Stolen`, `Exobiology Stolen`, `Carrier Tariffs`, and `NPC Crew Payouts`) is an **informational breakdown of deductions and unrealized losses already absent from `Realized Value`**, not an additional fee to subtract again. Once all data has been sold, `Realized Value` stays at or below `(Cartographics Value + Exobiology Value) - Sum(Sublines)` within 1 to 2 percent due to Elite's internal mass-curve rounding; any larger gap represents unsold pending scans still aboard your ship or suit.
+
+### Death and Respawning
+Elite Dangerous journals never erase past entries, and neither does Planisphere. Whether you die on foot or lose your ship out in the black, Planisphere preserves all the scans, organic samples, and theoretical estimated values you gathered before respawning. Respawning also won't inflate your jump distance or advance your waypoints.
+
+Under realized accounting, unsold data at the time of a `Resurrect` event is recorded as a death loss based on how you died:
+- **On-Foot or SRV Death:** Only unsold exobiology samples in your suit are marked as lost (`Exobiology Lost (Death)`), while shipboard cartography remains pending until sold.
+- **Ship Destruction:** Both unsold suit exobiology samples and unsold shipboard cartography are marked as lost.
+
+### Route Progression and Carrier Tracking
+- **Out-of-Order Waypoint Visits:** If you jump into a planned waypoint further down your list before visiting the intermediate stops above it, Planisphere does not ignore the arrival or mark the skipped stops as missed. Instead, it moves the visited waypoint up to become your latest completed leg and shifts the unvisited waypoints down below it so you can still visit them later without breaking your route.
+- **Fleet Carrier Tritium Calculation vs. Spansh:** When plotting a carrier route, Planisphere uses Spansh to find the 500 Ly route hops, but discards Spansh's native tritium estimates. Spansh calculates jump fuel assuming an artificially low amount of tritium in the carrier's depot tank, which under-reports actual in-game fuel burn because depot fuel adds mass to the carrier. Planisphere recalculates every hop using Elite's in-game fuel formula (`round(5 + distance * (usedCapacity + depotTritium + 25000) / 200000)`) with your actual depot level (up to `1,000 t`), updating remaining hop costs as the depot drains or when you click **Refill**.
+- **Carrier Passenger Travel vs. Carrier Operations:** Elite Dangerous only writes a `CarrierJump` event to your journal when your commander is docked aboard the carrier during the jump, missing remote carrier jumps ordered from your ship or jumps made by a Squadron Carrier while you are elsewhere. To prevent missing remote jumps or double-counting when you are aboard:
+  - **By Carrier (Passenger)** under `Distance Travelled (Ly)` tracks distance from `CarrierJump` journal events when your commander personally rode aboard a carrier, and obeys flight mode filters.
+  - **Expedition Carrier Operations** (Carrier Dist, Carrier Jumps, and Tritium) tracks jumps logged through the carrier route plotter and manual jump logger, independent of flight mode filters.
+  - **All-Time Personal Carrier Operations** reads your owned carrier's lifetime jump count and distance directly from Frontier's `Statistics` journal event (`FLEETCARRIER_TOTAL_JUMPS` and `FLEETCARRIER_DISTANCE_TRAVELLED`).
+
+### Valuation Rules, Historical Eras, and Community Goals
+- **Populated Systems and Tag-Locked Bubble Worlds:** In inhabited systems (`Population > 0`) in the Bubble and Colonia, Elite Dangerous disables First Discovered, First Mapped, and First Footfall tags in-game, yet still writes `WasDiscovered: false` and `WasFootfalled: false` in journal `Scan` events. Pre-seeded Bubble bodies can also log `WasDiscovered: false` alongside `WasMapped: true` (impossible in normal exploration since a body must be discovered to be DSS-mapped). Planisphere filters out populated systems and tag-locked bodies so flying through the Bubble does not inflate your stats with impossible first-discovery bonuses.
+- **Session-Aware Horizons vs. Odyssey Mapping Payouts:** Odyssey adds a 30 percent bonus to Detailed Surface Scanner (`SAAScanComplete`) mapping payouts compared to Horizons. Planisphere tracks your `LoadGame` state (`Odyssey: true` or `false`) across your journal timeline so historical Horizons mapping scans are valued under the Horizons formula while Odyssey sessions receive the 30 percent Odyssey bonus.
+- **Pre-Update 14 Exobiology:** Prior to Update 14 (`2022-11-29T08:00:00Z`), Vista Genomics used lower legacy species base values and a `2x` (`1x` bonus) First Logged multiplier instead of the modern `5x` (`4x` bonus) multiplier. Because Frontier evaluates exobiology payouts under the table active at redemption time rather than scan time, Planisphere evaluates era rules against the sale timestamp when sold (so pre-Update-14 samples sold after Update 14 receive modern payouts) and against the scan timestamp when unsold or lost to death.
+- **Community Goals:** Temporary event overrides are **not** detected automatically. They must be manually added in code and shipped in an update after an event concludes and its exact payout parameters are verified. For example, Planisphere includes a dedicated rule for the November 2025 `HIP 87621` Exobiology Initiative (`8x` base value = `952,296 Cr` per `Radicoida Unica` sample sold at `Exogene Sciences`, paired with multi-sample batch matching when Vista Genomics aggregates repeated scans of the same species into a single `BioData` entry). For any uncurated live or historical Community Goal, estimated values use standard pricing while `Realized Value` still records the actual net credits paid.
+
+### Elite Dangerous Journal Limitations
+Several journal edge cases cannot be reconstructed deterministically from Frontier's logs and are intentionally left unguessed to avoid introducing phantom losses:
+
+- **Exobiology First Logged Detection ([Frontier Issue #81891](https://issues.frontierstore.net/issue-detail/81891)):** Because Elite Dangerous journals do not reliably populate `WasLogged` on `ScanOrganic` events when another commander has already logged a species, Planisphere checks `WasFootfalled == false` on the parent body's `Scan` event (falling back to `!WasDiscovered` and `!WasMapped` on pre-2025 journals that predate `WasFootfalled`) to estimate first-logged bonuses and detect stolen exobiology bonuses. As a tradeoff, if another commander previously achieved First Footfall on a body without sampling its organics, those samples are initially estimated at base value (`1x`) and automatically upgraded to `5x` once sold at Vista Genomics. If you die before selling at Vista Genomics on a previously footfalled world, lost samples can only be valued at base value (`1x`).
+- **Stolen Bonuses on Bulk `MultiSellExplorationData` Sales:** Unlike single-system `SellExplorationData` (which lists `Discovered` bodies), bulk `MultiSellExplorationData` bakes First Discovery and First Mapped bonuses directly into `BaseValue` and reserves `Bonus` strictly for flat system-completion bonuses. Because per-body discovery flags are omitted on bulk pages, Planisphere cannot detect stolen discovery bonuses on multi-system sales and does not infer losses from `Estimated - BaseValue`, which naturally varies by 1 to 2 percent due to mass-curve rounding and passive star or asteroid-belt honks without `Scan` events.
+- **Unlogged Vista Genomics NPC Crew Cuts:** Frontier occasionally deducts an active NPC pilot's cut from Vista Genomics payouts without writing an `NpcCrewPaidWage` journal event. Planisphere only deducts explicitly logged `NpcCrewPaidWage` events within five seconds of a sale rather than estimating cuts from `Statistics` ledger deltas, which blend combat, trade, and exploration crew wages across sessions.
+- **Voluntary Starter Sidewinder Forfeit:** Because death losses are classified from the journal's `Resurrect` event, if you can afford your ship's insurance (`Bankrupt: false`) but voluntarily forfeit your ship for a free starter Sidewinder and the journal logs `Option: "free"` with `Cost: 0` instead of `"freewinder"`, that respawn cannot be distinguished from a free on-foot redeployment to orbit.
+
 
 ## Development
 
@@ -138,11 +174,7 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 
 ### Architecture
 
-- **Local-First**: Everything lives in a local SQLite database on your machine. Your journals, route waypoints, and cached coordinates stay local and work completely offline.
-- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using native filesystem notifications (`fsnotify`) as its primary event pipeline, with a configurable debounce window (`0.3s` to `30s`, `2s` default) to coalesce rapid write bursts such as FSS body scans. It handles out-of-order writes safely and never touches your game files.
-  > [!WARNING]
-  > The journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent folders do not emit kernel filesystem events and are not supported for live log streaming.
-- **Optional Historical Ingestion**: When older journal files are no longer available on disk, Planisphere can optionally backfill past flight events from an existing EDDiscovery database (`EDDUser.sqlite`).
+- **Debounced Filesystem Watcher**: The journal ingester watches the active journal directory via `fsnotify` with a configurable debounce window (`0.3s` to `30s`, `2s` default) to coalesce rapid write bursts such as FSS body scans and handle out-of-order writes safely.
 - **Single Source of Truth Config**: Versioning, product name, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, and package manifests in sync.
 
 ### Commands
