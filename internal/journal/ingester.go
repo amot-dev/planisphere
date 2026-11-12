@@ -378,7 +378,7 @@ func (ingester *Ingester) ImportEDDiscoveryDB(ctx context.Context, eddPath strin
 
 	const eventFilter = `journalEntry.EventType IN (
 			'Commander','LoadGame','Statistics','Location','FSDJump','CarrierJump',
-			'CarrierStats','CarrierDepositFuel','CarrierJumpRequest','Docked','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
+			'CarrierStats','CarrierDepositFuel','CarrierJumpRequest','Docked','Undocked','FSDTarget','Scan','SAAScanComplete','FSSDiscoveryScan',
 			'ScanOrganic','MultiSellExplorationData','SellExplorationData','SellOrganicData','ShipyardSwap',
 			'Died','Resurrect','NpcCrewPaidWage'
 		)`

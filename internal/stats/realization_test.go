@@ -35,17 +35,21 @@ func insertEvent(t *testing.T, databaseConnection *sql.DB, timestamp, event, raw
 func TestRealizationNpcCrewCut(t *testing.T) {
 	databaseConnection := setupRealizationDB(t)
 
-	// Scan
+	// Scan two samples sold in rapid consecutive transactions within 5 seconds.
 	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":111,"Body":1}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "ScanOrganic",
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Bacterial","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","WasLogged":true,"SystemAddress":111,"Body":2}`)
 
-	// Sale for 19,010,800 credits
+	// First sale for 19,010,800 credits with concurrent NPC crew cut of 1,901,080 (10%).
 	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
-
-	// Concurrent NPC crew cut: 1,901,080 (10%)
 	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "NpcCrewPaidWage",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"NpcCrewPaidWage","NpcCrewId":99,"NpcCrewName":"Piloteer","Amount":1901080}`)
+
+	// Second sale 2 seconds later without its own NpcCrewPaidWage must not re-claim the consumed wage event.
+	insertEvent(t, databaseConnection, "2026-03-01T12:00:02Z", "SellOrganicData",
+		`{"timestamp":"2026-03-01T12:00:02Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`)
 
 	engine := stats.NewEngine(databaseConnection)
 	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
@@ -53,11 +57,13 @@ func TestRealizationNpcCrewCut(t *testing.T) {
 		t.Fatalf("ComputeRealization failed: %v", err)
 	}
 
-	if realizationBreakdown.TotalRealized != 19010800 {
-		t.Errorf("expected TotalRealized 19,010,800, got %d", realizationBreakdown.TotalRealized)
+	// Net Credits Pocketed = (19,010,800 - 1,901,080) + 1,000,000 = 18,109,720.
+	expectedNetRealized := int64(19010800 - 1901080 + 1000000)
+	if realizationBreakdown.TotalRealized != expectedNetRealized {
+		t.Errorf("expected net TotalRealized %d, got %d", expectedNetRealized, realizationBreakdown.TotalRealized)
 	}
 	if realizationBreakdown.NpcCrewLoss != 1901080 {
-		t.Errorf("expected NpcCrewLoss 1,901,080, got %d", realizationBreakdown.NpcCrewLoss)
+		t.Errorf("expected NpcCrewLoss 1,901,080 (consumed once), got %d", realizationBreakdown.NpcCrewLoss)
 	}
 }
 
@@ -190,13 +196,16 @@ func TestRealizationOnFootDeathPreservesCarto(t *testing.T) {
 func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
 	databaseConnection := setupRealizationDB(t)
 
-	// Scan two systems during the leg: both Alpha and Beta are undiscovered (WasDiscovered: false) and expect a bonus.
+	// Scan three undiscovered systems: Alpha and Beta sold via MultiSellExplorationData,
+	// Gamma sold individually via SellExplorationData where someone else claimed discovery first.
 	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":1001,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 	insertEvent(t, databaseConnection, "2026-03-01T10:15:00Z", "Scan",
 		`{"timestamp":"2026-03-01T10:15:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Beta","SystemAddress":1002,"BodyID":1,"BodyName":"Beta 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	insertEvent(t, databaseConnection, "2026-03-01T10:20:00Z", "Scan",
+		`{"timestamp":"2026-03-01T10:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Gamma","SystemAddress":1003,"BodyID":1,"BodyName":"Gamma 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 
-	// Page 1 sells only Alpha with Bonus: 0 (someone else turned Alpha in first, while Beta remains unsold).
+	// Bulk Page 1 sells Alpha with Bonus: 0 (no system-completion bonus; first-discovery bonus is baked into BaseValue).
 	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[{"SystemName":"Alpha","NumBodies":1}]}`)
 
@@ -210,30 +219,32 @@ func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
 	if afterFirstPageBreakdown.TotalRealized != 1000000 {
 		t.Errorf("expected TotalRealized 1,000,000 after first page, got %d", afterFirstPageBreakdown.TotalRealized)
 	}
-	if afterFirstPageBreakdown.CartoStolen != 24188 {
-		t.Errorf("expected CartoStolen 24,188 (only Alpha bonus stolen), got %d", afterFirstPageBreakdown.CartoStolen)
+	if afterFirstPageBreakdown.CartoStolen != 0 {
+		t.Errorf("expected CartoStolen 0 on MultiSellExplorationData with Bonus 0, got %d", afterFirstPageBreakdown.CartoStolen)
 	}
-	if afterFirstPageBreakdown.PendingValue != 39305 {
-		t.Errorf("expected PendingValue 39,305 for unsold Beta scan, got %d", afterFirstPageBreakdown.PendingValue)
+	if afterFirstPageBreakdown.PendingValue != 39305*2 {
+		t.Errorf("expected PendingValue %d for unsold Beta and Gamma scans, got %d", 39305*2, afterFirstPageBreakdown.PendingValue)
 	}
 
-	// Page 2 is sold a week later and realizes Beta with its full discovery bonus.
+	// Bulk Page 2 realizes Beta, and individual SellExplorationData sells Gamma with empty Discovered (stolen bonus).
 	insertEvent(t, databaseConnection, "2026-03-08T12:00:00Z", "MultiSellExplorationData",
 		`{"timestamp":"2026-03-08T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Beta","NumBodies":1}]}`)
+	insertEvent(t, databaseConnection, "2026-03-08T12:05:00Z", "SellExplorationData",
+		`{"timestamp":"2026-03-08T12:05:00Z","event":"SellExplorationData","Systems":["Gamma"],"Discovered":[],"BaseValue":15117,"Bonus":0,"TotalEarnings":15117}`)
 	stats.InvalidateLedgerCache()
 
 	afterSecondPageBreakdown, secondPageError := engineInstance.ComputeRealization(legWindow, nil)
 	if secondPageError != nil {
 		t.Fatalf("ComputeRealization after second page failed: %v", secondPageError)
 	}
-	if afterSecondPageBreakdown.TotalRealized != 2500000 {
-		t.Errorf("expected combined TotalRealized 2,500,000 across pages, got %d", afterSecondPageBreakdown.TotalRealized)
+	if afterSecondPageBreakdown.TotalRealized != 2515117 {
+		t.Errorf("expected combined TotalRealized 2,515,117 across sales, got %d", afterSecondPageBreakdown.TotalRealized)
 	}
 	if afterSecondPageBreakdown.CartoStolen != 24188 {
-		t.Errorf("expected CartoStolen to remain 24,188 (only Alpha bonus stolen, Beta not marked stolen), got %d", afterSecondPageBreakdown.CartoStolen)
+		t.Errorf("expected CartoStolen 24,188 from Gamma SellExplorationData, got %d", afterSecondPageBreakdown.CartoStolen)
 	}
 	if afterSecondPageBreakdown.PendingValue != 0 {
-		t.Errorf("expected PendingValue 0 after both pages sold, got %d", afterSecondPageBreakdown.PendingValue)
+		t.Errorf("expected PendingValue 0 after all systems sold, got %d", afterSecondPageBreakdown.PendingValue)
 	}
 }
 

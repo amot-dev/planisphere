@@ -18,6 +18,7 @@ type FSDJumpEvent struct {
 	StarSystem    string    `json:"StarSystem"`
 	SystemAddress int64     `json:"SystemAddress"`
 	StarPos       []float64 `json:"StarPos"`
+	Population    int64     `json:"Population"`
 	JumpDist      float64   `json:"JumpDist"`
 	FuelUsed      float64   `json:"FuelUsed"`
 	BoostUsed     int       `json:"BoostUsed"` // 1 basic, 2 standard, 3 premium synthesis, 4 neutron/white dwarf jet cone
@@ -29,8 +30,22 @@ type LocationEvent struct {
 	StarSystem    string    `json:"StarSystem"`
 	SystemAddress int64     `json:"SystemAddress"`
 	StarPos       []float64 `json:"StarPos"`
+	Population    int64     `json:"Population"`
 	Docked        bool      `json:"Docked"`
+	OnFoot        bool      `json:"OnFoot"`
+	BodyType      string    `json:"BodyType"`
 	StationType   string    `json:"StationType"`
+	MarketID      int64     `json:"MarketID"`
+}
+
+// DockedEvent is written when landing at a station, settlement, or fleet carrier.
+type DockedEvent struct {
+	Timestamp     string `json:"timestamp"`
+	StationName   string `json:"StationName"`
+	StationType   string `json:"StationType"`
+	StarSystem    string `json:"StarSystem"`
+	SystemAddress int64  `json:"SystemAddress"`
+	MarketID      int64  `json:"MarketID"`
 }
 
 // CarrierJumpEvent is written when the player is aboard a jumping fleet carrier.
@@ -39,6 +54,10 @@ type CarrierJumpEvent struct {
 	StarSystem    string    `json:"StarSystem"`
 	SystemAddress int64     `json:"SystemAddress"`
 	StarPos       []float64 `json:"StarPos"`
+	Population    int64     `json:"Population"`
+	Docked        bool      `json:"Docked"`
+	OnFoot        bool      `json:"OnFoot"`
+	StationType   string    `json:"StationType"`
 	MarketID      int64     `json:"MarketID"`
 	StationName   string    `json:"StationName"`
 }

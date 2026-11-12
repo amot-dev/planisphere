@@ -596,6 +596,12 @@ export const StatsSidebar = memo(function StatsSidebar({
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                  <span className="truncate">Carrier Tariffs</span>
+                  <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+                    {formatLoss(displayedRealization.carrierTariffLoss)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                   <span className="truncate">NPC Crew Payouts</span>
                   <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
                     {formatLoss(displayedRealization.npcCrewLoss)}

@@ -69,6 +69,122 @@ func TestExobiologyValuation(t *testing.T) {
 	if calculatedValue.Base != 19010800 || calculatedValue.Bonus != 19010800*4 || calculatedValue.Total != 19010800*5 {
 		t.Fatalf("OrganicValue with 5x bonus = %+v", calculatedValue)
 	}
+
+	radicoidaBase := SpeciesBaseValue("$Codex_Ent_Ingensradices_Unicus_Name;", "Radicoida Unica", "$Codex_Ent_Ingensradices_Genus_Name;")
+	if radicoidaBase != 119037 {
+		t.Fatalf("Radicoida Unica base = %d, want 119037", radicoidaBase)
+	}
+}
+
+func TestBonusEligibilityPredicates(t *testing.T) {
+	boolTrue := true
+	boolFalse := false
+
+	eligibilityCases := []struct {
+		name               string
+		systemPopulation   int64
+		wasDiscovered      bool
+		wasMapped          bool
+		wasFootfalled      *bool
+		wantFirstDisc      bool
+		wantFirstMap       bool
+		wantFirstLogged    bool
+	}{
+		{
+			name:             "unpopulated untouched modern body",
+			systemPopulation: 0,
+			wasDiscovered:    false,
+			wasMapped:        false,
+			wasFootfalled:    &boolFalse,
+			wantFirstDisc:    true,
+			wantFirstMap:     true,
+			wantFirstLogged:  true,
+		},
+		{
+			name:             "unpopulated discovered unmapped unfootfalled body",
+			systemPopulation: 0,
+			wasDiscovered:    true,
+			wasMapped:        false,
+			wasFootfalled:    &boolFalse,
+			wantFirstDisc:    false,
+			wantFirstMap:     true,
+			wantFirstLogged:  true,
+		},
+		{
+			name:             "populated system suppresses all first bonuses",
+			systemPopulation: 125000,
+			wasDiscovered:    false,
+			wasMapped:        false,
+			wasFootfalled:    &boolFalse,
+			wantFirstDisc:    false,
+			wantFirstMap:     false,
+			wantFirstLogged:  false,
+		},
+		{
+			name:             "tag-locked bubble body suppresses all first bonuses",
+			systemPopulation: 0,
+			wasDiscovered:    false,
+			wasMapped:        true,
+			wasFootfalled:    &boolFalse,
+			wantFirstDisc:    false,
+			wantFirstMap:     false,
+			wantFirstLogged:  false,
+		},
+		{
+			name:             "pre-2025 nil footfall on untouched body expects bonus",
+			systemPopulation: 0,
+			wasDiscovered:    false,
+			wasMapped:        false,
+			wasFootfalled:    nil,
+			wantFirstDisc:    true,
+			wantFirstMap:     true,
+			wantFirstLogged:  true,
+		},
+		{
+			name:             "pre-2025 nil footfall on already discovered body suppresses organic bonus",
+			systemPopulation: 0,
+			wasDiscovered:    true,
+			wasMapped:        false,
+			wasFootfalled:    nil,
+			wantFirstDisc:    false,
+			wantFirstMap:     true,
+			wantFirstLogged:  false,
+		},
+		{
+			name:             "already footfalled body suppresses scan-time organic bonus",
+			systemPopulation: 0,
+			wasDiscovered:    true,
+			wasMapped:        true,
+			wasFootfalled:    &boolTrue,
+			wantFirstDisc:    false,
+			wantFirstMap:     false,
+			wantFirstLogged:  false,
+		},
+	}
+
+	for _, testCase := range eligibilityCases {
+		if actualDisc := CanExpectFirstDiscovered(testCase.systemPopulation, testCase.wasDiscovered, testCase.wasMapped); actualDisc != testCase.wantFirstDisc {
+			t.Errorf("%s: CanExpectFirstDiscovered = %v, want %v", testCase.name, actualDisc, testCase.wantFirstDisc)
+		}
+		if actualMap := CanExpectFirstMapped(testCase.systemPopulation, testCase.wasDiscovered, testCase.wasMapped); actualMap != testCase.wantFirstMap {
+			t.Errorf("%s: CanExpectFirstMapped = %v, want %v", testCase.name, actualMap, testCase.wantFirstMap)
+		}
+		if actualLogged := CanExpectFirstLogged(testCase.systemPopulation, testCase.wasDiscovered, testCase.wasMapped, testCase.wasFootfalled); actualLogged != testCase.wantFirstLogged {
+			t.Errorf("%s: CanExpectFirstLogged = %v, want %v", testCase.name, actualLogged, testCase.wantFirstLogged)
+		}
+	}
+
+	populatedScan := BodyScan{
+		PlanetClass:      "Earthlike body",
+		MassEM:           1.0,
+		SystemPopulation: 5000000,
+		WasDiscovered:    false,
+		WasMapped:        false,
+	}
+	populatedMappedValue := EstimateBodyValue(populatedScan, MappingInfo{Mapped: true, ProbesUsed: 5, EfficiencyTarget: 6}, true)
+	if populatedMappedValue.Bonus != 0 || populatedMappedValue.Total != populatedMappedValue.Base {
+		t.Fatalf("expected zero first-discovery bonus in populated system, got %+v", populatedMappedValue)
+	}
 }
 
 func TestCarrierTritiumCost(t *testing.T) {

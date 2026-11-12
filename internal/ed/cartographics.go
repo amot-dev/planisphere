@@ -14,13 +14,14 @@ import (
 
 // BodyScan is the subset of a journal `Scan` event needed for valuation.
 type BodyScan struct {
-	StarType       string  // non-empty for stars
-	PlanetClass    string  // non-empty for planets/moons
-	MassEM         float64 // planets, earth masses
-	StellarMass    float64 // stars, solar masses
-	TerraformState string
-	WasDiscovered  bool
-	WasMapped      bool
+	StarType         string  // non-empty for stars
+	PlanetClass      string  // non-empty for planets/moons
+	MassEM           float64 // planets, earth masses
+	StellarMass      float64 // stars, solar masses
+	TerraformState   string
+	SystemPopulation int64 // population of parent system; positive values suppress first bonuses
+	WasDiscovered    bool
+	WasMapped        bool
 }
 
 // MappingInfo describes the matching `SAAScanComplete` (if any).
@@ -169,19 +170,20 @@ func planetValue(bodyScan BodyScan, firstDiscovery, mapped, firstMapped, efficie
 // body, split into Base (as if someone else had already discovered/mapped it)
 // and Bonus (first discovered / first mapped premium).
 //
-// First discovery is `WasDiscovered == false`; first mapped is
-// `WasMapped == false` combined with a completed DSS mapping.
+// First discovery and first mapped eligibility require an unpopulated parent
+// system and a body that is not tag-locked, combined with `WasDiscovered == false`
+// or `WasMapped == false` with a completed DSS mapping.
 func EstimateBodyValue(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool) ScanValue {
 	if !bodyScan.IsValuable() {
 		return ScanValue{}
 	}
-	isFirstDiscovery := !bodyScan.WasDiscovered
+	isFirstDiscovery := CanExpectFirstDiscovered(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
 	var base, total float64
 	if bodyScan.IsStar() {
 		base = starValue(bodyScan, false)
 		total = starValue(bodyScan, isFirstDiscovery)
 	} else {
-		isFirstMapped := mappingInfo.Mapped && !bodyScan.WasMapped
+		isFirstMapped := mappingInfo.Mapped && CanExpectFirstMapped(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
 		base = planetValue(bodyScan, false, mappingInfo.Mapped, false, mappingInfo.Efficient(), odyssey)
 		total = planetValue(bodyScan, isFirstDiscovery, mappingInfo.Mapped, isFirstMapped, mappingInfo.Efficient(), odyssey)
 	}

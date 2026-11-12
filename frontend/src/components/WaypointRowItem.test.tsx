@@ -349,6 +349,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
         organicLostDeath: 10000000,
         cartoStolen: 2000000,
         organicStolen: 8000000,
+        carrierTariffLoss: 3500000,
         npcCrewLoss: 1200000,
       } as any,
     })
@@ -365,7 +366,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('Realized Value')
     expect(html).toContain('120,000,000 Cr')
 
-    // Check the 5 orange negative loss lines
+    // Check the six orange negative deduction lines
     expect(html).toContain('Cartographics Lost (Death):')
     expect(html).toContain('-5,000,000 Cr')
 
@@ -378,12 +379,15 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('Exobiology Stolen:')
     expect(html).toContain('-8,000,000 Cr')
 
+    expect(html).toContain('Carrier Tariffs:')
+    expect(html).toContain('-3,500,000 Cr')
+
     expect(html).toContain('NPC Crew Payouts:')
     expect(html).toContain('-1,200,000 Cr')
 
-    // Ensure all 5 values have orange text-[#FF7100] styling
+    // Ensure the header and all six deduction values have orange text-[#FF7100] styling
     const orangeMatches = html.match(/text-\[#FF7100\]/g)
-    expect(orangeMatches && orangeMatches.length).toBeGreaterThanOrEqual(6)
+    expect(orangeMatches && orangeMatches.length).toBeGreaterThanOrEqual(7)
 
     // Ensure strictly no emojis anywhere in the drawer HTML
     const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u

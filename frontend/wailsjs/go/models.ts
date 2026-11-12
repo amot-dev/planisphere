@@ -1041,6 +1041,7 @@ export namespace stats {
 	    organicLostDeath: number;
 	    cartoStolen: number;
 	    organicStolen: number;
+	    carrierTariffLoss: number;
 	    npcCrewLoss: number;
 	    pendingValue: number;
 	
@@ -1055,6 +1056,7 @@ export namespace stats {
 	        this.organicLostDeath = source["organicLostDeath"];
 	        this.cartoStolen = source["cartoStolen"];
 	        this.organicStolen = source["organicStolen"];
+	        this.carrierTariffLoss = source["carrierTariffLoss"];
 	        this.npcCrewLoss = source["npcCrewLoss"];
 	        this.pendingValue = source["pendingValue"];
 	    }

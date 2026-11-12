@@ -55,6 +55,7 @@ var genusFallback = map[string]int64{
 	"tube":              1514500, // Sinuous Tubers
 	"tubeabcd":          1514500,
 	"tubeefgh":          1514500,
+	"ingensradices":     119037, // Radicoida
 }
 
 func init() {
@@ -175,6 +176,8 @@ func init() {
 		"13", "Tussock Stigmasis", 19010800,
 		"14", "Tussock Virgam", 14313700,
 		"15", "Tussock Capillum", 7025800)
+	add("Ingensradices", "Radicoida",
+		"Unicus", "Radicoida Unica", 119037)
 
 	for _, speciesItem := range speciesTable {
 		speciesByName[strings.ToLower(speciesItem.Name)] = speciesItem
@@ -186,8 +189,9 @@ var speciesByName = map[string]Species{}
 var codexRe = regexp.MustCompile(`(?i)^\$codex_ent_(.+?)(?:_name)?;?$`)
 var codexNumRe = regexp.MustCompile(`^(.*?)_(\d+)$`)
 
-// codexKey turns "$Codex_Ent_Stratum_07_Name;" into "stratum_07".
-func codexKey(codexID string) string {
+// CodexKey turns a Frontier codex identifier such as
+// "$Codex_Ent_Stratum_07_Name;" into its canonical lowercase key "stratum_07".
+func CodexKey(codexID string) string {
 	matches := codexRe.FindStringSubmatch(strings.TrimSpace(codexID))
 	if matches == nil {
 		return ""
@@ -198,7 +202,7 @@ func codexKey(codexID string) string {
 // LookupSpecies resolves a species from a journal `Species` codex key and/or
 // the `Species_Localised` English name. ok is false when unknown.
 func LookupSpecies(codexID, localisedName string) (Species, bool) {
-	if keyString := codexKey(codexID); keyString != "" {
+	if keyString := CodexKey(codexID); keyString != "" {
 		if foundSpecies, found := speciesTable[keyString]; found {
 			return foundSpecies, true
 		}
@@ -216,7 +220,7 @@ func SpeciesBaseValue(speciesCodex, speciesLocalised, genusCodex string) int64 {
 	if foundSpecies, found := LookupSpecies(speciesCodex, speciesLocalised); found {
 		return foundSpecies.Value
 	}
-	if speciesKey := codexKey(speciesCodex); speciesKey != "" {
+	if speciesKey := CodexKey(speciesCodex); speciesKey != "" {
 		base := speciesKey
 		if matches := codexNumRe.FindStringSubmatch(speciesKey); matches != nil {
 			base = matches[1]
@@ -225,7 +229,7 @@ func SpeciesBaseValue(speciesCodex, speciesLocalised, genusCodex string) int64 {
 			return fallbackValue
 		}
 	}
-	if genusKey := codexKey(genusCodex); genusKey != "" {
+	if genusKey := CodexKey(genusCodex); genusKey != "" {
 		genusKey = strings.TrimSuffix(genusKey, "_genus")
 		if fallbackValue, found := genusFallback[genusKey]; found {
 			return fallbackValue
