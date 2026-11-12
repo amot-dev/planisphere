@@ -2,6 +2,7 @@ package journal
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"planisphere/internal/db"
@@ -25,10 +26,12 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	var status Status
 	var firstTimestamp, lastTimestamp sql.NullString
 	if queryError := queryer.QueryRow(`SELECT COUNT(*) FROM ingested_journals`).Scan(&status.FilesTracked); queryError != nil {
-		return status, queryError
+		return status, fmt.Errorf("count ingested journals: %w", queryError)
 	}
 	var hasDisabled int
-	_ = queryer.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled)
+	if queryError := queryer.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled); queryError != nil {
+		return status, fmt.Errorf("check disabled commanders: %w", queryError)
+	}
 	var archiveQuery string
 	if hasDisabled == 0 {
 		archiveQuery = `SELECT
@@ -42,7 +45,7 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 			(SELECT timestamp FROM journal_events WHERE ` + CmdrFilterSQL + ` ORDER BY timestamp DESC LIMIT 1)`
 	}
 	if queryError := queryer.QueryRow(archiveQuery).Scan(&status.EventsStored, &firstTimestamp, &lastTimestamp); queryError != nil {
-		return status, queryError
+		return status, fmt.Errorf("query archive event counts: %w", queryError)
 	}
 	status.FirstEventAt, status.LastEventAt = firstTimestamp.String, lastTimestamp.String
 	return status, nil

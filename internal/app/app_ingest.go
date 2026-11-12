@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -43,7 +44,9 @@ func (app *App) runScan() bool {
 	}
 	app.dbMu.RLock()
 	if app.db != nil {
-		_ = db.SetSetting(app.db, settingLastScanAt, ed.NowISO())
+		if settingError := db.SetSetting(app.db, settingLastScanAt, ed.NowISO()); settingError != nil {
+			log.Printf("persist last scan timestamp: %v", settingError)
+		}
 	}
 	app.dbMu.RUnlock()
 	hasNewEvents := scanResult.NewEvents > 0
@@ -70,18 +73,32 @@ func (app *App) warmInitialStats() {
 	if app.db == nil {
 		return
 	}
-	_, _ = app.getAllTimeMetrics()
-	_, _ = app.getAllTimeRealization()
+	if _, metricsError := app.getAllTimeMetrics(); metricsError != nil {
+		log.Printf("warm initial all-time metrics: %v", metricsError)
+	}
+	if _, realizationError := app.getAllTimeRealization(); realizationError != nil {
+		log.Printf("warm initial all-time realization: %v", realizationError)
+	}
 	_, _ = app.resolveCareerStart()
 	activeID := app.activeExpeditionID()
 	if activeID == 0 {
-		if expeditionsList, listError := expedition.List(app.db); listError == nil && len(expeditionsList) > 0 {
+		expeditionsList, listError := expedition.List(app.db)
+		if listError != nil {
+			log.Printf("warm initial stats list expeditions: %v", listError)
+		} else if len(expeditionsList) > 0 {
 			activeID = expeditionsList[0].ID
 		}
 	}
 	if activeID > 0 {
-		if expeditionRecord, getError := expedition.Get(app.db, activeID); getError == nil && expeditionRecord.StartTimestamp != "" {
-			_, _, _ = app.computeExpeditionLiveStats(expeditionRecord, stats.Filter{}, stats.NewEngine(app.db))
+		expeditionRecord, getError := expedition.Get(app.db, activeID)
+		if getError != nil {
+			if !errors.Is(getError, sql.ErrNoRows) {
+				log.Printf("warm initial stats load expedition %d: %v", activeID, getError)
+			}
+		} else if expeditionRecord.StartTimestamp != "" {
+			if _, _, statsError := app.computeExpeditionLiveStats(expeditionRecord, stats.Filter{}, stats.NewEngine(app.db)); statsError != nil {
+				log.Printf("warm initial stats compute expedition %d: %v", activeID, statsError)
+			}
 		}
 	}
 }
@@ -266,7 +283,9 @@ func (app *App) maybeCatchUpEDD() {
 	})
 	if importError == nil {
 		stats.InvalidateLedgerCache()
-		_ = db.SetSetting(database, "edd_history_realization_v6", "1")
+		if settingError := db.SetSetting(database, "edd_history_realization_v6", "1"); settingError != nil {
+			log.Printf("persist edd catch-up marker: %v", settingError)
+		}
 		app.invalidateAllTimeCache()
 		app.reevaluateActive()
 		app.changed("journal", 0)

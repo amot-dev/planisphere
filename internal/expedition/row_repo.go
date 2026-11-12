@@ -160,7 +160,10 @@ func InsertRow(transaction *sql.Tx, expeditionID, afterRowID int64, rowType stri
 	if insertError != nil {
 		return Row{}, insertError
 	}
-	insertedRowID, _ := insertResult.LastInsertId()
+	insertedRowID, idError := insertResult.LastInsertId()
+	if idError != nil {
+		return Row{}, fmt.Errorf("read inserted row id: %w", idError)
+	}
 	newRow, getError := GetRow(transaction, insertedRowID)
 	if getError != nil {
 		return Row{}, getError
@@ -173,7 +176,9 @@ func InsertRow(transaction *sql.Tx, expeditionID, afterRowID int64, rowType stri
 			return Row{}, writeError
 		}
 	}
-	touch(transaction, expeditionID)
+	if touchError := touch(transaction, expeditionID); touchError != nil {
+		return Row{}, touchError
+	}
 	return GetRow(transaction, insertedRowID)
 }
 
@@ -202,7 +207,9 @@ func UpdateRow(queryer db.Queryer, patch RowPatch) (systemChanged bool, updateEr
 			return false, execError
 		}
 		if !*patch.FCStop {
-			_, _ = queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE id = ?`, patch.ID)
+			if _, execError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE id = ?`, patch.ID); execError != nil {
+				return false, execError
+			}
 		}
 	}
 	if patch.FCArrived != nil {
@@ -244,7 +251,9 @@ func UpdateRow(queryer db.Queryer, patch RowPatch) (systemChanged bool, updateEr
 			}
 		}
 	}
-	touch(queryer, currentRow.ExpeditionID)
+	if touchError := touch(queryer, currentRow.ExpeditionID); touchError != nil {
+		return false, touchError
+	}
 	return systemChanged, nil
 }
 
@@ -278,7 +287,9 @@ func DeleteRow(transaction *sql.Tx, rowID int64) (int64, error) {
 	if listError != nil {
 		return 0, listError
 	}
-	touch(transaction, rowItem.ExpeditionID)
+	if touchError := touch(transaction, rowItem.ExpeditionID); touchError != nil {
+		return 0, touchError
+	}
 	return rowItem.ExpeditionID, writePositions(transaction, rows)
 }
 
@@ -347,7 +358,9 @@ func PruneEmptyRows(transaction *sql.Tx, expeditionID int64) error {
 		}
 	}
 
-	touch(transaction, expeditionID)
+	if touchError := touch(transaction, expeditionID); touchError != nil {
+		return touchError
+	}
 	return writePositions(transaction, survivingRows)
 }
 
@@ -362,7 +375,9 @@ func MoveRow(transaction *sql.Tx, rowID int64, toIndex int) (int64, error) {
 		return 0, listError
 	}
 	rows = moveTo(rows, indexOf(rows, rowID), toIndex)
-	touch(transaction, rowItem.ExpeditionID)
+	if touchError := touch(transaction, rowItem.ExpeditionID); touchError != nil {
+		return 0, touchError
+	}
 	return rowItem.ExpeditionID, writePositions(transaction, rows)
 }
 
@@ -397,7 +412,8 @@ func moveTo(rows []Row, fromIndex, toIndex int) []Row {
 	return reordered
 }
 
-func touch(queryer db.Queryer, expeditionID int64) {
-	_, _ = queryer.Exec(`UPDATE expeditions SET updated_at = ? WHERE id = ?`, ed.NowISO(), expeditionID)
+func touch(queryer db.Queryer, expeditionID int64) error {
+	_, execError := queryer.Exec(`UPDATE expeditions SET updated_at = ? WHERE id = ?`, ed.NowISO(), expeditionID)
+	return execError
 }
 

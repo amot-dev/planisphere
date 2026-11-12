@@ -228,7 +228,7 @@ func (app *App) openTargetDatabase(dbPath string, isDebugMode bool, logSnapshot 
 	if isDebugMode && dbPath != ":memory:" {
 		snapshotPath, snapshotError := db.CreateDebugSnapshot(dbPath)
 		if snapshotError != nil {
-			return snapshotError
+			return fmt.Errorf("create debug database snapshot: %w", snapshotError)
 		}
 		if logSnapshot {
 			log.Printf("debug mode: snapshotted %s -> %s", dbPath, snapshotPath)
@@ -264,7 +264,7 @@ func (app *App) initialize(ctx context.Context, dbPath string) error {
 	if dbPath == "" {
 		configuredPath, resolveError := db.ResolveConfiguredPath()
 		if resolveError != nil {
-			return resolveError
+			return fmt.Errorf("resolve configured database path: %w", resolveError)
 		}
 		dbPath = configuredPath
 	}
@@ -344,32 +344,39 @@ func (app *App) shutdown(ctx context.Context) {
 	}
 }
 
-func (app *App) prepareInitialState() {
+func (app *App) isSetupCompleted() bool {
 	app.dbMu.RLock()
-	setupDone := app.setupCompleted()
-	app.dbMu.RUnlock()
-	if !setupDone {
-		return
-	}
-	scannedNewEvents := app.runScan()
-	if !scannedNewEvents {
-		app.reevaluateActive()
-	}
-	app.dbMu.RLock()
-	watcher := app.watcher
-	configuredJournalDir := app.journalDir()
-	app.dbMu.RUnlock()
+	defer app.dbMu.RUnlock()
+	return app.setupCompleted()
+}
+
+func (app *App) startConfiguredWatcher() {
+	watcher, configuredJournalDir := func() (*journal.Watcher, string) {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if app.ctx != nil && app.ctx.Err() != nil {
+			return nil, ""
+		}
+		return app.watcher, app.journalDir()
+	}()
 	if watcher != nil {
 		watcher.Start(app.ctx, configuredJournalDir)
 	}
+}
+
+func (app *App) prepareInitialState() {
+	if !app.isSetupCompleted() {
+		return
+	}
+	if !app.runScan() {
+		app.reevaluateActive()
+	}
+	app.startConfiguredWatcher()
 	app.warmInitialStats()
 }
 
 func (app *App) backgroundStart() {
-	app.dbMu.RLock()
-	setupDone := app.setupCompleted()
-	app.dbMu.RUnlock()
-	if !setupDone {
+	if !app.isSetupCompleted() {
 		return
 	}
 	app.maybeRefreshGEC()

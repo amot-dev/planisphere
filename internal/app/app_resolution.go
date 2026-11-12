@@ -1,6 +1,8 @@
 package app
 
 import (
+	"database/sql"
+	"errors"
 	"html"
 	"log"
 	"strings"
@@ -181,12 +183,16 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 		return false, false
 	}
 	// Populate POI name from EDAstro GEC or GMP if the waypoint does not already have one set.
-	var currentPOIName string
-	_ = app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&currentPOIName)
-	if strings.TrimSpace(currentPOIName) == "" && app.gec != nil {
+	var currentPOIName sql.NullString
+	if queryError := app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&currentPOIName); queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
+		log.Printf("query poi name for row %d: %v", rowItem.ID, queryError)
+	}
+	if strings.TrimSpace(currentPOIName.String) == "" && app.gec != nil {
 		if matchedPOIs := app.gec.Lookup(rowItem.SystemName, systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
 			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-			_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID)
+			if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID); execError != nil {
+				log.Printf("update poi name for row %d: %v", rowItem.ID, execError)
+			}
 		}
 	}
 	return positionCoords != nil, true
@@ -204,34 +210,47 @@ func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 	})
 }
 
+type missingPOIItem struct {
+	id            int64
+	systemName    string
+	systemAddress int64
+}
+
+func (app *App) loadMissingPOIItems() []missingPOIItem {
+	rows, queryError := app.db.Query(`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`)
+	if queryError != nil {
+		log.Printf("query missing poi rows: %v", queryError)
+		return nil
+	}
+	defer rows.Close()
+	var items []missingPOIItem
+	for rows.Next() {
+		var item missingPOIItem
+		if scanError := rows.Scan(&item.id, &item.systemName, &item.systemAddress); scanError != nil {
+			log.Printf("scan missing poi row: %v", scanError)
+			return nil
+		}
+		items = append(items, item)
+	}
+	if iterationError := rows.Err(); iterationError != nil {
+		log.Printf("iterate missing poi rows: %v", iterationError)
+		return nil
+	}
+	return items
+}
+
 func (app *App) populateMissingPOIs() {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	if app.db == nil || app.gec == nil {
 		return
 	}
-	rows, queryError := app.db.Query(`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`)
-	if queryError != nil {
-		return
-	}
-	defer rows.Close()
-	type missingPOIItem struct {
-		id            int64
-		systemName    string
-		systemAddress int64
-	}
-	var items []missingPOIItem
-	for rows.Next() {
-		var item missingPOIItem
-		if scanError := rows.Scan(&item.id, &item.systemName, &item.systemAddress); scanError == nil {
-			items = append(items, item)
-		}
-	}
-	rows.Close()
-	for _, item := range items {
+	for _, item := range app.loadMissingPOIItems() {
 		if matchedPOIs := app.gec.Lookup(item.systemName, item.systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
 			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-			_, _ = app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, item.id)
+			if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, item.id); execError != nil {
+				log.Printf("update missing poi row %d: %v", item.id, execError)
+			}
 		}
 	}
 }

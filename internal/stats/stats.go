@@ -7,6 +7,7 @@ package stats
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"planisphere/internal/db"
@@ -221,7 +222,7 @@ func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNam
 
 	rows, queryError := engine.DB.Query(query, args...)
 	if queryError != nil {
-		return nil, queryError
+		return nil, fmt.Errorf("query journal events: %w", queryError)
 	}
 	defer rows.Close()
 	var out []eventRow
@@ -229,14 +230,17 @@ func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNam
 		var eventItem eventRow
 		var starX, starY, starZ sql.NullFloat64
 		if scanError := rows.Scan(&eventItem.eventUID, &eventItem.timestamp, &eventItem.eventType, &eventItem.systemAddress, &eventItem.bodyID, &starX, &starY, &starZ, &eventItem.rawJSON); scanError != nil {
-			return nil, scanError
+			return nil, fmt.Errorf("scan journal event row: %w", scanError)
 		}
 		if starX.Valid && starY.Valid && starZ.Valid {
 			eventItem.starPosition = &ed.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
 		}
 		out = append(out, eventItem)
 	}
-	return out, rows.Err()
+	if iterationError := rows.Err(); iterationError != nil {
+		return nil, fmt.Errorf("iterate journal events: %w", iterationError)
+	}
+	return out, nil
 }
 
 type bodyKey struct{ systemAddress, bodyID int64 }
@@ -252,7 +256,7 @@ func (engine *Engine) lookupScan(key bodyKey, timestamp string) (*journal.ScanEv
 		return nil, nil
 	}
 	if queryError != nil {
-		return nil, queryError
+		return nil, fmt.Errorf("lookup scan for body (%d, %d): %w", key.systemAddress, key.bodyID, queryError)
 	}
 	var scanEvent journal.ScanEvent
 	if unmarshalError := json.Unmarshal([]byte(rawJSON), &scanEvent); unmarshalError != nil {
@@ -270,45 +274,49 @@ func (engine *Engine) preloadScans(keys []bodyKey, untilTimestamp string) (map[b
 	chunkSize := 200
 	for startIndex := 0; startIndex < len(keys); startIndex += chunkSize {
 		endIndex := min(startIndex+chunkSize, len(keys))
-		chunk := keys[startIndex:endIndex]
-		conditions := make([]string, 0, len(chunk))
-		args := make([]any, 0, len(chunk)*2+1)
-		args = append(args, untilTimestamp)
-		for _, key := range chunk {
-			conditions = append(conditions, "(system_address = ? AND body_id = ?)")
-			args = append(args, key.systemAddress, key.bodyID)
+		if chunkError := engine.preloadScanChunk(keys[startIndex:endIndex], untilTimestamp, result); chunkError != nil {
+			return nil, chunkError
 		}
-		query := `SELECT system_address, body_id, raw_json FROM (
-			SELECT system_address, body_id, raw_json,
-			       ROW_NUMBER() OVER (PARTITION BY system_address, body_id ORDER BY timestamp DESC) as rn
-			FROM journal_events
-			WHERE +event = 'Scan' AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
-			  AND (` + strings.Join(conditions, " OR ") + `)
-		) WHERE rn = 1`
-
-		rows, queryError := engine.DB.Query(query, args...)
-		if queryError != nil {
-			return nil, queryError
-		}
-		for rows.Next() {
-			var systemAddress, bodyID int64
-			var rawJSON string
-			if scanError := rows.Scan(&systemAddress, &bodyID, &rawJSON); scanError != nil {
-				rows.Close()
-				return nil, scanError
-			}
-			var scanEvent journal.ScanEvent
-			if json.Unmarshal([]byte(rawJSON), &scanEvent) == nil {
-				result[bodyKey{systemAddress, bodyID}] = &scanEvent
-			}
-		}
-		if iterationError := rows.Err(); iterationError != nil {
-			rows.Close()
-			return nil, iterationError
-		}
-		rows.Close()
 	}
 	return result, nil
+}
+
+func (engine *Engine) preloadScanChunk(chunk []bodyKey, untilTimestamp string, result map[bodyKey]*journal.ScanEvent) error {
+	conditions := make([]string, 0, len(chunk))
+	args := make([]any, 0, len(chunk)*2+1)
+	args = append(args, untilTimestamp)
+	for _, key := range chunk {
+		conditions = append(conditions, "(system_address = ? AND body_id = ?)")
+		args = append(args, key.systemAddress, key.bodyID)
+	}
+	query := `SELECT system_address, body_id, raw_json FROM (
+		SELECT system_address, body_id, raw_json,
+		       ROW_NUMBER() OVER (PARTITION BY system_address, body_id ORDER BY timestamp DESC) as rn
+		FROM journal_events
+		WHERE +event = 'Scan' AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
+		  AND (` + strings.Join(conditions, " OR ") + `)
+	) WHERE rn = 1`
+
+	rows, queryError := engine.DB.Query(query, args...)
+	if queryError != nil {
+		return fmt.Errorf("query scan chunk: %w", queryError)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var systemAddress, bodyID int64
+		var rawJSON string
+		if scanError := rows.Scan(&systemAddress, &bodyID, &rawJSON); scanError != nil {
+			return fmt.Errorf("scan preloaded body scan: %w", scanError)
+		}
+		var scanEvent journal.ScanEvent
+		if json.Unmarshal([]byte(rawJSON), &scanEvent) == nil {
+			result[bodyKey{systemAddress, bodyID}] = &scanEvent
+		}
+	}
+	if iterationError := rows.Err(); iterationError != nil {
+		return fmt.Errorf("iterate scan chunk rows: %w", iterationError)
+	}
+	return nil
 }
 
 // Compute returns metrics for events in timeRange, optionally filtered by mode.
@@ -317,24 +325,24 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 	after, until := timeRange.bounds()
 	filterSet, prepareError := filter.prepare(engine.DB)
 	if prepareError != nil {
-		return metrics, prepareError
+		return metrics, fmt.Errorf("prepare stats filter: %w", prepareError)
 	}
 	events, loadError := engine.loadEvents(after, until, metricEvents)
 	if loadError != nil {
-		return metrics, loadError
+		return metrics, fmt.Errorf("load stats events: %w", loadError)
 	}
 
 	session := newSessionState(engine.Odyssey, len(events)/8)
 	if seedError := engine.seedLoadGameBefore(after, session); seedError != nil {
-		return metrics, seedError
+		return metrics, fmt.Errorf("seed initial loadgame state: %w", seedError)
 	}
 	if preloadPopError := engine.preloadSystemPopulations(after, events, until, session); preloadPopError != nil {
-		return metrics, preloadPopError
+		return metrics, fmt.Errorf("preload system populations: %w", preloadPopError)
 	}
 
 	scans, missingScans, preloadScanError := engine.prepareComputeScans(after, events)
 	if preloadScanError != nil {
-		return metrics, preloadScanError
+		return metrics, fmt.Errorf("prepare compute scans: %w", preloadScanError)
 	}
 
 	accumulator := &computeAccumulator{

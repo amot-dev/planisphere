@@ -167,7 +167,13 @@ func (accumulator *archiveImportAccumulator) processEntry(
 	result.LinesRead++
 
 	parsedEvent, keepEvent, parseError := journal.ParseLine([]byte(rawEventData), normalizedFileName)
-	if parseError != nil || !keepEvent {
+	if parseError != nil {
+		if len(result.Errors) < 20 {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", normalizedFileName, parseError))
+		}
+		return nil
+	}
+	if !keepEvent {
 		return nil
 	}
 	if parsedEvent.Commander != "" {
@@ -224,11 +230,13 @@ func (accumulator *archiveImportAccumulator) finalizeMetadata(
 
 	reportProgress(totalEntries, totalEntries, result.FilesScanned, "Finalizing journal archive metadata…")
 	for fileName, eventCount := range accumulator.fileEventCounts {
-		_, _ = transaction.Exec(`INSERT OR IGNORE INTO ingested_journals
+		if _, execError := transaction.Exec(`INSERT OR IGNORE INTO ingested_journals
 			(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at)
 			VALUES (?, ?, 0, ?, 0, ?, ?, ?, ?)`,
 			fileName, accumulator.filePaths[fileName], eventCount, eventCount,
-			accumulator.fileFirstTimestamps[fileName], accumulator.fileLastTimestamps[fileName], accumulator.ingestedAt)
+			accumulator.fileFirstTimestamps[fileName], accumulator.fileLastTimestamps[fileName], accumulator.ingestedAt); execError != nil {
+			return fmt.Errorf("record imported journal %s: %w", fileName, execError)
+		}
 		result.FilesUpdated++
 	}
 	return db.AdvanceIngestWatermark(transaction, accumulator.ingestedAt)

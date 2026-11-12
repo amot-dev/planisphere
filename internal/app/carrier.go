@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -157,36 +158,42 @@ func (app *App) latestDockedCarrierLocation(playerCarrierID int64, playerCallsig
 		AND raw_json LIKE '%FleetCarrier%'
 		ORDER BY timestamp DESC, id DESC LIMIT 20`)
 	if queryError != nil {
+		log.Printf("query docked carrier location: %v", queryError)
 		return "", ""
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var candidateSystem, candidateTimestamp, candidateRawJSON string
-		if rows.Scan(&candidateSystem, &candidateTimestamp, &candidateRawJSON) == nil {
-			var dockRecord struct {
-				StationType string `json:"StationType"`
-				MarketID    int64  `json:"MarketID"`
-				StationName string `json:"StationName"`
-				Docked      *bool  `json:"Docked"`
-			}
-			if json.Unmarshal([]byte(candidateRawJSON), &dockRecord) == nil {
-				if strings.EqualFold(dockRecord.StationType, "FleetCarrier") {
-					isDocked := dockRecord.Docked == nil || *dockRecord.Docked
-					if isDocked {
-						matchesCarrier := true
-						if playerCarrierID > 0 && dockRecord.MarketID > 0 {
-							matchesCarrier = (dockRecord.MarketID == playerCarrierID)
-						} else if playerCallsign != "" && dockRecord.StationName != "" {
-							matchesCarrier = strings.Contains(strings.ToUpper(dockRecord.StationName), strings.ToUpper(playerCallsign))
-						}
-						if matchesCarrier {
-							return strings.TrimSpace(candidateSystem), candidateTimestamp
-						}
+		if scanError := rows.Scan(&candidateSystem, &candidateTimestamp, &candidateRawJSON); scanError != nil {
+			log.Printf("scan docked carrier location: %v", scanError)
+			return "", ""
+		}
+		var dockRecord struct {
+			StationType string `json:"StationType"`
+			MarketID    int64  `json:"MarketID"`
+			StationName string `json:"StationName"`
+			Docked      *bool  `json:"Docked"`
+		}
+		if json.Unmarshal([]byte(candidateRawJSON), &dockRecord) == nil {
+			if strings.EqualFold(dockRecord.StationType, "FleetCarrier") {
+				isDocked := dockRecord.Docked == nil || *dockRecord.Docked
+				if isDocked {
+					matchesCarrier := true
+					if playerCarrierID > 0 && dockRecord.MarketID > 0 {
+						matchesCarrier = (dockRecord.MarketID == playerCarrierID)
+					} else if playerCallsign != "" && dockRecord.StationName != "" {
+						matchesCarrier = strings.Contains(strings.ToUpper(dockRecord.StationName), strings.ToUpper(playerCallsign))
+					}
+					if matchesCarrier {
+						return strings.TrimSpace(candidateSystem), candidateTimestamp
 					}
 				}
 			}
 		}
+	}
+	if iterationError := rows.Err(); iterationError != nil {
+		log.Printf("iterate docked carrier location: %v", iterationError)
 	}
 	return "", ""
 }

@@ -89,23 +89,27 @@ func ListJournalFiles(dir string) ([]string, error) {
 	return matches, nil
 }
 
-func (ingester *Ingester) loadAllTrackedOffsets() map[string]int64 {
+func (ingester *Ingester) loadAllTrackedOffsets() (map[string]int64, error) {
 	ingester.mu.Lock()
 	defer ingester.mu.Unlock()
 	rows, queryError := ingester.conn.Query(`SELECT file_name, byte_offset FROM ingested_journals`)
 	if queryError != nil {
-		return nil
+		return nil, fmt.Errorf("query tracked journal offsets: %w", queryError)
 	}
 	defer rows.Close()
 	trackedOffsets := make(map[string]int64, 256)
 	for rows.Next() {
 		var fileName string
 		var byteOffset int64
-		if rows.Scan(&fileName, &byteOffset) == nil {
-			trackedOffsets[fileName] = byteOffset
+		if scanError := rows.Scan(&fileName, &byteOffset); scanError != nil {
+			return nil, fmt.Errorf("scan tracked journal offset: %w", scanError)
 		}
+		trackedOffsets[fileName] = byteOffset
 	}
-	return trackedOffsets
+	if rowsError := rows.Err(); rowsError != nil {
+		return nil, fmt.Errorf("iterate tracked journal offsets: %w", rowsError)
+	}
+	return trackedOffsets, nil
 }
 
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
@@ -118,19 +122,20 @@ func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, erro
 	if listError != nil {
 		return scanResult, listError
 	}
-	trackedOffsets := ingester.loadAllTrackedOffsets()
+	trackedOffsets, offsetError := ingester.loadAllTrackedOffsets()
+	if offsetError != nil {
+		return scanResult, offsetError
+	}
 	for _, filePath := range files {
 		select {
 		case <-ctx.Done():
 			return scanResult, ctx.Err()
 		default:
 		}
-		if trackedOffsets != nil {
-			if fileInfo, statError := os.Stat(filePath); statError == nil {
-				if trackedOffset, isTracked := trackedOffsets[filepath.Base(filePath)]; isTracked && trackedOffset == fileInfo.Size() {
-					scanResult.FilesScanned++
-					continue
-				}
+		if fileInfo, statError := os.Stat(filePath); statError == nil {
+			if trackedOffset, isTracked := trackedOffsets[filepath.Base(filePath)]; isTracked && trackedOffset == fileInfo.Size() {
+				scanResult.FilesScanned++
+				continue
 			}
 		}
 		fileResult, ingestError := ingester.IngestFile(filePath)
@@ -167,6 +172,21 @@ func (ingester *Ingester) loadTrackedFileState(fileName string, fileSize int64) 
 	return state, false, nil
 }
 
+func loadLatestFileCommander(transaction *sql.Tx, fileName string) (string, error) {
+	var previousCommander sql.NullString
+	queryError := transaction.QueryRow(
+		`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`,
+		fileName,
+	).Scan(&previousCommander)
+	if errors.Is(queryError, sql.ErrNoRows) {
+		return "", nil
+	}
+	if queryError != nil {
+		return "", fmt.Errorf("load latest commander for %s: %w", fileName, queryError)
+	}
+	return previousCommander.String, nil
+}
+
 func ingestAppendedLines(
 	transaction *sql.Tx,
 	reader *bufio.Reader,
@@ -176,11 +196,11 @@ func ingestAppendedLines(
 	result *Result,
 	ingestedAt string,
 ) error {
-	var currentCommander string
-	var previousCommander sql.NullString
-	_ = transaction.QueryRow(`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`, fileName).Scan(&previousCommander)
-	currentCommander = previousCommander.String
-	hasUnattributedEvents := state.offset > 0 && currentCommander == ""
+	currentCommander, cmdError := loadLatestFileCommander(transaction, fileName)
+	if cmdError != nil {
+		return cmdError
+	}
+	hasUnattributedEvents := state.offset == 0 || currentCommander == ""
 
 	// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
 	insertEventStmt, prepError := transaction.Prepare(`INSERT INTO journal_events
@@ -233,10 +253,14 @@ func ingestAppendedLines(
 		}
 		if parsedEvent.Commander != "" {
 			currentCommander = parsedEvent.Commander
-			_, _ = upsertCommanderStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp)
+			if _, execError := upsertCommanderStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp); execError != nil {
+				return fmt.Errorf("upsert commander %s: %w", parsedEvent.Commander, execError)
+			}
 			if hasUnattributedEvents {
 				// Backfill any earlier events in the same file that arrived before LoadGame or Commander.
-				_, _ = transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCommander, fileName)
+				if _, execError := transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCommander, fileName); execError != nil {
+					return fmt.Errorf("backfill commander for %s: %w", fileName, execError)
+				}
 				hasUnattributedEvents = false
 			}
 		} else if currentCommander != "" {
@@ -257,7 +281,10 @@ func ingestAppendedLines(
 		if execError != nil {
 			return execError
 		}
-		rowsAffected, _ := execResult.RowsAffected()
+		rowsAffected, rowsError := execResult.RowsAffected()
+		if rowsError != nil {
+			return fmt.Errorf("read rows affected for %s: %w", fileName, rowsError)
+		}
 		if rowsAffected > 0 {
 			state.stored++
 			result.NewEvents++
@@ -273,7 +300,9 @@ func ingestAppendedLines(
 		}
 	}
 	if currentCommander != "" && state.last.Valid {
-		_, _ = upsertCommanderStmt.Exec(currentCommander, "", state.last.String, state.last.String)
+		if _, execError := upsertCommanderStmt.Exec(currentCommander, "", state.last.String, state.last.String); execError != nil {
+			return fmt.Errorf("update trailing commander %s: %w", currentCommander, execError)
+		}
 	}
 	return nil
 }

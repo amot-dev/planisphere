@@ -309,3 +309,73 @@ func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
 		t.Fatalf("timed out waiting for debounced watcher batch")
 	}
 }
+
+func TestReingestFromByteZeroBackfillsUnattributedEvents(t *testing.T) {
+	conn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer conn.Close()
+
+	fileName := "Journal.2026-03-01T120000.01.log"
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, fileName)
+	lines := []string{
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-03-01T12:01:00Z","event":"LoadGame","Commander":"CmdrBackfill","FID":"F9","Ship":"mandalay"}`,
+		`{"timestamp":"2026-03-01T12:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":4.3}`,
+	}
+	if writeError := os.WriteFile(logFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
+	}
+
+	// Simulate an EDDiscovery or partial DB state at byte_offset = 0 where an
+	// earlier event lacks commander attribution while a later event already has it.
+	if _, execError := conn.Exec(
+		`INSERT INTO ingested_journals (file_name, file_path, byte_offset, updated_at) VALUES (?, ?, 0, '2026-03-01T12:05:00Z')`,
+		fileName, logFile,
+	); execError != nil {
+		t.Fatal(execError)
+	}
+	if _, execError := conn.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
+		 VALUES ('uid-early', '2026-03-01T12:00:00Z', 'Location', 'Sol', 1001, NULL, ?, '{}', '2026-03-01T12:05:00Z'),
+		        ('uid-late', '2026-03-01T12:05:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBackfill', ?, '{}', '2026-03-01T12:05:00Z')`,
+		fileName, fileName,
+	); execError != nil {
+		t.Fatal(execError)
+	}
+
+	ingester := journal.NewIngester(conn)
+	if _, ingestError := ingester.IngestFile(logFile); ingestError != nil {
+		t.Fatalf("ingest file: %v", ingestError)
+	}
+
+	var commanderName string
+	if queryError := conn.QueryRow(`SELECT COALESCE(commander, '') FROM journal_events WHERE event_uid = 'uid-early'`).Scan(&commanderName); queryError != nil {
+		t.Fatal(queryError)
+	}
+	if commanderName != "CmdrBackfill" {
+		t.Fatalf("expected unattributed early event to be backfilled to CmdrBackfill, got %q", commanderName)
+	}
+}
+
+func TestArchiveStatusPropagatesDisabledCommanderQueryError(t *testing.T) {
+	conn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer conn.Close()
+
+	if _, dropError := conn.Exec(`DROP TABLE commanders`); dropError != nil {
+		t.Fatal(dropError)
+	}
+
+	_, statusError := journal.ArchiveStatus(conn)
+	if statusError == nil {
+		t.Fatal("expected ArchiveStatus to fail when commanders table is missing")
+	}
+	if !strings.Contains(statusError.Error(), "check disabled commanders") {
+		t.Fatalf("expected error wrapping check disabled commanders, got %v", statusError)
+	}
+}

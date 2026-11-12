@@ -16,6 +16,7 @@ import (
 	"planisphere/internal/db"
 	"planisphere/internal/ed"
 	"planisphere/internal/eddiscovery"
+	"planisphere/internal/gec"
 	"planisphere/internal/journal"
 	"planisphere/internal/stats"
 	"planisphere/internal/version"
@@ -132,13 +133,8 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 		if openError := app.openTargetDatabase(dbPath, isDebugMode, false); openError != nil {
 			return Settings{}, openError
 		}
-		app.dbMu.RLock()
-		setupDone := app.setupCompleted()
-		watcher := app.watcher
-		configuredJournalDir := app.journalDir()
-		app.dbMu.RUnlock()
-		if setupDone && watcher != nil {
-			watcher.Start(app.ctx, configuredJournalDir)
+		if app.isSetupCompleted() {
+			app.startConfiguredWatcher()
 		}
 	}
 	if !isDebugMode {
@@ -169,13 +165,7 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 		return IngestStatus{}, err
 	}
 	app.runScan()
-	app.dbMu.RLock()
-	watcher := app.watcher
-	configuredJournalDir := app.journalDir()
-	app.dbMu.RUnlock()
-	if watcher != nil {
-		watcher.Start(app.ctx, configuredJournalDir)
-	}
+	app.startConfiguredWatcher()
 	app.changed("journal", 0)
 	return app.GetIngestStatus()
 }
@@ -302,14 +292,7 @@ func (app *App) SetJournalDir(dir string) (Settings, error) {
 	}
 	app.spawnBackground(func() {
 		app.runScan()
-		app.dbMu.RLock()
-		isCanceled := app.ctx != nil && app.ctx.Err() != nil
-		watcher := app.watcher
-		configuredJournalDir := app.journalDir()
-		app.dbMu.RUnlock()
-		if !isCanceled && watcher != nil {
-			watcher.Start(app.ctx, configuredJournalDir)
-		}
+		app.startConfiguredWatcher()
 	})
 	return app.GetSettings()
 }
@@ -440,14 +423,29 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	return status, nil
 }
 
+func (app *App) ensureReady() error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	return app.ready()
+}
+
+func (app *App) readyGECCatalog() (*gec.Catalog, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if readyError := app.ready(); readyError != nil {
+		return nil, readyError
+	}
+	if app.gec == nil {
+		return nil, errors.New("GEC catalog not initialized")
+	}
+	return app.gec, nil
+}
+
 // RescanJournals performs a full idempotent catch-up scan of the configured journal directory.
 func (app *App) RescanJournals() error {
-	app.dbMu.RLock()
-	if readyError := app.ready(); readyError != nil {
-		app.dbMu.RUnlock()
+	if readyError := app.ensureReady(); readyError != nil {
 		return readyError
 	}
-	app.dbMu.RUnlock()
 	app.runScan()
 	return nil
 }
@@ -459,19 +457,13 @@ func (app *App) RefreshGEC() (int, error) {
 	}
 	defer app.gecRefreshing.Store(false)
 
-	app.dbMu.RLock()
-	if readyError := app.ready(); readyError != nil {
-		app.dbMu.RUnlock()
-		return 0, readyError
-	}
-	gecCatalog := app.gec
-	app.dbMu.RUnlock()
-	if gecCatalog == nil {
-		return 0, errors.New("GEC catalog not initialized")
+	gecCatalog, catalogError := app.readyGECCatalog()
+	if catalogError != nil {
+		return 0, catalogError
 	}
 	refreshCount, refreshError := gecCatalog.Refresh(app.ctx)
 	if refreshError != nil {
-		return 0, refreshError
+		return 0, fmt.Errorf("refresh GEC catalog: %w", refreshError)
 	}
 	app.populateMissingPOIs()
 	app.changed("plan", 0)

@@ -372,7 +372,10 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	for i := range rows {
 		rows[i].VisitedAt, rows[i].VisitEventUID = "", ""
 	}
-	modeTimeline, _ := modes.LoadTimeline(queryer)
+	modeTimeline, timelineError := modes.LoadTimeline(queryer)
+	if timelineError != nil {
+		return false, fmt.Errorf("load mode timeline: %w", timelineError)
+	}
 
 	var arrivals []Arrival
 	var arrivalsError error
