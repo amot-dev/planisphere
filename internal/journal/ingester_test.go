@@ -400,3 +400,75 @@ func TestComputeUIDDeterministicAndConcurrent(t *testing.T) {
 	}
 	waitGroup.Wait()
 }
+
+func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
+	temporaryDatabaseConnection, databaseOpenError := db.Open(":memory:")
+	if databaseOpenError != nil {
+		t.Fatal(databaseOpenError)
+	}
+	defer temporaryDatabaseConnection.Close()
+
+	temporaryJournalDirectory := t.TempDir()
+	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
+
+	batchNotificationChan := make(chan journal.Result, 4)
+	watcherInstance := journal.NewWatcher(ingesterInstance, func(batchResult journal.Result) {
+		batchNotificationChan <- batchResult
+	})
+
+	if watcherInstance.DebounceDelay() != journal.DefaultDebounceDelay {
+		t.Fatalf("expected initial debounce %v, got %v", journal.DefaultDebounceDelay, watcherInstance.DebounceDelay())
+	}
+	watcherInstance.SetDebounceDelay(90 * time.Second)
+	if watcherInstance.DebounceDelay() != journal.MaxDebounceDelay {
+		t.Fatalf("expected upper-clamped debounce %v, got %v", journal.MaxDebounceDelay, watcherInstance.DebounceDelay())
+	}
+	watcherInstance.SetDebounceDelay(50 * time.Millisecond)
+	if watcherInstance.DebounceDelay() != journal.MinDebounceDelay {
+		t.Fatalf("expected lower-clamped debounce %v, got %v", journal.MinDebounceDelay, watcherInstance.DebounceDelay())
+	}
+
+	parentContext, cancelParentContext := context.WithCancel(context.Background())
+	defer cancelParentContext()
+	watcherInstance.Start(parentContext, temporaryJournalDirectory)
+	defer watcherInstance.Stop()
+
+	activeDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(activeDeadline) {
+		isActive, _ := watcherInstance.Active()
+		if isActive {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	journalFilePath := filepath.Join(temporaryJournalDirectory, "Journal.2026-02-01T100000.01.log")
+	firstLine := `{"timestamp":"2026-02-01T10:00:01Z","event":"Scan","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Sol A 1","BodyID":1,"PlanetClass":"High metal content body"}` + "\n"
+	secondLine := `{"timestamp":"2026-02-01T10:00:02Z","event":"Scan","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Sol A 2","BodyID":2,"PlanetClass":"Rocky body"}` + "\n"
+
+	fileHandle, openError := os.OpenFile(journalFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if openError != nil {
+		t.Fatalf("open journal file: %v", openError)
+	}
+	if _, writeError := fileHandle.WriteString(firstLine); writeError != nil {
+		_ = fileHandle.Close()
+		t.Fatalf("write first scan line: %v", writeError)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, writeError := fileHandle.WriteString(secondLine); writeError != nil {
+		_ = fileHandle.Close()
+		t.Fatalf("write second scan line: %v", writeError)
+	}
+	if closeError := fileHandle.Close(); closeError != nil {
+		t.Fatalf("close journal file: %v", closeError)
+	}
+
+	select {
+	case coalescedBatch := <-batchNotificationChan:
+		if coalescedBatch.NewEvents != 2 {
+			t.Fatalf("expected 2 coalesced events in single debounced batch, got %d", coalescedBatch.NewEvents)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for debounced watcher batch")
+	}
+}

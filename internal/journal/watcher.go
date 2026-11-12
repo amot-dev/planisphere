@@ -5,16 +5,38 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
 
+// Bounds and default duration for live journal file event debouncing.
+const (
+	MinDebounceDelay     = 300 * time.Millisecond
+	DefaultDebounceDelay = 2 * time.Second
+	MaxDebounceDelay     = 30 * time.Second
+	reconnectInterval    = 2 * time.Second
+)
+
+// ClampDebounceDelay restricts delay to [MinDebounceDelay, MaxDebounceDelay].
+func ClampDebounceDelay(delay time.Duration) time.Duration {
+	if delay < MinDebounceDelay {
+		return MinDebounceDelay
+	}
+	if delay > MaxDebounceDelay {
+		return MaxDebounceDelay
+	}
+	return delay
+}
+
 // Watcher tails the journal directory: fsnotify events trigger ingestion of
 // the changed file (debounced).
 type Watcher struct {
-	ingester *Ingester
-	onBatch  func(Result)
+	ingester        *Ingester
+	onBatch         func(Result)
+	debounceNanos   atomic.Int64
+	debounceChanged chan struct{}
 
 	mu        sync.Mutex
 	dir       string
@@ -24,10 +46,37 @@ type Watcher struct {
 	lastError string
 }
 
-// NewWatcher creates a watcher. onBatch is invoked (from the watcher
-// goroutine) after every ingestion pass that inserted new events.
+// NewWatcher creates a watcher initialized with DefaultDebounceDelay. onBatch
+// is invoked (from the watcher goroutine) after every ingestion pass that
+// inserted new events.
 func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
-	return &Watcher{ingester: ingester, onBatch: onBatch}
+	watcher := &Watcher{
+		ingester:        ingester,
+		onBatch:         onBatch,
+		debounceChanged: make(chan struct{}, 1),
+	}
+	watcher.debounceNanos.Store(int64(DefaultDebounceDelay))
+	return watcher
+}
+
+// DebounceDelay returns the currently configured live file-event debounce duration.
+func (watcher *Watcher) DebounceDelay() time.Duration {
+	storedNanos := watcher.debounceNanos.Load()
+	if storedNanos <= 0 {
+		return DefaultDebounceDelay
+	}
+	return ClampDebounceDelay(time.Duration(storedNanos))
+}
+
+// SetDebounceDelay updates the live file-event debounce duration (clamped to
+// [MinDebounceDelay, MaxDebounceDelay]) and reschedules any in-flight timer.
+func (watcher *Watcher) SetDebounceDelay(delay time.Duration) {
+	clampedDelay := ClampDebounceDelay(delay)
+	watcher.debounceNanos.Store(int64(clampedDelay))
+	select {
+	case watcher.debounceChanged <- struct{}{}:
+	default:
+	}
 }
 
 // Active reports whether fsnotify is currently watching the directory.
@@ -72,11 +121,6 @@ func (watcher *Watcher) setActive(active bool, errorMessage string) {
 	watcher.active, watcher.lastError = active, errorMessage
 	watcher.mu.Unlock()
 }
-
-const (
-	debounceDelay     = 300 * time.Millisecond
-	reconnectInterval = 2 * time.Second
-)
 
 func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{}) {
 	var fsWatcher *fsnotify.Watcher
@@ -150,7 +194,11 @@ func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{})
 			}
 			if IsJournalFile(fsEvent.Name) && fsEvent.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 				pending[fsEvent.Name] = true
-				debounceTimer.Reset(debounceDelay)
+				debounceTimer.Reset(watcher.DebounceDelay())
+			}
+		case <-watcher.debounceChanged:
+			if len(pending) > 0 {
+				debounceTimer.Reset(watcher.DebounceDelay())
 			}
 		case watchError, ok := <-errorChan:
 			if ok && watchError != nil {

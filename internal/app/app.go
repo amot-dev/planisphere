@@ -10,6 +10,7 @@ import (
 	"html"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,12 +53,13 @@ type EDDImportProgress struct {
 
 // Setting keys.
 const (
-	settingJournalDir     = "journal_dir"
-	settingOnline         = "online_lookups"
-	settingActiveExp      = "active_expedition_id"
-	settingLastScanAt     = "last_scan_at"
-	settingSetupCompleted = "setup_completed"
-	gecRefreshInterval    = 7 * 24 * time.Hour
+	settingJournalDir        = "journal_dir"
+	settingJournalDebounceMs = "journal_debounce_ms"
+	settingOnline            = "online_lookups"
+	settingActiveExp         = "active_expedition_id"
+	settingLastScanAt        = "last_scan_at"
+	settingSetupCompleted    = "setup_completed"
+	gecRefreshInterval       = 7 * 24 * time.Hour
 )
 
 // App is the Wails-bound application service.
@@ -231,6 +233,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.db, app.dbPath = dbConn, dbPath
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
+	app.watcher.SetDebounceDelay(time.Duration(app.journalDebounceMs()) * time.Millisecond)
 	app.resolver = systems.NewResolver(dbConn, app.onlineEnabled)
 	app.gec = gec.NewCatalog(dbConn)
 	stats.InvalidateLedgerCache()
@@ -353,6 +356,26 @@ func (app *App) setupCompleted() bool {
 	}
 	settingValue, _ := db.GetSetting(app.db, settingSetupCompleted)
 	return settingValue == "1"
+}
+
+// journalDebounceMs returns the configured or default live journal file-watcher
+// debounce delay in milliseconds, clamped to [MinDebounceDelay, MaxDebounceDelay].
+// Caller must hold app.dbMu.RLock or app.dbMu.Lock.
+func (app *App) journalDebounceMs() int {
+	defaultDebounceMilliseconds := int(journal.DefaultDebounceDelay / time.Millisecond)
+	if app.db == nil {
+		return defaultDebounceMilliseconds
+	}
+	settingValue, getError := db.GetSetting(app.db, settingJournalDebounceMs)
+	if getError != nil || strings.TrimSpace(settingValue) == "" {
+		return defaultDebounceMilliseconds
+	}
+	parsedMilliseconds, parseError := strconv.Atoi(strings.TrimSpace(settingValue))
+	if parseError != nil {
+		return defaultDebounceMilliseconds
+	}
+	clampedDuration := journal.ClampDebounceDelay(time.Duration(parsedMilliseconds) * time.Millisecond)
+	return int(clampedDuration / time.Millisecond)
 }
 
 // runScan performs the idempotent catch-up scan of the journal directory and

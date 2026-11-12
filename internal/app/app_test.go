@@ -606,6 +606,52 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 	waitGroup.Wait()
 }
 
+func TestJournalDebounceSettingPersistenceAndReload(t *testing.T) {
+	testApp := setupTestApp(t)
+
+	initialSettings, getSettingsError := testApp.GetSettings()
+	if getSettingsError != nil {
+		t.Fatalf("GetSettings: %v", getSettingsError)
+	}
+	if initialSettings.JournalDebounceMs != 2000 || initialSettings.DefaultJournalDebounceMs != 2000 {
+		t.Fatalf("expected default 2000ms debounce, got current=%d default=%d", initialSettings.JournalDebounceMs, initialSettings.DefaultJournalDebounceMs)
+	}
+
+	updatedSettings, setError := testApp.SetJournalDebounceMs(5000)
+	if setError != nil {
+		t.Fatalf("SetJournalDebounceMs(5000): %v", setError)
+	}
+	if updatedSettings.JournalDebounceMs != 5000 {
+		t.Fatalf("expected 5000ms debounce, got %d", updatedSettings.JournalDebounceMs)
+	}
+	if testApp.watcher.DebounceDelay() != 5*time.Second {
+		t.Fatalf("expected live watcher delay 5s, got %v", testApp.watcher.DebounceDelay())
+	}
+
+	lowClampedSettings, lowClampError := testApp.SetJournalDebounceMs(50)
+	if lowClampError != nil {
+		t.Fatalf("SetJournalDebounceMs(50): %v", lowClampError)
+	}
+	if lowClampedSettings.JournalDebounceMs != 300 {
+		t.Fatalf("expected lower clamp 300ms, got %d", lowClampedSettings.JournalDebounceMs)
+	}
+
+	highClampedSettings, highClampError := testApp.SetJournalDebounceMs(120000)
+	if highClampError != nil {
+		t.Fatalf("SetJournalDebounceMs(120000): %v", highClampError)
+	}
+	if highClampedSettings.JournalDebounceMs != 30000 {
+		t.Fatalf("expected upper clamp 30000ms, got %d", highClampedSettings.JournalDebounceMs)
+	}
+
+	if reloadError := testApp.openAndWireDB(testApp.dbPath); reloadError != nil {
+		t.Fatalf("openAndWireDB reload: %v", reloadError)
+	}
+	if testApp.watcher.DebounceDelay() != 30*time.Second {
+		t.Fatalf("expected reloaded watcher to restore persisted 30s debounce, got %v", testApp.watcher.DebounceDelay())
+	}
+}
+
 
 
 

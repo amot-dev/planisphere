@@ -12,6 +12,7 @@ import {
   RefreshGEC,
   RescanJournals,
   SetCommanderEnabled,
+  SetJournalDebounceMs,
   SetJournalDir,
   SetOnlineLookups,
   StartExpedition,
@@ -22,6 +23,10 @@ import {
 import { app, expedition } from '../../wailsjs/go/models'
 import { fromGalacticTime, nowGalacticTime } from '../utils/galacticTime'
 import { APP_VERSION } from '../version'
+import {
+  DEFAULT_JOURNAL_DEBOUNCE_MILLISECONDS,
+  JournalDebounceControl,
+} from './JournalDebounceControl'
 import { SquareCheckbox } from './SquareCheckbox'
 
 function ModalShell({
@@ -326,6 +331,16 @@ export function SettingsModal({
     onRefresh()
   }
 
+  async function handleCommitDebounceMilliseconds(milliseconds: number) {
+    setError('')
+    try {
+      await SetJournalDebounceMs(milliseconds)
+      onRefresh()
+    } catch (commitError) {
+      setError(String(commitError))
+    }
+  }
+
   async function handleRefreshGec() {
     setGecBusy(true)
     setError('')
@@ -481,6 +496,15 @@ export function SettingsModal({
             </div>
           </div>
         </div>
+        <JournalDebounceControl
+          configuredDebounceMilliseconds={
+            settings?.journalDebounceMs ?? DEFAULT_JOURNAL_DEBOUNCE_MILLISECONDS
+          }
+          defaultDebounceMilliseconds={
+            settings?.defaultJournalDebounceMs ?? DEFAULT_JOURNAL_DEBOUNCE_MILLISECONDS
+          }
+          onCommitDebounceMilliseconds={handleCommitDebounceMilliseconds}
+        />
         <div className="text-[11px] text-[#a6907c] font-mono-tabular flex items-center justify-between">
           <span>Database Path:</span>
           <span className="text-[#F4ECE4] font-bold">{settings?.dbPath}</span>

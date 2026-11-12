@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -46,6 +47,8 @@ type Settings struct {
 	JournalDir               string              `json:"journalDir"`
 	DefaultJournalDir        string              `json:"defaultJournalDir"`
 	JournalDirExists         bool                `json:"journalDirExists"`
+	JournalDebounceMs        int                 `json:"journalDebounceMs"`
+	DefaultJournalDebounceMs int                 `json:"defaultJournalDebounceMs"`
 	OnlineLookups            bool                `json:"onlineLookups"`
 	DBPath                   string              `json:"dbPath"`
 	DefaultDBPath            string              `json:"defaultDbPath"`
@@ -84,6 +87,8 @@ func (app *App) GetSettings() (Settings, error) {
 		JournalDir:               dir,
 		DefaultJournalDir:        journal.DefaultJournalDir(),
 		JournalDirExists:         journal.DirExists(dir),
+		JournalDebounceMs:        app.journalDebounceMs(),
+		DefaultJournalDebounceMs: int(journal.DefaultDebounceDelay / time.Millisecond),
 		OnlineLookups:            app.onlineEnabled(),
 		DBPath:                   app.dbPath,
 		DefaultDBPath:            defaultDBPath,
@@ -378,6 +383,33 @@ func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
 	if enabled {
 		go app.maybeRefreshGEC()
 	}
+	return app.GetSettings()
+}
+
+// SetJournalDebounceMs updates the live journal file-watcher debounce delay
+// in milliseconds, clamped to [MinDebounceDelay, MaxDebounceDelay], and
+// applies it immediately to the running watcher.
+func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
+	clampedDuration := journal.ClampDebounceDelay(time.Duration(milliseconds) * time.Millisecond)
+	clampedMilliseconds := strconv.FormatInt(clampedDuration.Milliseconds(), 10)
+
+	var runningWatcher *journal.Watcher
+	if saveError := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		runningWatcher = app.watcher
+		return db.SetSetting(app.db, settingJournalDebounceMs, clampedMilliseconds)
+	}(); saveError != nil {
+		return Settings{}, fmt.Errorf("persist journal debounce setting: %w", saveError)
+	}
+
+	if runningWatcher != nil {
+		runningWatcher.SetDebounceDelay(clampedDuration)
+	}
+	app.changed("settings", 0)
 	return app.GetSettings()
 }
 

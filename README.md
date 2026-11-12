@@ -139,7 +139,7 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 ### Architecture
 
 - **Local-First**: Everything lives in a local SQLite database on your machine. Your journals, route waypoints, and cached coordinates stay local and work completely offline.
-- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using native filesystem notifications (`fsnotify`) as its primary event pipeline. It handles out-of-order writes safely and never touches your game files.
+- **Direct Journal Tailing**: Watches the Elite Dangerous journal folder directly using native filesystem notifications (`fsnotify`) as its primary event pipeline, with a configurable debounce window (`0.3s` to `30s`, `2s` default) to coalesce rapid write bursts such as FSS body scans. It handles out-of-order writes safely and never touches your game files.
   > [!WARNING]
   > The journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent folders do not emit kernel filesystem events and are not supported for live log streaming.
 - **Optional Historical Ingestion**: When older journal files are no longer available on disk, Planisphere can optionally backfill past flight events from an existing EDDiscovery database (`EDDUser.sqlite`).

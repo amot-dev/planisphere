@@ -178,6 +178,10 @@ export function SetDatabasePath(arg1) {
   return window['go']['app']['App']['SetDatabasePath'](arg1);
 }
 
+export function SetJournalDebounceMs(arg1) {
+  return window['go']['app']['App']['SetJournalDebounceMs'](arg1);
+}
+
 export function SetJournalDir(arg1) {
   return window['go']['app']['App']['SetJournalDir'](arg1);
 }

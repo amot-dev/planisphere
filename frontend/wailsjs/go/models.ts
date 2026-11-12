@@ -303,6 +303,8 @@ export namespace app {
 	    journalDir: string;
 	    defaultJournalDir: string;
 	    journalDirExists: boolean;
+	    journalDebounceMs: number;
+	    defaultJournalDebounceMs: number;
 	    onlineLookups: boolean;
 	    dbPath: string;
 	    defaultDbPath: string;
@@ -324,6 +326,8 @@ export namespace app {
 	        this.journalDir = source["journalDir"];
 	        this.defaultJournalDir = source["defaultJournalDir"];
 	        this.journalDirExists = source["journalDirExists"];
+	        this.journalDebounceMs = source["journalDebounceMs"];
+	        this.defaultJournalDebounceMs = source["defaultJournalDebounceMs"];
 	        this.onlineLookups = source["onlineLookups"];
 	        this.dbPath = source["dbPath"];
 	        this.defaultDbPath = source["defaultDbPath"];
