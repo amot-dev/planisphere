@@ -183,7 +183,9 @@ func (app *App) ready() error {
 }
 
 func (app *App) startup(ctx context.Context) {
-	app.emit = func(event string, data ...any) { runtime.EventsEmit(ctx, event, data...) }
+	if app.emit == nil {
+		app.emit = func(event string, data ...any) { runtime.EventsEmit(ctx, event, data...) }
+	}
 	initError := app.initialize(ctx, os.Getenv("ED_PLANNER_DB"))
 	if initError != nil {
 		log.Printf("startup: %v", initError)
@@ -193,7 +195,6 @@ func (app *App) startup(ctx context.Context) {
 	}
 	app.prepareInitialState()
 	app.markStartupComplete()
-	app.changed("settings", 0)
 	go app.backgroundStart()
 }
 

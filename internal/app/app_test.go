@@ -652,6 +652,83 @@ func TestJournalDebounceSettingPersistenceAndReload(t *testing.T) {
 	}
 }
 
+func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testing.T) {
+	temporaryDirectory := testingContext.TempDir()
+	seededDatabasePath := filepath.Join(temporaryDirectory, "startup-events.sqlite")
+	emptyJournalDirectory := filepath.Join(temporaryDirectory, "journals")
+	if mkdirError := os.MkdirAll(emptyJournalDirectory, 0o755); mkdirError != nil {
+		testingContext.Fatalf("create journal dir: %v", mkdirError)
+	}
 
+	seedApp := New()
+	seedApp.debugMode = false
+	seedContext, cancelSeed := context.WithCancel(context.Background())
+	if initError := seedApp.initialize(seedContext, seededDatabasePath); initError != nil {
+		cancelSeed()
+		testingContext.Fatalf("seed initialize: %v", initError)
+	}
+	for _, settingPair := range [][2]string{
+		{settingSetupCompleted, "1"},
+		{settingOnline, "0"},
+		{settingJournalDir, emptyJournalDirectory},
+	} {
+		if _, setError := seedApp.db.Exec(
+			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			settingPair[0], settingPair[1],
+		); setError != nil {
+			cancelSeed()
+			seedApp.shutdown(seedContext)
+			testingContext.Fatalf("seed setting %s: %v", settingPair[0], setError)
+		}
+	}
+	if _, createError := seedApp.CreateExpedition("Boot Sync Survey", ""); createError != nil {
+		cancelSeed()
+		seedApp.shutdown(seedContext)
+		testingContext.Fatalf("seed CreateExpedition: %v", createError)
+	}
+	cancelSeed()
+	seedApp.shutdown(seedContext)
 
+	testingContext.Setenv("ED_PLANNER_DB", seededDatabasePath)
+
+	startupApp := New()
+	startupApp.debugMode = false
+
+	var emittedMutex sync.Mutex
+	var emittedChanges []DataChanged
+	startupApp.emit = func(eventName string, payload ...any) {
+		if eventName != EventDataChanged || len(payload) == 0 {
+			return
+		}
+		if dataChangedPayload, ok := payload[0].(DataChanged); ok {
+			emittedMutex.Lock()
+			emittedChanges = append(emittedChanges, dataChangedPayload)
+			emittedMutex.Unlock()
+		}
+	}
+
+	onStartup := StartupHook(startupApp)
+	onShutdown := ShutdownHook(startupApp)
+	applicationContext, cancelApplication := context.WithCancel(context.Background())
+	defer cancelApplication()
+	defer onShutdown(applicationContext)
+
+	onStartup(applicationContext)
+
+	loadedSettings, settingsError := startupApp.GetSettings()
+	if settingsError != nil {
+		testingContext.Fatalf("GetSettings after startup: %v", settingsError)
+	}
+	if !loadedSettings.SetupCompleted {
+		testingContext.Fatalf("expected SetupCompleted to be true after startup")
+	}
+
+	emittedMutex.Lock()
+	defer emittedMutex.Unlock()
+	for _, changeEvent := range emittedChanges {
+		if changeEvent.Scope == "settings" {
+			testingContext.Errorf("unexpected startup %q event emitted with Scope=%q", EventDataChanged, changeEvent.Scope)
+		}
+	}
+}
 

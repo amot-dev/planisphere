@@ -14,6 +14,84 @@ import { EventsOn } from '../../wailsjs/runtime/runtime'
 import type { EddImportProgress } from '../components/settings/EDDiscoveryImportSection'
 
 /**
+ * SyncBootLifecycleState tracks the two-stage terminal boot lifecycle so early
+ * Wails events do not cancel in-flight bootstrap RPCs before main paint.
+ */
+export interface SyncBootLifecycleState {
+  initialBootComplete: boolean
+  bootCoreLoaded: boolean
+  pendingBootRefresh: boolean
+}
+
+/**
+ * DataChangedDispatchContext supplies current synchronization state and loader
+ * callbacks when routing a backend data:changed event.
+ */
+export interface DataChangedDispatchContext {
+  bootState: SyncBootLifecycleState
+  currentActiveExpeditionId: number
+  currentFilter: stats.Filter
+  refreshExpeditionListOnly: () => void
+  loadCoreState: () => Promise<{
+    settingsData: app.Settings | null
+    chosenId: number
+  }>
+  loadPlanOnly: (expeditionId: number) => Promise<void>
+  loadStatsOnly: (expeditionId: number, currentFilter: stats.Filter) => Promise<void>
+  refreshAll: () => void
+}
+
+/**
+ * routeDataChangedEvent dispatches a Wails data:changed notification without
+ * interrupting an in-progress initial boot or waterfalling live journal updates.
+ */
+export function routeDataChangedEvent(
+  payload: { scope?: string; kind?: string; expeditionId?: number; expId?: number } | undefined,
+  dispatchContext: DataChangedDispatchContext,
+): void {
+  if (!dispatchContext.bootState.initialBootComplete) {
+    if (dispatchContext.bootState.bootCoreLoaded) {
+      dispatchContext.bootState.pendingBootRefresh = true
+    }
+    return
+  }
+
+  const scope = payload?.scope ?? payload?.kind ?? ''
+  const currentActive = dispatchContext.currentActiveExpeditionId
+  const eventExpeditionId = payload?.expeditionId ?? payload?.expId
+
+  if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
+    dispatchContext.refreshExpeditionListOnly()
+    return
+  }
+
+  if (scope === 'plan') {
+    if (currentActive > 0) {
+      void dispatchContext.loadPlanOnly(currentActive)
+    }
+    return
+  }
+
+  if (scope === 'adjustments') {
+    if (currentActive > 0) {
+      void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
+    }
+    return
+  }
+
+  if (scope === 'journal') {
+    void dispatchContext.loadCoreState()
+    if (currentActive > 0) {
+      void dispatchContext.loadPlanOnly(currentActive)
+      void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
+    }
+    return
+  }
+
+  dispatchContext.refreshAll()
+}
+
+/**
  * useBackendSync manages terminal bootstrap state, Wails IPC queries for
  * settings/expeditions/plans/telemetry, and live runtime event subscriptions.
  */
@@ -35,7 +113,17 @@ export function useBackendSync() {
   const [eddProgress, setEddProgress] = useState<EddImportProgress | null>(null)
 
   const activeExpeditionIdRef = useRef(0)
-  const initialBootCompleteRef = useRef(false)
+  const bootStateRef = useRef<SyncBootLifecycleState>({
+    initialBootComplete: false,
+    bootCoreLoaded: false,
+    pendingBootRefresh: false,
+  })
+  const coreStateRequestSequenceRef = useRef(0)
+  const lastEffectPlanExpeditionIdRef = useRef(0)
+  const lastEffectStatsSelectionRef = useRef<{
+    expeditionId: number
+    filter: stats.Filter
+  } | null>(null)
   const ingestReqSeq = useRef(0)
   const planReqSeq = useRef(0)
   const statsReqSeq = useRef(0)
@@ -67,6 +155,7 @@ export function useBackendSync() {
     settingsData: app.Settings | null
     chosenId: number
   }> => {
+    const coreRequestSequence = ++coreStateRequestSequenceRef.current
     const ingestSeq = ++ingestReqSeq.current
     try {
       const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
@@ -75,6 +164,9 @@ export function useBackendSync() {
         GetModesState(),
         ListExpeditions(),
       ])
+      if (coreRequestSequence !== coreStateRequestSequenceRef.current) {
+        return { settingsData: null, chosenId: 0 }
+      }
       setSettings(settingsData)
       if (ingestSeq === ingestReqSeq.current) {
         setIngest(ingestStatus)
@@ -144,16 +236,40 @@ export function useBackendSync() {
     }
   }, [])
 
+  const refreshAll = useCallback(() => {
+    void loadCoreState().then(({ settingsData, chosenId }) => {
+      if (!settingsData || !settingsData.setupCompleted || chosenId <= 0) {
+        return
+      }
+      const willTransitionEffectReload =
+        bootStateRef.current.initialBootComplete &&
+        lastEffectPlanExpeditionIdRef.current !== chosenId
+      if (!willTransitionEffectReload) {
+        void loadPlanOnly(chosenId)
+        void loadStatsOnly(chosenId, filterRef.current)
+      }
+    })
+  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
+
   // Initial boot sequence: load core state, active expedition plan, and sidebar
   // telemetry before dismissing the boot screen so the main cockpit UI never
   // paints in an unready state.
   useEffect(() => {
     let mounted = true
+    bootStateRef.current.bootCoreLoaded = false
     setBusyAction('INITIALIZING TERMINAL')
     ;(async () => {
       try {
         const { settingsData, chosenId } = await loadCoreState()
-        if (mounted && settingsData?.setupCompleted && chosenId > 0) {
+        if (!mounted) {
+          return
+        }
+        bootStateRef.current.bootCoreLoaded = true
+        lastEffectPlanExpeditionIdRef.current = chosenId
+        lastEffectStatsSelectionRef.current =
+          chosenId > 0 ? { expeditionId: chosenId, filter: filterRef.current } : null
+
+        if (settingsData?.setupCompleted && chosenId > 0) {
           await Promise.all([
             loadPlanOnly(chosenId),
             loadStatsOnly(chosenId, filterRef.current),
@@ -161,31 +277,50 @@ export function useBackendSync() {
         }
       } finally {
         if (mounted) {
-          initialBootCompleteRef.current = true
+          bootStateRef.current.initialBootComplete = true
           setBooting(false)
           setBusyAction(null)
+          if (bootStateRef.current.pendingBootRefresh) {
+            bootStateRef.current.pendingBootRefresh = false
+            refreshAll()
+          }
         }
       }
     })()
     return () => {
       mounted = false
     }
-  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
+  }, [loadCoreState, loadPlanOnly, loadStatsOnly, refreshAll])
 
   // Load plan immediately when expedition changes after initial boot
   useEffect(() => {
-    if (!initialBootCompleteRef.current) return
-    if (activeExpeditionId > 0) {
-      loadPlanOnly(activeExpeditionId)
+    if (!bootStateRef.current.initialBootComplete) return
+    if (activeExpeditionId <= 0) {
+      lastEffectPlanExpeditionIdRef.current = 0
+      return
     }
+    if (lastEffectPlanExpeditionIdRef.current === activeExpeditionId) {
+      return
+    }
+    lastEffectPlanExpeditionIdRef.current = activeExpeditionId
+    void loadPlanOnly(activeExpeditionId)
   }, [activeExpeditionId, loadPlanOnly])
 
   // Reload sidebar stats when expedition or filter changes after initial boot
   useEffect(() => {
-    if (!initialBootCompleteRef.current) return
-    if (activeExpeditionId > 0) {
-      loadStatsOnly(activeExpeditionId, filter)
+    if (!bootStateRef.current.initialBootComplete) return
+    if (activeExpeditionId <= 0) {
+      lastEffectStatsSelectionRef.current = null
+      return
     }
+    if (
+      lastEffectStatsSelectionRef.current?.expeditionId === activeExpeditionId &&
+      lastEffectStatsSelectionRef.current?.filter === filter
+    ) {
+      return
+    }
+    lastEffectStatsSelectionRef.current = { expeditionId: activeExpeditionId, filter }
+    void loadStatsOnly(activeExpeditionId, filter)
   }, [activeExpeditionId, filter, loadStatsOnly])
 
   // Subscribe to Wails backend events (live fsnotify journal tailing, coordinate resolution, etc.)
@@ -197,37 +332,19 @@ export function useBackendSync() {
     const offChanged = EventsOn(
       'data:changed',
       (payload?: { scope?: string; kind?: string; expeditionId?: number; expId?: number }) => {
-        const scope = payload?.scope ?? payload?.kind ?? ''
-        const currentActive = activeExpeditionIdRef.current
-        const eventExpeditionId = payload?.expeditionId ?? payload?.expId
-
-        if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
-          ListExpeditions()
-            .then((expeditionList) => expeditionList && setExpeditions(expeditionList))
-            .catch(console.error)
-          return
-        }
-
-        if (scope === 'plan') {
-          if (currentActive > 0) {
-            loadPlanOnly(currentActive)
-          }
-          return
-        }
-
-        if (scope === 'adjustments') {
-          if (currentActive > 0) {
-            loadStatsOnly(currentActive, filterRef.current)
-          }
-          return
-        }
-
-        void loadCoreState().then(({ chosenId }) => {
-          const targetExpeditionId = chosenId || activeExpeditionIdRef.current
-          if (targetExpeditionId > 0) {
-            void loadPlanOnly(targetExpeditionId)
-            void loadStatsOnly(targetExpeditionId, filterRef.current)
-          }
+        routeDataChangedEvent(payload, {
+          bootState: bootStateRef.current,
+          currentActiveExpeditionId: activeExpeditionIdRef.current,
+          currentFilter: filterRef.current,
+          refreshExpeditionListOnly: () => {
+            ListExpeditions()
+              .then((expeditionList) => expeditionList && setExpeditions(expeditionList))
+              .catch(console.error)
+          },
+          loadCoreState,
+          loadPlanOnly,
+          loadStatsOnly,
+          refreshAll,
         })
       },
     )
@@ -242,7 +359,7 @@ export function useBackendSync() {
       offIngest()
       offEdd()
     }
-  }, [loadCoreState, loadIngestStatusOnly, loadPlanOnly, loadStatsOnly])
+  }, [loadCoreState, loadIngestStatusOnly, loadPlanOnly, loadStatsOnly, refreshAll])
 
   const handleSelectExpedition = useCallback(async (selectedExpeditionId: number) => {
     if (!selectedExpeditionId) return
@@ -275,16 +392,6 @@ export function useBackendSync() {
     },
     [activeExpeditionId, filter, loadPlanOnly, loadStatsOnly],
   )
-
-  const refreshAll = useCallback(() => {
-    void loadCoreState().then(({ chosenId }) => {
-      const targetExpeditionId = chosenId || activeExpeditionIdRef.current
-      if (targetExpeditionId > 0) {
-        void loadPlanOnly(targetExpeditionId)
-        void loadStatsOnly(targetExpeditionId, filterRef.current)
-      }
-    })
-  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
 
   const refreshPlanAndStats = useCallback(() => {
     if (activeExpeditionIdRef.current > 0) {
