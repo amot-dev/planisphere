@@ -27,7 +27,21 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	if queryError := queryer.QueryRow(`SELECT COUNT(*) FROM ingested_journals`).Scan(&status.FilesTracked); queryError != nil {
 		return status, queryError
 	}
-	if queryError := queryer.QueryRow(`SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM journal_events WHERE `+CmdrFilterSQL).Scan(&status.EventsStored, &firstTimestamp, &lastTimestamp); queryError != nil {
+	var hasDisabled int
+	_ = queryer.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled)
+	var archiveQuery string
+	if hasDisabled == 0 {
+		archiveQuery = `SELECT
+			(SELECT COUNT(*) FROM journal_events),
+			(SELECT timestamp FROM journal_events ORDER BY timestamp ASC LIMIT 1),
+			(SELECT timestamp FROM journal_events ORDER BY timestamp DESC LIMIT 1)`
+	} else {
+		archiveQuery = `SELECT
+			(SELECT COUNT(*) FROM journal_events WHERE ` + CmdrFilterSQL + `),
+			(SELECT timestamp FROM journal_events WHERE ` + CmdrFilterSQL + ` ORDER BY timestamp ASC LIMIT 1),
+			(SELECT timestamp FROM journal_events WHERE ` + CmdrFilterSQL + ` ORDER BY timestamp DESC LIMIT 1)`
+	}
+	if queryError := queryer.QueryRow(archiveQuery).Scan(&status.EventsStored, &firstTimestamp, &lastTimestamp); queryError != nil {
 		return status, queryError
 	}
 	status.FirstEventAt, status.LastEventAt = firstTimestamp.String, lastTimestamp.String

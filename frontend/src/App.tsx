@@ -75,7 +75,7 @@ export default function App() {
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
 
-  if (booting && !plan) {
+  if (booting) {
     return <TerminalBootScreen />
   }
 

@@ -35,6 +35,8 @@ export function useBackendSync() {
   const [eddProgress, setEddProgress] = useState<EddImportProgress | null>(null)
 
   const activeExpeditionIdRef = useRef(0)
+  const initialBootCompleteRef = useRef(false)
+  const ingestReqSeq = useRef(0)
   const planReqSeq = useRef(0)
   const statsReqSeq = useRef(0)
   const filterRef = useRef(filter)
@@ -47,7 +49,25 @@ export function useBackendSync() {
     filterRef.current = filter
   }, [filter])
 
-  const loadCoreState = useCallback(async () => {
+  const loadIngestStatusOnly = useCallback(async () => {
+    const requestSeq = ++ingestReqSeq.current
+    try {
+      const ingestStatus = await GetIngestStatus()
+      if (requestSeq === ingestReqSeq.current) {
+        setIngest(ingestStatus)
+      }
+      return ingestStatus
+    } catch (ingestError) {
+      console.error('Failed to load ingest status:', ingestError)
+      return null
+    }
+  }, [])
+
+  const loadCoreState = useCallback(async (): Promise<{
+    settingsData: app.Settings | null
+    chosenId: number
+  }> => {
+    const ingestSeq = ++ingestReqSeq.current
     try {
       const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
         GetSettings(),
@@ -56,7 +76,9 @@ export function useBackendSync() {
         ListExpeditions(),
       ])
       setSettings(settingsData)
-      setIngest(ingestStatus)
+      if (ingestSeq === ingestReqSeq.current) {
+        setIngest(ingestStatus)
+      }
       setModesState(modesStateData)
 
       const list = expeditionList || []
@@ -79,8 +101,10 @@ export function useBackendSync() {
         setActiveExpeditionId(chosenId)
         activeExpeditionIdRef.current = chosenId
       }
+      return { settingsData, chosenId }
     } catch (coreStateError) {
       console.error('Failed to load core state:', coreStateError)
+      return { settingsData: null, chosenId: 0 }
     }
   }, [])
 
@@ -120,30 +144,45 @@ export function useBackendSync() {
     }
   }, [])
 
-  // Initial boot sequence
+  // Initial boot sequence: load core state, active expedition plan, and sidebar
+  // telemetry before dismissing the boot screen so the main cockpit UI never
+  // paints in an unready state.
   useEffect(() => {
     let mounted = true
     setBusyAction('INITIALIZING TERMINAL')
-    loadCoreState().finally(() => {
-      if (mounted) {
-        setBooting(false)
-        setBusyAction(null)
+    ;(async () => {
+      try {
+        const { settingsData, chosenId } = await loadCoreState()
+        if (mounted && settingsData?.setupCompleted && chosenId > 0) {
+          await Promise.all([
+            loadPlanOnly(chosenId),
+            loadStatsOnly(chosenId, filterRef.current),
+          ])
+        }
+      } finally {
+        if (mounted) {
+          initialBootCompleteRef.current = true
+          setBooting(false)
+          setBusyAction(null)
+        }
       }
-    })
+    })()
     return () => {
       mounted = false
     }
-  }, [loadCoreState])
+  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
 
-  // Load plan immediately when expedition changes
+  // Load plan immediately when expedition changes after initial boot
   useEffect(() => {
+    if (!initialBootCompleteRef.current) return
     if (activeExpeditionId > 0) {
       loadPlanOnly(activeExpeditionId)
     }
   }, [activeExpeditionId, loadPlanOnly])
 
-  // Reload sidebar stats when expedition or filter changes
+  // Reload sidebar stats when expedition or filter changes after initial boot
   useEffect(() => {
+    if (!initialBootCompleteRef.current) return
     if (activeExpeditionId > 0) {
       loadStatsOnly(activeExpeditionId, filter)
     }
@@ -183,15 +222,17 @@ export function useBackendSync() {
           return
         }
 
-        loadCoreState()
-        if (currentActive > 0) {
-          loadPlanOnly(currentActive)
-          loadStatsOnly(currentActive, filterRef.current)
-        }
+        void loadCoreState().then(({ chosenId }) => {
+          const targetExpeditionId = chosenId || activeExpeditionIdRef.current
+          if (targetExpeditionId > 0) {
+            void loadPlanOnly(targetExpeditionId)
+            void loadStatsOnly(targetExpeditionId, filterRef.current)
+          }
+        })
       },
     )
     const offIngest = EventsOn('ingest:status', () => {
-      GetIngestStatus().then(setIngest).catch(console.error)
+      void loadIngestStatusOnly()
     })
     const offEdd = EventsOn('edd:progress', (progress) => {
       setEddProgress(progress)
@@ -201,7 +242,7 @@ export function useBackendSync() {
       offIngest()
       offEdd()
     }
-  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
+  }, [loadCoreState, loadIngestStatusOnly, loadPlanOnly, loadStatsOnly])
 
   const handleSelectExpedition = useCallback(async (selectedExpeditionId: number) => {
     if (!selectedExpeditionId) return
@@ -236,12 +277,14 @@ export function useBackendSync() {
   )
 
   const refreshAll = useCallback(() => {
-    loadCoreState()
-    if (activeExpeditionIdRef.current > 0) {
-      loadPlanOnly(activeExpeditionIdRef.current)
-      loadStatsOnly(activeExpeditionIdRef.current, filter)
-    }
-  }, [loadCoreState, loadPlanOnly, loadStatsOnly, filter])
+    void loadCoreState().then(({ chosenId }) => {
+      const targetExpeditionId = chosenId || activeExpeditionIdRef.current
+      if (targetExpeditionId > 0) {
+        void loadPlanOnly(targetExpeditionId)
+        void loadStatsOnly(targetExpeditionId, filterRef.current)
+      }
+    })
+  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
 
   const refreshPlanAndStats = useCallback(() => {
     if (activeExpeditionIdRef.current > 0) {

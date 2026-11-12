@@ -89,6 +89,25 @@ func ListJournalFiles(dir string) ([]string, error) {
 	return matches, nil
 }
 
+func (ingester *Ingester) loadAllTrackedOffsets() map[string]int64 {
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
+	rows, queryError := ingester.conn.Query(`SELECT file_name, byte_offset FROM ingested_journals`)
+	if queryError != nil {
+		return nil
+	}
+	defer rows.Close()
+	trackedOffsets := make(map[string]int64, 256)
+	for rows.Next() {
+		var fileName string
+		var byteOffset int64
+		if rows.Scan(&fileName, &byteOffset) == nil {
+			trackedOffsets[fileName] = byteOffset
+		}
+	}
+	return trackedOffsets
+}
+
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
 func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, error) {
 	var scanResult Result
@@ -99,11 +118,20 @@ func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, erro
 	if listError != nil {
 		return scanResult, listError
 	}
+	trackedOffsets := ingester.loadAllTrackedOffsets()
 	for _, filePath := range files {
 		select {
 		case <-ctx.Done():
 			return scanResult, ctx.Err()
 		default:
+		}
+		if trackedOffsets != nil {
+			if fileInfo, statError := os.Stat(filePath); statError == nil {
+				if trackedOffset, isTracked := trackedOffsets[filepath.Base(filePath)]; isTracked && trackedOffset == fileInfo.Size() {
+					scanResult.FilesScanned++
+					continue
+				}
+			}
 		}
 		fileResult, ingestError := ingester.IngestFile(filePath)
 		if ingestError != nil {
@@ -152,6 +180,7 @@ func ingestAppendedLines(
 	var previousCommander sql.NullString
 	_ = transaction.QueryRow(`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`, fileName).Scan(&previousCommander)
 	currentCommander = previousCommander.String
+	hasUnattributedEvents := state.offset > 0 && currentCommander == ""
 
 	// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
 	insertEventStmt, prepError := transaction.Prepare(`INSERT INTO journal_events
@@ -205,10 +234,15 @@ func ingestAppendedLines(
 		if parsedEvent.Commander != "" {
 			currentCommander = parsedEvent.Commander
 			_, _ = upsertCommanderStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp)
-			// Backfill any earlier events in the same file that arrived before LoadGame or Commander.
-			_, _ = transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCommander, fileName)
+			if hasUnattributedEvents {
+				// Backfill any earlier events in the same file that arrived before LoadGame or Commander.
+				_, _ = transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCommander, fileName)
+				hasUnattributedEvents = false
+			}
 		} else if currentCommander != "" {
 			parsedEvent.Commander = currentCommander
+		} else {
+			hasUnattributedEvents = true
 		}
 		var xCoord, yCoord, zCoord any
 		if parsedEvent.StarPos != nil {

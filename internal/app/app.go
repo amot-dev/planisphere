@@ -158,11 +158,15 @@ func (app *App) markStartupComplete() {
 // app.dbMu.RLock, which is temporarily released while waiting so startup can
 // acquire app.dbMu.Lock.
 func (app *App) waitStartupLocked() {
-	if app.db == nil && app.startupDone != nil {
-		startupDone := app.startupDone
-		app.dbMu.RUnlock()
-		<-startupDone
-		app.dbMu.RLock()
+	if app.startupDone != nil {
+		select {
+		case <-app.startupDone:
+		default:
+			startupDone := app.startupDone
+			app.dbMu.RUnlock()
+			<-startupDone
+			app.dbMu.RLock()
+		}
 	}
 }
 
@@ -187,6 +191,7 @@ func (app *App) startup(ctx context.Context) {
 		app.markStartupComplete()
 		return
 	}
+	app.prepareInitialState()
 	app.markStartupComplete()
 	app.changed("settings", 0)
 	go app.backgroundStart()
@@ -287,20 +292,33 @@ func (app *App) shutdown(ctx context.Context) {
 	}
 }
 
-func (app *App) backgroundStart() {
+func (app *App) prepareInitialState() {
 	app.dbMu.RLock()
 	setupDone := app.setupCompleted()
 	app.dbMu.RUnlock()
 	if !setupDone {
 		return
 	}
-	app.runScan()
+	scannedNewEvents := app.runScan()
+	if !scannedNewEvents {
+		app.reevaluateActive()
+	}
 	app.dbMu.RLock()
 	watcher := app.watcher
 	configuredJournalDir := app.journalDir()
 	app.dbMu.RUnlock()
 	if watcher != nil {
 		watcher.Start(app.ctx, configuredJournalDir)
+	}
+	app.warmInitialStats()
+}
+
+func (app *App) backgroundStart() {
+	app.dbMu.RLock()
+	setupDone := app.setupCompleted()
+	app.dbMu.RUnlock()
+	if !setupDone {
+		return
 	}
 	app.maybeRefreshGEC()
 	go app.maybeCatchUpEDD()

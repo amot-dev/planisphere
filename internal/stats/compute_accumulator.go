@@ -2,6 +2,7 @@ package stats
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"planisphere/internal/ed"
@@ -9,10 +10,14 @@ import (
 	"planisphere/internal/journal"
 )
 
-func (engine *Engine) prepareComputeScans(events []eventRow, untilTimestamp string) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
+// prepareComputeScans identifies mapped or organically sampled bodies that have
+// no Scan event in events and preloads their latest prior Scan at or before
+// afterTimestamp. Two passes ensure same-second mappings ordered before their
+// matching Scan in events are not marked missing.
+func (engine *Engine) prepareComputeScans(afterTimestamp string, events []eventRow) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
 	scans := make(map[bodyKey]*journal.ScanEvent)
 	missingScans := make(map[bodyKey]bool)
-	scannedInEvents := make(map[bodyKey]bool, len(events))
+	scannedInEvents := make(map[bodyKey]bool, len(events)/2)
 	for _, rowItem := range events {
 		if rowItem.eventType == "Scan" && rowItem.systemAddress.Valid && rowItem.bodyID.Valid {
 			scannedInEvents[bodyKey{rowItem.systemAddress.Int64, rowItem.bodyID.Int64}] = true
@@ -33,9 +38,15 @@ func (engine *Engine) prepareComputeScans(events []eventRow, untilTimestamp stri
 	if len(neededKeys) == 0 {
 		return scans, missingScans, nil
 	}
-	preloaded, preloadError := engine.preloadScans(neededKeys, untilTimestamp)
+	if afterTimestamp == "" {
+		for _, key := range neededKeys {
+			missingScans[key] = true
+		}
+		return scans, missingScans, nil
+	}
+	preloaded, preloadError := engine.preloadScans(neededKeys, afterTimestamp)
 	if preloadError != nil {
-		return nil, nil, preloadError
+		return nil, nil, fmt.Errorf("preload compute scans before %s: %w", afterTimestamp, preloadError)
 	}
 	for key, scanEvent := range preloaded {
 		scans[key] = scanEvent

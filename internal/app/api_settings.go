@@ -434,10 +434,12 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 			}
 		}
 	}
+	status.Scanning = app.scanning.Load()
+	status.LastError = app.getError()
 	return status, nil
 }
 
-// RescanJournals starts a full idempotent catch-up scan in the background.
+// RescanJournals performs a full idempotent catch-up scan of the configured journal directory.
 func (app *App) RescanJournals() error {
 	app.dbMu.RLock()
 	if readyError := app.ready(); readyError != nil {
@@ -445,7 +447,7 @@ func (app *App) RescanJournals() error {
 		return readyError
 	}
 	app.dbMu.RUnlock()
-	go app.runScan()
+	app.runScan()
 	return nil
 }
 

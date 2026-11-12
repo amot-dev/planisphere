@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { RescanJournals, SetJournalDebounceMs } from '../../../wailsjs/go/app/App'
 import { app } from '../../../wailsjs/go/models'
 import {
@@ -26,6 +27,24 @@ export function DatabaseArchiveSection({
   onRefresh,
   onSetError,
 }: DatabaseArchiveSectionProps) {
+  const [rescanning, setRescanning] = useState(false)
+  const isScanning = rescanning || Boolean(ingestStatus?.scanning)
+
+  async function handleRescanJournals() {
+    if (isScanning) {
+      return
+    }
+    onSetError('')
+    setRescanning(true)
+    try {
+      await RescanJournals()
+    } catch (rescanError) {
+      onSetError(String(rescanError))
+    } finally {
+      setRescanning(false)
+    }
+  }
+
   async function handleCommitDebounceMilliseconds(milliseconds: number) {
     onSetError('')
     try {
@@ -44,10 +63,11 @@ export function DatabaseArchiveSection({
         </span>
         <button
           type="button"
-          onClick={() => RescanJournals().then(onRefresh)}
+          disabled={isScanning}
+          onClick={handleRescanJournals}
           className="ed-btn-cyan"
         >
-          <span>Rescan Journals</span>
+          <span>{isScanning ? 'Rescanning…' : 'Rescan Journals'}</span>
         </button>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono-tabular text-xs">

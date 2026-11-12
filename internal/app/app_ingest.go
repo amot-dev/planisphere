@@ -14,11 +14,12 @@ import (
 	"planisphere/internal/stats"
 )
 
-// runScan performs the idempotent catch-up scan of the journal directory and
-// re-evaluates active expeditions.
-func (app *App) runScan() {
+// runScan performs the idempotent catch-up scan of the journal directory,
+// re-evaluates active expeditions when new events are ingested, and returns
+// whether any new events were stored.
+func (app *App) runScan() bool {
 	if !app.scanning.CompareAndSwap(false, true) {
-		return
+		return false
 	}
 	defer app.scanning.Store(false)
 	app.emit(EventIngest, nil)
@@ -28,7 +29,9 @@ func (app *App) runScan() {
 	database := app.db
 	app.dbMu.RUnlock()
 	if ingester == nil || database == nil {
-		return
+		app.scanning.Store(false)
+		app.emit(EventIngest, nil)
+		return false
 	}
 	scanResult, scanError := ingester.ScanDir(app.ctx, dir)
 	if scanError != nil {
@@ -43,16 +46,43 @@ func (app *App) runScan() {
 		_ = db.SetSetting(app.db, settingLastScanAt, ed.NowISO())
 	}
 	app.dbMu.RUnlock()
+	hasNewEvents := scanResult.NewEvents > 0
 	if scanResult.HasRealizationEvents {
 		stats.InvalidateLedgerCache()
 	}
-	if scanResult.LinesRead > 0 {
+	if hasNewEvents {
 		app.invalidateAllTimeCache()
+		app.reevaluateActive()
 	}
-	app.reevaluateActive()
+	app.scanning.Store(false)
 	app.emit(EventIngest, nil)
-	if scanResult.LinesRead > 0 {
+	if hasNewEvents {
 		app.changed("journal", 0)
+	}
+	return hasNewEvents
+}
+
+// warmInitialStats pre-populates the all-time and active expedition statistics
+// caches during startup so initial frontend queries resolve immediately.
+func (app *App) warmInitialStats() {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil {
+		return
+	}
+	_, _ = app.getAllTimeMetrics()
+	_, _ = app.getAllTimeRealization()
+	_, _ = app.resolveCareerStart()
+	activeID := app.activeExpeditionID()
+	if activeID == 0 {
+		if expeditionsList, listError := expedition.List(app.db); listError == nil && len(expeditionsList) > 0 {
+			activeID = expeditionsList[0].ID
+		}
+	}
+	if activeID > 0 {
+		if expeditionRecord, getError := expedition.Get(app.db, activeID); getError == nil && expeditionRecord.StartTimestamp != "" {
+			_, _, _ = app.computeExpeditionLiveStats(expeditionRecord, stats.Filter{}, stats.NewEngine(app.db))
+		}
 	}
 }
 

@@ -187,16 +187,39 @@ type eventRow struct {
 
 var metricEvents = []string{"LoadGame", "Location", "FSDJump", "CarrierJump", "Scan", "SAAScanComplete", "ScanOrganic"}
 
+func (engine *Engine) hasDisabledCommanders() bool {
+	var hasDisabled int
+	if queryError := engine.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled); queryError != nil {
+		return true
+	}
+	return hasDisabled != 0
+}
+
 func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNames []string) ([]eventRow, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(eventNames)), ",")
-	args := []any{}
+	args := make([]any, 0, len(eventNames)+2)
 	for _, name := range eventNames {
 		args = append(args, name)
 	}
 	args = append(args, afterTimestamp, untilTimestamp)
-	rows, queryError := engine.DB.Query(`SELECT event_uid, timestamp, event, system_address, body_id, star_x, star_y, star_z, raw_json
-		FROM journal_events WHERE event IN (`+placeholders+`) AND timestamp > ? AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
-		ORDER BY timestamp, id`, args...)
+
+	// When loading a broad event set from the beginning of time, unary +event
+	// prevents SQLite from union-scanning idx_journal_events_event_ts and sorting
+	// ~180k rows in a temporary B-tree; instead it streams idx_journal_events_ts
+	// in (timestamp, id) order.
+	eventColumn := "event"
+	if afterTimestamp == "" && len(eventNames) >= 6 {
+		eventColumn = "+event"
+	}
+	commanderPredicate := ""
+	if engine.hasDisabledCommanders() {
+		commanderPredicate = " AND " + journal.CmdrFilterSQL
+	}
+	query := `SELECT event_uid, timestamp, event, system_address, body_id, star_x, star_y, star_z, raw_json
+		FROM journal_events WHERE ` + eventColumn + ` IN (` + placeholders + `) AND timestamp > ? AND timestamp <= ?` + commanderPredicate + `
+		ORDER BY timestamp, id`
+
+	rows, queryError := engine.DB.Query(query, args...)
 	if queryError != nil {
 		return nil, queryError
 	}
@@ -219,9 +242,11 @@ func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNam
 type bodyKey struct{ systemAddress, bodyID int64 }
 
 // lookupScan finds the most recent Scan of a body at or before timestamp.
+// Unary +event forces SQLite to seek idx_journal_events_body (system_address, body_id)
+// rather than scanning backwards through idx_journal_events_event_ts.
 func (engine *Engine) lookupScan(key bodyKey, timestamp string) (*journal.ScanEvent, error) {
 	var rawJSON string
-	queryError := engine.DB.QueryRow(`SELECT raw_json FROM journal_events WHERE event = 'Scan' AND system_address = ? AND body_id = ?
+	queryError := engine.DB.QueryRow(`SELECT raw_json FROM journal_events WHERE +event = 'Scan' AND system_address = ? AND body_id = ?
 		AND timestamp <= ? AND `+journal.CmdrFilterSQL+` ORDER BY timestamp DESC LIMIT 1`, key.systemAddress, key.bodyID, timestamp).Scan(&rawJSON)
 	if queryError == sql.ErrNoRows {
 		return nil, nil
@@ -243,25 +268,22 @@ func (engine *Engine) preloadScans(keys []bodyKey, untilTimestamp string) (map[b
 	}
 	result := make(map[bodyKey]*journal.ScanEvent, len(keys))
 	chunkSize := 200
-	for i := 0; i < len(keys); i += chunkSize {
-		end := i + chunkSize
-		if end > len(keys) {
-			end = len(keys)
-		}
-		chunk := keys[i:end]
-		var conds []string
-		var args []any
+	for startIndex := 0; startIndex < len(keys); startIndex += chunkSize {
+		endIndex := min(startIndex+chunkSize, len(keys))
+		chunk := keys[startIndex:endIndex]
+		conditions := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk)*2+1)
 		args = append(args, untilTimestamp)
-		for _, k := range chunk {
-			conds = append(conds, "(system_address = ? AND body_id = ?)")
-			args = append(args, k.systemAddress, k.bodyID)
+		for _, key := range chunk {
+			conditions = append(conditions, "(system_address = ? AND body_id = ?)")
+			args = append(args, key.systemAddress, key.bodyID)
 		}
 		query := `SELECT system_address, body_id, raw_json FROM (
 			SELECT system_address, body_id, raw_json,
 			       ROW_NUMBER() OVER (PARTITION BY system_address, body_id ORDER BY timestamp DESC) as rn
 			FROM journal_events
-			WHERE event = 'Scan' AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
-			  AND (` + strings.Join(conds, " OR ") + `)
+			WHERE +event = 'Scan' AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
+			  AND (` + strings.Join(conditions, " OR ") + `)
 		) WHERE rn = 1`
 
 		rows, queryError := engine.DB.Query(query, args...)
@@ -269,14 +291,20 @@ func (engine *Engine) preloadScans(keys []bodyKey, untilTimestamp string) (map[b
 			return nil, queryError
 		}
 		for rows.Next() {
-			var addr, body int64
-			var raw string
-			if scanErr := rows.Scan(&addr, &body, &raw); scanErr == nil {
-				var scanEvent journal.ScanEvent
-				if json.Unmarshal([]byte(raw), &scanEvent) == nil {
-					result[bodyKey{addr, body}] = &scanEvent
-				}
+			var systemAddress, bodyID int64
+			var rawJSON string
+			if scanError := rows.Scan(&systemAddress, &bodyID, &rawJSON); scanError != nil {
+				rows.Close()
+				return nil, scanError
 			}
+			var scanEvent journal.ScanEvent
+			if json.Unmarshal([]byte(rawJSON), &scanEvent) == nil {
+				result[bodyKey{systemAddress, bodyID}] = &scanEvent
+			}
+		}
+		if iterationError := rows.Err(); iterationError != nil {
+			rows.Close()
+			return nil, iterationError
 		}
 		rows.Close()
 	}
@@ -304,7 +332,7 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 		return metrics, preloadPopError
 	}
 
-	scans, missingScans, preloadScanError := engine.prepareComputeScans(events, until)
+	scans, missingScans, preloadScanError := engine.prepareComputeScans(after, events)
 	if preloadScanError != nil {
 		return metrics, preloadScanError
 	}

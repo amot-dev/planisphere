@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"planisphere/internal/db"
+	"planisphere/internal/ed"
 	"planisphere/internal/journal"
 	"planisphere/internal/modes"
 	"planisphere/internal/stats"
@@ -355,5 +356,52 @@ func TestFilterPreparedSetsReuse(testingContext *testing.T) {
 
 	if countingQueryer.timelineQueryCount != 1 {
 		testingContext.Fatalf("expected mode_windows timeline query to execute once when reusing Filter, got %d", countingQueryer.timelineQueryCount)
+	}
+}
+
+func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
+	databaseConnection := setupRealizationDB(testingContext)
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	ingestTestLine(testingContext, databaseConnection,
+		`{"timestamp":"2026-05-01T10:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`)
+	ingestTestLine(testingContext, databaseConnection,
+		`{"timestamp":"2026-05-01T10:05:00Z","event":"SAAScanComplete","BodyName":"SameSec 1","BodyID":3,"SystemAddress":7001,"ProbesUsed":4,"EfficiencyTarget":6}`)
+	ingestTestLine(testingContext, databaseConnection,
+		`{"timestamp":"2026-05-01T10:05:00Z","event":"Scan","ScanType":"Detailed","BodyName":"SameSec 1","BodyID":3,"StarSystem":"SameSec","SystemAddress":7001,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+
+	earthlikeScan := ed.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}
+	expectedScanOnly := ed.EstimateBodyValue(earthlikeScan, ed.MappingInfo{}, true)
+	expectedMapping := ed.EstimateMappingIncrement(earthlikeScan, ed.MappingInfo{Mapped: true, ProbesUsed: 4, EfficiencyTarget: 6}, true)
+
+	fallbackModeFilter := &stats.Filter{
+		Enabled: true,
+		Modes: []stats.ModeSelection{
+			{ModeID: modes.DefaultFallbackModeID(databaseConnection), Travel: true, Discovery: true},
+		},
+	}
+	sameTimestampMetrics, sameTimestampError := engineInstance.Compute(stats.Range{}, fallbackModeFilter)
+	if sameTimestampError != nil {
+		testingContext.Fatalf("Compute same-timestamp all-time filtered failed: %v", sameTimestampError)
+	}
+	expectedCombinedTotal := expectedScanOnly.Total + expectedMapping.Total
+	if sameTimestampMetrics.FirstMapped != 1 || sameTimestampMetrics.ScanValueTotal != expectedCombinedTotal {
+		testingContext.Fatalf("expected same-timestamp mapping to resolve parent scan (FirstMapped=1, ScanValueTotal=%d), got FirstMapped=%d ScanValueTotal=%d",
+			expectedCombinedTotal, sameTimestampMetrics.FirstMapped, sameTimestampMetrics.ScanValueTotal)
+	}
+
+	ingestTestLine(testingContext, databaseConnection,
+		`{"timestamp":"2026-05-01T11:10:00Z","event":"SAAScanComplete","BodyName":"FutureScan 1","BodyID":4,"SystemAddress":7002,"ProbesUsed":4,"EfficiencyTarget":6}`)
+	ingestTestLine(testingContext, databaseConnection,
+		`{"timestamp":"2026-05-01T11:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"FutureScan 1","BodyID":4,"StarSystem":"FutureScan","SystemAddress":7002,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+
+	futureScanWindow := stats.Range{After: "2026-05-01T11:00:00Z", Until: "2026-05-01T12:00:00Z"}
+	futureScanMetrics, futureScanError := engineInstance.Compute(futureScanWindow, nil)
+	if futureScanError != nil {
+		testingContext.Fatalf("Compute future-scan range failed: %v", futureScanError)
+	}
+	if futureScanMetrics.FirstMapped != 0 || futureScanMetrics.ScanValueTotal != expectedScanOnly.Total {
+		testingContext.Fatalf("expected future scan not to preload for earlier mapping (FirstMapped=0, ScanValueTotal=%d), got FirstMapped=%d ScanValueTotal=%d",
+			expectedScanOnly.Total, futureScanMetrics.FirstMapped, futureScanMetrics.ScanValueTotal)
 	}
 }
