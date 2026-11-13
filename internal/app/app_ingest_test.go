@@ -94,6 +94,23 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 	if ingestStatus.EventsStored != 2 || ingestStatus.FilesTracked != 1 {
 		testingContext.Fatalf("expected 2 stored events across 1 tracked file, got events=%d files=%d", ingestStatus.EventsStored, ingestStatus.FilesTracked)
 	}
+
+	previousEmit := testApp.emit
+	acquiredInCompletionCallback := false
+	testApp.emit = func(event string, data ...any) {
+		if event == EventIngest && !testApp.scanning.Load() {
+			acquiredInCompletionCallback = testApp.scanning.CompareAndSwap(false, true)
+		}
+		previousEmit(event, data...)
+	}
+	if rescanError := testApp.RescanJournals(); rescanError != nil {
+		testingContext.Fatalf("RescanJournals with completion handoff: %v", rescanError)
+	}
+	testApp.emit = previousEmit
+	if !acquiredInCompletionCallback || !testApp.scanning.Load() {
+		testingContext.Fatalf("expected scanning flag to stay acquired after completion callback handoff (acquired=%v scanning=%v)", acquiredInCompletionCallback, testApp.scanning.Load())
+	}
+	testApp.scanning.Store(false)
 }
 
 func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *testing.T) {

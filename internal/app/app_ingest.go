@@ -19,8 +19,20 @@ import (
 // re-evaluates active expeditions when new events are ingested, and returns
 // whether any new events were stored.
 func (app *App) runScan() bool {
-	if !app.scanning.CompareAndSwap(false, true) {
+	hasNewEvents, didStartScan := app.executeJournalScan()
+	if !didStartScan {
 		return false
+	}
+	app.emit(EventIngest, nil)
+	if hasNewEvents {
+		app.changed("journal", 0)
+	}
+	return hasNewEvents
+}
+
+func (app *App) executeJournalScan() (bool, bool) {
+	if !app.scanning.CompareAndSwap(false, true) {
+		return false, false
 	}
 	defer app.scanning.Store(false)
 	app.emit(EventIngest, nil)
@@ -30,9 +42,7 @@ func (app *App) runScan() bool {
 	database := app.db
 	app.dbMu.RUnlock()
 	if ingester == nil || database == nil {
-		app.scanning.Store(false)
-		app.emit(EventIngest, nil)
-		return false
+		return false, true
 	}
 	scanResult, scanError := ingester.ScanDir(app.ctx, dir)
 	if scanError != nil {
@@ -57,12 +67,7 @@ func (app *App) runScan() bool {
 		app.invalidateAllTimeCache()
 		app.reevaluateActive()
 	}
-	app.scanning.Store(false)
-	app.emit(EventIngest, nil)
-	if hasNewEvents {
-		app.changed("journal", 0)
-	}
-	return hasNewEvents
+	return hasNewEvents, true
 }
 
 // warmInitialStats pre-populates the all-time and active expedition statistics

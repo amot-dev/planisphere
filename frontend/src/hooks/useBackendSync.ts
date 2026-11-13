@@ -122,6 +122,7 @@ export function useBackendSync() {
   const [eddProgress, setEddProgress] = useState<EddImportProgress | null>(null)
 
   const activeExpeditionIdRef = useRef(0)
+  const setupCompletedRef = useRef(false)
   const bootStateRef = useRef<SyncBootLifecycleState>({
     initialBootComplete: false,
     bootCoreLoaded: false,
@@ -176,6 +177,7 @@ export function useBackendSync() {
       if (coreRequestSequence !== coreStateRequestSequenceRef.current) {
         return { settingsData: null, chosenId: 0 }
       }
+      setupCompletedRef.current = Boolean(settingsData.setupCompleted)
       setSettings(settingsData)
       if (ingestRequestSequence === ingestRequestSequenceRef.current) {
         setIngest(ingestStatus)
@@ -258,8 +260,18 @@ export function useBackendSync() {
   }, [])
 
   const refreshAll = useCallback(() => {
+    const prefetchedExpeditionId = setupCompletedRef.current ? activeExpeditionIdRef.current : 0
+    if (prefetchedExpeditionId > 0) {
+      void loadPlanOnly(prefetchedExpeditionId)
+      void loadStatsOnly(prefetchedExpeditionId, filterRef.current)
+    }
     void loadCoreState().then(({ settingsData, chosenId }) => {
-      if (!settingsData || !settingsData.setupCompleted || chosenId <= 0) {
+      if (
+        !settingsData ||
+        !settingsData.setupCompleted ||
+        chosenId <= 0 ||
+        chosenId === prefetchedExpeditionId
+      ) {
         return
       }
       const willTransitionEffectReload =
