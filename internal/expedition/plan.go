@@ -348,6 +348,11 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 	return planView, nil
 }
 
+// addOneSecond shifts an ISO timestamp forward by one second. Leg telemetry
+// uses half-open arrival intervals (prevVisit, rowVisit], whereas modes.SetWindow
+// stores half-open [StartsAt, EndsAt) intervals at 1-second resolution; shifting
+// both bounds maps (prevVisit, rowVisit] onto [prevVisit+1s, rowVisit+1s) and
+// (latestVisit, +inf) onto [latestVisit+1s, "") so arrival-second events stay in the arriving leg.
 func addOneSecond(isoTimestamp string) string {
 	parsedTime, parseError := ed.ParseISO(isoTimestamp)
 	if parseError != nil {

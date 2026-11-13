@@ -35,7 +35,7 @@ func (app *App) CreateExpedition(name, description string) (expedition.Expeditio
 	if createError != nil {
 		return createdExpedition, createError
 	}
-	_ = db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(createdExpedition.ID, 10))
+	_ = db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(createdExpedition.ID, 10))
 	app.changed("plan", createdExpedition.ID)
 	return createdExpedition, nil
 }
@@ -55,7 +55,7 @@ func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 		if cloneError != nil {
 			return cloneError
 		}
-		return db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(clonedExpedition.ID, 10))
+		return db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(clonedExpedition.ID, 10))
 	}(); err != nil {
 		return clonedExpedition, err
 	}
@@ -89,7 +89,7 @@ func (app *App) DeleteExpedition(id int64) error {
 		return deleteError
 	}
 	if app.activeExpeditionID() == id {
-		_ = db.SetSetting(app.db, settingActiveExp, "")
+		_ = db.SetSetting(app.db, settingActiveExpedition, "")
 	}
 	app.invalidateLiveStatsCache()
 	app.changed("plan", id)
@@ -104,7 +104,7 @@ func (app *App) SetActiveExpedition(id int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.SetSetting(app.db, settingActiveExp, strconv.FormatInt(id, 10))
+		return db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(id, 10))
 	}(); err != nil {
 		return err
 	}
@@ -380,6 +380,8 @@ func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (Regio
 	regionRecord, _ := ed.RegionByID(anchor)
 	regionOptionsResult.AnchorID, regionOptionsResult.AnchorName = anchor, regionRecord.Name
 	regionOptionsResult.Options = ed.PrioritizedRegions(anchor)
+	// Inserting before cutoffIndex checks the row currently at cutoffIndex as the first
+	// downstream waypoint; editing an existing region header at cutoffIndex skips that header.
 	startIndex := cutoffIndex
 	if editing {
 		startIndex = cutoffIndex + 1

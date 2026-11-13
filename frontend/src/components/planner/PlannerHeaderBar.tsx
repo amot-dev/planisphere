@@ -9,7 +9,7 @@ import { StatusBadge } from './widgets/StatusBadge'
  */
 export interface PlannerHeaderBarProps {
   plan: expedition.PlanView
-  hasWp1System: boolean
+  hasOriginWaypointSystem: boolean
   onOpenStartModal: () => void
   onLifecycleAction: (label: string, actionFunction: () => Promise<void>) => Promise<void>
 }
@@ -20,7 +20,7 @@ export interface PlannerHeaderBarProps {
  */
 export function PlannerHeaderBar({
   plan,
-  hasWp1System,
+  hasOriginWaypointSystem,
   onOpenStartModal,
   onLifecycleAction,
 }: PlannerHeaderBarProps) {
@@ -108,15 +108,15 @@ export function PlannerHeaderBar({
         {isPlanning && (
           <button
             type="button"
-            disabled={!hasWp1System}
+            disabled={!hasOriginWaypointSystem}
             onClick={onOpenStartModal}
             title={
-              hasWp1System
+              hasOriginWaypointSystem
                 ? 'Engage expedition (lock arrival at Waypoint #1)'
                 : 'Enter a star system for Waypoint #1 before engaging the expedition'
             }
             className={`ed-btn-primary ${
-              !hasWp1System ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
+              !hasOriginWaypointSystem ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
             }`}
           >
             <span>ENGAGE EXPEDITION</span>

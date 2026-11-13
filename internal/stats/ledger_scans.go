@@ -184,6 +184,8 @@ func (builder *ledgerBuilder) recordCartoMapping(journalEvent eventRow) {
 	}
 
 	normalizedSystemName := strings.ToLower(strings.TrimSpace(parentScan.StarSystem))
+	// Fall back to CanExpectFirstDiscovered when creating a mapping-only record whose initial
+	// Scan was sold in an earlier session so undiscovered status is preserved.
 	scanEntry := &scanRecord{
 		timestamp:            journalEvent.timestamp,
 		systemAddress:        mappingEvent.SystemAddress,

@@ -42,16 +42,16 @@ type CarrierRouteResult struct {
 // ActiveCarrierRouteState stores the active fleet carrier navigation state
 // for an expedition, persisting across application restarts and sessions.
 type ActiveCarrierRouteState struct {
-	ExpeditionID    int64              `json:"expeditionId"`
-	TargetRowID     int64              `json:"targetRowId"`
-	Route           CarrierRouteResult `json:"route"`
-	JumpIdx         int                `json:"jumpIdx"`
-	ManualMode      bool               `json:"manualMode"`
-	ManualDistInput string             `json:"manualDistInput"`
-	ManualTritInput string             `json:"manualTritInput"`
-	ManualLegJumps  int                `json:"manualLegJumps"`
-	ManualLegDist   float64            `json:"manualLegDist"`
-	ManualLegTrit   int                `json:"manualLegTrit"`
+	ExpeditionID        int64              `json:"expeditionId"`
+	TargetRowID         int64              `json:"targetRowId"`
+	Route               CarrierRouteResult `json:"route"`
+	JumpIndex           int                `json:"jumpIdx"`
+	ManualMode          bool               `json:"manualMode"`
+	ManualDistanceInput string             `json:"manualDistInput"`
+	ManualTritiumInput  string             `json:"manualTritInput"`
+	ManualLegJumps      int                `json:"manualLegJumps"`
+	ManualLegDistance   float64            `json:"manualLegDist"`
+	ManualLegTritium    int                `json:"manualLegTrit"`
 }
 
 // GetActiveCarrierRoute retrieves the persisted active carrier route for an expedition.

@@ -13,8 +13,8 @@ import (
 )
 
 func TestImportEDDiscoveryDB(t *testing.T) {
-	tmpDir := t.TempDir()
-	eddPath := filepath.Join(tmpDir, "EDD.sqlite")
+	temporaryDir := t.TempDir()
+	eddPath := filepath.Join(temporaryDir, "EDD.sqlite")
 
 	eddConn, err := sql.Open("sqlite", eddPath)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 
 	var lastTotal int
 	progressCalled := false
-	res, err := eddiscovery.Import(context.Background(), ingester, eddPath, func(current, total, files int, stage string) {
+	importResult, err := eddiscovery.Import(context.Background(), ingester, eddPath, func(current, total, files int, stage string) {
 		progressCalled = true
 		lastTotal = total
 	})
@@ -80,11 +80,11 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 	if lastTotal != 5 {
 		t.Fatalf("expected total 5, got %d", lastTotal)
 	}
-	if res.LinesRead != 5 {
-		t.Fatalf("expected 5 lines read, got %d", res.LinesRead)
+	if importResult.LinesRead != 5 {
+		t.Fatalf("expected 5 lines read, got %d", importResult.LinesRead)
 	}
-	if res.FilesScanned != 2 {
-		t.Fatalf("expected 2 files scanned, got %d", res.FilesScanned)
+	if importResult.FilesScanned != 2 {
+		t.Fatalf("expected 2 files scanned, got %d", importResult.FilesScanned)
 	}
 
 	// Verify all 5 events in journal_events have the correct commander set,
@@ -95,9 +95,9 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 	}
 	defer rows.Close()
 
-	expectedCmdrs := []struct {
-		event string
-		cmdr  string
+	expectedCommanders := []struct {
+		event     string
+		commander string
 	}{
 		{"Location", "CmdrOne"},
 		{"LoadGame", "CmdrOne"},
@@ -106,53 +106,53 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 		{"FSDJump", "CmdrTwo"},
 	}
 
-	idx := 0
+	index := 0
 	for rows.Next() {
-		var ev, cmdr sql.NullString
-		if err := rows.Scan(&ev, &cmdr); err != nil {
+		var eventRow, commander sql.NullString
+		if err := rows.Scan(&eventRow, &commander); err != nil {
 			t.Fatal(err)
 		}
-		if idx >= len(expectedCmdrs) {
-			t.Fatalf("extra row returned: %s, %s", ev.String, cmdr.String)
+		if index >= len(expectedCommanders) {
+			t.Fatalf("extra row returned: %s, %s", eventRow.String, commander.String)
 		}
-		if ev.String != expectedCmdrs[idx].event {
-			t.Errorf("row %d: expected event %s, got %s", idx, expectedCmdrs[idx].event, ev.String)
+		if eventRow.String != expectedCommanders[index].event {
+			t.Errorf("row %d: expected event %s, got %s", index, expectedCommanders[index].event, eventRow.String)
 		}
-		if cmdr.String != expectedCmdrs[idx].cmdr {
-			t.Errorf("row %d (%s): expected commander %s, got %s", idx, ev.String, expectedCmdrs[idx].cmdr, cmdr.String)
+		if commander.String != expectedCommanders[index].commander {
+			t.Errorf("row %d (%s): expected commander %s, got %s", index, eventRow.String, expectedCommanders[index].commander, commander.String)
 		}
-		idx++
+		index++
 	}
-	if idx != len(expectedCmdrs) {
-		t.Fatalf("expected %d rows, got %d", len(expectedCmdrs), idx)
+	if index != len(expectedCommanders) {
+		t.Fatalf("expected %d rows, got %d", len(expectedCommanders), index)
 	}
 
 	// Verify commanders table
-	cmdrRows, err := destConn.Query(`SELECT name, fid, first_seen, last_seen FROM commanders ORDER BY name ASC`)
+	commanderRows, err := destConn.Query(`SELECT name, fid, first_seen, last_seen FROM commanders ORDER BY name ASC`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cmdrRows.Close()
+	defer commanderRows.Close()
 
-	type cmdrRecord struct {
+	type commanderRecord struct {
 		name, fid, firstSeen, lastSeen string
 	}
-	var cmdrs []cmdrRecord
-	for cmdrRows.Next() {
-		var c cmdrRecord
-		if err := cmdrRows.Scan(&c.name, &c.fid, &c.firstSeen, &c.lastSeen); err != nil {
+	var commanders []commanderRecord
+	for commanderRows.Next() {
+		var commander commanderRecord
+		if err := commanderRows.Scan(&commander.name, &commander.fid, &commander.firstSeen, &commander.lastSeen); err != nil {
 			t.Fatal(err)
 		}
-		cmdrs = append(cmdrs, c)
+		commanders = append(commanders, commander)
 	}
-	if len(cmdrs) != 2 {
-		t.Fatalf("expected 2 commanders, got %d", len(cmdrs))
+	if len(commanders) != 2 {
+		t.Fatalf("expected 2 commanders, got %d", len(commanders))
 	}
-	if cmdrs[0].name != "CmdrOne" || cmdrs[0].fid != "F001" || cmdrs[0].firstSeen != "2026-01-18T19:05:00Z" || cmdrs[0].lastSeen != "2026-01-18T19:20:00Z" {
-		t.Errorf("unexpected CmdrOne record: %+v", cmdrs[0])
+	if commanders[0].name != "CmdrOne" || commanders[0].fid != "F001" || commanders[0].firstSeen != "2026-01-18T19:05:00Z" || commanders[0].lastSeen != "2026-01-18T19:20:00Z" {
+		t.Errorf("unexpected CmdrOne record: %+v", commanders[0])
 	}
-	if cmdrs[1].name != "CmdrTwo" || cmdrs[1].fid != "F002" || cmdrs[1].firstSeen != "2026-01-19T20:00:00Z" || cmdrs[1].lastSeen != "2026-01-19T20:30:00Z" {
-		t.Errorf("unexpected CmdrTwo record: %+v", cmdrs[1])
+	if commanders[1].name != "CmdrTwo" || commanders[1].fid != "F002" || commanders[1].firstSeen != "2026-01-19T20:00:00Z" || commanders[1].lastSeen != "2026-01-19T20:30:00Z" {
+		t.Errorf("unexpected CmdrTwo record: %+v", commanders[1])
 	}
 }
 

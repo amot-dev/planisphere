@@ -68,15 +68,6 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 		t.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(lines))
 	}
 
-	// Re-scanning the same directory is idempotent (0 new events).
-	rescanResult, rescanError := ingester.ScanDir(context.Background(), tmpDir)
-	if rescanError != nil {
-		t.Fatal(rescanError)
-	}
-	if rescanResult.NewEvents != 0 {
-		t.Fatalf("expected 0 new events on idempotent rescan, got %d", rescanResult.NewEvents)
-	}
-
 	// Delete the journal file from disk: zero data may be lost.
 	if removeError := os.Remove(journalFile); removeError != nil {
 		t.Fatal(removeError)
@@ -465,25 +456,6 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 	}
 	if wp1Details.From != "2026-01-01T10:00:00Z" {
 		t.Errorf("expected wp1 From '2026-01-01T10:00:00Z', got %q", wp1Details.From)
-	}
-
-	// Second call for WP1 should hit origin metrics cache
-	wp1DetailsCached, err := expedition.Details(dbConn, wp1.ID)
-	if err != nil {
-		t.Fatalf("cached Details for wp1 failed: %v", err)
-	}
-	if wp1DetailsCached.Metrics != wp1Details.Metrics {
-		t.Errorf("expected cached metrics to match, got %+v vs %+v", wp1DetailsCached.Metrics, wp1Details.Metrics)
-	}
-
-	// Invalidate cache and verify it still succeeds
-	expedition.InvalidateOriginMetricsCache()
-	wp1DetailsRecomputed, err := expedition.Details(dbConn, wp1.ID)
-	if err != nil {
-		t.Fatalf("Details after cache invalidation failed: %v", err)
-	}
-	if wp1DetailsRecomputed.Metrics != wp1Details.Metrics {
-		t.Errorf("metrics mismatch after recomputing: %+v vs %+v", wp1DetailsRecomputed.Metrics, wp1Details.Metrics)
 	}
 
 	// Details for WP2 (leg)

@@ -145,6 +145,9 @@ func pollRouteJob(ctx context.Context, httpClient *http.Client, jobID string, ca
 	defer pollTicker.Stop()
 	startTime := time.Now()
 
+	// Intentionally keep polling until ctx.Done() expires rather than failing fast on
+	// transient transport failures, non-JSON gateway responses, or intermediate job states,
+	// so Spansh worker queue propagation and brief upstream gateway blips self-recover.
 	for {
 		select {
 		case <-ctx.Done():

@@ -212,6 +212,8 @@ export function PlannerRouteTable({
             activeCarrierRoute &&
               (isManualCarrierRoute ? isNextFcStop : activeCarrierTargetRowId === row.id),
           )
+          // Manual logging leaves the target stop editable until arrival is logged;
+          // an active Spansh route locks through routedCarrierStopIndex while hops are in progress.
           const isFcStopLocked = Boolean(
             activeCarrierRoute &&
               routedCarrierStopIndex >= 0 &&

@@ -3,7 +3,8 @@ import { APP_PRODUCT_NAME, APP_VERSION } from '../../version'
 
 /**
  * TerminalBootScreen renders the initial loading screen shown while the backend
- * mounts the SQLite archive and stellar coordinate index.
+ * initializes the SQLite archive and initial journal catch-up, core settings,
+ * the active flight plan, and sidebar telemetry finish loading before main paint.
  */
 export function TerminalBootScreen() {
   return (

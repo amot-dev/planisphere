@@ -21,8 +21,8 @@ func TestIngestFile(t *testing.T) {
 	}
 	defer conn.Close()
 
-	tmpDir := t.TempDir()
-	logFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
+	temporaryDir := t.TempDir()
+	logFile := filepath.Join(temporaryDir, "Journal.2026-01-18T190000.01.log")
 	lines := []string{
 		`{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay"}`,
 		`{"timestamp":"2026-01-18T19:10:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
@@ -33,24 +33,24 @@ func TestIngestFile(t *testing.T) {
 	}
 
 	ingester := journal.NewIngester(conn)
-	res, err := ingester.IngestFile(logFile)
+	scanResult, err := ingester.IngestFile(logFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.NewEvents != 3 {
-		t.Fatalf("expected 3 new events, got %d", res.NewEvents)
+	if scanResult.NewEvents != 3 {
+		t.Fatalf("expected 3 new events, got %d", scanResult.NewEvents)
 	}
-	if res.LinesRead != 3 {
-		t.Fatalf("expected 3 lines read, got %d", res.LinesRead)
+	if scanResult.LinesRead != 3 {
+		t.Fatalf("expected 3 lines read, got %d", scanResult.LinesRead)
 	}
 
 	// Ingesting the same file again should produce 0 new events (idempotent)
-	res2, err := ingester.IngestFile(logFile)
+	secondScanResult, err := ingester.IngestFile(logFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res2.NewEvents != 0 {
-		t.Fatalf("expected 0 new events on re-ingest, got %d", res2.NewEvents)
+	if secondScanResult.NewEvents != 0 {
+		t.Fatalf("expected 0 new events on re-ingest, got %d", secondScanResult.NewEvents)
 	}
 }
 
@@ -61,8 +61,8 @@ func TestIngestFilePartialLine(t *testing.T) {
 	}
 	defer conn.Close()
 
-	tmpDir := t.TempDir()
-	logFile := filepath.Join(tmpDir, "Journal.2026-01-18T200000.01.log")
+	temporaryDir := t.TempDir()
+	logFile := filepath.Join(temporaryDir, "Journal.2026-01-18T200000.01.log")
 
 	line1 := `{"timestamp":"2026-01-18T20:01:00Z","event":"LoadGame","Commander":"CmdrPartial","FID":"F2","Ship":"cobra"}` + "\n"
 	line2 := `{"timestamp":"2026-01-18T20:02:00Z","event":"Location","StarSystem":"Sol","SystemAddress":2001,"StarPos":[0,0,0]}` + "\n"
@@ -73,15 +73,15 @@ func TestIngestFilePartialLine(t *testing.T) {
 	}
 
 	ingester := journal.NewIngester(conn)
-	res1, err := ingester.IngestFile(logFile)
+	firstScanResult, err := ingester.IngestFile(logFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res1.LinesRead != 2 {
-		t.Fatalf("expected 2 complete lines read, got %d", res1.LinesRead)
+	if firstScanResult.LinesRead != 2 {
+		t.Fatalf("expected 2 complete lines read, got %d", firstScanResult.LinesRead)
 	}
-	if res1.NewEvents != 2 {
-		t.Fatalf("expected 2 new events, got %d", res1.NewEvents)
+	if firstScanResult.NewEvents != 2 {
+		t.Fatalf("expected 2 new events, got %d", firstScanResult.NewEvents)
 	}
 
 	var storedOffset int64
@@ -106,15 +106,15 @@ func TestIngestFilePartialLine(t *testing.T) {
 	}
 	fileHandle.Close()
 
-	res2, err := ingester.IngestFile(logFile)
+	secondScanResult, err := ingester.IngestFile(logFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res2.LinesRead != 1 {
-		t.Fatalf("expected 1 line read on second pass, got %d", res2.LinesRead)
+	if secondScanResult.LinesRead != 1 {
+		t.Fatalf("expected 1 line read on second pass, got %d", secondScanResult.LinesRead)
 	}
-	if res2.NewEvents != 1 {
-		t.Fatalf("expected 1 new event on second pass, got %d", res2.NewEvents)
+	if secondScanResult.NewEvents != 1 {
+		t.Fatalf("expected 1 new event on second pass, got %d", secondScanResult.NewEvents)
 	}
 
 	if err := conn.QueryRow("SELECT byte_offset FROM ingested_journals WHERE file_name = ?", name).Scan(&storedOffset); err != nil {

@@ -83,16 +83,16 @@ func (metrics Metrics) Add(otherMetrics Metrics) Metrics {
 	}
 }
 
-func (metrics *Metrics) addScan(scanVal ed.ScanValue) {
-	metrics.ScanValueTotal += scanVal.Total
-	metrics.ScanValueBase += scanVal.Base
-	metrics.ScanValueBonus += scanVal.Bonus
+func (metrics *Metrics) addScan(scanValuation ed.ScanValue) {
+	metrics.ScanValueTotal += scanValuation.Total
+	metrics.ScanValueBase += scanValuation.Base
+	metrics.ScanValueBonus += scanValuation.Bonus
 }
 
-func (metrics *Metrics) addOrganic(organicVal ed.ScanValue) {
-	metrics.OrganicValueTotal += organicVal.Total
-	metrics.OrganicValueBase += organicVal.Base
-	metrics.OrganicValueBonus += organicVal.Bonus
+func (metrics *Metrics) addOrganic(organicValuation ed.ScanValue) {
+	metrics.OrganicValueTotal += organicValuation.Total
+	metrics.OrganicValueBase += organicValuation.Base
+	metrics.OrganicValueBonus += organicValuation.Bonus
 }
 
 // Range is the half-open time range (After, Until]. Empty After means "from

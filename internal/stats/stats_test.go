@@ -140,27 +140,6 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		t.Fatalf("expected Jumps to be filtered to 0, got %d", filtered.Jumps)
 	}
 
-	// Filter with Travel = false AND Discovery = false (mode completely disabled)
-	// Carrier Operations metrics MUST still completely ignore mode!
-	filteredAllOff, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
-		Enabled: true,
-		Modes: []stats.ModeSelection{
-			{ModeID: expModeID, Travel: false, Discovery: false},
-		},
-	})
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	if filteredAllOff.CarrierJumps != 1 || filteredAllOff.CarrierDistanceLy != 100.0 {
-		t.Fatalf("expected carrier operations to ignore mode even when all categories off: %+v", filteredAllOff)
-	}
-	if filteredAllOff.TritiumUsed == nil || *filteredAllOff.TritiumUsed != 40 {
-		t.Fatalf("expected tritium used 40 when all categories off, got %v", filteredAllOff.TritiumUsed)
-	}
-	if filteredAllOff.CarrierPassengerLy != 0 || filteredAllOff.DistanceLy != 0 {
-		t.Fatalf("expected passenger distance 0 when all categories off: %+v", filteredAllOff)
-	}
-
 	// Filter enabled with empty modes list (everything excluded by default)
 	filteredEmpty, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,

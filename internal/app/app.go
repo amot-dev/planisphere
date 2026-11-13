@@ -54,7 +54,7 @@ const (
 	settingJournalDir        = "journal_dir"
 	settingJournalDebounceMs = "journal_debounce_ms"
 	settingOnline            = "online_lookups"
-	settingActiveExp         = "active_expedition_id"
+	settingActiveExpedition  = "active_expedition_id"
 	settingLastScanAt        = "last_scan_at"
 	settingSetupCompleted    = "setup_completed"
 	gecRefreshInterval       = 7 * 24 * time.Hour
@@ -90,7 +90,7 @@ type App struct {
 	resolveMu            sync.Mutex
 	resolving            map[int64]bool
 	resolvingExpeditions map[int64]bool
-	resolveSem           chan struct{}
+	resolutionSemaphore  chan struct{}
 
 	allTimeMu               sync.Mutex
 	allTimeValid            bool
@@ -132,7 +132,7 @@ func New() *App {
 		debugMode:            version.Debug,
 		resolving:            map[int64]bool{},
 		resolvingExpeditions: map[int64]bool{},
-		resolveSem:           make(chan struct{}, 1),
+		resolutionSemaphore:  make(chan struct{}, 1),
 		liveStatsCache:       map[string]cachedLiveStats{},
 	}
 }
@@ -446,7 +446,7 @@ func (app *App) activeExpeditionID() int64 {
 	if app.db == nil {
 		return 0
 	}
-	settingValue, _ := db.GetSetting(app.db, settingActiveExp)
+	settingValue, _ := db.GetSetting(app.db, settingActiveExpedition)
 	var expeditionID int64
 	fmt.Sscan(settingValue, &expeditionID)
 	return expeditionID

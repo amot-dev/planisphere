@@ -18,6 +18,16 @@ export type PlannerTableItem =
   | { kind: 'waypoint'; rowView: expedition.RowView; index: number; key: string }
   | { kind: 'drawer'; rowView: expedition.RowView; index: number; key: string }
 
+const ALWAYS_VISIBLE_COLUMN_COUNT = 5
+const LEG_EXPAND_COLUMN_WIDTH_PIXELS = 32
+const WAYPOINT_NUMBER_COLUMN_WIDTH_PIXELS = 40
+const STAR_SYSTEM_COLUMN_WIDTH_PIXELS = 240
+const POI_BODY_COLUMN_WIDTH_PIXELS = 192
+const FLIGHT_NOTES_COLUMN_WIDTH_PIXELS = 224
+const CARRIER_STOP_COLUMN_WIDTH_PIXELS = 160
+const TELEMETRY_COLUMN_WIDTH_PIXELS = 240
+const CONTROLS_COLUMN_WIDTH_PIXELS = 380
+
 /**
  * computePlannerTableDimensions calculates the visible column count and minimum
  * horizontal table width in pixels based on planning state and column toggles.
@@ -28,24 +38,20 @@ export function computePlannerTableDimensions(
   showCarrierStop: boolean,
 ): { visibleColumnCount: number; tableMinWidthPixels: number } {
   const visibleColumnCount =
+    ALWAYS_VISIBLE_COLUMN_COUNT +
     (isPlanning ? 0 : 1) +
-    1 +
-    1 +
-    1 +
     (showNotes ? 1 : 0) +
-    (showCarrierStop ? 1 : 0) +
-    1 +
-    1
+    (showCarrierStop ? 1 : 0)
 
   const tableMinWidthPixels =
-    (isPlanning ? 0 : 32) +
-    40 +
-    240 +
-    192 +
-    (showNotes ? 224 : 0) +
-    (showCarrierStop ? 160 : 0) +
-    240 +
-    380
+    (isPlanning ? 0 : LEG_EXPAND_COLUMN_WIDTH_PIXELS) +
+    WAYPOINT_NUMBER_COLUMN_WIDTH_PIXELS +
+    STAR_SYSTEM_COLUMN_WIDTH_PIXELS +
+    POI_BODY_COLUMN_WIDTH_PIXELS +
+    (showNotes ? FLIGHT_NOTES_COLUMN_WIDTH_PIXELS : 0) +
+    (showCarrierStop ? CARRIER_STOP_COLUMN_WIDTH_PIXELS : 0) +
+    TELEMETRY_COLUMN_WIDTH_PIXELS +
+    CONTROLS_COLUMN_WIDTH_PIXELS
 
   return { visibleColumnCount, tableMinWidthPixels }
 }

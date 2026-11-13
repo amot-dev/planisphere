@@ -109,13 +109,13 @@ func (app *App) lookupRowSystemInfo(systemName string, online bool) (*systems.In
 			select {
 			case <-app.ctx.Done():
 				return nil, nil, false
-			case app.resolveSem <- struct{}{}:
+			case app.resolutionSemaphore <- struct{}{}:
 			}
 		} else {
-			app.resolveSem <- struct{}{}
+			app.resolutionSemaphore <- struct{}{}
 		}
 		defer func() {
-			<-app.resolveSem
+			<-app.resolutionSemaphore
 		}()
 		app.dbMu.RLock()
 		coordinateResolver := app.resolver

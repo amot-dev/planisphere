@@ -42,11 +42,20 @@ export interface DataChangedDispatchContext {
 }
 
 /**
+ * DataChangedPayload matches the Go app.DataChanged event payload emitted on
+ * Wails 'data:changed' runtime notifications.
+ */
+export interface DataChangedPayload {
+  scope?: string
+  expeditionId?: number
+}
+
+/**
  * routeDataChangedEvent dispatches a Wails data:changed notification without
  * interrupting an in-progress initial boot or waterfalling live journal updates.
  */
 export function routeDataChangedEvent(
-  payload: { scope?: string; kind?: string; expeditionId?: number; expId?: number } | undefined,
+  payload: DataChangedPayload | undefined,
   dispatchContext: DataChangedDispatchContext,
 ): void {
   if (!dispatchContext.bootState.initialBootComplete) {
@@ -56,9 +65,9 @@ export function routeDataChangedEvent(
     return
   }
 
-  const scope = payload?.scope ?? payload?.kind ?? ''
+  const scope = payload?.scope ?? ''
   const currentActive = dispatchContext.currentActiveExpeditionId
-  const eventExpeditionId = payload?.expeditionId ?? payload?.expId
+  const eventExpeditionId = payload?.expeditionId
 
   if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
     dispatchContext.refreshExpeditionListOnly()
@@ -124,9 +133,9 @@ export function useBackendSync() {
     expeditionId: number
     filter: stats.Filter
   } | null>(null)
-  const ingestReqSeq = useRef(0)
-  const planReqSeq = useRef(0)
-  const statsReqSeq = useRef(0)
+  const ingestRequestSequenceRef = useRef(0)
+  const planRequestSequenceRef = useRef(0)
+  const statsRequestSequenceRef = useRef(0)
   const filterRef = useRef(filter)
 
   useEffect(() => {
@@ -138,10 +147,10 @@ export function useBackendSync() {
   }, [filter])
 
   const loadIngestStatusOnly = useCallback(async () => {
-    const requestSeq = ++ingestReqSeq.current
+    const requestSequence = ++ingestRequestSequenceRef.current
     try {
       const ingestStatus = await GetIngestStatus()
-      if (requestSeq === ingestReqSeq.current) {
+      if (requestSequence === ingestRequestSequenceRef.current) {
         setIngest(ingestStatus)
       }
       return ingestStatus
@@ -156,7 +165,7 @@ export function useBackendSync() {
     chosenId: number
   }> => {
     const coreRequestSequence = ++coreStateRequestSequenceRef.current
-    const ingestSeq = ++ingestReqSeq.current
+    const ingestRequestSequence = ++ingestRequestSequenceRef.current
     try {
       const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
         GetSettings(),
@@ -168,7 +177,7 @@ export function useBackendSync() {
         return { settingsData: null, chosenId: 0 }
       }
       setSettings(settingsData)
-      if (ingestSeq === ingestReqSeq.current) {
+      if (ingestRequestSequence === ingestRequestSequenceRef.current) {
         setIngest(ingestStatus)
       }
       setModesState(modesStateData)
@@ -209,11 +218,11 @@ export function useBackendSync() {
   // Fast plan loader (< 5ms) — never blocked by sidebar telemetry computation
   const loadPlanOnly = useCallback(async (expeditionId: number) => {
     if (!expeditionId) return
-    const requestSeq = ++planReqSeq.current
+    const requestSequence = ++planRequestSequenceRef.current
     try {
       const fetchedPlan = await GetPlan(expeditionId)
       if (
-        requestSeq === planReqSeq.current &&
+        requestSequence === planRequestSequenceRef.current &&
         fetchedPlan?.expedition?.id === activeExpeditionIdRef.current
       ) {
         setPlan(fetchedPlan)
@@ -226,17 +235,23 @@ export function useBackendSync() {
   // Asynchronous sidebar telemetry loader
   const loadStatsOnly = useCallback(async (expeditionId: number, currentFilter: stats.Filter) => {
     if (!expeditionId) return
-    const requestSeq = ++statsReqSeq.current
+    const requestSequence = ++statsRequestSequenceRef.current
     setStatsLoading(true)
     try {
       const fetchedSidebarStats = await GetSidebarStats(expeditionId, currentFilter)
-      if (requestSeq === statsReqSeq.current && activeExpeditionIdRef.current === expeditionId) {
+      if (
+        requestSequence === statsRequestSequenceRef.current &&
+        activeExpeditionIdRef.current === expeditionId
+      ) {
         setSidebarStats(fetchedSidebarStats)
       }
     } catch (statsError) {
       console.error('Failed to load sidebar stats:', statsError)
     } finally {
-      if (requestSeq === statsReqSeq.current && activeExpeditionIdRef.current === expeditionId) {
+      if (
+        requestSequence === statsRequestSequenceRef.current &&
+        activeExpeditionIdRef.current === expeditionId
+      ) {
         setStatsLoading(false)
       }
     }
@@ -335,9 +350,7 @@ export function useBackendSync() {
       return
     }
 
-    const offChanged = EventsOn(
-      'data:changed',
-      (payload?: { scope?: string; kind?: string; expeditionId?: number; expId?: number }) => {
+    const offChanged = EventsOn('data:changed', (payload?: DataChangedPayload) => {
         routeDataChangedEvent(payload, {
           bootState: bootStateRef.current,
           currentActiveExpeditionId: activeExpeditionIdRef.current,
@@ -352,8 +365,7 @@ export function useBackendSync() {
           loadStatsOnly,
           refreshAll,
         })
-      },
-    )
+      })
     const offIngest = EventsOn('ingest:status', () => {
       void loadIngestStatusOnly()
     })

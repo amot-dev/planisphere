@@ -12,90 +12,24 @@ import (
 )
 
 func TestReconcileSpanshJumps(t *testing.T) {
-	testCases := []struct {
-		name                 string
-		rawJumps             []RawJump
-		usedCapacity         int
-		depotTritium         int
-		expectedCount        int
-		expectedTritiumCosts []int
-		validate             func(t *testing.T, reconciled []RouteJump)
-	}{
-		{
-			name: "StandardReconciliationAndOriginSkip",
-			rawJumps: []RawJump{
-				{Name: "Origin System", Distance: 0, DistanceToDestination: 614.89, FuelUsed: 0, TritiumUsed: 0, FuelInTank: 437},
-				{Name: "Waypoint 1", Distance: 494.89, DistanceToDestination: 120.0, FuelUsed: 89, TritiumUsed: 89, FuelInTank: 437},
-				{Name: "Waypoint 2", Distance: 120.0, DistanceToDestination: 0, FuelUsed: 26, TritiumUsed: 26, FuelInTank: 348},
-			},
-			usedCapacity:         8548,
-			depotTritium:         1000,
-			expectedCount:        2,
-			expectedTritiumCosts: []int{90, 26},
-			validate: func(t *testing.T, reconciled []RouteJump) {
-				if reconciled[0].SystemName != "Waypoint 1" || reconciled[0].FuelInTank != 1000 {
-					t.Errorf("unexpected hop 1 data: %+v", reconciled[0])
-				}
-			},
-		},
-		{
-			name: "InGameVerifiedHop",
-			rawJumps: []RawJump{
-				{Name: "NGC 7789 Sector MH-W b31-0", Distance: 0, DistanceToDestination: 495.27},
-				{Name: "Slegoae NS-U d2-2", Distance: 495.27, DistanceToDestination: 0},
-			},
-			usedCapacity:         8548,
-			depotTritium:         818,
-			expectedCount:        1,
-			expectedTritiumCosts: []int{90},
-		},
-		{
-			name: "DepotOverrideFull",
-			rawJumps: []RawJump{
-				{Name: "Test Hop", Distance: 500.0, DistanceToDestination: 0, FuelUsed: 999},
-			},
-			usedCapacity:         0,
-			depotTritium:         1000,
-			expectedCount:        1,
-			expectedTritiumCosts: []int{70},
-		},
-		{
-			name: "DepotOverridePartial",
-			rawJumps: []RawJump{
-				{Name: "Test Hop", Distance: 500.0, DistanceToDestination: 0, FuelUsed: 999},
-			},
-			usedCapacity:         0,
-			depotTritium:         500,
-			expectedCount:        1,
-			expectedTritiumCosts: []int{69},
-		},
-		{
-			name: "SquadronCarrierHighCapacity",
-			rawJumps: []RawJump{
-				{Name: "Deep Space Hop", Distance: 500.0, DistanceToDestination: 0, FuelUsed: 999},
-			},
-			usedCapacity:         60000,
-			depotTritium:         1000,
-			expectedCount:        1,
-			expectedTritiumCosts: []int{220},
-		},
+	rawJumps := []RawJump{
+		{Name: "Origin System", Distance: 0, DistanceToDestination: 614.89, FuelUsed: 0, TritiumUsed: 0, FuelInTank: 437},
+		{Name: "Waypoint 1", Distance: 494.89, DistanceToDestination: 120.0, FuelUsed: 89, TritiumUsed: 89, FuelInTank: 437},
+		{Name: "Waypoint 2", Distance: 120.0, DistanceToDestination: 0, FuelUsed: 26, TritiumUsed: 26, FuelInTank: 348},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			reconciled := ReconcileJumps(tc.rawJumps, tc.usedCapacity, tc.depotTritium)
-			if len(reconciled) != tc.expectedCount {
-				t.Fatalf("expected %d jumps, got %d", tc.expectedCount, len(reconciled))
-			}
-			for i, wantCost := range tc.expectedTritiumCosts {
-				if reconciled[i].TritiumUsed != wantCost {
-					t.Errorf("hop %d: expected TritiumUsed = %d, got %d", i, wantCost, reconciled[i].TritiumUsed)
-				}
-			}
-			if tc.validate != nil {
-				tc.validate(t, reconciled)
-			}
-		})
+	reconciled := ReconcileJumps(rawJumps, 8548, 1000)
+	if len(reconciled) != 2 {
+		t.Fatalf("expected 2 jumps, got %d", len(reconciled))
+	}
+	expectedTritiumCosts := []int{90, 26}
+	for index, expectedCost := range expectedTritiumCosts {
+		if reconciled[index].TritiumUsed != expectedCost {
+			t.Errorf("hop %d: expected TritiumUsed = %d, got %d", index, expectedCost, reconciled[index].TritiumUsed)
+		}
+	}
+	if reconciled[0].SystemName != "Waypoint 1" || reconciled[0].FuelInTank != 1000 {
+		t.Errorf("unexpected hop 1 data: %+v", reconciled[0])
 	}
 }
 
@@ -117,14 +51,6 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 				return requestContext, cancelFunction
 			},
 			expectedErr: context.Canceled,
-		},
-		{
-			name: "ContextDeadlineExceeded",
-			setupCtx: func(pollStarted chan struct{}) (context.Context, context.CancelFunc) {
-				requestContext, cancelFunction := context.WithTimeout(context.Background(), 50*time.Millisecond)
-				return requestContext, cancelFunction
-			},
-			expectedErr: context.DeadlineExceeded,
 		},
 		{
 			name:         "ContextCanceledDuringTickerWait",

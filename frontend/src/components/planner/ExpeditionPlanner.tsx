@@ -28,6 +28,8 @@ import {
 import { PlannerRouteTable } from './PlannerRouteTable'
 import { useCarrierRoute } from './useCarrierRoute'
 import { useInitialExpeditionScroll } from './useInitialExpeditionScroll'
+
+const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
 import { useWaypointDetails } from './useWaypointDetails'
 
 /**
@@ -247,6 +249,7 @@ export function ExpeditionPlanner({
     if (!plan) return
     if (carrierRoute.activeCarrierRoute && carrierRoute.routedCarrierStopIndex >= 0) {
       const rowIndex = plan.rows.findIndex((rowView) => rowView?.row?.id === row.id)
+      // Manual logging leaves the target stop editable until arrival is logged; Spansh routes lock through the plotted stop.
       if (
         rowIndex >= 0 &&
         (carrierRoute.isManualCarrierRoute
@@ -300,7 +303,7 @@ export function ExpeditionPlanner({
     await runPlanMutation(
       rowType === 'region' ? 'ADDING REGION HEADER' : 'ADDING WAYPOINT',
       `Failed to insert ${rowType}`,
-      () => AddRow(plan.expedition.id, afterRowId, rowType, 18),
+      () => AddRow(plan.expedition.id, afterRowId, rowType, DEFAULT_GALACTIC_REGION_ID),
       { onSuccess: onRefreshPlan, rollbackOnError: true },
     )
   }
@@ -395,7 +398,7 @@ export function ExpeditionPlanner({
   const isCompleted = currentExpedition.status === 'completed'
   const modesList = plan.modes ?? []
   const firstWaypoint = plan.rows?.find((rowView) => rowView.row.rowType === 'waypoint')
-  const hasWp1System = Boolean(
+  const hasOriginWaypointSystem = Boolean(
     (drafts[firstWaypoint?.row.id ?? 0]?.systemName ?? firstWaypoint?.row.systemName ?? '').trim(),
   )
 
@@ -403,7 +406,7 @@ export function ExpeditionPlanner({
     <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#070605]">
       <PlannerHeaderBar
         plan={plan}
-        hasWp1System={hasWp1System}
+        hasOriginWaypointSystem={hasOriginWaypointSystem}
         onOpenStartModal={onOpenStartModal}
         onLifecycleAction={handleLifecycleAction}
       />

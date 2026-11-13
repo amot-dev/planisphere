@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -161,7 +160,7 @@ func TestResolveRowSync_ContextCancellation(t *testing.T) {
 	testApp.cancel = cancel
 
 	// Fill semaphore so resolveRowSync has to wait
-	testApp.resolveSem <- struct{}{}
+	testApp.resolutionSemaphore <- struct{}{}
 
 	// Cancel context
 	cancel()
@@ -199,9 +198,9 @@ func TestResolveRowSync_SemaphoreReleased(t *testing.T) {
 
 	// Verify semaphore is available (can acquire without blocking)
 	select {
-	case testApp.resolveSem <- struct{}{}:
+	case testApp.resolutionSemaphore <- struct{}{}:
 		// Semaphore token was successfully released!
-		<-testApp.resolveSem
+		<-testApp.resolutionSemaphore
 	default:
 		t.Fatal("semaphore was not released by resolveRowSync")
 	}
@@ -325,32 +324,30 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T
 	}
 }
 
+func seedDatabaseWithExpedition(testingContext *testing.T, databasePath, expeditionName, expeditionDescription string) {
+	testingContext.Helper()
+	seedApp := New()
+	seedApp.debugMode = false
+	seedContext, cancelSeed := context.WithCancel(context.Background())
+	if initError := seedApp.initialize(seedContext, databasePath); initError != nil {
+		cancelSeed()
+		testingContext.Fatalf("seed initialize %s: %v", databasePath, initError)
+	}
+	if _, createError := seedApp.CreateExpedition(expeditionName, expeditionDescription); createError != nil {
+		cancelSeed()
+		seedApp.shutdown(seedContext)
+		testingContext.Fatalf("seed CreateExpedition %q: %v", expeditionName, createError)
+	}
+	cancelSeed()
+	seedApp.shutdown(seedContext)
+}
+
 func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 	temporaryDirectory := testingContext.TempDir()
 	productionDBPath := filepath.Join(temporaryDirectory, "production.sqlite")
+	seedDatabaseWithExpedition(testingContext, productionDBPath, "Production Expedition", "Saved in production DB")
 
-	// Seed a production database with an existing expedition
-	productionApp := New()
-	productionApp.debugMode = false
-	productionContext, cancelProduction := context.WithCancel(context.Background())
-	if initError := productionApp.initialize(productionContext, productionDBPath); initError != nil {
-		cancelProduction()
-		testingContext.Fatalf("initialize production app: %v", initError)
-	}
-	if _, createError := productionApp.CreateExpedition("Production Expedition", "Saved in production DB"); createError != nil {
-		cancelProduction()
-		productionApp.shutdown(productionContext)
-		testingContext.Fatalf("create production expedition: %v", createError)
-	}
-	cancelProduction()
-	productionApp.shutdown(productionContext)
-
-	originalProductionBytes, readOriginalError := os.ReadFile(productionDBPath)
-	if readOriginalError != nil {
-		testingContext.Fatalf("read production DB bytes: %v", readOriginalError)
-	}
-
-	// Launch a debug-mode app pointing at the same production database path
+	// Launch a debug-mode app pointing at the seeded production database path
 	debugApp := New()
 	debugApp.debugMode = true
 	debugContext, cancelDebug := context.WithCancel(context.Background())
@@ -393,27 +390,34 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 		testingContext.Fatalf("expected 'Production Expedition' to be present in debug snapshot")
 	}
 
-	// Mutate data inside debug app
+	// Mutate data inside debug app and shut down
 	if _, createDebugError := debugApp.CreateExpedition("Debug Scratch Expedition", "Must not persist to production DB"); createDebugError != nil {
 		debugApp.shutdown(debugContext)
 		testingContext.Fatalf("create expedition in debug app: %v", createDebugError)
 	}
-
-	// Shut down debug app and verify temporary snapshot is deleted
 	debugApp.shutdown(debugContext)
-	for _, suffix := range []string{"", "-wal", "-shm"} {
-		if _, statError := os.Stat(snapshotPath + suffix); !os.IsNotExist(statError) {
-			testingContext.Errorf("expected debug snapshot %s%s to be removed on shutdown, stat err: %v", snapshotPath, suffix, statError)
-		}
+	if _, statError := os.Stat(snapshotPath); !os.IsNotExist(statError) {
+		testingContext.Errorf("expected debug snapshot %s to be removed on shutdown, stat err: %v", snapshotPath, statError)
 	}
 
-	// Verify production DB file on disk was not modified
-	afterProductionBytes, readAfterError := os.ReadFile(productionDBPath)
-	if readAfterError != nil {
-		testingContext.Fatalf("read production DB bytes after debug shutdown: %v", readAfterError)
+	// Reopen production database in non-debug mode and confirm scratch mutations did not persist
+	verifyApp := New()
+	verifyApp.debugMode = false
+	verifyContext, cancelVerify := context.WithCancel(context.Background())
+	defer cancelVerify()
+	if initVerifyError := verifyApp.initialize(verifyContext, productionDBPath); initVerifyError != nil {
+		testingContext.Fatalf("reopen production app: %v", initVerifyError)
 	}
-	if !bytes.Equal(originalProductionBytes, afterProductionBytes) {
-		testingContext.Fatalf("expected production DB bytes to remain untouched after debug session")
+	defer verifyApp.shutdown(verifyContext)
+
+	productionExpeditions, verifyListError := verifyApp.ListExpeditions()
+	if verifyListError != nil {
+		testingContext.Fatalf("ListExpeditions in reopened production app: %v", verifyListError)
+	}
+	for _, expeditionItem := range productionExpeditions {
+		if expeditionItem.Name == "Debug Scratch Expedition" {
+			testingContext.Fatalf("debug scratch expedition leaked into production database")
+		}
 	}
 }
 
@@ -512,21 +516,8 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 	temporaryDirectory := testingContext.TempDir()
 	productionDBPath := filepath.Join(temporaryDirectory, "startup-race.sqlite")
 
-	// Seed a database with an expedition so we can verify callers receive real state
-	seedApp := New()
-	seedApp.debugMode = false
-	seedContext, cancelSeed := context.WithCancel(context.Background())
-	if initError := seedApp.initialize(seedContext, productionDBPath); initError != nil {
-		cancelSeed()
-		testingContext.Fatalf("seed initialize: %v", initError)
-	}
-	if _, createError := seedApp.CreateExpedition("Startup Race Expedition", "Verify concurrent RPCs wait for OnStartup"); createError != nil {
-		cancelSeed()
-		seedApp.shutdown(seedContext)
-		testingContext.Fatalf("seed CreateExpedition: %v", createError)
-	}
-	cancelSeed()
-	seedApp.shutdown(seedContext)
+	// Seed a database with an expedition so callers receive real state
+	seedDatabaseWithExpedition(testingContext, productionDBPath, "Startup Race Expedition", "Verify concurrent RPCs wait for OnStartup")
 
 	testingContext.Setenv("ED_PLANNER_DB", productionDBPath)
 

@@ -193,7 +193,7 @@ export function SetupWizardModal({
     }
   }
 
-  async function handleToggleCmdr(name: string, enabled: boolean) {
+  async function handleToggleCommander(name: string, enabled: boolean) {
     setError('')
     try {
       const next = await SetCommanderEnabled(name, enabled)
@@ -396,7 +396,7 @@ export function SetupWizardModal({
               gecBusy={gecBusy}
               gecSyncedCount={gecSyncedCount}
               isBusy={isBusy}
-              onToggleCommander={handleToggleCmdr}
+              onToggleCommander={handleToggleCommander}
               onToggleOnline={handleToggleOnline}
               onSyncGecNow={handleSyncGecNow}
             />
