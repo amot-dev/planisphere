@@ -160,7 +160,7 @@ export function StartExpeditionModal({
           />
           <div className="flex-1 space-y-1.5">
             <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-              Custom Timestamp (33XX-MM-DD HH:mm:ss UTC)
+              Custom Timestamp (33XX-MM-DD HH:mm UTC)
             </div>
             <input
               type="text"
@@ -170,7 +170,7 @@ export function StartExpeditionModal({
                 setCustomGalactic(event.target.value)
                 setMode('custom')
               }}
-              placeholder="3312-01-18 19:42:10 UTC"
+              placeholder="3312-01-18 19:42 UTC"
               className="w-full bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
             />
           </div>

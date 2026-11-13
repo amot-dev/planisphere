@@ -838,5 +838,3 @@ func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *
 		}
 	}
 }
-
-

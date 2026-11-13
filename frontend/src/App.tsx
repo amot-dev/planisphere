@@ -104,6 +104,7 @@ export default function App() {
         activeExpeditionId={activeExpeditionId}
         activeStatusMessage={activeStatusMessage}
         ingest={ingest}
+        settings={settings}
         onSelectExpedition={handleSelectExpedition}
         onOpenExpeditionsModal={() => setActiveModal('expeditions')}
         onOpenSettingsModal={() => setActiveModal('settings')}

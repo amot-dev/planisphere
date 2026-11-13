@@ -117,6 +117,12 @@ type App struct {
 	carrierStatsValid     bool
 	carrierStatsGen       uint64
 
+	// Latest GitHub release version check fields protected by versionCheckMu.
+	versionCheckMu     sync.Mutex
+	latestVersion      string
+	versionCheckFailed bool
+	versionChecked     bool
+
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
 }
@@ -376,6 +382,7 @@ func (app *App) prepareInitialState() {
 }
 
 func (app *App) backgroundStart() {
+	app.spawnBackground(app.checkLatestVersionOnStartup)
 	if !app.isSetupCompleted() {
 		return
 	}

@@ -40,6 +40,8 @@ type Settings struct {
 	EDDiscoveryDBPath        string              `json:"edDiscoveryDbPath"`
 	DefaultEDDiscoveryDBPath string              `json:"defaultEdDiscoveryDbPath"`
 	EDDiscoveryDBExists      bool                `json:"edDiscoveryDbExists"`
+	LatestVersion            string              `json:"latestVersion"`
+	VersionCheckFailed       bool                `json:"versionCheckFailed"`
 }
 
 // GetSettings returns the current settings.
@@ -63,6 +65,7 @@ func (app *App) GetSettings() (Settings, error) {
 		gecCount = app.gec.Count()
 		gecFetched = app.gec.LastFetched()
 	}
+	latestVersion, versionCheckFailed := app.getVersionStatus()
 	return Settings{
 		SetupCompleted:           app.setupCompleted(),
 		JournalDir:               dir,
@@ -80,6 +83,8 @@ func (app *App) GetSettings() (Settings, error) {
 		EDDiscoveryDBPath:        discoveredEDDPath,
 		DefaultEDDiscoveryDBPath: defaultEDDPath,
 		EDDiscoveryDBExists:      discoveredEDDPath != "" || journal.FileExists(defaultEDDPath),
+		LatestVersion:            latestVersion,
+		VersionCheckFailed:       versionCheckFailed,
 	}, nil
 }
 
@@ -472,9 +477,9 @@ func (app *App) OpenURL(link string) error {
 	return nil
 }
 
-// ToGalactic converts an ISO-8601 UTC timestamp to "33XX-MM-DD HH:mm:ss UTC".
+// ToGalactic converts an ISO-8601 UTC timestamp to "33XX-MM-DD HH:mm UTC".
 func (app *App) ToGalactic(iso string) string { return ed.ToGalactic(iso) }
 
-// FromGalactic converts "33XX-MM-DD HH:mm:ss UTC" to an ISO-8601 UTC timestamp.
+// FromGalactic converts "33XX-MM-DD HH:mm UTC" to an ISO-8601 UTC timestamp.
 func (app *App) FromGalactic(gst string) (string, error) { return ed.FromGalactic(gst) }
 

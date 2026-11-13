@@ -19,6 +19,7 @@ type Config struct {
 	Author      string `json:"author"`
 	Description string `json:"description"`
 	BinaryName  string `json:"binaryName"`
+	Repository  string `json:"repository"`
 }
 
 func main() {
@@ -46,6 +47,10 @@ func main() {
 	}
 	if appConfig.BinaryName == "" {
 		appConfig.BinaryName = "planisphere"
+	}
+	appConfig.Repository = strings.TrimSuffix(strings.TrimSpace(appConfig.Repository), "/")
+	if appConfig.Repository == "" {
+		appConfig.Repository = "https://github.com/amot-dev/planisphere"
 	}
 
 	fmt.Printf("[sync-metadata] Reading app.config.json: %s v%s (%s)\n", appConfig.ProductName, appConfig.Version, appConfig.BinaryName)
@@ -76,6 +81,9 @@ func main() {
 
 	// Sync Arch PKGBUILD
 	syncPKGBUILD(filepath.Join(rootDir, "packaging", "arch", "PKGBUILD"), appConfig)
+
+	// Sync nfpm package manifest
+	syncNFPM(filepath.Join(rootDir, "packaging", "nfpm.yaml"), appConfig)
 
 	fmt.Printf("Metadata synchronized successfully across all project targets.\n")
 }
@@ -282,9 +290,10 @@ const (
 	Author      = %q
 	Description = %q
 	BinaryName  = %q
+	Repository  = %q
 	UserAgent   = %q
 )
-`, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName, userAgent)
+`, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName, appConfig.Repository, userAgent)
 	changed, writeErr := writeFileIfChanged(path, []byte(content), 0644)
 	if writeErr != nil {
 		return
@@ -305,7 +314,8 @@ export const APP_VERSION = %q
 export const APP_AUTHOR = %q
 export const APP_DESCRIPTION = %q
 export const APP_BINARY_NAME = %q
-`, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName)
+export const APP_REPOSITORY = %q
+`, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName, appConfig.Repository)
 	changed, writeErr := writeFileIfChanged(path, []byte(content), 0644)
 	if writeErr != nil {
 		return
@@ -354,12 +364,14 @@ func syncPKGBUILD(path string, appConfig Config) {
 	pkgnameRegex := regexp.MustCompile(`(?m)^pkgname=.*$`)
 	versionRegex := regexp.MustCompile(`(?m)^pkgver=.*$`)
 	descRegex := regexp.MustCompile(`(?m)^pkgdesc=.*$`)
+	urlRegex := regexp.MustCompile(`(?m)^url=.*$`)
 
 	pkgName := appConfig.BinaryName + "-bin"
 
 	updated := pkgnameRegex.ReplaceAll([]byte(text), []byte(fmt.Sprintf("pkgname=%s", pkgName)))
 	updated = versionRegex.ReplaceAll(updated, []byte(fmt.Sprintf("pkgver=%s", appConfig.Version)))
 	updated = descRegex.ReplaceAll(updated, []byte(fmt.Sprintf("pkgdesc=%q", appConfig.Description)))
+	updated = urlRegex.ReplaceAll(updated, []byte(fmt.Sprintf("url=%q", appConfig.Repository)))
 
 	changed, writeErr := writeFileIfChanged(path, updated, 0644)
 	if writeErr != nil {
@@ -367,6 +379,24 @@ func syncPKGBUILD(path string, appConfig Config) {
 		return
 	}
 	if changed {
-		fmt.Printf("  -> Updated %s (pkgname: %s, pkgver: %s)\n", filepath.Base(path), pkgName, appConfig.Version)
+		fmt.Printf("  -> Updated %s (pkgname: %s, pkgver: %s, url: %s)\n", filepath.Base(path), pkgName, appConfig.Version, appConfig.Repository)
+	}
+}
+
+func syncNFPM(path string, appConfig Config) {
+	data, readError := os.ReadFile(path)
+	if readError != nil {
+		return
+	}
+	homepageRegex := regexp.MustCompile(`(?m)^homepage:\s*.*$`)
+	updated := homepageRegex.ReplaceAll(data, []byte(fmt.Sprintf("homepage: %q", appConfig.Repository)))
+
+	changed, writeErr := writeFileIfChanged(path, updated, 0644)
+	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeErr)
+		return
+	}
+	if changed {
+		fmt.Printf("  -> Updated %s (homepage: %s)\n", filepath.Base(path), appConfig.Repository)
 	}
 }

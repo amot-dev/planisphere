@@ -53,7 +53,7 @@ func NormalizeISO(rawTimestamp string) (string, error) {
 }
 
 // ToGalactic converts a real ISO-8601 UTC timestamp ("2026-01-18T19:42:10Z")
-// into Galactic Standard Time ("3312-01-18 19:42:10 UTC").
+// into Galactic Standard Time rounded to the nearest minute ("3312-01-18 19:42 UTC").
 //
 // The year shift is done on the formatted string rather than via time.AddDate
 // so that dates such as 29 February are preserved verbatim (3314 is not a
@@ -69,15 +69,15 @@ func ToGalactic(isoTimestamp string) string {
 	return TimeToGalactic(parsedTime)
 }
 
-// TimeToGalactic converts a time.Time into Galactic Standard Time.
+// TimeToGalactic converts a time.Time into Galactic Standard Time rounded to the nearest minute.
 func TimeToGalactic(sourceTime time.Time) string {
-	sourceTime = sourceTime.UTC()
-	return fmt.Sprintf("%04d-%s%s", sourceTime.Year()+GalacticYearOffset, sourceTime.Format("01-02 15:04:05"), GalacticLayoutSuffix)
+	roundedTime := sourceTime.UTC().Round(time.Minute)
+	return fmt.Sprintf("%04d-%s%s", roundedTime.Year()+GalacticYearOffset, roundedTime.Format("01-02 15:04"), GalacticLayoutSuffix)
 }
 
-// FromGalactic converts "3312-01-18 19:42:10 UTC" (the " UTC" suffix, the
+// FromGalactic converts "3312-01-18 19:42 UTC" (the " UTC" suffix, the
 // seconds and the time part are optional; a "T" separator is accepted) back
-// into a real ISO-8601 UTC timestamp ("2026-01-18T19:42:10Z").
+// into a real ISO-8601 UTC timestamp ("2026-01-18T19:42:00Z").
 func FromGalactic(galacticTimeString string) (string, error) {
 	cleanedString := strings.TrimSpace(galacticTimeString)
 	cleanedString = strings.TrimSuffix(cleanedString, "UTC")

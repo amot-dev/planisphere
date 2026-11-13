@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import { app, stats } from '../../../wailsjs/go/models'
-import { formatInt, formatLy } from '../../utils/galacticTime'
+import { formatInt, formatLy, nowGalacticTime } from '../../utils/galacticTime'
 import { StatRow } from './StatRow'
 
 /**
@@ -25,6 +26,20 @@ export function NavigationTelemetrySection({
   carrierRouteOpen,
   onLogCarrierJump,
 }: NavigationTelemetrySectionProps) {
+  const isActiveExpeditionClock = Boolean(sidebarStats?.started && sidebarStats?.endIsNow)
+  const [currentGalacticTime, setCurrentGalacticTime] = useState<string>(() => nowGalacticTime())
+
+  useEffect(() => {
+    if (!isActiveExpeditionClock) {
+      return
+    }
+    setCurrentGalacticTime(nowGalacticTime())
+    const clockInterval = setInterval(() => {
+      setCurrentGalacticTime(nowGalacticTime())
+    }, 60_000)
+    return () => clearInterval(clockInterval)
+  }, [isActiveExpeditionClock])
+
   return (
     <>
       {/* Duration */}
@@ -77,7 +92,7 @@ export function NavigationTelemetrySection({
                     {sidebarStats.endIsNow ? 'CURRENT:' : 'END:'}
                   </span>
                   <span className="text-[#F4ECE4] font-bold text-right">
-                    {sidebarStats.endGalactic}
+                    {sidebarStats.endIsNow ? currentGalacticTime : sidebarStats.endGalactic}
                   </span>
                 </div>
               </div>

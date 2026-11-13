@@ -1,6 +1,6 @@
 import { app, expedition } from '../../../wailsjs/go/models'
 import { APP_PRODUCT_NAME, APP_TAGLINE } from '../../version'
-import { GalacticClockBadge } from './GalacticClockBadge'
+import { VersionIndicator } from './VersionIndicator'
 
 /**
  * CockpitTopBarProps defines the sidebar collapse state, expedition selector
@@ -12,6 +12,7 @@ export interface CockpitTopBarProps {
   activeExpeditionId: number
   activeStatusMessage: string | null
   ingest: app.IngestStatus | null
+  settings: app.Settings | null
   onSelectExpedition: (selectedExpeditionId: number) => void
   onOpenExpeditionsModal: () => void
   onOpenSettingsModal: () => void
@@ -19,7 +20,7 @@ export interface CockpitTopBarProps {
 
 /**
  * CockpitTopBar renders the persistent 48px top cockpit header containing the
- * application emblem, Galactic Standard Time clock, expedition switcher, and status strip.
+ * application emblem, version indicator, expedition switcher, and status strip.
  */
 export function CockpitTopBar({
   sidebarCollapsed,
@@ -27,6 +28,7 @@ export function CockpitTopBar({
   activeExpeditionId,
   activeStatusMessage,
   ingest,
+  settings,
   onSelectExpedition,
   onOpenExpeditionsModal,
   onOpenSettingsModal,
@@ -42,13 +44,13 @@ export function CockpitTopBar({
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="w-2 h-5 bg-[#FF7100]" />
           <div className="leading-none">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#FF7100]">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#FF7100] leading-none">
                 {APP_PRODUCT_NAME}
               </span>
-              <GalacticClockBadge />
+              <VersionIndicator settings={settings} />
             </div>
-            <div className="text-[9px] font-mono-tabular uppercase tracking-[0.14em] text-[#a6907c] mt-0.5">
+            <div className="text-[9px] font-mono-tabular uppercase tracking-[0.14em] text-[#a6907c] mt-1">
               {APP_TAGLINE}
             </div>
           </div>

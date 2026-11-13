@@ -5,9 +5,10 @@ const (
 	Name        = "planisphere"
 	ProductName = "Planisphere"
 	Tagline     = "Expedition Planner and Astrometric Telemetry Terminal"
-	Version     = "0.4.1"
+	Version     = "0.4.2"
 	Author      = "Alexander Mot"
 	Description = "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal"
 	BinaryName  = "planisphere"
-	UserAgent   = "Planisphere/0.4.1"
+	Repository  = "https://github.com/amot-dev/planisphere"
+	UserAgent   = "Planisphere/0.4.2"
 )

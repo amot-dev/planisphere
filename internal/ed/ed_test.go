@@ -12,7 +12,7 @@ import (
 func TestGalacticTimeConversion(t *testing.T) {
 	isoTimestamp := "2026-01-18T19:42:10Z"
 	galacticTime := ToGalactic(isoTimestamp)
-	expectedGalacticTime := "3312-01-18 19:42:10 UTC"
+	expectedGalacticTime := "3312-01-18 19:42 UTC"
 	if galacticTime != expectedGalacticTime {
 		t.Fatalf("ToGalactic(%q) = %q, want %q", isoTimestamp, galacticTime, expectedGalacticTime)
 	}
@@ -20,15 +20,21 @@ func TestGalacticTimeConversion(t *testing.T) {
 	if conversionError != nil {
 		t.Fatalf("FromGalactic(%q) error: %v", galacticTime, conversionError)
 	}
-	if convertedBack != isoTimestamp {
-		t.Fatalf("FromGalactic(%q) = %q, want %q", galacticTime, convertedBack, isoTimestamp)
+	expectedRoundedISO := "2026-01-18T19:42:00Z"
+	if convertedBack != expectedRoundedISO {
+		t.Fatalf("FromGalactic(%q) = %q, want %q", galacticTime, convertedBack, expectedRoundedISO)
+	}
+
+	roundedUpGalactic := ToGalactic("2026-01-18T19:42:45Z")
+	if roundedUpGalactic != "3312-01-18 19:43 UTC" {
+		t.Fatalf("ToGalactic round up = %q, want 3312-01-18 19:43 UTC", roundedUpGalactic)
 	}
 
 	// Leap day preservation: 2028 is a leap year; 2028+1286 = 3314 is not in Gregorian,
 	// yet the galactic string must preserve 02-29.
 	leapISOTimestamp := "2028-02-29T08:15:00Z"
 	leapGalacticTime := ToGalactic(leapISOTimestamp)
-	if leapGalacticTime != "3314-02-29 08:15:00 UTC" {
+	if leapGalacticTime != "3314-02-29 08:15 UTC" {
 		t.Fatalf("ToGalactic leap day = %q", leapGalacticTime)
 	}
 	leapConvertedBack, leapError := FromGalactic(leapGalacticTime)

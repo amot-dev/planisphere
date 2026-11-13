@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { app } from '../../../wailsjs/go/models'
-import { APP_VERSION } from '../../version'
 import { ModalShell } from '../common/ModalShell'
 import { CommandersSection } from './CommandersSection'
 import { DatabaseArchiveSection } from './DatabaseArchiveSection'
@@ -41,7 +40,6 @@ export function SettingsModal({
   return (
     <ModalShell
       title="Terminal Configuration"
-      badge={`v${APP_VERSION}`}
       onClose={onClose}
       maxWidth="max-w-2xl"
     >

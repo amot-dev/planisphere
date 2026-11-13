@@ -313,6 +313,8 @@ export namespace app {
 	    edDiscoveryDbPath: string;
 	    defaultEdDiscoveryDbPath: string;
 	    edDiscoveryDbExists: boolean;
+	    latestVersion: string;
+	    versionCheckFailed: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -336,6 +338,8 @@ export namespace app {
 	        this.edDiscoveryDbPath = source["edDiscoveryDbPath"];
 	        this.defaultEdDiscoveryDbPath = source["defaultEdDiscoveryDbPath"];
 	        this.edDiscoveryDbExists = source["edDiscoveryDbExists"];
+	        this.latestVersion = source["latestVersion"];
+	        this.versionCheckFailed = source["versionCheckFailed"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
