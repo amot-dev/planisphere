@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 
 const TEXTAREA_LINE_HEIGHT = 20 // 1.25rem = 20px (leading-5)
 const TEXTAREA_VERTICAL_PAD = 8 // py-[3px] (6px) + border (2px) = 8px; total 1-line height = 28px (h-7)
+const SINGLE_LINE_TEXT_THRESHOLD = 15
 
 /**
  * AutoExpandingTextareaProps defines the controlled text value, line bounds,
@@ -31,24 +32,31 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
   maxLines = 3,
 }: AutoExpandingTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [, setIsFocused] = useState(false)
 
   const adjustHeight = useCallback(() => {
     const textareaElement = textareaRef.current
     if (!textareaElement) return
 
     const minHeight = TEXTAREA_LINE_HEIGHT + TEXTAREA_VERTICAL_PAD
-    const maxHeight = TEXTAREA_LINE_HEIGHT * maxLines + TEXTAREA_VERTICAL_PAD
+    const currentText = textareaElement.value
+    if (currentText.length <= SINGLE_LINE_TEXT_THRESHOLD && !currentText.includes('\n')) {
+      const targetSingleLineHeight = `${minHeight}px`
+      if (textareaElement.style.height !== targetSingleLineHeight) {
+        textareaElement.style.height = targetSingleLineHeight
+      }
+      if (textareaElement.style.overflowY !== 'hidden') {
+        textareaElement.style.overflowY = 'hidden'
+      }
+      return
+    }
 
+    const maxHeight = TEXTAREA_LINE_HEIGHT * maxLines + TEXTAREA_VERTICAL_PAD
     textareaElement.style.height = 'auto'
     const borderHeight = Math.max(textareaElement.offsetHeight - textareaElement.clientHeight, 2)
-    const targetHeight = Math.min(
-      Math.max(textareaElement.scrollHeight + borderHeight, minHeight),
-      maxHeight,
-    )
+    const scrollAndBorderHeight = textareaElement.scrollHeight + borderHeight
+    const targetHeight = Math.min(Math.max(scrollAndBorderHeight, minHeight), maxHeight)
     textareaElement.style.height = `${targetHeight}px`
-    textareaElement.style.overflowY =
-      textareaElement.scrollHeight + borderHeight > maxHeight ? 'auto' : 'hidden'
+    textareaElement.style.overflowY = scrollAndBorderHeight > maxHeight ? 'auto' : 'hidden'
   }, [maxLines])
 
   // Synchronously measure and size on value change (including initial mount)
@@ -56,22 +64,14 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
     adjustHeight()
   }, [value, adjustHeight])
 
-  // Recalculate on viewport/container resize so wrapping reflows correctly
+  // Recalculate on container width changes using ResizeObserver, falling back to window resize
   useEffect(() => {
     const textareaElement = textareaRef.current
     if (!textareaElement) return
 
-    let lastWidth = textareaElement.getBoundingClientRect().width
-
-    const handleResize = () => {
-      adjustHeight()
-    }
-
-    window.addEventListener('resize', handleResize)
-
-    let observer: ResizeObserver | null = null
     if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver((entries) => {
+      let lastWidth = textareaElement.getBoundingClientRect().width
+      const observer = new ResizeObserver((entries) => {
         for (const entry of entries) {
           const newWidth = entry.contentRect.width
           if (newWidth !== lastWidth) {
@@ -81,12 +81,14 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
         }
       })
       observer.observe(textareaElement)
+      return () => observer.disconnect()
     }
 
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      observer?.disconnect()
+    const handleResize = () => {
+      adjustHeight()
     }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [adjustHeight])
 
   return (
@@ -97,20 +99,9 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
       autoComplete="off"
       value={value}
       placeholder={placeholder}
-      onFocus={() => {
-        setIsFocused(true)
-        adjustHeight()
-        onFocus?.()
-      }}
-      onChange={(event) => {
-        onChange(event.target.value)
-        adjustHeight()
-      }}
-      onBlur={(event) => {
-        setIsFocused(false)
-        adjustHeight()
-        onBlur(event.target.value)
-      }}
+      onFocus={onFocus}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={(event) => onBlur(event.target.value)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault()
@@ -121,4 +112,3 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
     />
   )
 })
-
