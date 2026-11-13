@@ -331,7 +331,7 @@ export function useBackendSync() {
 
   // Subscribe to Wails backend events (live fsnotify journal tailing, coordinate resolution, etc.)
   useEffect(() => {
-    if (typeof window === 'undefined' || !(window as any).runtime?.EventsOnMultiple) {
+    if (typeof window === 'undefined' || !window.runtime?.EventsOnMultiple) {
       return
     }
 
@@ -412,12 +412,6 @@ export function useBackendSync() {
     }
   }, [loadPlanOnly])
 
-  const handleRefreshStats = useCallback(() => {
-    if (activeExpeditionIdRef.current > 0) {
-      loadStatsOnly(activeExpeditionIdRef.current, filter)
-    }
-  }, [loadStatsOnly, filter])
-
   const activeStatusMessage =
     busyAction ||
     (eddProgress?.active ? `EDD IMPORT ${eddProgress.percent}%` : null) ||
@@ -445,7 +439,6 @@ export function useBackendSync() {
     refreshAll,
     refreshPlanAndStats,
     handleRefreshPlan,
-    handleRefreshStats,
   }
 }
 

@@ -187,6 +187,49 @@ func loadLatestFileCommander(transaction *sql.Tx, fileName string) (string, erro
 	return previousCommander.String, nil
 }
 
+// InsertJournalEventPrefixSQL is the shared INSERT header for journal_events
+// before each caller appends its own ON CONFLICT clause.
+const InsertJournalEventPrefixSQL = `INSERT INTO journal_events
+	(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
+	 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+
+// UpsertCommanderSQL inserts a discovered commander or expands its observed
+// Frontier ID and timestamp range on conflict.
+const UpsertCommanderSQL = `INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
+	VALUES(?, ?, 1, ?, ?)
+	ON CONFLICT(name) DO UPDATE SET
+		fid = CASE WHEN excluded.fid != '' THEN excluded.fid ELSE commanders.fid END,
+		first_seen = CASE WHEN commanders.first_seen IS NULL OR excluded.first_seen < commanders.first_seen THEN excluded.first_seen ELSE commanders.first_seen END,
+		last_seen = CASE WHEN commanders.last_seen IS NULL OR excluded.last_seen > commanders.last_seen THEN excluded.last_seen ELSE commanders.last_seen END`
+
+// BackfillFileCommanderSQL attributes earlier unlabelled events in a journal
+// file once the commander identity appears.
+const BackfillFileCommanderSQL = `UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`
+
+// NullStringOrNil returns nil when text contains only whitespace, otherwise text.
+func NullStringOrNil(text string) any {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return text
+}
+
+// ExecJournalEvent executes a prepared journal_events insert statement using a
+// parsed event's columns and optional star position coordinates.
+func ExecJournalEvent(statement *sql.Stmt, parsedEvent *Event, sourceFile string, ingestedAt string) (sql.Result, error) {
+	var xCoord, yCoord, zCoord any
+	if parsedEvent.StarPos != nil {
+		xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
+	}
+	return statement.Exec(
+		parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event,
+		NullStringOrNil(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
+		NullStringOrNil(parsedEvent.BodyName), xCoord, yCoord, zCoord,
+		NullStringOrNil(parsedEvent.Commander), sourceFile, parsedEvent.Raw, ingestedAt,
+	)
+}
+
 func ingestAppendedLines(
 	transaction *sql.Tx,
 	reader *bufio.Reader,
@@ -203,22 +246,13 @@ func ingestAppendedLines(
 	hasUnattributedEvents := state.offset == 0 || currentCommander == ""
 
 	// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
-	insertEventStmt, prepError := transaction.Prepare(`INSERT INTO journal_events
-		(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
-		 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(event_uid) DO NOTHING`)
+	insertEventStmt, prepError := transaction.Prepare(InsertJournalEventPrefixSQL + ` ON CONFLICT(event_uid) DO NOTHING`)
 	if prepError != nil {
 		return prepError
 	}
 	defer insertEventStmt.Close()
 
-	upsertCommanderStmt, prepCommanderError := transaction.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
-		VALUES(?, ?, 1, ?, ?)
-		ON CONFLICT(name) DO UPDATE SET
-			fid = CASE WHEN excluded.fid != '' THEN excluded.fid ELSE commanders.fid END,
-			first_seen = CASE WHEN commanders.first_seen IS NULL OR excluded.first_seen < commanders.first_seen THEN excluded.first_seen ELSE commanders.first_seen END,
-			last_seen = CASE WHEN commanders.last_seen IS NULL OR excluded.last_seen > commanders.last_seen THEN excluded.last_seen ELSE commanders.last_seen END`)
+	upsertCommanderStmt, prepCommanderError := transaction.Prepare(UpsertCommanderSQL)
 	if prepCommanderError != nil {
 		return prepCommanderError
 	}
@@ -258,7 +292,7 @@ func ingestAppendedLines(
 			}
 			if hasUnattributedEvents {
 				// Backfill any earlier events in the same file that arrived before LoadGame or Commander.
-				if _, execError := transaction.Exec(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`, currentCommander, fileName); execError != nil {
+				if _, execError := transaction.Exec(BackfillFileCommanderSQL, currentCommander, fileName); execError != nil {
 					return fmt.Errorf("backfill commander for %s: %w", fileName, execError)
 				}
 				hasUnattributedEvents = false
@@ -268,16 +302,7 @@ func ingestAppendedLines(
 		} else {
 			hasUnattributedEvents = true
 		}
-		var xCoord, yCoord, zCoord any
-		if parsedEvent.StarPos != nil {
-			xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
-		}
-		execResult, execError := insertEventStmt.Exec(
-			parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event,
-			nullStr(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
-			nullStr(parsedEvent.BodyName), xCoord, yCoord, zCoord,
-			nullStr(parsedEvent.Commander), fileName, parsedEvent.Raw, ingestedAt,
-		)
+		execResult, execError := ExecJournalEvent(insertEventStmt, &parsedEvent, fileName, ingestedAt)
 		if execError != nil {
 			return execError
 		}
@@ -376,11 +401,4 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 	InvalidateCommanderCountsCache()
 	result.FilesUpdated = 1
 	return result, nil
-}
-
-func nullStr(text string) any {
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	return text
 }

@@ -187,13 +187,8 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 	if queryError := app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&currentPOIName); queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
 		log.Printf("query poi name for row %d: %v", rowItem.ID, queryError)
 	}
-	if strings.TrimSpace(currentPOIName.String) == "" && app.gec != nil {
-		if matchedPOIs := app.gec.Lookup(rowItem.SystemName, systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
-			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-			if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID); execError != nil {
-				log.Printf("update poi name for row %d: %v", rowItem.ID, execError)
-			}
-		}
+	if strings.TrimSpace(currentPOIName.String) == "" {
+		app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, systemAddress)
 	}
 	return positionCoords != nil, true
 }
@@ -239,6 +234,26 @@ func (app *App) loadMissingPOIItems() []missingPOIItem {
 	return items
 }
 
+// applyMissingPOIFromGEC looks up systemName and systemAddress in the GEC catalog,
+// HTML-unescapes the matched POI name, stores it on rowID when poi_name is still
+// blank, and returns the persisted name (or "" when none matched or persisted).
+// Caller must hold app.dbMu.RLock.
+func (app *App) applyMissingPOIFromGEC(rowID int64, systemName string, systemAddress int64) string {
+	if app.db == nil || app.gec == nil || systemName == "" {
+		return ""
+	}
+	matchedPOIs := app.gec.Lookup(systemName, systemAddress)
+	if len(matchedPOIs) == 0 || strings.TrimSpace(matchedPOIs[0].Name) == "" {
+		return ""
+	}
+	poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
+	if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowID); execError != nil {
+		log.Printf("update poi name for row %d: %v", rowID, execError)
+		return ""
+	}
+	return poiName
+}
+
 func (app *App) populateMissingPOIs() {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
@@ -246,12 +261,7 @@ func (app *App) populateMissingPOIs() {
 		return
 	}
 	for _, item := range app.loadMissingPOIItems() {
-		if matchedPOIs := app.gec.Lookup(item.systemName, item.systemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
-			poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-			if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, item.id); execError != nil {
-				log.Printf("update missing poi row %d: %v", item.id, execError)
-			}
-		}
+		app.applyMissingPOIFromGEC(item.id, item.systemName, item.systemAddress)
 	}
 }
 

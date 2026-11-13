@@ -45,29 +45,20 @@ func prepareImportStatements(transaction *sql.Tx) (*importStatements, error) {
 	statements := &importStatements{}
 	var prepError error
 
-	// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
-	statements.insertEventStmt, prepError = transaction.Prepare(`INSERT INTO journal_events
-		(event_uid, timestamp, event, system_name, system_address, body_id, body_name,
-		 star_x, star_y, star_z, commander, source_file, raw_json, ingested_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(event_uid) DO UPDATE SET
-			commander = COALESCE(NULLIF(excluded.commander, ''), journal_events.commander)`)
+	// Upsert so missing commander attribution on earlier live-ingested rows is backfilled on conflict.
+	statements.insertEventStmt, prepError = transaction.Prepare(journal.InsertJournalEventPrefixSQL + ` ON CONFLICT(event_uid) DO UPDATE SET
+		commander = COALESCE(NULLIF(excluded.commander, ''), journal_events.commander)`)
 	if prepError != nil {
 		return nil, prepError
 	}
 
-	statements.upsertCommanderStmt, prepError = transaction.Prepare(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen)
-		VALUES(?, ?, 1, ?, ?)
-		ON CONFLICT(name) DO UPDATE SET
-			fid = CASE WHEN excluded.fid != '' THEN excluded.fid ELSE commanders.fid END,
-			first_seen = CASE WHEN commanders.first_seen IS NULL OR excluded.first_seen < commanders.first_seen THEN excluded.first_seen ELSE commanders.first_seen END,
-			last_seen = CASE WHEN commanders.last_seen IS NULL OR excluded.last_seen > commanders.last_seen THEN excluded.last_seen ELSE commanders.last_seen END`)
+	statements.upsertCommanderStmt, prepError = transaction.Prepare(journal.UpsertCommanderSQL)
 	if prepError != nil {
 		statements.close()
 		return nil, prepError
 	}
 
-	statements.backfillCommanderStmt, prepError = transaction.Prepare(`UPDATE journal_events SET commander = ? WHERE source_file = ? AND (commander IS NULL OR commander = '')`)
+	statements.backfillCommanderStmt, prepError = transaction.Prepare(journal.BackfillFileCommanderSQL)
 	if prepError != nil {
 		statements.close()
 		return nil, prepError
@@ -186,16 +177,7 @@ func (accumulator *archiveImportAccumulator) processEntry(
 
 	recordCommanderSighting(accumulator.commanderTrackers, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp)
 
-	var xCoord, yCoord, zCoord any
-	if parsedEvent.StarPos != nil {
-		xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
-	}
-	if _, execError := accumulator.statements.insertEventStmt.Exec(
-		parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event,
-		nullStringOrNil(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
-		nullStringOrNil(parsedEvent.BodyName), xCoord, yCoord, zCoord,
-		nullStringOrNil(parsedEvent.Commander), normalizedFileName, parsedEvent.Raw, accumulator.ingestedAt,
-	); execError != nil {
+	if _, execError := journal.ExecJournalEvent(accumulator.statements.insertEventStmt, &parsedEvent, normalizedFileName, accumulator.ingestedAt); execError != nil {
 		return execError
 	}
 
@@ -347,12 +329,5 @@ func Import(ctx context.Context, ingester *journal.Ingester, databasePath string
 		reportProgress(totalEntries, totalEntries, result.FilesScanned, "Complete")
 		return result, txError
 	})
-}
-
-func nullStringOrNil(text string) any {
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	return text
 }
 

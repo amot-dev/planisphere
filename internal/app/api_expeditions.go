@@ -2,7 +2,6 @@ package app
 
 import (
 	"database/sql"
-	"html"
 	"strconv"
 	"strings"
 
@@ -187,12 +186,9 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 			return getError
 		}
 		if changed {
-			if rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" && app.gec != nil {
-				if matchedPOIs := app.gec.Lookup(rowItem.SystemName, rowItem.SystemAddress); len(matchedPOIs) > 0 && strings.TrimSpace(matchedPOIs[0].Name) != "" {
-					poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-					if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowItem.ID); execError == nil {
-						rowItem.POIName = poiName
-					}
+			if rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
+				if poiName := app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress); poiName != "" {
+					rowItem.POIName = poiName
 				}
 			}
 		}

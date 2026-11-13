@@ -146,26 +146,32 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 	return app.GetSettings()
 }
 
+func (app *App) saveJournalDirSetting(dir string) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if readyError := app.ready(); readyError != nil {
+		return readyError
+	}
+	dir = strings.TrimSpace(dir)
+	if dir != "" && !journal.DirExists(dir) {
+		return fmt.Errorf("directory does not exist: %s", dir)
+	}
+	return db.SetSetting(app.db, settingJournalDir, dir)
+}
+
+func (app *App) scanAndStartWatcher() {
+	app.runScan()
+	app.startConfiguredWatcher()
+}
+
 // SetupConfigureJournals sets the journal directory, performs a synchronous
 // initial scan of local .log files, starts the live watcher, and returns the
 // resulting archive status (including oldest journal date and discovered commanders).
 func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		dir = strings.TrimSpace(dir)
-		if dir != "" && !journal.DirExists(dir) {
-			return fmt.Errorf("directory does not exist: %s", dir)
-		}
-		return db.SetSetting(app.db, settingJournalDir, dir)
-	}(); err != nil {
+	if err := app.saveJournalDirSetting(dir); err != nil {
 		return IngestStatus{}, err
 	}
-	app.runScan()
-	app.startConfiguredWatcher()
+	app.scanAndStartWatcher()
 	app.changed("journal", 0)
 	return app.GetIngestStatus()
 }
@@ -276,24 +282,10 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 // SetJournalDir changes the journal directory, restarts the watcher and
 // performs a catch-up scan in the background. Pass "" to restore the default.
 func (app *App) SetJournalDir(dir string) (Settings, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		dir = strings.TrimSpace(dir)
-		if dir != "" && !journal.DirExists(dir) {
-			return fmt.Errorf("directory does not exist: %s", dir)
-		}
-		return db.SetSetting(app.db, settingJournalDir, dir)
-	}(); err != nil {
+	if err := app.saveJournalDirSetting(dir); err != nil {
 		return Settings{}, err
 	}
-	app.spawnBackground(func() {
-		app.runScan()
-		app.startConfiguredWatcher()
-	})
+	app.spawnBackground(app.scanAndStartWatcher)
 	return app.GetSettings()
 }
 

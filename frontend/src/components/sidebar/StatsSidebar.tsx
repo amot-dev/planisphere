@@ -18,7 +18,6 @@ export interface StatsSidebarProps {
   onFilterChange: (next: stats.Filter) => void
   onQuickSwitchMode: (modeId: number) => void
   onToggleCollapse?: () => void
-  onRefreshStats?: () => void
   onLogCarrierJump?: () => void
 }
 

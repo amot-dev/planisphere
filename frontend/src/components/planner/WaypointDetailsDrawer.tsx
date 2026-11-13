@@ -3,9 +3,9 @@ import { expedition, modes, stats } from '../../../wailsjs/go/models'
 import {
   formatCredits,
   formatInt,
-  formatLoss,
   formatLy,
 } from '../../utils/galacticTime'
+import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
 import { LegModeDropdown } from './widgets/LegModeDropdown'
 
 /**
@@ -285,44 +285,11 @@ function WaypointValuationCards({
             {formatCredits(realization?.totalRealized)}
           </span>
         </div>
-        <div className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px]">
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">Cartographics Lost (Death):</span>
-            <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-              {formatLoss(realization?.cartoLostDeath)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">Exobiology Lost (Death):</span>
-            <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-              {formatLoss(realization?.organicLostDeath)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">Cartographics Stolen:</span>
-            <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-              {formatLoss(realization?.cartoStolen)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">Exobiology Stolen:</span>
-            <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-              {formatLoss(realization?.organicStolen)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">Carrier Tariffs:</span>
-            <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-              {formatLoss(realization?.carrierTariffLoss)}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">NPC Crew Payouts:</span>
-            <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-              {formatLoss(realization?.npcCrewLoss)}
-            </span>
-          </div>
-        </div>
+        <RealizationLossBreakdown
+          realization={realization}
+          withColons
+          className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px]"
+        />
       </div>
     </div>
   )

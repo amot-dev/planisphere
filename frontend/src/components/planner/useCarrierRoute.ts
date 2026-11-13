@@ -11,7 +11,6 @@ import type { CarrierRoutePromptState } from './CarrierRouteModal'
 import {
   computeRoutedCarrierStopIndex,
   findNextCarrierStopEntry,
-  recalculateCarrierRouteAfterSpanshJump,
   recalculateCarrierRouteDepotFuel,
   resolveCarrierDefaults,
   resolveCarrierStartSystem,
@@ -456,7 +455,7 @@ export function useCarrierRoute({
       // Deduct consumed fuel from the depot
       const nextDepot = Math.max(0, currentDepot - carrierHop.tritiumUsed)
       // Recalculate remaining hops based on the updated depot fuel level
-      const updatedRoute = recalculateCarrierRouteAfterSpanshJump(
+      const updatedRoute = recalculateCarrierRouteDepotFuel(
         activeCarrierRoute,
         nextJumpIndex,
         nextDepot,

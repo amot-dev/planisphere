@@ -52,7 +52,6 @@ type ActiveCarrierRouteState struct {
 	ManualLegJumps  int                `json:"manualLegJumps"`
 	ManualLegDist   float64            `json:"manualLegDist"`
 	ManualLegTrit   int                `json:"manualLegTrit"`
-	Minimized       bool               `json:"minimized"`
 }
 
 // GetActiveCarrierRoute retrieves the persisted active carrier route for an expedition.
@@ -175,21 +174,23 @@ func (app *App) latestDockedCarrierLocation(playerCarrierID int64, playerCallsig
 			StationName string `json:"StationName"`
 			Docked      *bool  `json:"Docked"`
 		}
-		if json.Unmarshal([]byte(candidateRawJSON), &dockRecord) == nil {
-			if strings.EqualFold(dockRecord.StationType, "FleetCarrier") {
-				isDocked := dockRecord.Docked == nil || *dockRecord.Docked
-				if isDocked {
-					matchesCarrier := true
-					if playerCarrierID > 0 && dockRecord.MarketID > 0 {
-						matchesCarrier = (dockRecord.MarketID == playerCarrierID)
-					} else if playerCallsign != "" && dockRecord.StationName != "" {
-						matchesCarrier = strings.Contains(strings.ToUpper(dockRecord.StationName), strings.ToUpper(playerCallsign))
-					}
-					if matchesCarrier {
-						return strings.TrimSpace(candidateSystem), candidateTimestamp
-					}
-				}
-			}
+		if json.Unmarshal([]byte(candidateRawJSON), &dockRecord) != nil {
+			continue
+		}
+		if !strings.EqualFold(dockRecord.StationType, "FleetCarrier") {
+			continue
+		}
+		if dockRecord.Docked != nil && !*dockRecord.Docked {
+			continue
+		}
+		matchesCarrier := true
+		if playerCarrierID > 0 && dockRecord.MarketID > 0 {
+			matchesCarrier = dockRecord.MarketID == playerCarrierID
+		} else if playerCallsign != "" && dockRecord.StationName != "" {
+			matchesCarrier = strings.Contains(strings.ToUpper(dockRecord.StationName), strings.ToUpper(playerCallsign))
+		}
+		if matchesCarrier {
+			return strings.TrimSpace(candidateSystem), candidateTimestamp
 		}
 	}
 	if iterationError := rows.Err(); iterationError != nil {

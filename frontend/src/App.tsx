@@ -36,7 +36,6 @@ export default function App() {
     refreshAll,
     refreshPlanAndStats,
     handleRefreshPlan,
-    handleRefreshStats,
   } = useBackendSync()
 
   const [activeModal, setActiveModal] = useState<
@@ -123,7 +122,6 @@ export default function App() {
             onFilterChange={setFilter}
             onQuickSwitchMode={handleQuickSwitchMode}
             onToggleCollapse={toggleSidebarCollapsed}
-            onRefreshStats={handleRefreshStats}
             onLogCarrierJump={handleLogCarrierJump}
           />
         </ErrorBoundary>

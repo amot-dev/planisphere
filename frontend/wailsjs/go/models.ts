@@ -83,7 +83,6 @@ export namespace app {
 	    manualLegJumps: number;
 	    manualLegDist: number;
 	    manualLegTrit: number;
-	    minimized: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ActiveCarrierRouteState(source);
@@ -101,7 +100,6 @@ export namespace app {
 	        this.manualLegJumps = source["manualLegJumps"];
 	        this.manualLegDist = source["manualLegDist"];
 	        this.manualLegTrit = source["manualLegTrit"];
-	        this.minimized = source["minimized"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

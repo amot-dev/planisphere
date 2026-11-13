@@ -1,5 +1,6 @@
 import { stats } from '../../../wailsjs/go/models'
-import { formatCredits, formatInt, formatLoss } from '../../utils/galacticTime'
+import { formatCredits, formatInt } from '../../utils/galacticTime'
+import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
 import { StatRow } from './StatRow'
 
 /**
@@ -154,44 +155,10 @@ export function ExplorationValuationSection({
           </span>
         </button>
         {realizedExpanded && (
-          <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#FF7100]/50 text-[11px]">
-            <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">Cartographics Lost (Death)</span>
-              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatLoss(displayedRealization.cartoLostDeath)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">Exobiology Lost (Death)</span>
-              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatLoss(displayedRealization.organicLostDeath)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">Cartographics Stolen</span>
-              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatLoss(displayedRealization.cartoStolen)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">Exobiology Stolen</span>
-              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatLoss(displayedRealization.organicStolen)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">Carrier Tariffs</span>
-              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatLoss(displayedRealization.carrierTariffLoss)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-              <span className="truncate">NPC Crew Payouts</span>
-              <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
-                {formatLoss(displayedRealization.npcCrewLoss)}
-              </span>
-            </div>
-          </div>
+          <RealizationLossBreakdown
+            realization={displayedRealization}
+            className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#FF7100]/50 text-[11px]"
+          />
         )}
       </div>
     </div>

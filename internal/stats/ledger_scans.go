@@ -11,11 +11,6 @@ import (
 	"planisphere/internal/journal"
 )
 
-type cartoKey struct {
-	systemAddress int64
-	bodyID        int64
-}
-
 type saleDedupKey struct {
 	kind       string
 	timestamp  string
@@ -29,11 +24,11 @@ type ledgerBuilder struct {
 	ledger              *RealizationLedger
 	session             *sessionState
 	wageMatcher         *crewWageMatcher
-	scans               map[cartoKey]*journal.ScanEvent
-	unsoldCarto         map[cartoKey]*scanRecord
+	scans               map[bodyKey]*journal.ScanEvent
+	unsoldCarto         map[bodyKey]*scanRecord
 	unsoldCartoBySystem map[string][]*scanRecord
-	soldScan            map[cartoKey]bool
-	soldMapped          map[cartoKey]bool
+	soldScan            map[bodyKey]bool
+	soldMapped          map[bodyKey]bool
 	unsoldOrganic       []*scanRecord
 	seenSales           map[saleDedupKey]bool
 }
@@ -52,11 +47,11 @@ func (engine *Engine) constructLedger() (*RealizationLedger, error) {
 		},
 		session:             newSessionState(engine.Odyssey, len(events)/16),
 		wageMatcher:         newCrewWageMatcher(events),
-		scans:               make(map[cartoKey]*journal.ScanEvent, len(events)/2),
-		unsoldCarto:         make(map[cartoKey]*scanRecord, len(events)/2),
+		scans:               make(map[bodyKey]*journal.ScanEvent, len(events)/2),
+		unsoldCarto:         make(map[bodyKey]*scanRecord, len(events)/2),
 		unsoldCartoBySystem: make(map[string][]*scanRecord, len(events)/8),
-		soldScan:            make(map[cartoKey]bool, len(events)/2),
-		soldMapped:          make(map[cartoKey]bool, len(events)/8),
+		soldScan:            make(map[bodyKey]bool, len(events)/2),
+		soldMapped:          make(map[bodyKey]bool, len(events)/8),
 		unsoldOrganic:       make([]*scanRecord, 0, 100),
 		seenSales:           make(map[saleDedupKey]bool, len(events)/16),
 	}
@@ -106,7 +101,7 @@ func (builder *ledgerBuilder) recordCartoScan(journalEvent eventRow) {
 	if json.Unmarshal([]byte(journalEvent.rawJSON), &scanEvent) != nil || scanEvent.IsBeltCluster() {
 		return
 	}
-	key := cartoKey{systemAddress: scanEvent.SystemAddress, bodyID: scanEvent.BodyID}
+	key := bodyKey{systemAddress: scanEvent.SystemAddress, bodyID: scanEvent.BodyID}
 	scanCopy := scanEvent
 	builder.scans[key] = &scanCopy
 
@@ -157,7 +152,7 @@ func (builder *ledgerBuilder) recordCartoMapping(journalEvent eventRow) {
 	if json.Unmarshal([]byte(journalEvent.rawJSON), &mappingEvent) != nil {
 		return
 	}
-	key := cartoKey{systemAddress: mappingEvent.SystemAddress, bodyID: mappingEvent.BodyID}
+	key := bodyKey{systemAddress: mappingEvent.SystemAddress, bodyID: mappingEvent.BodyID}
 	parentScan := builder.scans[key]
 	if parentScan == nil || builder.soldMapped[key] {
 		return
@@ -214,7 +209,7 @@ func (builder *ledgerBuilder) recordOrganicScan(journalEvent eventRow) {
 	if json.Unmarshal([]byte(journalEvent.rawJSON), &scanOrganicEvent) != nil || !strings.EqualFold(scanOrganicEvent.ScanType, "Analyse") {
 		return
 	}
-	parentKey := cartoKey{systemAddress: scanOrganicEvent.SystemAddress, bodyID: scanOrganicEvent.Body}
+	parentKey := bodyKey{systemAddress: scanOrganicEvent.SystemAddress, bodyID: scanOrganicEvent.Body}
 	parentScan := builder.scans[parentKey]
 	systemPopulation := builder.session.systemPopulation(scanOrganicEvent.SystemAddress)
 	firstLogged := parentScan != nil && ed.CanExpectFirstLogged(
@@ -339,7 +334,7 @@ func (builder *ledgerBuilder) claimAllPendingCarto(saleTimestamp string) []*scan
 	for normalizedSystem, systemRecords := range builder.unsoldCartoBySystem {
 		remainingRecords := systemRecords[:0]
 		for _, systemRecord := range systemRecords {
-			recordKey := cartoKey{systemAddress: systemRecord.systemAddress, bodyID: systemRecord.bodyID}
+			recordKey := bodyKey{systemAddress: systemRecord.systemAddress, bodyID: systemRecord.bodyID}
 			if builder.unsoldCarto[recordKey] == systemRecord {
 				remainingRecords = append(remainingRecords, systemRecord)
 			}
@@ -354,7 +349,7 @@ func (builder *ledgerBuilder) claimAllPendingCarto(saleTimestamp string) []*scan
 }
 
 func (builder *ledgerBuilder) markCartoRecordSold(record *scanRecord) {
-	key := cartoKey{systemAddress: record.systemAddress, bodyID: record.bodyID}
+	key := bodyKey{systemAddress: record.systemAddress, bodyID: record.bodyID}
 	delete(builder.unsoldCarto, key)
 	if record.hasScan {
 		builder.soldScan[key] = true
