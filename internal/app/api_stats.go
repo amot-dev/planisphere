@@ -2,8 +2,9 @@ package app
 
 import (
 	"database/sql"
-	"encoding/json"
-	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 
 	"planisphere/internal/ed"
 	"planisphere/internal/expedition"
@@ -79,6 +80,63 @@ func (app *App) resolveCareerStart() (string, string) {
 	return computedCareerStart, computedCareerStartGalactic
 }
 
+func buildLiveStatsCacheKey(expeditionRecord expedition.Expedition, filter stats.Filter) string {
+	var keyBuilder strings.Builder
+	keyBuilder.Grow(64)
+	keyBuilder.WriteString(strconv.FormatInt(expeditionRecord.ID, 10))
+	keyBuilder.WriteByte('|')
+	keyBuilder.WriteString(expeditionRecord.StartTimestamp)
+	keyBuilder.WriteByte('|')
+	keyBuilder.WriteString(expeditionRecord.EndTimestamp)
+	keyBuilder.WriteByte('|')
+	if !filter.Enabled {
+		keyBuilder.WriteString("unfiltered")
+		return keyBuilder.String()
+	}
+	keyBuilder.WriteString("filtered:")
+	activeSelections := make([]stats.ModeSelection, 0, len(filter.Modes))
+	for _, selection := range filter.Modes {
+		if selection.Travel || selection.Discovery {
+			activeSelections = append(activeSelections, selection)
+		}
+	}
+	slices.SortFunc(activeSelections, func(left, right stats.ModeSelection) int {
+		if left.ModeID < right.ModeID {
+			return -1
+		}
+		if left.ModeID > right.ModeID {
+			return 1
+		}
+		return 0
+	})
+	wroteFirst := false
+	for index := 0; index < len(activeSelections); index++ {
+		merged := activeSelections[index]
+		for index+1 < len(activeSelections) && activeSelections[index+1].ModeID == merged.ModeID {
+			index++
+			merged.Travel = merged.Travel || activeSelections[index].Travel
+			merged.Discovery = merged.Discovery || activeSelections[index].Discovery
+		}
+		if wroteFirst {
+			keyBuilder.WriteByte(',')
+		}
+		wroteFirst = true
+		keyBuilder.WriteString(strconv.FormatInt(merged.ModeID, 10))
+		keyBuilder.WriteByte(':')
+		if merged.Travel {
+			keyBuilder.WriteByte('t')
+		} else {
+			keyBuilder.WriteByte('-')
+		}
+		if merged.Discovery {
+			keyBuilder.WriteByte('d')
+		} else {
+			keyBuilder.WriteByte('-')
+		}
+	}
+	return keyBuilder.String()
+}
+
 // computeExpeditionLiveStats returns mode-filtered live metrics and realization
 // for a started expedition, utilizing liveStatsCache when valid. Caller must
 // hold app.dbMu.RLock.
@@ -87,8 +145,7 @@ func (app *App) computeExpeditionLiveStats(
 	filter stats.Filter,
 	statsEngine *stats.Engine,
 ) (stats.Metrics, stats.RealizationBreakdown, error) {
-	filterJSON, _ := json.Marshal(filter)
-	cacheKey := fmt.Sprintf("%d|%s|%s|%s", expeditionRecord.ID, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, string(filterJSON))
+	cacheKey := buildLiveStatsCacheKey(expeditionRecord, filter)
 
 	app.liveStatsMu.Lock()
 	cachedEntry, isCached := app.liveStatsCache[cacheKey]

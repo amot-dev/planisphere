@@ -43,7 +43,7 @@ func loadArrivals(queryer db.Queryer, where string, args ...any) ([]Arrival, err
 
 // matches reports whether an arrival is in the row's system (by name,
 // case-insensitive, or by SystemAddress when both are known).
-func matches(rowItem Row, arrival Arrival) bool {
+func matches(rowItem *Row, arrival Arrival) bool {
 	if rowItem.RowType != RowWaypoint || strings.TrimSpace(rowItem.SystemName) == "" {
 		return false
 	}
@@ -54,8 +54,8 @@ func matches(rowItem Row, arrival Arrival) bool {
 }
 
 func firstWaypoint(rows []Row) int {
-	for i, rowItem := range rows {
-		if rowItem.IsWaypoint() {
+	for i := range rows {
+		if rows[i].IsWaypoint() {
 			return i
 		}
 	}
@@ -207,7 +207,7 @@ func resolveArmedExpeditionStart(queryer db.Queryer, expeditionRecord *Expeditio
 		return false, loadError
 	}
 	for _, arrival := range candidateArrivals {
-		if matches((*rows)[firstWaypointIndex], arrival) {
+		if matches(&(*rows)[firstWaypointIndex], arrival) {
 			expeditionRecord.StartTimestamp = arrival.Timestamp
 			break
 		}
@@ -229,15 +229,42 @@ func resolveArmedExpeditionStart(queryer db.Queryer, expeditionRecord *Expeditio
 	return true, nil
 }
 
+func matchesNormalizedWaypoint(rowItem *Row, normalizedRowSystem string, arrivalSystemAddress int64, normalizedArrivalSystem string) bool {
+	if rowItem.RowType != RowWaypoint || normalizedRowSystem == "" {
+		return false
+	}
+	if rowItem.SystemAddress != 0 && arrivalSystemAddress != 0 && rowItem.SystemAddress == arrivalSystemAddress {
+		return true
+	}
+	return normalizedRowSystem == normalizedArrivalSystem
+}
+
+func findMatchingUnvisitedWaypoint(rows []Row, normalizedSystemNames []string, arrivalSystemAddress int64, normalizedArrivalSystem string) int {
+	for i := range rows {
+		if rows[i].VisitedAt == "" && matchesNormalizedWaypoint(&rows[i], normalizedSystemNames[i], arrivalSystemAddress, normalizedArrivalSystem) {
+			return i
+		}
+	}
+	return -1
+}
+
 func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp string, arrivals []Arrival, modeTimeline *modes.Timeline) []Row {
+	normalizedSystemNames := make([]string, len(rows))
+	for i := range rows {
+		if rows[i].RowType == RowWaypoint {
+			normalizedSystemNames[i] = strings.ToLower(strings.TrimSpace(rows[i].SystemName))
+		}
+	}
+
 	// Waypoint #1 is visited at the start timestamp.
 	rows[firstWaypointIndex].VisitedAt = startTimestamp
-	lastSystemName := strings.ToLower(strings.TrimSpace(rows[firstWaypointIndex].SystemName))
+	lastSystemName := normalizedSystemNames[firstWaypointIndex]
 	for _, arrival := range arrivals {
-		if arrival.Timestamp == startTimestamp && matches(rows[firstWaypointIndex], arrival) {
+		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
+		if arrival.Timestamp == startTimestamp && matchesNormalizedWaypoint(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], arrival.SystemAddress, normalizedArrivalSystem) {
 			rows[firstWaypointIndex].VisitEventUID = arrival.UID
-			if arrival.SystemName != "" {
-				lastSystemName = strings.ToLower(strings.TrimSpace(arrival.SystemName))
+			if normalizedArrivalSystem != "" {
+				lastSystemName = normalizedArrivalSystem
 			}
 			break
 		}
@@ -248,18 +275,12 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 		if arrival.Timestamp == startTimestamp && arrival.UID == rows[firstWaypointIndex].VisitEventUID {
 			continue
 		}
-		systemName := strings.ToLower(strings.TrimSpace(arrival.SystemName))
-		if systemName == "" || systemName == lastSystemName {
+		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
+		if normalizedArrivalSystem == "" || normalizedArrivalSystem == lastSystemName {
 			continue // not an actual change of system
 		}
-		lastSystemName = systemName
-		targetIndex := -1
-		for i, rowItem := range rows {
-			if rowItem.IsWaypoint() && rowItem.VisitedAt == "" && matches(rowItem, arrival) {
-				targetIndex = i
-				break
-			}
-		}
+		lastSystemName = normalizedArrivalSystem
+		targetIndex := findMatchingUnvisitedWaypoint(rows, normalizedSystemNames, arrival.SystemAddress, normalizedArrivalSystem)
 		if targetIndex < 0 {
 			continue
 		}
@@ -280,6 +301,7 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 				destinationIndex = currentIndex // removing target shifts current up by one
 			}
 			rows = moveTo(rows, targetIndex, destinationIndex)
+			normalizedSystemNames = moveTo(normalizedSystemNames, targetIndex, destinationIndex)
 			targetIndex = destinationIndex
 		}
 		currentIndex = targetIndex

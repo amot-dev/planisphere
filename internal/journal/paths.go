@@ -5,10 +5,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 )
 
-var vdfPathRe = regexp.MustCompile(`"path"\s+"([^"]+)"`)
+var (
+	vdfPathRe = regexp.MustCompile(`"path"\s+"([^"]+)"`)
+
+	defaultJournalDirsOnce   sync.Once
+	cachedDefaultJournalDirs []string
+
+	defaultJournalDirOnce   sync.Once
+	cachedDefaultJournalDir string
+)
 
 // steamLibraryRoots discovers Steam installation and library folders dynamically
 // from environment variables, XDG directories, and Steam's libraryfolders.vdf.
@@ -62,8 +72,15 @@ func steamLibraryRoots(home string) []string {
 }
 
 // DefaultJournalDirs returns candidate default journal directories for the
-// current OS, discovered dynamically from OS environment and Steam library metadata.
+// current OS, discovered once per process from OS environment and Steam library metadata.
 func DefaultJournalDirs() []string {
+	defaultJournalDirsOnce.Do(func() {
+		cachedDefaultJournalDirs = discoverDefaultJournalDirs()
+	})
+	return slices.Clone(cachedDefaultJournalDirs)
+}
+
+func discoverDefaultJournalDirs() []string {
 	home, _ := os.UserHomeDir()
 	configDir, _ := os.UserConfigDir()
 	cacheDir, _ := os.UserCacheDir()
@@ -113,7 +130,15 @@ func DefaultJournalDirs() []string {
 
 // DefaultJournalDir returns the first existing default directory that contains
 // journal files (or exists as a directory), or the primary candidate when none exists.
+// Discovery is cached once per process.
 func DefaultJournalDir() string {
+	defaultJournalDirOnce.Do(func() {
+		cachedDefaultJournalDir = discoverDefaultJournalDir()
+	})
+	return cachedDefaultJournalDir
+}
+
+func discoverDefaultJournalDir() string {
 	dirs := DefaultJournalDirs()
 	for _, dirPath := range dirs {
 		if matches, globError := filepath.Glob(filepath.Join(dirPath, JournalGlob)); globError == nil && len(matches) > 0 {

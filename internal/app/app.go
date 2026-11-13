@@ -396,7 +396,7 @@ func (app *App) getError() string {
 }
 
 func (app *App) changed(scope string, expeditionID int64) {
-	if scope == "modes" || scope == "journal" || scope == "plan" {
+	if scope == "modes" || scope == "journal" {
 		app.invalidateLiveStatsCache()
 	}
 	app.emit(EventDataChanged, DataChanged{Scope: scope, ExpeditionID: expeditionID})

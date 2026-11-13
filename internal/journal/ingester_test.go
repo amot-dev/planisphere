@@ -379,3 +379,81 @@ func TestArchiveStatusPropagatesDisabledCommanderQueryError(t *testing.T) {
 		t.Fatalf("expected error wrapping check disabled commanders, got %v", statusError)
 	}
 }
+
+func TestListCommandersEventCountCachingAndBackfillInvalidation(t *testing.T) {
+	conn, openError := db.Open(":memory:")
+	if openError != nil {
+		t.Fatal(openError)
+	}
+	defer conn.Close()
+
+	fileName := "Journal.2026-04-01T120000.01.log"
+	temporaryDirectory := t.TempDir()
+	logFilePath := filepath.Join(temporaryDirectory, fileName)
+	earlyLine := `{"timestamp":"2026-04-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`
+	loadLine := `{"timestamp":"2026-04-01T12:01:00Z","event":"LoadGame","Commander":"CmdrAlpha","FID":"F10","Ship":"mandalay"}`
+	if writeError := os.WriteFile(logFilePath, []byte(earlyLine+"\n"+loadLine+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
+	}
+
+	earlyEvent, _, parseEarlyError := journal.ParseLine([]byte(earlyLine), fileName)
+	if parseEarlyError != nil {
+		t.Fatal(parseEarlyError)
+	}
+	loadEvent, _, parseLoadError := journal.ParseLine([]byte(loadLine), fileName)
+	if parseLoadError != nil {
+		t.Fatal(parseLoadError)
+	}
+
+	if _, execError := conn.Exec(
+		`INSERT INTO commanders (name, fid, enabled, first_seen, last_seen)
+		 VALUES ('CmdrAlpha', 'F10', 1, '2026-04-01T12:00:00Z', '2026-04-01T12:01:00Z'),
+		        ('CmdrBeta', 'F20', 1, '2026-04-02T12:00:00Z', '2026-04-02T12:00:00Z')`,
+	); execError != nil {
+		t.Fatal(execError)
+	}
+	if _, execError := conn.Exec(
+		`INSERT INTO ingested_journals (file_name, file_path, byte_offset, updated_at) VALUES (?, ?, 0, '2026-04-01T12:01:00Z')`,
+		fileName, logFilePath,
+	); execError != nil {
+		t.Fatal(execError)
+	}
+	if _, execError := conn.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
+		 VALUES (?, '2026-04-01T12:00:00Z', 'Location', 'Sol', 1001, NULL, ?, '{}', '2026-04-01T12:01:00Z'),
+		        (?, '2026-04-01T12:01:00Z', 'LoadGame', '', 0, 'cmdralpha', ?, '{}', '2026-04-01T12:01:00Z'),
+		        ('uid-beta', '2026-04-02T12:00:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBeta', 'other.log', '{}', '2026-04-02T12:00:00Z')`,
+		earlyEvent.UID, fileName, loadEvent.UID, fileName,
+	); execError != nil {
+		t.Fatal(execError)
+	}
+
+	assertCounts := func(expectedAlpha, expectedBeta int) {
+		t.Helper()
+		commanders, listError := journal.ListCommanders(conn)
+		if listError != nil {
+			t.Fatalf("ListCommanders: %v", listError)
+		}
+		if len(commanders) != 2 {
+			t.Fatalf("expected 2 commanders, got %d", len(commanders))
+		}
+		if commanders[0].Name != "CmdrAlpha" || commanders[0].EventCount != expectedAlpha {
+			t.Fatalf("expected CmdrAlpha eventCount=%d, got %+v", expectedAlpha, commanders[0])
+		}
+		if commanders[1].Name != "CmdrBeta" || commanders[1].EventCount != expectedBeta {
+			t.Fatalf("expected CmdrBeta eventCount=%d, got %+v", expectedBeta, commanders[1])
+		}
+	}
+
+	// Populate and hit the commander counts cache before backfill.
+	assertCounts(1, 1)
+	assertCounts(1, 1)
+
+	ingester := journal.NewIngester(conn)
+	if _, ingestError := ingester.IngestFile(logFilePath); ingestError != nil {
+		t.Fatalf("IngestFile: %v", ingestError)
+	}
+
+	// MAX(id) did not increase (existing UIDs), so cache invalidation must surface the backfill.
+	assertCounts(2, 1)
+}

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"planisphere/internal/db"
+	"planisphere/internal/expedition"
+	"planisphere/internal/stats"
 )
 
 func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testingContext *testing.T) {
@@ -91,6 +93,89 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 	}
 	if ingestStatus.EventsStored != 2 || ingestStatus.FilesTracked != 1 {
 		testingContext.Fatalf("expected 2 stored events across 1 tracked file, got events=%d files=%d", ingestStatus.EventsStored, ingestStatus.FilesTracked)
+	}
+}
+
+func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	createdExpedition, createError := testApp.CreateExpedition("Cache Key Test", "")
+	if createError != nil {
+		testingContext.Fatalf("CreateExpedition: %v", createError)
+	}
+	systemName := "Sol"
+	planView, planError := testApp.GetPlan(createdExpedition.ID)
+	if planError != nil || len(planView.Rows) == 0 {
+		testingContext.Fatalf("GetPlan: len=%d err=%v", len(planView.Rows), planError)
+	}
+	originRowID := planView.Rows[0].Row.ID
+	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &systemName}); updateError != nil {
+		testingContext.Fatalf("UpdateRow SystemName: %v", updateError)
+	}
+	if startError := testApp.StartExpedition(createdExpedition.ID, "2026-01-01T00:00:00Z"); startError != nil {
+		testingContext.Fatalf("StartExpedition: %v", startError)
+	}
+
+	testApp.warmInitialStats()
+
+	testApp.liveStatsMu.Lock()
+	warmedCacheSize := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+	if warmedCacheSize != 1 {
+		testingContext.Fatalf("expected 1 cached entry after warmInitialStats, got %d", warmedCacheSize)
+	}
+
+	for _, filterVariant := range []stats.Filter{
+		{Enabled: false, Modes: []stats.ModeSelection{}},
+		{Enabled: false, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}}},
+	} {
+		if _, statsError := testApp.GetSidebarStats(createdExpedition.ID, filterVariant); statsError != nil {
+			testingContext.Fatalf("GetSidebarStats unfiltered: %v", statsError)
+		}
+	}
+	testApp.liveStatsMu.Lock()
+	afterUnfilteredSize := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+	if afterUnfilteredSize != 1 {
+		testingContext.Fatalf("expected unfiltered variants to reuse warmed cache entry, got %d entries", afterUnfilteredSize)
+	}
+
+	for _, filterVariant := range []stats.Filter{
+		{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}, {ModeID: 2, Discovery: true}}},
+		{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 99, Travel: false, Discovery: false}, {ModeID: 2, Discovery: true}, {ModeID: 1, Travel: true}}},
+	} {
+		if _, statsError := testApp.GetSidebarStats(createdExpedition.ID, filterVariant); statsError != nil {
+			testingContext.Fatalf("GetSidebarStats filtered: %v", statsError)
+		}
+	}
+	testApp.liveStatsMu.Lock()
+	afterFilteredSize := len(testApp.liveStatsCache)
+	generationBeforeCosmetic := testApp.liveStatsGen
+	testApp.liveStatsMu.Unlock()
+	if afterFilteredSize != 2 {
+		testingContext.Fatalf("expected canonical filtered variants to share 1 entry (total 2), got %d entries", afterFilteredSize)
+	}
+
+	noteText := "Updated scenic notes"
+	poiText := "Sol Origin"
+	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, Notes: &noteText, POIName: &poiText}); updateError != nil {
+		testingContext.Fatalf("UpdateRow cosmetic: %v", updateError)
+	}
+	testApp.liveStatsMu.Lock()
+	sizeAfterCosmetic := len(testApp.liveStatsCache)
+	generationAfterCosmetic := testApp.liveStatsGen
+	testApp.liveStatsMu.Unlock()
+	if sizeAfterCosmetic != 2 || generationAfterCosmetic != generationBeforeCosmetic {
+		testingContext.Fatalf("expected cosmetic plan edit to preserve cache (size=%d gen=%d vs %d)", sizeAfterCosmetic, generationAfterCosmetic, generationBeforeCosmetic)
+	}
+
+	if completeError := testApp.CompleteExpedition(createdExpedition.ID); completeError != nil {
+		testingContext.Fatalf("CompleteExpedition: %v", completeError)
+	}
+	testApp.liveStatsMu.Lock()
+	sizeAfterComplete := len(testApp.liveStatsCache)
+	testApp.liveStatsMu.Unlock()
+	if sizeAfterComplete != 0 {
+		testingContext.Fatalf("expected CompleteExpedition to invalidate liveStatsCache, got %d entries", sizeAfterComplete)
 	}
 }
 

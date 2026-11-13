@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"hash"
 	"io"
 	"strconv"
@@ -51,14 +52,15 @@ func healDowngradedJournalIngest(dbConn *sql.DB) error {
 		return getWatermarkError
 	}
 	if watermark != "" {
-		var downgradedJournalCount int
-		if countError := dbConn.QueryRow(`SELECT COUNT(*) FROM ingested_journals WHERE updated_at > ?`, watermark).Scan(&downgradedJournalCount); countError != nil {
-			return countError
+		resetResult, resetError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0 WHERE updated_at > ?`, watermark)
+		if resetError != nil {
+			return fmt.Errorf("reset downgraded journal offsets: %w", resetError)
 		}
-		if downgradedJournalCount > 0 {
-			if _, resetError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0 WHERE updated_at > ?`, watermark); resetError != nil {
-				return resetError
-			}
+		rowsAffected, rowsError := resetResult.RowsAffected()
+		if rowsError != nil {
+			return fmt.Errorf("read healed journal count: %w", rowsError)
+		}
+		if rowsAffected > 0 {
 			if dedupError := migrateSellOrganicUIDsV8(dbConn); dedupError != nil {
 				return dedupError
 			}
@@ -121,6 +123,11 @@ func computeSellOrganicCanonicalUID(hasher hash.Hash, timestamp string, rawJSON 
 	return hex.EncodeToString(hasher.Sum(digestBuffer[:0])), true
 }
 
+type pendingSellOrganicUIDUpdate struct {
+	id           int64
+	canonicalUID string
+}
+
 func migrateSellOrganicUIDsV8(dbConn *sql.DB) error {
 	rows, queryError := dbConn.Query(`SELECT id, event_uid, timestamp, raw_json FROM journal_events WHERE event = 'SellOrganicData' ORDER BY id ASC`)
 	if queryError != nil {
@@ -128,13 +135,9 @@ func migrateSellOrganicUIDsV8(dbConn *sql.DB) error {
 	}
 	defer rows.Close()
 
-	type pendingUIDUpdate struct {
-		id           int64
-		canonicalUID string
-	}
 	seenUIDs := make(map[string]bool)
 	var duplicateRowIDs []int64
-	var pendingUpdates []pendingUIDUpdate
+	var pendingUpdates []pendingSellOrganicUIDUpdate
 	hasher := sha256.New()
 
 	for rows.Next() {
@@ -157,7 +160,7 @@ func migrateSellOrganicUIDsV8(dbConn *sql.DB) error {
 		}
 		seenUIDs[canonicalUID] = true
 		if row.eventUID != canonicalUID {
-			pendingUpdates = append(pendingUpdates, pendingUIDUpdate{id: row.id, canonicalUID: canonicalUID})
+			pendingUpdates = append(pendingUpdates, pendingSellOrganicUIDUpdate{id: row.id, canonicalUID: canonicalUID})
 		}
 	}
 	if iterationError := rows.Err(); iterationError != nil {
@@ -166,7 +169,13 @@ func migrateSellOrganicUIDsV8(dbConn *sql.DB) error {
 	if closeError := rows.Close(); closeError != nil {
 		return closeError
 	}
+	if len(duplicateRowIDs) == 0 && len(pendingUpdates) == 0 {
+		return nil
+	}
+	return applySellOrganicUIDFixes(dbConn, duplicateRowIDs, pendingUpdates)
+}
 
+func applySellOrganicUIDFixes(dbConn *sql.DB, duplicateRowIDs []int64, pendingUpdates []pendingSellOrganicUIDUpdate) error {
 	return WithTx(dbConn, func(transaction *sql.Tx) error {
 		// Delete duplicate rows first so any duplicate that already holds the
 		// canonical UID is removed before updating the surviving older row.

@@ -4,11 +4,37 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
+)
+
+var (
+	eddiscoveryPathsOnce     sync.Once
+	cachedDiscoveredDBPath   string
+	cachedDefaultEDDBPath    string
 )
 
 // DiscoverDBPath dynamically locates an existing EDDiscovery SQLite database
 // (EDDUser.sqlite) using standard operating system data and configuration directories.
+// Discovery is cached once per process.
 func DiscoverDBPath() string {
+	eddiscoveryPathsOnce.Do(resolveEDDiscoveryPaths)
+	return cachedDiscoveredDBPath
+}
+
+// DefaultDBPath returns an existing EDDUser.sqlite path if discovered, or the
+// standard operating-system-specific default path where EDDiscovery stores EDDUser.sqlite.
+// Discovery is cached once per process.
+func DefaultDBPath() string {
+	eddiscoveryPathsOnce.Do(resolveEDDiscoveryPaths)
+	return cachedDefaultEDDBPath
+}
+
+func resolveEDDiscoveryPaths() {
+	cachedDiscoveredDBPath = discoverEDDiscoveryDBPath()
+	cachedDefaultEDDBPath = computeDefaultEDDiscoveryDBPath(cachedDiscoveredDBPath)
+}
+
+func discoverEDDiscoveryDBPath() string {
 	homeDir, _ := os.UserHomeDir()
 	configDir, _ := os.UserConfigDir()
 	cacheDir, _ := os.UserCacheDir()
@@ -32,10 +58,8 @@ func DiscoverDBPath() string {
 	return ""
 }
 
-// DefaultDBPath returns an existing EDDUser.sqlite path if discovered, or the
-// standard operating-system-specific default path where EDDiscovery stores EDDUser.sqlite.
-func DefaultDBPath() string {
-	if discoveredPath := DiscoverDBPath(); discoveredPath != "" {
+func computeDefaultEDDiscoveryDBPath(discoveredPath string) string {
+	if discoveredPath != "" {
 		return discoveredPath
 	}
 	homeDir, _ := os.UserHomeDir()

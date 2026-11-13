@@ -92,6 +92,7 @@ func (app *App) DeleteExpedition(id int64) error {
 	if app.activeExpeditionID() == id {
 		_ = db.SetSetting(app.db, settingActiveExp, "")
 	}
+	app.invalidateLiveStatsCache()
 	app.changed("plan", id)
 	return nil
 }
@@ -296,6 +297,7 @@ func (app *App) DeleteRow(rowID int64) error {
 		return err
 	}
 	app.reevaluate(expeditionID)
+	app.invalidateLiveStatsCache()
 	app.changed("plan", expeditionID)
 	return nil
 }
@@ -429,6 +431,7 @@ func (app *App) lifecycle(expeditionID int64, action func(transaction *sql.Tx) e
 		return err
 	}
 	app.reevaluate(expeditionID)
+	app.invalidateLiveStatsCache()
 	app.changed("plan", expeditionID)
 	return nil
 }

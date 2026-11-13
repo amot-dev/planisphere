@@ -390,26 +390,28 @@ func indexOf(rows []Row, targetRowID int64) int {
 	return -1
 }
 
-// moveTo moves rows[fromIndex] so that it ends up at index toIndex.
-func moveTo(rows []Row, fromIndex, toIndex int) []Row {
-	if fromIndex < 0 || fromIndex >= len(rows) {
-		return rows
+// moveTo moves items[fromIndex] in place so that it ends up at index toIndex.
+func moveTo[T any](items []T, fromIndex, toIndex int) []T {
+	if fromIndex < 0 || fromIndex >= len(items) {
+		return items
 	}
 	if toIndex < 0 {
 		toIndex = 0
 	}
-	if toIndex >= len(rows) {
-		toIndex = len(rows) - 1
+	if toIndex >= len(items) {
+		toIndex = len(items) - 1
 	}
 	if fromIndex == toIndex {
-		return rows
+		return items
 	}
-	targetItem := rows[fromIndex]
-	reordered := make([]Row, 0, len(rows))
-	reordered = append(reordered, rows[:fromIndex]...)
-	reordered = append(reordered, rows[fromIndex+1:]...)
-	reordered = append(reordered[:toIndex], append([]Row{targetItem}, reordered[toIndex:]...)...)
-	return reordered
+	targetItem := items[fromIndex]
+	if fromIndex < toIndex {
+		copy(items[fromIndex:toIndex], items[fromIndex+1:toIndex+1])
+	} else {
+		copy(items[toIndex+1:fromIndex+1], items[toIndex:fromIndex])
+	}
+	items[toIndex] = targetItem
+	return items
 }
 
 func touch(queryer db.Queryer, expeditionID int64) error {

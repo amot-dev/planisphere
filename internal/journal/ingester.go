@@ -373,6 +373,7 @@ func (ingester *Ingester) IngestFile(path string) (Result, error) {
 	if txError != nil {
 		return result, txError
 	}
+	InvalidateCommanderCountsCache()
 	result.FilesUpdated = 1
 	return result, nil
 }
