@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowseJournalDir, SetJournalDir } from '../../../wailsjs/go/app/App'
 import { app } from '../../../wailsjs/go/models'
 
@@ -23,6 +23,10 @@ export function JournalDirectorySection({
 }: JournalDirectorySectionProps) {
   const [directoryPath, setDirectoryPath] = useState(settings?.journalDir ?? '')
 
+  useEffect(() => {
+    setDirectoryPath(settings?.journalDir ?? '')
+  }, [settings?.journalDir])
+
   async function handleBrowse() {
     try {
       const pickedDirectory = await BrowseJournalDir()
@@ -35,7 +39,8 @@ export function JournalDirectorySection({
   async function handleSaveDirectory() {
     onSetError('')
     try {
-      await SetJournalDir(directoryPath)
+      const updatedSettings = await SetJournalDir(directoryPath)
+      setDirectoryPath(updatedSettings.journalDir)
       onRefresh()
     } catch (saveError) {
       onSetError(String(saveError))
@@ -45,8 +50,8 @@ export function JournalDirectorySection({
   async function handleResetDefaultDirectory() {
     onSetError('')
     try {
-      await SetJournalDir('')
-      setDirectoryPath(settings?.defaultJournalDir ?? '')
+      const updatedSettings = await SetJournalDir('')
+      setDirectoryPath(updatedSettings.journalDir)
       onRefresh()
     } catch (resetError) {
       onSetError(String(resetError))

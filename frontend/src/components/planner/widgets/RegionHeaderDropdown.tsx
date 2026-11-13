@@ -32,9 +32,21 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
 
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     GetRegionOptions(expeditionId, rowId, true)
-      .then(setRegionOptions)
-      .catch(console.error)
+      .then((options) => {
+        if (!cancelled) {
+          setRegionOptions(options)
+        }
+      })
+      .catch((optionsError) => {
+        if (!cancelled) {
+          console.error('Failed to load region options:', optionsError)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
   }, [open, expeditionId, rowId])
 
   if (locked) {

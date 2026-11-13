@@ -21,6 +21,8 @@ import {
   buildOptimisticMovedRowPlan,
   buildPlannerTableItems,
   computePlannerTableDimensions,
+  executePlanMutation,
+  type PlanMutationBehaviorOptions,
   type PlannerRowDraft,
 } from './plannerPlanHelpers'
 import { PlannerRouteTable } from './PlannerRouteTable'
@@ -35,6 +37,7 @@ import { useWaypointDetails } from './useWaypointDetails'
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
+  archiveRevision?: string
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
   onOpenStartModal: () => void
   onRefreshPlan: () => void
@@ -50,6 +53,7 @@ export interface ExpeditionPlannerProps {
  */
 export function ExpeditionPlanner({
   plan,
+  archiveRevision = '',
   onPlanOptimisticUpdate,
   onOpenStartModal,
   onRefreshPlan,
@@ -62,6 +66,7 @@ export function ExpeditionPlanner({
   const { expandedRowIds, detailsById, loadingDetails, toggleExpand } = useWaypointDetails(
     plan,
     isPlanning,
+    archiveRevision,
   )
 
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
@@ -155,16 +160,31 @@ export function ExpeditionPlanner({
     return maxIndex
   }, [plan, isPlanning])
 
+  const runPlanMutation = useCallback(
+    (
+      busyMessage: string,
+      errorContext: string,
+      mutationAction: () => Promise<unknown>,
+      options?: PlanMutationBehaviorOptions,
+    ) =>
+      executePlanMutation(
+        busyMessage,
+        errorContext,
+        mutationAction,
+        { onBusyChange, onPlanOptimisticUpdate, onRefreshPlan },
+        options,
+      ),
+    [onBusyChange, onPlanOptimisticUpdate, onRefreshPlan],
+  )
+
   async function setFcArrived(rowId: number, arrived: boolean) {
     if (!plan) return
-    onPlanOptimisticUpdate(buildOptimisticFcArrivedPlan(plan, rowId, arrived))
-    onBusyChange('UPDATING CARRIER ARRIVAL')
-    try {
-      await UpdateRow(expedition.RowPatch.createFrom({ id: rowId, fcArrived: arrived }))
-      onRefreshPlan()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'UPDATING CARRIER ARRIVAL',
+      'Failed to update carrier arrival',
+      () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, fcArrived: arrived })),
+      { optimisticPlan: buildOptimisticFcArrivedPlan(plan, rowId, arrived), onSuccess: onRefreshPlan },
+    )
   }
 
   const carrierRoute = useCarrierRoute({
@@ -215,12 +235,12 @@ export function ExpeditionPlanner({
     value: string,
   ) {
     if ((row[field] ?? '') === value) return
-    onBusyChange('UPDATING WAYPOINT')
-    try {
-      await UpdateRow(expedition.RowPatch.createFrom({ id: row.id, [field]: value }))
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'UPDATING WAYPOINT',
+      `Failed to update waypoint ${field}`,
+      () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, [field]: value })),
+      { rollbackOnError: true },
+    )
   }
 
   async function toggleFcStop(row: expedition.Row) {
@@ -237,72 +257,62 @@ export function ExpeditionPlanner({
       }
     }
     const nextFcStop = !row.fcStop
-    onPlanOptimisticUpdate(buildOptimisticFcStopTogglePlan(plan, row, nextFcStop))
-    onBusyChange('UPDATING FC STOP')
-    try {
-      await UpdateRow(expedition.RowPatch.createFrom({ id: row.id, fcStop: nextFcStop }))
-      onRefreshPlan()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'UPDATING FC STOP',
+      'Failed to toggle fleet carrier stop',
+      () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, fcStop: nextFcStop })),
+      { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop), onSuccess: onRefreshPlan },
+    )
   }
 
   async function handleLegModeChange(rowId: number, modeId: number) {
     if (!plan) return
-    onPlanOptimisticUpdate(buildOptimisticLegModePlan(plan, rowId, modeId))
-    onBusyChange('UPDATING LEG MODE')
-    try {
-      await SetLegMode(rowId, modeId)
-      onRefreshAll()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'UPDATING LEG MODE',
+      'Failed to update leg flight mode',
+      () => SetLegMode(rowId, modeId),
+      { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId), onSuccess: onRefreshAll },
+    )
   }
 
   async function handleActiveLegModeChange(modeId: number) {
     if (!plan) return
-    onPlanOptimisticUpdate(buildOptimisticActiveLegModePlan(plan, modeId))
-    onBusyChange('UPDATING ACTIVE LEG MODE')
-    try {
-      await SetActiveLegMode(plan.expedition.id, modeId)
-      onRefreshAll()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'UPDATING ACTIVE LEG MODE',
+      'Failed to update active leg flight mode',
+      () => SetActiveLegMode(plan.expedition.id, modeId),
+      { optimisticPlan: buildOptimisticActiveLegModePlan(plan, modeId), onSuccess: onRefreshAll },
+    )
   }
 
   async function changeRegion(rowId: number, regionId: number) {
-    onBusyChange('UPDATING GALACTIC REGION')
-    try {
-      await UpdateRow(expedition.RowPatch.createFrom({ id: rowId, regionId }))
-      onRefreshPlan()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'UPDATING GALACTIC REGION',
+      'Failed to update galactic region',
+      () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, regionId })),
+      { onSuccess: onRefreshPlan, rollbackOnError: true },
+    )
   }
 
   async function handleInsert(afterRowId: number, rowType: 'waypoint' | 'region') {
     if (!plan) return
     setInsertMenuAfterId(null)
-    onBusyChange(rowType === 'region' ? 'ADDING REGION HEADER' : 'ADDING WAYPOINT')
-    try {
-      await AddRow(plan.expedition.id, afterRowId, rowType, 18)
-      onRefreshPlan()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      rowType === 'region' ? 'ADDING REGION HEADER' : 'ADDING WAYPOINT',
+      `Failed to insert ${rowType}`,
+      () => AddRow(plan.expedition.id, afterRowId, rowType, 18),
+      { onSuccess: onRefreshPlan, rollbackOnError: true },
+    )
   }
 
   async function handleDeleteRow(rowId: number) {
     if (!plan) return
-    onPlanOptimisticUpdate(buildOptimisticDeletedRowPlan(plan, rowId))
-    onBusyChange('REMOVING ROW')
-    try {
-      await DeleteRow(rowId)
-      onRefreshPlan()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(
+      'REMOVING ROW',
+      'Failed to delete row',
+      () => DeleteRow(rowId),
+      { optimisticPlan: buildOptimisticDeletedRowPlan(plan, rowId), onSuccess: onRefreshPlan },
+    )
   }
 
   const handleMoveRow = useCallback(
@@ -314,26 +324,21 @@ export function ExpeditionPlanner({
       }
       if (fromIndex === toIndex) return
 
-      onPlanOptimisticUpdate(buildOptimisticMovedRowPlan(plan, fromIndex, toIndex))
-      onBusyChange('REORDERING ROUTE')
-      try {
-        await MoveRow(rowId, toIndex)
-        onRefreshPlan()
-      } finally {
-        onBusyChange(null)
-      }
+      await runPlanMutation(
+        'REORDERING ROUTE',
+        'Failed to reorder route row',
+        () => MoveRow(rowId, toIndex),
+        { optimisticPlan: buildOptimisticMovedRowPlan(plan, fromIndex, toIndex), onSuccess: onRefreshPlan },
+      )
     },
-    [lastVisitedIndex, onBusyChange, onPlanOptimisticUpdate, onRefreshPlan, plan],
+    [lastVisitedIndex, onRefreshPlan, plan, runPlanMutation],
   )
 
   async function handleLifecycleAction(label: string, actionFunction: () => Promise<void>) {
-    onBusyChange(label)
-    try {
-      await actionFunction()
-      onRefreshAll()
-    } finally {
-      onBusyChange(null)
-    }
+    await runPlanMutation(label, 'Failed to update expedition lifecycle state', actionFunction, {
+      onSuccess: onRefreshAll,
+      rollbackOnError: true,
+    })
   }
 
   const { visibleColumnCount, tableMinWidthPixels } = computePlannerTableDimensions(
@@ -479,6 +484,7 @@ export function ExpeditionPlanner({
       {/* Bottom Panel: Active Carrier Route (Spansh or Manual Mode) */}
       {carrierRoute.activeCarrierRoute && (
         <CarrierRouteBottomPanel
+          key={currentExpedition.id}
           route={carrierRoute.activeCarrierRoute}
           jumpIndex={carrierRoute.carrierJumpIndex}
           manualMode={carrierRoute.isManualCarrierRoute}

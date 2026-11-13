@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   BrowseEDDiscoveryDB,
   ImportEDDiscoveryHistory,
@@ -42,6 +42,10 @@ export function EDDiscoveryImportSection({
   const [eddPath, setEddPath] = useState(settings?.edDiscoveryDbPath ?? '')
   const [eddBusy, setEddBusy] = useState(false)
   const [eddStatus, setEddStatus] = useState('')
+
+  useEffect(() => {
+    setEddPath(settings?.edDiscoveryDbPath ?? '')
+  }, [settings?.edDiscoveryDbPath])
 
   async function handleBrowseEdd() {
     try {

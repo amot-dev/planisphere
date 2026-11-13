@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshGEC, SetOnlineLookups } from '../../../wailsjs/go/app/App'
 import { app } from '../../../wailsjs/go/models'
 import { SquareCheckbox } from '../common/SquareCheckbox'
@@ -25,10 +25,24 @@ export function OnlineServicesSection({
   const [online, setOnline] = useState(settings?.onlineLookups ?? true)
   const [gecBusy, setGecBusy] = useState(false)
 
+  const configuredOnline = settings?.onlineLookups
+  useEffect(() => {
+    if (configuredOnline !== undefined) {
+      setOnline(configuredOnline)
+    }
+  }, [configuredOnline])
+
   async function handleToggleOnline(nextEnabled: boolean) {
+    onSetError('')
     setOnline(nextEnabled)
-    await SetOnlineLookups(nextEnabled)
-    onRefresh()
+    try {
+      const updatedSettings = await SetOnlineLookups(nextEnabled)
+      setOnline(updatedSettings.onlineLookups)
+      onRefresh()
+    } catch (toggleError) {
+      setOnline(settings?.onlineLookups ?? !nextEnabled)
+      onSetError(String(toggleError))
+    }
   }
 
   async function handleRefreshGec() {

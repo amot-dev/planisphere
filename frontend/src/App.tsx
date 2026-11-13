@@ -75,6 +75,10 @@ export default function App() {
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
 
+  const archiveRevision = ingest
+    ? `${ingest.eventsStored}:${ingest.firstEventAt}:${ingest.lastEventAt}`
+    : ''
+
   if (booting) {
     return <TerminalBootScreen />
   }
@@ -127,6 +131,7 @@ export default function App() {
         <ErrorBoundary fallbackTitle="Expedition Planner Error">
           <ExpeditionPlanner
             plan={plan}
+            archiveRevision={archiveRevision}
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
             onRefreshPlan={handleRefreshPlan}

@@ -192,6 +192,12 @@ export function useBackendSync() {
       if (chosenId > 0) {
         setActiveExpeditionId(chosenId)
         activeExpeditionIdRef.current = chosenId
+      } else {
+        setActiveExpeditionId(0)
+        activeExpeditionIdRef.current = 0
+        setPlan(null)
+        setSidebarStats(null)
+        setStatsLoading(false)
       }
       return { settingsData, chosenId }
     } catch (coreStateError) {

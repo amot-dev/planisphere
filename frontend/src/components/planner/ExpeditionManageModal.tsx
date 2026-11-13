@@ -36,26 +36,52 @@ export function ExpeditionManageModal({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
 
   async function handleCreate() {
     if (!name.trim()) return
-    const created = await CreateExpedition(name.trim(), description.trim())
-    setName('')
-    setDescription('')
-    onSelect(created.id)
-    onClose()
+    setErrorMessage('')
+    try {
+      const created = await CreateExpedition(name.trim(), description.trim())
+      setName('')
+      setDescription('')
+      onSelect(created.id)
+      onClose()
+    } catch (createError) {
+      setErrorMessage(String(createError))
+    }
   }
 
   async function handleSaveEdit(id: number) {
-    await UpdateExpedition(id, editName, editDescription)
-    setEditingId(null)
-    onRefresh()
+    setErrorMessage('')
+    try {
+      await UpdateExpedition(id, editName, editDescription)
+      setEditingId(null)
+      onRefresh()
+    } catch (updateError) {
+      setErrorMessage(String(updateError))
+    }
   }
 
   async function handleClone(id: number) {
-    const cloned = await CloneExpedition(id)
-    onSelect(cloned.id)
-    onClose()
+    setErrorMessage('')
+    try {
+      const cloned = await CloneExpedition(id)
+      onSelect(cloned.id)
+      onClose()
+    } catch (cloneError) {
+      setErrorMessage(String(cloneError))
+    }
+  }
+
+  async function handleDelete(expeditionId: number) {
+    setErrorMessage('')
+    try {
+      await DeleteExpedition(expeditionId)
+      onRefresh()
+    } catch (deleteError) {
+      setErrorMessage(String(deleteError))
+    }
   }
 
   return (
@@ -64,6 +90,11 @@ export function ExpeditionManageModal({
       subtitle="Create a new expedition or switch between saved expedition plans"
       onClose={onClose}
     >
+      {errorMessage && (
+        <div className="p-2.5 border border-[#ff3b2f] bg-[#190909] text-[#ff4d3d]">
+          {errorMessage}
+        </div>
+      )}
       <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
         <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
           + Create New Expedition Plan
@@ -169,7 +200,7 @@ export function ExpeditionManageModal({
                   {expeditions.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => DeleteExpedition(expeditionItem.id).then(onRefresh)}
+                      onClick={() => handleDelete(expeditionItem.id)}
                       className="ed-btn-danger"
                     >
                       Delete

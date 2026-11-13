@@ -37,6 +37,16 @@ export function FlightModesSection({
     }
   }
 
+  async function handleDeleteMode(modeId: number) {
+    onSetError('')
+    try {
+      await DeleteMode(modeId)
+      onRefresh()
+    } catch (deleteError) {
+      onSetError(String(deleteError))
+    }
+  }
+
   return (
     <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2.5">
       <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
@@ -79,7 +89,7 @@ export function FlightModesSection({
             {!modeItem.isDefault && (
               <button
                 type="button"
-                onClick={() => DeleteMode(modeItem.id).then(onRefresh)}
+                onClick={() => handleDeleteMode(modeItem.id)}
                 className="ed-btn-danger"
               >
                 Delete

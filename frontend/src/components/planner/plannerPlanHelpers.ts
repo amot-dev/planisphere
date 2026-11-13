@@ -205,7 +205,7 @@ export function buildOptimisticDeletedRowPlan(
 
 /**
  * buildOptimisticMovedRowPlan returns an optimistic PlanView moving a row to a
- * new index and renumbering waypoint sequence numbers and sort orders.
+ * new index and renumbering waypoint sequence numbers and row positions.
  */
 export function buildOptimisticMovedRowPlan(
   plan: expedition.PlanView,
@@ -216,8 +216,11 @@ export function buildOptimisticMovedRowPlan(
   const [movedRow] = nextRows.splice(fromIndex, 1)
   nextRows.splice(toIndex, 0, movedRow)
   let waypointCount = 0
-  const renumberedRows = nextRows.map((rowView, i) => {
-    const updatedRow = { ...rowView.row, sortOrder: i }
+  const renumberedRows = nextRows.map((rowView, rowIndex) => {
+    const updatedRow = expedition.Row.createFrom({
+      ...rowView.row,
+      position: rowIndex + 1,
+    })
     if (rowView.row.rowType === 'waypoint') {
       waypointCount++
       return expedition.RowView.createFrom({
@@ -232,5 +235,54 @@ export function buildOptimisticMovedRowPlan(
     ...plan,
     rows: renumberedRows,
   })
+}
+
+/**
+ * PlanMutationContextCallbacks supplies the busy banner, optimistic PlanView
+ * setter, and rollback refresh handler shared across planner mutations.
+ */
+export interface PlanMutationContextCallbacks {
+  onBusyChange: (busyMessage: string | null) => void
+  onPlanOptimisticUpdate: (nextPlan: expedition.PlanView) => void
+  onRefreshPlan: () => void | Promise<void>
+}
+
+/**
+ * PlanMutationBehaviorOptions configures optional optimistic PlanView state,
+ * post-success refresh, and rollback behavior for a single planner mutation.
+ */
+export interface PlanMutationBehaviorOptions {
+  optimisticPlan?: expedition.PlanView
+  onSuccess?: () => void
+  rollbackOnError?: boolean
+}
+
+/**
+ * executePlanMutation applies an optional optimistic PlanView update, runs a
+ * backend planner RPC under a busy status banner, and rolls back via
+ * onRefreshPlan if the RPC rejects.
+ */
+export async function executePlanMutation(
+  busyMessage: string,
+  errorContext: string,
+  mutationAction: () => Promise<unknown>,
+  contextCallbacks: PlanMutationContextCallbacks,
+  options?: PlanMutationBehaviorOptions,
+): Promise<void> {
+  if (options?.optimisticPlan) {
+    contextCallbacks.onPlanOptimisticUpdate(options.optimisticPlan)
+  }
+  contextCallbacks.onBusyChange(busyMessage)
+  try {
+    await mutationAction()
+    options?.onSuccess?.()
+  } catch (mutationError) {
+    console.error(`${errorContext}:`, mutationError)
+    if (options?.optimisticPlan || options?.rollbackOnError) {
+      await contextCallbacks.onRefreshPlan()
+    }
+  } finally {
+    contextCallbacks.onBusyChange(null)
+  }
 }
 

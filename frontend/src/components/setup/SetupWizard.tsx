@@ -57,14 +57,17 @@ export function SetupWizardModal({
   const [localSettings, setLocalSettings] = useState<app.Settings | null>(initialSettings)
   const [localIngest, setLocalIngest] = useState<app.IngestStatus | null>(initialIngest)
 
+  const userModifiedDbPathRef = useRef(false)
   const [dbPath, setDbPath] = useState<string>(
     initialSettings?.dbPath || initialSettings?.defaultDbPath || '',
   )
+  const userModifiedJournalDirRef = useRef(false)
   const [journalDir, setJournalDir] = useState<string>(
     initialSettings?.journalDir || initialSettings?.defaultJournalDir || '',
   )
 
   const [expectOlderJournals, setExpectOlderJournals] = useState<boolean>(false)
+  const userModifiedEddPathRef = useRef(false)
   const [eddPath, setEddPath] = useState<string>(
     initialSettings?.edDiscoveryDbPath || initialSettings?.defaultEdDiscoveryDbPath || '',
   )
@@ -84,13 +87,13 @@ export function SetupWizardModal({
   useEffect(() => {
     if (initialSettings) {
       setLocalSettings(initialSettings)
-      if (!dbPath) {
+      if (!userModifiedDbPathRef.current) {
         setDbPath(initialSettings.dbPath || initialSettings.defaultDbPath || '')
       }
-      if (!journalDir) {
+      if (!userModifiedJournalDirRef.current) {
         setJournalDir(initialSettings.journalDir || initialSettings.defaultJournalDir || '')
       }
-      if (!eddPath) {
+      if (!userModifiedEddPathRef.current) {
         setEddPath(
           initialSettings.edDiscoveryDbPath || initialSettings.defaultEdDiscoveryDbPath || '',
         )
@@ -121,7 +124,10 @@ export function SetupWizardModal({
     setError('')
     try {
       const picked = await BrowseDBPath()
-      if (picked) setDbPath(picked)
+      if (picked) {
+        userModifiedDbPathRef.current = true
+        setDbPath(picked)
+      }
     } catch (browseError) {
       setError(String(browseError))
     }
@@ -129,6 +135,7 @@ export function SetupWizardModal({
 
   function handleResetDefaultDb() {
     setError('')
+    userModifiedDbPathRef.current = true
     setDbPath(localSettings?.defaultDbPath || '')
   }
 
@@ -136,7 +143,10 @@ export function SetupWizardModal({
     setError('')
     try {
       const picked = await BrowseJournalDir()
-      if (picked) setJournalDir(picked)
+      if (picked) {
+        userModifiedJournalDirRef.current = true
+        setJournalDir(picked)
+      }
     } catch (browseError) {
       setError(String(browseError))
     }
@@ -144,6 +154,7 @@ export function SetupWizardModal({
 
   function handleResetDefaultJournals() {
     setError('')
+    userModifiedJournalDirRef.current = true
     setJournalDir(localSettings?.defaultJournalDir || '')
   }
 
@@ -151,7 +162,10 @@ export function SetupWizardModal({
     setError('')
     try {
       const picked = await BrowseEDDiscoveryDB()
-      if (picked) setEddPath(picked)
+      if (picked) {
+        userModifiedEddPathRef.current = true
+        setEddPath(picked)
+      }
     } catch (browseError) {
       setError(String(browseError))
     }
@@ -159,6 +173,7 @@ export function SetupWizardModal({
 
   function handleResetDefaultEdd() {
     setError('')
+    userModifiedEddPathRef.current = true
     setEddPath(
       localSettings?.edDiscoveryDbPath || localSettings?.defaultEdDiscoveryDbPath || '',
     )
@@ -220,10 +235,20 @@ export function SetupWizardModal({
       setBusyMessage('INITIALIZING DATABASE…')
       try {
         const nextSettings = await SetDatabasePath(dbPath)
+        const nextIngestStatus = await GetIngestStatus()
         setLocalSettings(nextSettings)
+        setLocalIngest(nextIngestStatus)
         setDbPath(nextSettings.dbPath)
-        if (!journalDir) {
+        if (!userModifiedJournalDirRef.current) {
           setJournalDir(nextSettings.journalDir || nextSettings.defaultJournalDir || '')
+        }
+        if (!userModifiedEddPathRef.current) {
+          setEddPath(
+            nextSettings.edDiscoveryDbPath || nextSettings.defaultEdDiscoveryDbPath || '',
+          )
+        }
+        if (!userModifiedOnlineLookupsRef.current) {
+          setOnlineLookups(nextSettings.onlineLookups)
         }
         setStep(1)
       } catch (stepError) {
@@ -320,7 +345,10 @@ export function SetupWizardModal({
               dbPath={dbPath}
               defaultDbPath={localSettings?.defaultDbPath}
               isBusy={isBusy}
-              onChangeDbPath={setDbPath}
+              onChangeDbPath={(nextPath) => {
+                userModifiedDbPathRef.current = true
+                setDbPath(nextPath)
+              }}
               onBrowseDb={handleBrowseDb}
               onResetDefaultDb={handleResetDefaultDb}
             />
@@ -331,7 +359,10 @@ export function SetupWizardModal({
               journalDir={journalDir}
               localSettings={localSettings}
               isBusy={isBusy}
-              onChangeJournalDir={setJournalDir}
+              onChangeJournalDir={(nextDir) => {
+                userModifiedJournalDirRef.current = true
+                setJournalDir(nextDir)
+              }}
               onBrowseJournals={handleBrowseJournals}
               onResetDefaultJournals={handleResetDefaultJournals}
             />
@@ -348,7 +379,10 @@ export function SetupWizardModal({
               eddProgress={eddProgress}
               isBusy={isBusy}
               onChangeExpectOlderJournals={setExpectOlderJournals}
-              onChangeEddPath={setEddPath}
+              onChangeEddPath={(nextPath) => {
+                userModifiedEddPathRef.current = true
+                setEddPath(nextPath)
+              }}
               onBrowseEdd={handleBrowseEdd}
               onResetDefaultEdd={handleResetDefaultEdd}
               onRunEddImport={handleRunEddImport}

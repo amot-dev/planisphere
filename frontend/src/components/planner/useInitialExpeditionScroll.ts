@@ -80,6 +80,6 @@ export function useInitialExpeditionScroll(
     return () => {
       cancelAnimationFrame(animationFrameId)
     }
-  }, [expeditionId, status, lastVisitedIndex, scrollContainerRef])
+  }, [expeditionId, hasExpedition, lastVisitedIndex, scrollContainerRef, status])
 }
 
