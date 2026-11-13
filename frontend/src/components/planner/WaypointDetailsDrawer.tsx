@@ -235,16 +235,16 @@ function WaypointValuationCards({
             {formatCredits(metrics.scanValueTotal)}
           </span>
         </div>
-        <div className="mt-1.5 grid grid-cols-2 gap-2 pt-1.5 border-t border-[#2e1f12] text-[11px]">
-          <div className="flex justify-between gap-2 text-[#a6907c]">
+        <div className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px] leading-4">
+          <div className="flex items-center justify-between gap-2 text-[#a6907c]">
             <span className="truncate">Base Scans and Mapping:</span>
             <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
               {formatCredits(metrics.scanValueBase)}
             </span>
           </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">First Disc. / Mapped:</span>
-            <span className="font-mono-tabular text-[#00D2FF] font-bold whitespace-nowrap shrink-0">
+          <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+            <span className="truncate">First Discovered / Mapped:</span>
+            <span className="font-mono-tabular text-[#00D2FF] whitespace-nowrap shrink-0">
               +{formatCredits(metrics.scanValueBonus)}
             </span>
           </div>
@@ -260,16 +260,16 @@ function WaypointValuationCards({
             {formatCredits(metrics.organicValueTotal)}
           </span>
         </div>
-        <div className="mt-1.5 grid grid-cols-2 gap-2 pt-1.5 border-t border-[#2e1f12] text-[11px]">
-          <div className="flex justify-between gap-2 text-[#a6907c]">
+        <div className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px] leading-4">
+          <div className="flex items-center justify-between gap-2 text-[#a6907c]">
             <span className="truncate">Base Organic Value:</span>
             <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
               {formatCredits(metrics.organicValueBase)}
             </span>
           </div>
-          <div className="flex justify-between gap-2 text-[#a6907c]">
+          <div className="flex items-center justify-between gap-2 text-[#a6907c]">
             <span className="truncate">First Logged Bonus:</span>
-            <span className="font-mono-tabular text-[#00E5A3] font-bold whitespace-nowrap shrink-0">
+            <span className="font-mono-tabular text-[#00E5A3] whitespace-nowrap shrink-0">
               +{formatCredits(metrics.organicValueBonus)}
             </span>
           </div>
@@ -288,7 +288,7 @@ function WaypointValuationCards({
         <RealizationLossBreakdown
           realization={realization}
           withColons
-          className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px]"
+          className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px] leading-4"
         />
       </div>
     </div>
