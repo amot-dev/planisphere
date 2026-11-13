@@ -286,11 +286,12 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		`{"timestamp":"2026-01-17T07:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		`{"timestamp":"2026-01-17T08:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		`{"timestamp":"2026-01-17T09:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
+		`{"timestamp":"2026-01-17T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"lander01","Ship_Localised":"Nomad","ShipID":41}`,
 		// Expedition start and arrival at Sol
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":25.0}`,
-		// Mid-expedition ship swap
+		// Mid-expedition ship swap and ship-launched Nomad relog (Nomad must be ignored by ship timeline)
 		`{"timestamp":"2026-01-19T14:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"krait_phantom","ShipType_Localised":"Krait Phantom","ShipID":20}`,
+		`{"timestamp":"2026-01-20T12:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"lander01","Ship_Localised":"Nomad","ShipID":41}`,
 		// Arrival at Alpha Centauri
 		`{"timestamp":"2026-01-20T16:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
 		// Post-expedition ship swap (should be clamped out)
@@ -358,6 +359,9 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		}
 		if tr.To == "Imperial Cutter" {
 			t.Errorf("Imperial Cutter should have been clamped out (occurred after expedition end)")
+		}
+		if tr.To == "Nomad" {
+			t.Errorf("Nomad ship-launched lander should have been filtered out of ship transitions")
 		}
 	}
 	if !foundPhantom {

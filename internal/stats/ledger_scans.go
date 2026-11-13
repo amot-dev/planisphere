@@ -253,7 +253,7 @@ func (builder *ledgerBuilder) recordResurrect(rawJSON string) {
 	if json.Unmarshal([]byte(rawJSON), &resurrectEvent) != nil {
 		return
 	}
-	builder.session.applyResurrect()
+	builder.session.applyResurrect(resurrectEvent.Option)
 
 	for _, organicRecord := range builder.unsoldOrganic {
 		if organicRecord.status == "pending" {

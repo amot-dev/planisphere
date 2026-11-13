@@ -22,12 +22,13 @@ const fleetCarrierStationType = "FleetCarrier"
 // journal events so valuation and realization share identical Odyssey,
 // population, and Fleet Carrier docking context.
 type sessionState struct {
-	defaultOdyssey         bool
-	hasSeenLoadGame        bool
-	currentOdyssey         bool
-	isDockedOnFleetCarrier bool
-	carrierSystemAddress   int64
-	populationBySystem     map[int64]int64
+	defaultOdyssey          bool
+	hasSeenLoadGame         bool
+	currentOdyssey          bool
+	isDockedOnFleetCarrier  bool
+	pendingConcourseRespawn bool
+	carrierSystemAddress    int64
+	populationBySystem      map[int64]int64
 }
 
 func newSessionState(defaultOdyssey bool, estimatedSystemCount int) *sessionState {
@@ -64,6 +65,7 @@ func (state *sessionState) applyLoadGame(rawJSON string) {
 	}
 	state.hasSeenLoadGame = true
 	state.currentOdyssey = loadGameEvent.Odyssey != nil && *loadGameEvent.Odyssey
+	state.pendingConcourseRespawn = false
 }
 
 func (state *sessionState) applyLocation(rawJSON string) {
@@ -71,6 +73,8 @@ func (state *sessionState) applyLocation(rawJSON string) {
 	if json.Unmarshal([]byte(rawJSON), &locationEvent) != nil {
 		return
 	}
+	wasPendingConcourseRespawn := state.pendingConcourseRespawn
+	state.pendingConcourseRespawn = false
 	if locationEvent.SystemAddress != 0 {
 		state.populationBySystem[locationEvent.SystemAddress] = locationEvent.Population
 	}
@@ -81,14 +85,19 @@ func (state *sessionState) applyLocation(rawJSON string) {
 		)
 		return
 	}
-	// When relogging on foot inside a Fleet Carrier Concourse, Frontier logs
-	// Docked: false, OnFoot: true with the orbited Star, Planet, or Null BodyType
-	// and omits StationType (whereas Starports, Outposts, Megaships, and Surface
-	// Settlements log BodyType: "Station"). Preserve carrier state in that case.
-	if locationEvent.OnFoot && state.isDockedOnFleetCarrier &&
-		!strings.EqualFold(locationEvent.BodyType, "Station") &&
-		(state.carrierSystemAddress == 0 || locationEvent.SystemAddress == state.carrierSystemAddress) {
-		return
+	// On a Fleet Carrier Concourse (both when relogging on foot and when respawning
+	// via Resurrect "recover" or "escape"), Frontier logs Docked: false, OnFoot: true
+	// with the orbited Star, Planet, or Null BodyType and omits StationType, whereas
+	// Starports, Outposts, Megaships, and Surface Settlements log BodyType: "Station".
+	if locationEvent.OnFoot && !strings.EqualFold(locationEvent.BodyType, "Station") {
+		if wasPendingConcourseRespawn {
+			state.setFleetCarrierDocked(true, locationEvent.SystemAddress)
+			return
+		}
+		if state.isDockedOnFleetCarrier &&
+			(state.carrierSystemAddress == 0 || locationEvent.SystemAddress == state.carrierSystemAddress) {
+			return
+		}
 	}
 	state.setFleetCarrierDocked(false, 0)
 }
@@ -133,11 +142,14 @@ func (state *sessionState) applyCarrierJump(rawJSON string) {
 	}
 }
 
-func (state *sessionState) applyResurrect() {
+func (state *sessionState) applyResurrect(resurrectOption string) {
 	state.setFleetCarrierDocked(false, 0)
+	normalizedOption := strings.ToLower(strings.TrimSpace(resurrectOption))
+	state.pendingConcourseRespawn = normalizedOption == "recover" || normalizedOption == "escape"
 }
 
 func (state *sessionState) setFleetCarrierDocked(dockedOnCarrier bool, systemAddress int64) {
+	state.pendingConcourseRespawn = false
 	state.isDockedOnFleetCarrier = dockedOnCarrier
 	if dockedOnCarrier {
 		state.carrierSystemAddress = systemAddress

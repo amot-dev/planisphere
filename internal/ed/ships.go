@@ -53,6 +53,7 @@ var shipNames = map[string]string{
 	"smallcombat01_nx":         "Kestrel Mk II",
 	"testbuggy":                "SRV Scarab",
 	"combat_multicrew_srv_01":  "SRV Scorpion",
+	"lander01":                 "Nomad",
 }
 
 // ShipDisplayName returns a human-friendly ship name. A localised name from

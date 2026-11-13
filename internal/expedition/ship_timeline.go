@@ -63,7 +63,7 @@ func fetchShipStates(queryer db.Queryer, startTimestamp, endTimestamp string) ([
 	var states []shipState
 
 	if startTimestamp != "" {
-		shipFilter := `(event = 'ShipyardSwap' OR (json_extract(raw_json, '$.Ship') IS NOT NULL AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%suit%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%buggy%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%srv%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%fighter%'))`
+		shipFilter := `(event = 'ShipyardSwap' OR (json_extract(raw_json, '$.Ship') IS NOT NULL AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%suit%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%buggy%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%srv%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%fighter%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%lander%'))`
 		rows, queryError := queryer.Query(`SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND timestamp <= ? AND `+shipFilter+` AND `+journal.CmdrFilterSQL+` ORDER BY timestamp DESC, id DESC LIMIT 1`, startTimestamp)
 		if queryError != nil {
 			return nil, queryError
@@ -145,11 +145,12 @@ func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) (
 	return states, nil
 }
 
-// isShip filters out on-foot suits, SRVs and fighters reported by LoadGame.
+// isShip filters out on-foot suits, SRVs, fighters, and ship-launched landers reported by LoadGame.
 func isShip(internalName string) bool {
 	lowercaseName := strings.ToLower(internalName)
 	return !strings.Contains(lowercaseName, "suit") && !strings.Contains(lowercaseName, "buggy") &&
-		!strings.Contains(lowercaseName, "srv") && !strings.Contains(lowercaseName, "fighter")
+		!strings.Contains(lowercaseName, "srv") && !strings.Contains(lowercaseName, "fighter") &&
+		!strings.Contains(lowercaseName, "lander")
 }
 
 func shipAt(timeline []shipState, timestamp string) *shipState {

@@ -331,3 +331,23 @@ func TestDurationDaysLabel(t *testing.T) {
 	}
 }
 
+func TestShipDisplayName(t *testing.T) {
+	shipDisplayCases := []struct {
+		internalID    string
+		localisedName string
+		expectedName  string
+	}{
+		{internalID: "lander01", localisedName: "", expectedName: "Nomad"},
+		{internalID: "Explorer_NX", localisedName: "", expectedName: "Caspian Explorer"},
+		{internalID: "lander01", localisedName: "Custom Nomad", expectedName: "Custom Nomad"},
+		{internalID: "future_vessel", localisedName: "", expectedName: "future_vessel"},
+		{internalID: "", localisedName: "", expectedName: "Unknown ship"},
+	}
+	for _, testCase := range shipDisplayCases {
+		actualName := ShipDisplayName(testCase.internalID, testCase.localisedName)
+		if actualName != testCase.expectedName {
+			t.Errorf("ShipDisplayName(%q, %q) = %q, want %q", testCase.internalID, testCase.localisedName, actualName, testCase.expectedName)
+		}
+	}
+}
+

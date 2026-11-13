@@ -72,6 +72,48 @@ func TestCarrierTariffRealization(t *testing.T) {
 	}
 }
 
+func TestResurrectConcourseCarrierTariff(t *testing.T) {
+	databaseConnection := setupRealizationDB(t)
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:00:00Z","event":"Docked","StationName":"K1V-6QB","StationType":"FleetCarrier","StarSystem":"BaseSys","SystemAddress":2200,"MarketID":3700000099}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:05:00Z","event":"Undocked","StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3700000099}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"CarrierRecoverSys","SystemAddress":2201,"BodyID":1,"BodyName":"CarrierRecoverSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:15:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"PenalEscapeSys","SystemAddress":2202,"BodyID":1,"BodyName":"PenalEscapeSys 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+
+	// Non-ship death recovery onto a Fleet Carrier Concourse logs Docked:false, OnFoot:true, BodyType:"Planet" without StationType;
+	// selling surviving cartographics before undocking incurs the 25% carrier tariff (600,000 / 3 = 200,000 Cr).
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:30:00Z","event":"Resurrect","Option":"recover","Cost":5000,"Bankrupt":false}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:30:08Z","event":"Location","Docked":false,"OnFoot":true,"StarSystem":"BaseSys","SystemAddress":2200,"Body":"BaseSys 1","BodyType":"Planet"}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:35:00Z","event":"MultiSellExplorationData","BaseValue":600000,"Bonus":0,"TotalEarnings":600000,"Discovered":[{"SystemName":"CarrierRecoverSys","NumBodies":1}]}`)
+
+	// Escape-pod or penal concourse respawn logs BodyType:"Station", clearing carrier state for subsequent sales.
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:45:00Z","event":"Resurrect","Option":"escape","Cost":0,"Bankrupt":false}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:45:08Z","event":"Location","Docked":false,"OnFoot":true,"StarSystem":"PenalSys","SystemAddress":2203,"Body":"Ashcliffe Penitentiary","BodyType":"Station"}`)
+	ingestTestLine(t, databaseConnection,
+		`{"timestamp":"2026-04-03T10:50:00Z","event":"MultiSellExplorationData","BaseValue":400000,"Bonus":0,"TotalEarnings":400000,"Discovered":[{"SystemName":"PenalEscapeSys","NumBodies":1}]}`)
+
+	breakdown, computeError := engineInstance.ComputeRealization(stats.Range{After: "2026-04-03T10:08:00Z", Until: "2026-04-03T10:20:00Z"}, nil)
+	if computeError != nil {
+		t.Fatalf("ComputeRealization failed: %v", computeError)
+	}
+	if breakdown.CarrierTariffLoss != 200000 {
+		t.Errorf("expected CarrierTariffLoss 200,000, got %d", breakdown.CarrierTariffLoss)
+	}
+	if breakdown.TotalRealized != 1000000 {
+		t.Errorf("expected TotalRealized 1,000,000, got %d", breakdown.TotalRealized)
+	}
+}
+
 func TestPopulatedAndPre2025OrganicEligibility(t *testing.T) {
 	databaseConnection := setupRealizationDB(t)
 	engineInstance := stats.NewEngine(databaseConnection)
