@@ -1,8 +1,6 @@
 package app
 
 import (
-	"database/sql"
-	"errors"
 	"html"
 	"log"
 	"strings"
@@ -183,13 +181,7 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 		return false, false
 	}
 	// Populate POI name from EDAstro GEC or GMP if the waypoint does not already have one set.
-	var currentPOIName sql.NullString
-	if queryError := app.db.QueryRow(`SELECT poi_name FROM expedition_rows WHERE id = ?`, rowItem.ID).Scan(&currentPOIName); queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
-		log.Printf("query poi name for row %d: %v", rowItem.ID, queryError)
-	}
-	if strings.TrimSpace(currentPOIName.String) == "" {
-		app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, systemAddress)
-	}
+	app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, systemAddress)
 	return positionCoords != nil, true
 }
 

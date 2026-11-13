@@ -175,10 +175,10 @@ func (app *App) spawnBackground(task func()) bool {
 	return true
 }
 
-// waitStartupLocked waits for the asynchronous Wails OnStartup database
-// initialization to finish when app.db is not yet populated. Caller must hold
-// app.dbMu.RLock, which is temporarily released while waiting so startup can
-// acquire app.dbMu.Lock.
+// waitStartupLocked waits on app.startupDone for asynchronous Wails OnStartup
+// database initialization and initial state preparation to finish. Caller must
+// hold app.dbMu.RLock, which is temporarily released while waiting so startup
+// can acquire app.dbMu.Lock.
 func (app *App) waitStartupLocked() {
 	if app.startupDone != nil {
 		select {

@@ -84,7 +84,7 @@ func (app *App) warmInitialStats() {
 	if _, realizationError := app.getAllTimeRealization(); realizationError != nil {
 		log.Printf("warm initial all-time realization: %v", realizationError)
 	}
-	_, _ = app.resolveCareerStart()
+	app.resolveCareerStart()
 	activeID := app.activeExpeditionID()
 	if activeID == 0 {
 		expeditionsList, listError := expedition.List(app.db)

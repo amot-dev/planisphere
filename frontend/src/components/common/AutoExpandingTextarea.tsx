@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 
 const TEXTAREA_LINE_HEIGHT = 20 // 1.25rem = 20px (leading-5)
 const TEXTAREA_VERTICAL_PAD = 8 // py-[3px] (6px) + border (2px) = 8px; total 1-line height = 28px (h-7)
-const SINGLE_LINE_TEXT_THRESHOLD = 15
+const SINGLE_LINE_TEXT_THRESHOLD = 10
 
 /**
  * AutoExpandingTextareaProps defines the controlled text value, line bounds,

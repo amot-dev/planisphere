@@ -28,14 +28,14 @@ import {
 import { PlannerRouteTable } from './PlannerRouteTable'
 import { useCarrierRoute } from './useCarrierRoute'
 import { useInitialExpeditionScroll } from './useInitialExpeditionScroll'
-
-const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
 import { useWaypointDetails } from './useWaypointDetails'
 
+const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
+
 /**
- * ExpeditionPlannerProps defines the active expedition plan state, optimistic
- * update handlers, lifecycle modal triggers, and carrier plotter registration
- * callbacks for the main flight planner view.
+ * ExpeditionPlannerProps defines the active expedition plan state, journal
+ * archive revision token, optimistic update handlers, lifecycle modal triggers,
+ * and carrier plotter registration callbacks for the main flight planner view.
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
