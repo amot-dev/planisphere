@@ -47,6 +47,7 @@ Whether you're taking your own carrier into the black, flying with a squadron, o
 - **Interactive Spansh Plotter:** Flag any waypoint as a Carrier Stop to plot 500 Ly hops with per-jump and total tritium calculations, `[ICY RING]` mining indicators on intermediate systems, live tritium depot tracking, and a one-click depot refill button that recalculates remaining fuel costs.
 - **Personal and Squadron Carriers:** Supports both Personal Carriers (`25,000 t` capacity) and Squadron Carriers (`60,000 t` capacity) when plotting routes and calculating tritium burn.
 - **Manual Jump Logging:** Switch to manual mode or log unscheduled carrier jumps straight from the telemetry sidebar even without a scheduled Carrier Stop waypoint.
+- **Expedition Carrier Cost Breakdown:** Track overall Fleet Carrier operating costs for an expedition under **Carrier Cost** (`Tritium Cost`, `Jump Maintenance`, and `Weekly Upkeep`), with estimated values prefixed by `~` and per-expedition vessel classification and weekly upkeep settings.
 
 ### Exploration Valuation and Realized Earnings
 See what your discoveries are worth as you scan them, and track what actually hits your bank account when you cash in.
@@ -148,6 +149,10 @@ Under realized accounting, unsold data is marked as lost once your `Resurrect` e
   - **By Carrier (Passenger)** under `Distance Travelled (Ly)` tracks distance from `CarrierJump` journal events when your commander personally rode aboard a carrier, and obeys flight mode filters.
   - **Expedition Carrier Operations** (Carrier Dist, Carrier Jumps, and Tritium) tracks jumps logged through the carrier route plotter and manual jump logger, independent of flight mode filters.
   - **All-Time Personal Carrier Operations** reads your owned carrier's lifetime jump count and distance directly from Frontier's `Statistics` journal event (`FLEETCARRIER_TOTAL_JUMPS` and `FLEETCARRIER_DISTANCE_TRAVELLED`).
+- **Static Expedition Carrier Upkeep:** Expedition carrier weekly upkeep is configured as a single static weekly rate per expedition (continuously pro-rated across the expedition's elapsed duration) rather than tracking mid-expedition service activations or suspensions. Because Fleet Carrier services can only be installed or removed at Carrier Administration systems in the Bubble or Colonia, a carrier's weekly upkeep rate remains fixed while out in deep space, avoiding unnecessary complexity and scope creep.
+- **All-Time Carrier Cost and Tritium Omissions:** On the **All Time** tab, both Tritium consumed and **Carrier Cost** are omitted from `Personal Carrier Operations`:
+  - Frontier's `Statistics` journal event only reports lifetime jump count and distance (`FLEETCARRIER_TOTAL_JUMPS` and `FLEETCARRIER_DISTANCE_TRAVELLED`), omitting lifetime tritium used, carrier commissioning date, and lifetime upkeep paid.
+  - Individual `CarrierJump` events omit fuel used, miss remote jumps made while your commander is not docked aboard, and include passenger rides aboard other commanders' carriers.
 
 ### Valuation Rules, Historical Eras, and Community Goals
 - **Populated Systems and Tag-Locked Bubble Worlds:** In inhabited systems (`Population > 0`) in the Bubble and Colonia, Elite Dangerous disables First Discovered, First Mapped, and First Footfall tags in-game, yet still writes `WasDiscovered: false` and `WasFootfalled: false` in journal `Scan` events. Pre-seeded Bubble bodies can also log `WasDiscovered: false` alongside `WasMapped: true` (impossible in normal exploration since a body must be discovered to be DSS-mapped). Planisphere filters out populated systems and tag-locked bodies so flying through the Bubble does not inflate your stats with impossible first-discovery bonuses.

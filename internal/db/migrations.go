@@ -91,6 +91,8 @@ func Migrate(dbConn *sql.DB) error {
 	_, _ = dbConn.Exec(`ALTER TABLE journal_events ADD COLUMN commander TEXT`)
 	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN fc_arrived INTEGER NOT NULL DEFAULT 0`)
 	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN leg_mode_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_type TEXT NOT NULL DEFAULT 'player'`)
+	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0`)
 	if _, schemaError := dbConn.Exec(schemaSQL); schemaError != nil {
 		return fmt.Errorf("apply schema: %w", schemaError)
 	}

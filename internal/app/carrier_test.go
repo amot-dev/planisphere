@@ -1,9 +1,11 @@
 package app
 
 import (
+	"database/sql"
 	"sync"
 	"testing"
 
+	"planisphere/internal/db"
 	"planisphere/internal/expedition"
 	"planisphere/internal/stats"
 )
@@ -188,6 +190,93 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	}
 	if sidebar2.Adjustments.CarrierJumps != 1 {
 		testingContext.Errorf("expected 1 adjustment carrier jump, got %d", sidebar2.Adjustments.CarrierJumps)
+	}
+}
+
+func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+
+	initialSettings, settingsErr := testApp.GetSettings()
+	if settingsErr != nil {
+		testingContext.Fatalf("GetSettings failed: %v", settingsErr)
+	}
+	if initialSettings.TritiumPricePerTonne != 50000 || initialSettings.DefaultTritiumPricePerTonne != 50000 {
+		testingContext.Fatalf("expected default tritium price 50000, got %d (default %d)",
+			initialSettings.TritiumPricePerTonne, initialSettings.DefaultTritiumPricePerTonne)
+	}
+
+	expeditionRecord, createErr := testApp.CreateExpedition("Deep Space Carrier", "Testing carrier cost")
+	if createErr != nil {
+		testingContext.Fatalf("CreateExpedition failed: %v", createErr)
+	}
+	if expeditionRecord.CarrierType != "player" || expeditionRecord.CarrierWeeklyUpkeep != 0 {
+		testingContext.Fatalf("expected default carrierType 'player' and upkeep 0, got %q and %d",
+			expeditionRecord.CarrierType, expeditionRecord.CarrierWeeklyUpkeep)
+	}
+
+	// Unstarted expedition with 0 jumps and 0 upkeep has 0 cost and TotalEstimated = false.
+	unstartedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{})
+	if err != nil {
+		testingContext.Fatalf("GetSidebarStats failed: %v", err)
+	}
+	if unstartedSidebar.CarrierCost.TotalCost != 0 || unstartedSidebar.CarrierCost.TotalEstimated {
+		testingContext.Fatalf("expected 0 unstarted carrier cost, got %+v", unstartedSidebar.CarrierCost)
+	}
+
+	// Update carrier config to squadron carrier with 14,000,000 Cr/week upkeep and custom tritium price 52,000 Cr/t.
+	if err := testApp.UpdateExpeditionCarrierConfig(expeditionRecord.ID, "squadron", 14_000_000); err != nil {
+		testingContext.Fatalf("UpdateExpeditionCarrierConfig failed: %v", err)
+	}
+	updatedSettings, setPriceErr := testApp.SetTritiumPricePerTonne(52000)
+	if setPriceErr != nil || updatedSettings.TritiumPricePerTonne != 52000 {
+		testingContext.Fatalf("SetTritiumPricePerTonne failed: %+v, %v", updatedSettings, setPriceErr)
+	}
+
+	// Clone expedition preserves carrier_type and carrier_weekly_upkeep.
+	clonedExpedition, cloneErr := testApp.CloneExpedition(expeditionRecord.ID)
+	if cloneErr != nil {
+		testingContext.Fatalf("CloneExpedition failed: %v", cloneErr)
+	}
+	if clonedExpedition.CarrierType != "squadron" || clonedExpedition.CarrierWeeklyUpkeep != 14_000_000 {
+		testingContext.Fatalf("expected cloned expedition to preserve squadron/14000000, got %q/%d",
+			clonedExpedition.CarrierType, clonedExpedition.CarrierWeeklyUpkeep)
+	}
+
+	// Start and complete expedition over exactly 7 days, and log 2 carrier jumps consuming 150t of tritium.
+	plan, _ := testApp.GetPlan(expeditionRecord.ID)
+	if len(plan.Rows) > 0 {
+		originSystemName := "Sol"
+		_ = testApp.UpdateRow(expedition.RowPatch{ID: plan.Rows[0].Row.ID, SystemName: &originSystemName})
+	}
+	if err := testApp.StartExpedition(expeditionRecord.ID, "2026-01-01T00:00:00Z"); err != nil {
+		testingContext.Fatalf("StartExpedition failed: %v", err)
+	}
+	if err := db.WithTx(testApp.db, func(transaction *sql.Tx) error {
+		return expedition.Complete(transaction, expeditionRecord.ID, "2026-01-08T00:00:00Z")
+	}); err != nil {
+		testingContext.Fatalf("Complete failed: %v", err)
+	}
+	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 490.0, 80); err != nil {
+		testingContext.Fatalf("first RecordCarrierJump failed: %v", err)
+	}
+	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 410.0, 70); err != nil {
+		testingContext.Fatalf("second RecordCarrierJump failed: %v", err)
+	}
+
+	completedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{})
+	if err != nil {
+		testingContext.Fatalf("GetSidebarStats completed failed: %v", err)
+	}
+	cost := completedSidebar.CarrierCost
+	// Tritium: 150 * 52,000 = 7,800,000 Cr
+	// Jumps: 2 * 100,000 = 200,000 Cr
+	// Upkeep: 7 days @ 14,000,000/wk = 14,000,000 Cr
+	// Total: 22,000,000 Cr
+	if cost.CarrierType != "squadron" || cost.WeeklyUpkeep != 14_000_000 || cost.TritiumPrice != 52000 {
+		testingContext.Fatalf("unexpected carrier cost metadata: %+v", cost)
+	}
+	if cost.TritiumCost != 7_800_000 || cost.JumpCost != 200_000 || cost.UpkeepCost != 14_000_000 || cost.TotalCost != 22_000_000 || !cost.TotalEstimated {
+		testingContext.Fatalf("unexpected carrier cost breakdown: %+v", cost)
 	}
 }
 

@@ -4,6 +4,7 @@ import { renderToString } from 'react-dom/server'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
+import { NavigationTelemetrySection } from '../sidebar/NavigationTelemetrySection'
 import { StatsSidebar } from '../sidebar/StatsSidebar'
 import { WaypointRowItem } from './WaypointRowItem'
 import { app, expedition, stats } from '../../../wailsjs/go/models'
@@ -664,7 +665,25 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     const completedHtml = renderToString(
       createElement(StatsSidebar, {
-        sidebarStats: app.SidebarStats.createFrom({ status: 'completed' }),
+        sidebarStats: app.SidebarStats.createFrom({
+          expeditionId: 1,
+          status: 'completed',
+          expedition: {
+            carrierJumps: 2,
+            carrierDistanceLy: 900,
+            tritiumUsed: 150,
+          },
+          carrierCost: {
+            carrierType: 'squadron',
+            weeklyUpkeep: 14000000,
+            tritiumPrice: 50000,
+            tritiumCost: 7500000,
+            jumpCost: 200000,
+            upkeepCost: 14000000,
+            totalCost: 21700000,
+            totalEstimated: true,
+          },
+        }),
         statsLoading: false,
         modesState: null,
         filter: emptyFilter,
@@ -675,6 +694,47 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     )
 
     expect(completedHtml).not.toContain('LOG JUMP')
+    expect(completedHtml).toContain('Flight Operations')
+    expect(completedHtml).toContain('Expedition Carrier Operations')
+    expect(completedHtml).toContain('Science Operations')
+    expect(completedHtml).toContain('Carrier Cost')
+    expect(completedHtml).toContain('~21,700,000 Cr')
+    expect(completedHtml).toContain('Tritium Cost')
+    expect(completedHtml).toContain('~7,500,000 Cr')
+    expect(completedHtml).toContain('Jump Maintenance')
+    expect(completedHtml).toContain('200,000 Cr')
+    expect(completedHtml).not.toContain('~200,000 Cr')
+    expect(completedHtml).toContain('Weekly Upkeep')
+    expect(completedHtml).toContain('~14,000,000 Cr')
+    expect(completedHtml).toContain(
+      'Configure expedition Fleet Carrier vessel classification and weekly upkeep',
+    )
+
+    const allTimeSectionHtml = renderToString(
+      createElement(NavigationTelemetrySection, {
+        viewScope: 'allTime',
+        sidebarStats: app.SidebarStats.createFrom({
+          allJournals: {
+            carrierDistanceLy: 12500,
+            carrierJumps: 28,
+            tritiumUsed: 1900,
+          },
+        }),
+        displayedMetrics: stats.Metrics.createFrom({
+          carrierDistanceLy: 12500,
+          carrierJumps: 28,
+          tritiumUsed: 1900,
+        }),
+        carrierRouteOpen: false,
+      }),
+    )
+
+    expect(allTimeSectionHtml).toContain('Personal Carrier Operations')
+    expect(allTimeSectionHtml).not.toContain('OWNED VESSEL')
+    expect(allTimeSectionHtml).toContain('Personal Carrier Dist (Ly)')
+    expect(allTimeSectionHtml).toContain('Personal Carrier Jumps')
+    expect(allTimeSectionHtml).not.toContain('Personal Carrier Tritium')
+    expect(allTimeSectionHtml).not.toContain('Carrier Cost')
   })
 
   it('CarrierRouteBottomPanel renders Close button with tooltip, start/end indicator with ??? fallback, and Mark FC Stop Arrival button', () => {

@@ -313,10 +313,12 @@ export function useCarrierRoute({
       resolveCarrierDefaults(),
     ])
 
+    const defaultCarrierType: 'player' | 'squadron' =
+      plan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
     const manualRoute = app.CarrierRouteResult.createFrom({
       origin: startSystem,
       destination: nextFcStopSystem,
-      carrierType: 'player',
+      carrierType: defaultCarrierType,
       capacityUsed: defaults.capacity,
       depotTritium: defaults.depot,
       manualMode: true,
@@ -342,13 +344,15 @@ export function useCarrierRoute({
       resolveCarrierStartSystem(plan, rowIndex),
       resolveCarrierDefaults(),
     ])
+    const defaultCarrierType: 'player' | 'squadron' =
+      plan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
     setRoutePrompt({
       targetRowId: targetRow.id,
       origin: startSystem,
       destination: (drafts[targetRow.id]?.systemName ?? targetRow.systemName ?? '').trim(),
       capacityUsed: String(defaults.capacity),
       depotTritium: String(defaults.depot),
-      carrierType: 'player',
+      carrierType: defaultCarrierType,
       loading: false,
     })
   }

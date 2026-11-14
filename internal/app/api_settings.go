@@ -24,24 +24,26 @@ import (
 
 // Settings is the user-configurable application state.
 type Settings struct {
-	SetupCompleted           bool                `json:"setupCompleted"`
-	JournalDir               string              `json:"journalDir"`
-	DefaultJournalDir        string              `json:"defaultJournalDir"`
-	JournalDirExists         bool                `json:"journalDirExists"`
-	JournalDebounceMs        int                 `json:"journalDebounceMs"`
-	DefaultJournalDebounceMs int                 `json:"defaultJournalDebounceMs"`
-	OnlineLookups            bool                `json:"onlineLookups"`
-	DBPath                   string              `json:"dbPath"`
-	DefaultDBPath            string              `json:"defaultDbPath"`
-	ActiveExpeditionID       int64               `json:"activeExpeditionId"`
-	GECCount                 int                 `json:"gecCount"`
-	GECFetchedAt             string              `json:"gecFetchedAt"`
-	Commanders               []journal.Commander `json:"commanders"`
-	EDDiscoveryDBPath        string              `json:"edDiscoveryDbPath"`
-	DefaultEDDiscoveryDBPath string              `json:"defaultEdDiscoveryDbPath"`
-	EDDiscoveryDBExists      bool                `json:"edDiscoveryDbExists"`
-	LatestVersion            string              `json:"latestVersion"`
-	VersionCheckFailed       bool                `json:"versionCheckFailed"`
+	SetupCompleted              bool                `json:"setupCompleted"`
+	JournalDir                  string              `json:"journalDir"`
+	DefaultJournalDir           string              `json:"defaultJournalDir"`
+	JournalDirExists            bool                `json:"journalDirExists"`
+	JournalDebounceMs           int                 `json:"journalDebounceMs"`
+	DefaultJournalDebounceMs    int                 `json:"defaultJournalDebounceMs"`
+	TritiumPricePerTonne        int64               `json:"tritiumPricePerTonne"`
+	DefaultTritiumPricePerTonne int64               `json:"defaultTritiumPricePerTonne"`
+	OnlineLookups               bool                `json:"onlineLookups"`
+	DBPath                      string              `json:"dbPath"`
+	DefaultDBPath               string              `json:"defaultDbPath"`
+	ActiveExpeditionID          int64               `json:"activeExpeditionId"`
+	GECCount                    int                 `json:"gecCount"`
+	GECFetchedAt                string              `json:"gecFetchedAt"`
+	Commanders                  []journal.Commander `json:"commanders"`
+	EDDiscoveryDBPath           string              `json:"edDiscoveryDbPath"`
+	DefaultEDDiscoveryDBPath    string              `json:"defaultEdDiscoveryDbPath"`
+	EDDiscoveryDBExists         bool                `json:"edDiscoveryDbExists"`
+	LatestVersion               string              `json:"latestVersion"`
+	VersionCheckFailed          bool                `json:"versionCheckFailed"`
 }
 
 // GetSettings returns the current settings.
@@ -67,24 +69,26 @@ func (app *App) GetSettings() (Settings, error) {
 	}
 	latestVersion, versionCheckFailed := app.getVersionStatus()
 	return Settings{
-		SetupCompleted:           app.setupCompleted(),
-		JournalDir:               dir,
-		DefaultJournalDir:        journal.DefaultJournalDir(),
-		JournalDirExists:         journal.DirExists(dir),
-		JournalDebounceMs:        app.journalDebounceMs(),
-		DefaultJournalDebounceMs: int(journal.DefaultDebounceDelay / time.Millisecond),
-		OnlineLookups:            app.onlineEnabled(),
-		DBPath:                   app.dbPath,
-		DefaultDBPath:            defaultDBPath,
-		ActiveExpeditionID:       app.activeExpeditionID(),
-		GECCount:                 gecCount,
-		GECFetchedAt:             gecFetched,
-		Commanders:               commanders,
-		EDDiscoveryDBPath:        discoveredEDDPath,
-		DefaultEDDiscoveryDBPath: defaultEDDPath,
-		EDDiscoveryDBExists:      discoveredEDDPath != "" || journal.FileExists(defaultEDDPath),
-		LatestVersion:            latestVersion,
-		VersionCheckFailed:       versionCheckFailed,
+		SetupCompleted:              app.setupCompleted(),
+		JournalDir:                  dir,
+		DefaultJournalDir:           journal.DefaultJournalDir(),
+		JournalDirExists:            journal.DirExists(dir),
+		JournalDebounceMs:           app.journalDebounceMs(),
+		DefaultJournalDebounceMs:    int(journal.DefaultDebounceDelay / time.Millisecond),
+		TritiumPricePerTonne:        app.tritiumPricePerTonne(),
+		DefaultTritiumPricePerTonne: ed.DefaultTritiumPricePerTonne,
+		OnlineLookups:               app.onlineEnabled(),
+		DBPath:                      app.dbPath,
+		DefaultDBPath:               defaultDBPath,
+		ActiveExpeditionID:          app.activeExpeditionID(),
+		GECCount:                    gecCount,
+		GECFetchedAt:                gecFetched,
+		Commanders:                  commanders,
+		EDDiscoveryDBPath:           discoveredEDDPath,
+		DefaultEDDiscoveryDBPath:    defaultEDDPath,
+		EDDiscoveryDBExists:         discoveredEDDPath != "" || journal.FileExists(defaultEDDPath),
+		LatestVersion:               latestVersion,
+		VersionCheckFailed:          versionCheckFailed,
 	}, nil
 }
 
@@ -350,6 +354,26 @@ func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
 
 	if runningWatcher != nil {
 		runningWatcher.SetDebounceDelay(clampedDuration)
+	}
+	app.changed("settings", 0)
+	return app.GetSettings()
+}
+
+// SetTritiumPricePerTonne updates the Tritium cost per tonne in credits used for
+// expedition Fleet Carrier cost estimates.
+func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
+	if pricePerTonne < 0 {
+		pricePerTonne = 0
+	}
+	if saveError := func() error {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if readyError := app.ready(); readyError != nil {
+			return readyError
+		}
+		return db.SetSetting(app.db, settingTritiumPricePerTonne, strconv.FormatInt(pricePerTonne, 10))
+	}(); saveError != nil {
+		return Settings{}, fmt.Errorf("persist tritium price setting: %w", saveError)
 	}
 	app.changed("settings", 0)
 	return app.GetSettings()

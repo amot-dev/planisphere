@@ -78,6 +78,22 @@ func (app *App) UpdateExpedition(id int64, name, description string) error {
 	return updateError
 }
 
+// UpdateExpeditionCarrierConfig updates the expedition's Fleet Carrier vessel
+// classification ("player" or "squadron") and weekly upkeep cost in credits.
+func (app *App) UpdateExpeditionCarrierConfig(id int64, carrierType string, weeklyUpkeep int64) error {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if readyError := app.ready(); readyError != nil {
+		return readyError
+	}
+	updateError := expedition.UpdateCarrierConfig(app.db, id, carrierType, weeklyUpkeep)
+	if updateError == nil {
+		app.changed("plan", id)
+		app.changed("adjustments", id)
+	}
+	return updateError
+}
+
 // DeleteExpedition deletes an expedition plan (journal history is kept).
 func (app *App) DeleteExpedition(id int64) error {
 	app.dbMu.RLock()

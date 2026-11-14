@@ -1,6 +1,9 @@
 package ed
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // Vec3 is a galactic coordinate in light years (journal StarPos order x, y, z).
 type Vec3 struct {
@@ -17,11 +20,14 @@ func Distance(pointA, pointB Vec3) float64 {
 
 // Fleet carrier constants.
 const (
-	CarrierMaxJumpLy       = 500.0
-	CarrierFuelTankTonnes  = 1000
-	carrierBaseMassTonnes  = 25000.0
-	carrierFuelDivisor     = 200000.0
-	carrierFixedJumpTonnes = 5.0
+	CarrierMaxJumpLy            = 500.0
+	CarrierFuelTankTonnes       = 1000
+	DefaultTritiumPricePerTonne = 50000
+	CarrierJumpMaintenanceCost  = 100000
+	carrierBaseMassTonnes       = 25000.0
+	carrierFuelDivisor          = 200000.0
+	carrierFixedJumpTonnes      = 5.0
+	secondsPerWeek              = 7 * 24 * 3600.0
 )
 
 // CarrierTritiumCost estimates the tritium consumed by a fleet carrier jump
@@ -44,4 +50,30 @@ func CarrierTritiumCost(distLy float64, usedCapacity, fuelLevel int) int {
 		fuelLevel = 0
 	}
 	return int(math.Round(carrierFixedJumpTonnes + distLy*(float64(usedCapacity)+float64(fuelLevel)+carrierBaseMassTonnes)/carrierFuelDivisor))
+}
+
+// CarrierProratedUpkeep computes continuously pro-rated carrier upkeep in credits
+// over the elapsed interval between startTimestamp and endTimestamp (or nowUTC
+// when endTimestamp is empty).
+func CarrierProratedUpkeep(startTimestamp, endTimestamp string, weeklyUpkeep int64, nowUTC time.Time) int64 {
+	if weeklyUpkeep <= 0 || startTimestamp == "" {
+		return 0
+	}
+	startTime, parseStartError := ParseISO(startTimestamp)
+	if parseStartError != nil {
+		return 0
+	}
+	endTime := nowUTC.UTC()
+	if endTimestamp != "" {
+		parsedEndTime, parseEndError := ParseISO(endTimestamp)
+		if parseEndError != nil {
+			return 0
+		}
+		endTime = parsedEndTime
+	}
+	elapsedSeconds := endTime.Sub(startTime).Seconds()
+	if elapsedSeconds <= 0 {
+		return 0
+	}
+	return int64(math.Round((elapsedSeconds / secondsPerWeek) * float64(weeklyUpkeep)))
 }

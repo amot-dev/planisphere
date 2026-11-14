@@ -12,6 +12,18 @@ import (
 	"planisphere/internal/stats"
 )
 
+// CarrierCostBreakdown holds the expedition Fleet Carrier cost breakdown in credits.
+type CarrierCostBreakdown struct {
+	CarrierType    string `json:"carrierType"`
+	WeeklyUpkeep   int64  `json:"weeklyUpkeep"`
+	TritiumPrice   int64  `json:"tritiumPrice"`
+	TritiumCost    int64  `json:"tritiumCost"`
+	JumpCost       int64  `json:"jumpCost"`
+	UpkeepCost     int64  `json:"upkeepCost"`
+	TotalCost      int64  `json:"totalCost"`
+	TotalEstimated bool   `json:"totalEstimated"`
+}
+
 // SidebarStats is the content of the Stats Sidebar.
 type SidebarStats struct {
 	ExpeditionID           int64                      `json:"expeditionId"`
@@ -37,6 +49,7 @@ type SidebarStats struct {
 	Lifetime               stats.Metrics              `json:"lifetime"`               // baseline + expedition
 	Realization            stats.RealizationBreakdown `json:"realization"`            // expedition realized earnings and losses (mode-filtered)
 	AllJournalsRealization stats.RealizationBreakdown `json:"allJournalsRealization"` // all-time realized earnings and losses across all journals (unfiltered)
+	CarrierCost            CarrierCostBreakdown       `json:"carrierCost"`
 }
 
 // resolveCareerStart queries or returns the cached earliest timestamp across
@@ -248,6 +261,41 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	} else {
 		sidebar.Expedition = expeditionRecord.Adjustments
 	}
+	sidebar.CarrierCost = app.computeExpeditionCarrierCost(expeditionRecord, sidebar.Expedition, sidebar.Started)
 	return sidebar, nil
+}
+
+func (app *App) computeExpeditionCarrierCost(
+	expeditionRecord expedition.Expedition,
+	expeditionMetrics stats.Metrics,
+	expeditionStarted bool,
+) CarrierCostBreakdown {
+	tritiumPrice := app.tritiumPricePerTonne()
+	var tritiumTonnes int64
+	if expeditionMetrics.TritiumUsed != nil && *expeditionMetrics.TritiumUsed > 0 {
+		tritiumTonnes = int64(*expeditionMetrics.TritiumUsed)
+	}
+	tritiumCost := tritiumTonnes * tritiumPrice
+	jumpCost := int64(expeditionMetrics.CarrierJumps) * ed.CarrierJumpMaintenanceCost
+	var upkeepCost int64
+	if expeditionStarted && expeditionRecord.CarrierWeeklyUpkeep > 0 {
+		upkeepCost = ed.CarrierProratedUpkeep(
+			expeditionRecord.StartTimestamp,
+			expeditionRecord.EndTimestamp,
+			expeditionRecord.CarrierWeeklyUpkeep,
+			timeNow(),
+		)
+	}
+	totalCost := tritiumCost + jumpCost + upkeepCost
+	return CarrierCostBreakdown{
+		CarrierType:    expeditionRecord.CarrierType,
+		WeeklyUpkeep:   expeditionRecord.CarrierWeeklyUpkeep,
+		TritiumPrice:   tritiumPrice,
+		TritiumCost:    tritiumCost,
+		JumpCost:       jumpCost,
+		UpkeepCost:     upkeepCost,
+		TotalCost:      totalCost,
+		TotalEstimated: tritiumCost > 0 || upkeepCost > 0,
+	}
 }
 

@@ -222,6 +222,26 @@ func TestCarrierTritiumCost(t *testing.T) {
 	}
 }
 
+func TestCarrierProratedUpkeep(t *testing.T) {
+	nowUTC := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "2026-01-08T00:00:00Z", 0, nowUTC); got != 0 {
+		t.Fatalf("expected 0 upkeep when weeklyUpkeep is 0, got %d", got)
+	}
+	if got := CarrierProratedUpkeep("", "2026-01-08T00:00:00Z", 14_000_000, nowUTC); got != 0 {
+		t.Fatalf("expected 0 upkeep when startTimestamp is empty, got %d", got)
+	}
+	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "2026-01-08T00:00:00Z", 14_000_000, nowUTC); got != 14_000_000 {
+		t.Fatalf("expected 14000000 for 7-day completed expedition, got %d", got)
+	}
+	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "", 14_000_000, nowUTC); got != 28_000_000 {
+		t.Fatalf("expected 28000000 for 14-day active expedition at nowUTC, got %d", got)
+	}
+	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "2026-01-11T00:00:00Z", 7_000_000, nowUTC); got != 10_000_000 {
+		t.Fatalf("expected 10000000 for 10-day expedition at 7M/wk, got %d", got)
+	}
+}
+
 func TestRegionsAndAdjacency(t *testing.T) {
 	if len(Regions) != 42 {
 		t.Fatalf("len(Regions) = %d, want 42", len(Regions))

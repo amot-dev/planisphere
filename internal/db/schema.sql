@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS expeditions (
     baseline_source  TEXT NOT NULL DEFAULT '',   -- '', 'statistics', 'manual'
     baseline_json    TEXT NOT NULL DEFAULT '{}', -- stats.Metrics snapshot "before expedition"
     adjustments_json TEXT NOT NULL DEFAULT '{}', -- stats.Metrics manual deltas (e.g. remote carrier jumps)
+    carrier_type          TEXT NOT NULL DEFAULT 'player',
+    carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0,
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );

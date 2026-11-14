@@ -194,6 +194,10 @@ export function SetOnlineLookups(arg1) {
   return window['go']['app']['App']['SetOnlineLookups'](arg1);
 }
 
+export function SetTritiumPricePerTonne(arg1) {
+  return window['go']['app']['App']['SetTritiumPricePerTonne'](arg1);
+}
+
 export function SetupConfigureJournals(arg1) {
   return window['go']['app']['App']['SetupConfigureJournals'](arg1);
 }
@@ -216,6 +220,10 @@ export function ToGalactic(arg1) {
 
 export function UpdateExpedition(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateExpedition'](arg1, arg2, arg3);
+}
+
+export function UpdateExpeditionCarrierConfig(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateExpeditionCarrierConfig'](arg1, arg2, arg3);
 }
 
 export function UpdateMode(arg1, arg2, arg3, arg4) {

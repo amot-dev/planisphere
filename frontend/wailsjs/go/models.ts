@@ -120,6 +120,32 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class CarrierCostBreakdown {
+	    carrierType: string;
+	    weeklyUpkeep: number;
+	    tritiumPrice: number;
+	    tritiumCost: number;
+	    jumpCost: number;
+	    upkeepCost: number;
+	    totalCost: number;
+	    totalEstimated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierCostBreakdown(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.carrierType = source["carrierType"];
+	        this.weeklyUpkeep = source["weeklyUpkeep"];
+	        this.tritiumPrice = source["tritiumPrice"];
+	        this.tritiumCost = source["tritiumCost"];
+	        this.jumpCost = source["jumpCost"];
+	        this.upkeepCost = source["upkeepCost"];
+	        this.totalCost = source["totalCost"];
+	        this.totalEstimated = source["totalEstimated"];
+	    }
+	}
 	export class CarrierDepotInfo {
 	    usedCapacity: number;
 	    depotTritium: number;
@@ -303,6 +329,8 @@ export namespace app {
 	    journalDirExists: boolean;
 	    journalDebounceMs: number;
 	    defaultJournalDebounceMs: number;
+	    tritiumPricePerTonne: number;
+	    defaultTritiumPricePerTonne: number;
 	    onlineLookups: boolean;
 	    dbPath: string;
 	    defaultDbPath: string;
@@ -328,6 +356,8 @@ export namespace app {
 	        this.journalDirExists = source["journalDirExists"];
 	        this.journalDebounceMs = source["journalDebounceMs"];
 	        this.defaultJournalDebounceMs = source["defaultJournalDebounceMs"];
+	        this.tritiumPricePerTonne = source["tritiumPricePerTonne"];
+	        this.defaultTritiumPricePerTonne = source["defaultTritiumPricePerTonne"];
 	        this.onlineLookups = source["onlineLookups"];
 	        this.dbPath = source["dbPath"];
 	        this.defaultDbPath = source["defaultDbPath"];
@@ -384,6 +414,7 @@ export namespace app {
 	    lifetime: stats.Metrics;
 	    realization: stats.RealizationBreakdown;
 	    allJournalsRealization: stats.RealizationBreakdown;
+	    carrierCost: CarrierCostBreakdown;
 	
 	    static createFrom(source: any = {}) {
 	        return new SidebarStats(source);
@@ -414,6 +445,7 @@ export namespace app {
 	        this.lifetime = this.convertValues(source["lifetime"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], stats.RealizationBreakdown);
 	        this.allJournalsRealization = this.convertValues(source["allJournalsRealization"], stats.RealizationBreakdown);
+	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCostBreakdown);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -528,6 +560,8 @@ export namespace expedition {
 	    baselineSource: string;
 	    baseline: stats.Metrics;
 	    adjustments: stats.Metrics;
+	    carrierType: string;
+	    carrierWeeklyUpkeep: number;
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -548,6 +582,8 @@ export namespace expedition {
 	        this.baselineSource = source["baselineSource"];
 	        this.baseline = this.convertValues(source["baseline"], stats.Metrics);
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
+	        this.carrierType = source["carrierType"];
+	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }

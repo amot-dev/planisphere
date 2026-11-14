@@ -4,6 +4,7 @@ import { ModalShell } from '../common/ModalShell'
 import { CommandersSection } from './CommandersSection'
 import { DatabaseArchiveSection } from './DatabaseArchiveSection'
 import { EDDiscoveryImportSection, type EddImportProgress } from './EDDiscoveryImportSection'
+import { FleetCarrierSection } from './FleetCarrierSection'
 import { FlightModesSection } from './FlightModesSection'
 import { JournalDirectorySection } from './JournalDirectorySection'
 import { OnlineServicesSection } from './OnlineServicesSection'
@@ -62,6 +63,12 @@ export function SettingsModal({
 
       <FlightModesSection
         modesState={modesState}
+        onRefresh={onRefresh}
+        onSetError={setError}
+      />
+
+      <FleetCarrierSection
+        settings={settings}
         onRefresh={onRefresh}
         onSetError={setError}
       />

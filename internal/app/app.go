@@ -19,6 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"planisphere/internal/db"
+	"planisphere/internal/ed"
 	"planisphere/internal/gec"
 	"planisphere/internal/journal"
 	"planisphere/internal/stats"
@@ -51,13 +52,14 @@ type EDDImportProgress struct {
 
 // Setting keys.
 const (
-	settingJournalDir        = "journal_dir"
-	settingJournalDebounceMs = "journal_debounce_ms"
-	settingOnline            = "online_lookups"
-	settingActiveExpedition  = "active_expedition_id"
-	settingLastScanAt        = "last_scan_at"
-	settingSetupCompleted    = "setup_completed"
-	gecRefreshInterval       = 7 * 24 * time.Hour
+	settingJournalDir           = "journal_dir"
+	settingJournalDebounceMs    = "journal_debounce_ms"
+	settingOnline               = "online_lookups"
+	settingActiveExpedition     = "active_expedition_id"
+	settingLastScanAt           = "last_scan_at"
+	settingSetupCompleted       = "setup_completed"
+	settingTritiumPricePerTonne = "tritium_price_per_tonne"
+	gecRefreshInterval          = 7 * 24 * time.Hour
 )
 
 var errorNotReady = errors.New("database is not available — check the startup error in Settings")
@@ -486,4 +488,21 @@ func (app *App) journalDebounceMs() int {
 	}
 	clampedDuration := journal.ClampDebounceDelay(time.Duration(parsedMilliseconds) * time.Millisecond)
 	return int(clampedDuration / time.Millisecond)
+}
+
+// tritiumPricePerTonne returns the configured or default Tritium cost in credits
+// per tonne. Caller must hold app.dbMu.RLock or app.dbMu.Lock.
+func (app *App) tritiumPricePerTonne() int64 {
+	if app.db == nil {
+		return ed.DefaultTritiumPricePerTonne
+	}
+	settingValue, getError := db.GetSetting(app.db, settingTritiumPricePerTonne)
+	if getError != nil || strings.TrimSpace(settingValue) == "" {
+		return ed.DefaultTritiumPricePerTonne
+	}
+	parsedPrice, parseError := strconv.ParseInt(strings.TrimSpace(settingValue), 10, 64)
+	if parseError != nil || parsedPrice < 0 {
+		return ed.DefaultTritiumPricePerTonne
+	}
+	return parsedPrice
 }

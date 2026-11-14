@@ -24,31 +24,37 @@ const (
 
 // Expedition is an expedition plan and its lifecycle state.
 type Expedition struct {
-	ID              int64         `json:"id"`
-	Name            string        `json:"name"`
-	Description     string        `json:"description"`
-	Status          string        `json:"status"`
-	StartTimestamp  string        `json:"startTimestamp"`
-	EndTimestamp    string        `json:"endTimestamp"`
-	ArmedAt         string        `json:"armedAt"`
-	BaselineEnabled bool          `json:"baselineEnabled"`
-	BaselineSource  string        `json:"baselineSource"`
-	Baseline        stats.Metrics `json:"baseline"`
-	Adjustments     stats.Metrics `json:"adjustments"`
-	CreatedAt       string        `json:"createdAt"`
-	UpdatedAt       string        `json:"updatedAt"`
+	ID                  int64         `json:"id"`
+	Name                string        `json:"name"`
+	Description         string        `json:"description"`
+	Status              string        `json:"status"`
+	StartTimestamp      string        `json:"startTimestamp"`
+	EndTimestamp        string        `json:"endTimestamp"`
+	ArmedAt             string        `json:"armedAt"`
+	BaselineEnabled     bool          `json:"baselineEnabled"`
+	BaselineSource      string        `json:"baselineSource"`
+	Baseline            stats.Metrics `json:"baseline"`
+	Adjustments         stats.Metrics `json:"adjustments"`
+	CarrierType         string        `json:"carrierType"`
+	CarrierWeeklyUpkeep int64         `json:"carrierWeeklyUpkeep"`
+	CreatedAt           string        `json:"createdAt"`
+	UpdatedAt           string        `json:"updatedAt"`
 }
 
 const expeditionCols = `id, name, description, status, COALESCE(start_timestamp,''), COALESCE(end_timestamp,''),
-	COALESCE(armed_at,''), baseline_enabled, baseline_source, baseline_json, adjustments_json, created_at, updated_at`
+	COALESCE(armed_at,''), baseline_enabled, baseline_source, baseline_json, adjustments_json,
+	COALESCE(carrier_type,'player'), COALESCE(carrier_weekly_upkeep,0), created_at, updated_at`
 
 func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error) {
 	var expeditionRecord Expedition
 	var baselineJSON, adjustmentsJSON string
 	scanError := scanner.Scan(&expeditionRecord.ID, &expeditionRecord.Name, &expeditionRecord.Description, &expeditionRecord.Status, &expeditionRecord.StartTimestamp, &expeditionRecord.EndTimestamp, &expeditionRecord.ArmedAt,
-		&expeditionRecord.BaselineEnabled, &expeditionRecord.BaselineSource, &baselineJSON, &adjustmentsJSON, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
+		&expeditionRecord.BaselineEnabled, &expeditionRecord.BaselineSource, &baselineJSON, &adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
 	if scanError != nil {
 		return expeditionRecord, scanError
+	}
+	if expeditionRecord.CarrierType == "" {
+		expeditionRecord.CarrierType = "player"
 	}
 	_ = json.Unmarshal([]byte(baselineJSON), &expeditionRecord.Baseline)
 	_ = json.Unmarshal([]byte(adjustmentsJSON), &expeditionRecord.Adjustments)
@@ -118,6 +124,21 @@ func UpdateMeta(queryer db.Queryer, expeditionID int64, name, description string
 	return execError
 }
 
+// UpdateCarrierConfig updates the expedition's vessel classification ("player" or "squadron")
+// and static weekly upkeep cost in credits.
+func UpdateCarrierConfig(queryer db.Queryer, expeditionID int64, carrierType string, weeklyUpkeep int64) error {
+	normalizedCarrierType := "player"
+	if strings.EqualFold(strings.TrimSpace(carrierType), "squadron") {
+		normalizedCarrierType = "squadron"
+	}
+	if weeklyUpkeep < 0 {
+		weeklyUpkeep = 0
+	}
+	_, execError := queryer.Exec(`UPDATE expeditions SET carrier_type = ?, carrier_weekly_upkeep = ?, updated_at = ? WHERE id = ?`,
+		normalizedCarrierType, weeklyUpkeep, ed.NowISO(), expeditionID)
+	return execError
+}
+
 // Delete removes an expedition and its rows. Journal history is untouched.
 func Delete(queryer db.Queryer, expeditionID int64) error {
 	_, execError := queryer.Exec(`DELETE FROM expeditions WHERE id = ?`, expeditionID)
@@ -140,8 +161,8 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 	now := ed.NowISO()
 	var newExpeditionID int64
 	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		insertResult, insertError := transaction.Exec(`INSERT INTO expeditions(name, description, status, created_at, updated_at) VALUES(?,?,?,?,?)`,
-			cloneName, sourceExpedition.Description, StatusPlanning, now, now)
+		insertResult, insertError := transaction.Exec(`INSERT INTO expeditions(name, description, status, carrier_type, carrier_weekly_upkeep, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
+			cloneName, sourceExpedition.Description, StatusPlanning, sourceExpedition.CarrierType, sourceExpedition.CarrierWeeklyUpkeep, now, now)
 		if insertError != nil {
 			return insertError
 		}

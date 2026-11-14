@@ -101,6 +101,8 @@ export function SetLegMode(arg1:number,arg2:number):Promise<void>;
 
 export function SetOnlineLookups(arg1:boolean):Promise<app.Settings>;
 
+export function SetTritiumPricePerTonne(arg1:number):Promise<app.Settings>;
+
 export function SetupConfigureJournals(arg1:string):Promise<app.IngestStatus>;
 
 export function StartExpedition(arg1:number,arg2:string):Promise<void>;
@@ -112,6 +114,8 @@ export function SwitchMode(arg1:number):Promise<app.ModesState>;
 export function ToGalactic(arg1:string):Promise<string>;
 
 export function UpdateExpedition(arg1:number,arg2:string,arg3:string):Promise<void>;
+
+export function UpdateExpeditionCarrierConfig(arg1:number,arg2:string,arg3:number):Promise<void>;
 
 export function UpdateMode(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 

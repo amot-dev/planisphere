@@ -1,5 +1,6 @@
 import { memo, useState } from 'react'
 import { app, stats } from '../../../wailsjs/go/models'
+import { CarrierConfigModal } from './CarrierConfigModal'
 import { ExplorationValuationSection } from './ExplorationValuationSection'
 import { ModeFilterPanel } from './ModeFilterPanel'
 import { NavigationTelemetrySection } from './NavigationTelemetrySection'
@@ -40,10 +41,12 @@ export const StatsSidebar = memo(function StatsSidebar({
   const [viewScope, setViewScope] = useState<'expedition' | 'allTime'>('expedition')
   const [flightOpsExpanded, setFlightOpsExpanded] = useState(true)
   const [carrierOpsExpanded, setCarrierOpsExpanded] = useState(true)
+  const [carrierCostExpanded, setCarrierCostExpanded] = useState(true)
   const [scienceOpsExpanded, setScienceOpsExpanded] = useState(true)
   const [scanExpanded, setScanExpanded] = useState(true)
   const [organicExpanded, setOrganicExpanded] = useState(true)
   const [realizedExpanded, setRealizedExpanded] = useState(true)
+  const [carrierConfigOpen, setCarrierConfigOpen] = useState(false)
 
   const displayedMetrics: stats.Metrics = (() => {
     if (!sidebarStats) return new stats.Metrics()
@@ -131,9 +134,12 @@ export const StatsSidebar = memo(function StatsSidebar({
           carrierRouteOpen={carrierRouteOpen}
           flightOpsExpanded={flightOpsExpanded}
           carrierOpsExpanded={carrierOpsExpanded}
+          carrierCostExpanded={carrierCostExpanded}
           onToggleFlightOpsExpanded={() => setFlightOpsExpanded((previous) => !previous)}
           onToggleCarrierOpsExpanded={() => setCarrierOpsExpanded((previous) => !previous)}
+          onToggleCarrierCostExpanded={() => setCarrierCostExpanded((previous) => !previous)}
           onLogCarrierJump={onLogCarrierJump}
+          onOpenCarrierConfig={() => setCarrierConfigOpen(true)}
         />
 
         <ExplorationValuationSection
@@ -149,6 +155,17 @@ export const StatsSidebar = memo(function StatsSidebar({
           onToggleRealizedExpanded={() => setRealizedExpanded((previous) => !previous)}
         />
       </div>
+
+      {carrierConfigOpen && sidebarStats && sidebarStats.expeditionId > 0 && (
+        <CarrierConfigModal
+          expeditionId={sidebarStats.expeditionId}
+          initialCarrierType={
+            sidebarStats.carrierCost?.carrierType === 'squadron' ? 'squadron' : 'player'
+          }
+          initialWeeklyUpkeep={sidebarStats.carrierCost?.weeklyUpkeep ?? 0}
+          onClose={() => setCarrierConfigOpen(false)}
+        />
+      )}
     </aside>
   )
 })
