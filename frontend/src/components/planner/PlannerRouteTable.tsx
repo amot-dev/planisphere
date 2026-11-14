@@ -1,7 +1,7 @@
 import type { CSSProperties, DragEvent } from 'react'
 import { app, expedition, modes } from '../../../wailsjs/go/models'
 import type { NextCarrierStopEntry } from './carrierRouteHelpers'
-import type { PlannerRowDraft, PlannerTableItem } from './plannerPlanHelpers'
+import type { PlannerTableItem } from './plannerPlanHelpers'
 import { PlannerRegionRow } from './PlannerRegionRow'
 import { PlannerTableHeader } from './PlannerTableHeader'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
@@ -14,8 +14,8 @@ const rowStyle: CSSProperties = {
 
 /**
  * PlannerRouteTableProps defines the table items, column display toggles,
- * row draft state, drag-and-drop state, carrier route state, and row action
- * callbacks rendered by the expedition route table.
+ * drag-and-drop state, carrier route state, and row action callbacks rendered
+ * by the expedition route table.
  */
 export interface PlannerRouteTableProps {
   plan: expedition.PlanView
@@ -31,7 +31,6 @@ export interface PlannerRouteTableProps {
   expandedRowIds: Record<number, boolean>
   detailsById: Record<number, expedition.WaypointDetails>
   loadingDetails: Record<number, boolean>
-  drafts: Record<number, PlannerRowDraft>
   copiedSystemRowId: number | null
   insertMenuAfterId: number | null
   draggedIndex: number | null
@@ -57,13 +56,7 @@ export interface PlannerRouteTableProps {
   onDeleteRow: (rowId: number) => void
   onLegModeChange: (rowId: number, modeId: number) => void
   onToggleExpand: (rowId: number) => void
-  onDraftChange: (
-    rowId: number,
-    fallbackDraft: PlannerRowDraft,
-    fieldName: 'systemName' | 'poiName' | 'notes',
-    fieldValue: string,
-  ) => void
-  onFieldFocus: (rowId: number) => void
+  onOriginSystemFilledChange?: (hasSystem: boolean) => void
   onFieldBlur: (
     row: expedition.Row,
     fieldName: 'systemName' | 'poiName' | 'notes',
@@ -94,7 +87,6 @@ export function PlannerRouteTable({
   expandedRowIds,
   detailsById,
   loadingDetails,
-  drafts,
   copiedSystemRowId,
   insertMenuAfterId,
   draggedIndex,
@@ -114,8 +106,7 @@ export function PlannerRouteTable({
   onDeleteRow,
   onLegModeChange,
   onToggleExpand,
-  onDraftChange,
-  onFieldFocus,
+  onOriginSystemFilledChange,
   onFieldBlur,
   onCopySystem,
   onToggleFcStop,
@@ -197,11 +188,6 @@ export function PlannerRouteTable({
           }
 
           const isExpanded = Boolean(expandedRowIds[row.id])
-          const draft = drafts[row.id] ?? {
-            systemName: row.systemName ?? '',
-            poiName: row.poiName ?? '',
-            notes: row.notes ?? '',
-          }
           const isNextFcStop = Boolean(
             row.fcStop && !row.fcArrived && nextFcStopEntry && row.id === nextFcStopEntry.row.id,
           )
@@ -237,7 +223,6 @@ export function PlannerRouteTable({
               isNextWaypoint={isNextWaypoint}
               playerSystem={plan.playerSystem}
               hasActiveCarrierRoute={hasActiveCarrierRoute}
-              draft={draft}
               copiedSystemRowId={copiedSystemRowId}
               insertMenuOpen={insertMenuAfterId === row.id}
               lastVisitedIndex={lastVisitedIndex}
@@ -246,11 +231,10 @@ export function PlannerRouteTable({
               dropProps={getRowDropProps(index, isDraggable)}
               showNotes={showNotes}
               showCarrierStop={showCarrierStop}
-              onToggleExpand={onToggleExpand}
-              onDraftChange={(rowId, fieldName, fieldValue) =>
-                onDraftChange(rowId, draft, fieldName, fieldValue)
+              onOriginSystemFilledChange={
+                rowView.number === 1 ? onOriginSystemFilledChange : undefined
               }
-              onFieldFocus={onFieldFocus}
+              onToggleExpand={onToggleExpand}
               onFieldBlur={onFieldBlur}
               onCopySystem={onCopySystem}
               onToggleFcStop={onToggleFcStop}

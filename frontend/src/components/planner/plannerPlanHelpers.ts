@@ -1,15 +1,6 @@
 import { expedition } from '../../../wailsjs/go/models'
 
 /**
- * PlannerRowDraft holds uncommitted inline text edits for a waypoint row.
- */
-export interface PlannerRowDraft {
-  systemName: string
-  poiName: string
-  notes: string
-}
-
-/**
  * PlannerTableItem represents a rendered row in the flattened expedition flight
  * plan table (galactic region header, waypoint row, or expanded telemetry drawer).
  */

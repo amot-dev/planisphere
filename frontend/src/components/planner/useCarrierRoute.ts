@@ -15,7 +15,6 @@ import {
   resolveCarrierDefaults,
   resolveCarrierStartSystem,
 } from './carrierRouteHelpers'
-import type { PlannerRowDraft } from './plannerPlanHelpers'
 
 /**
  * UseCarrierRouteOptions defines the expedition plan context and callbacks
@@ -24,7 +23,6 @@ import type { PlannerRowDraft } from './plannerPlanHelpers'
 export interface UseCarrierRouteOptions {
   plan: expedition.PlanView | null
   lastVisitedIndex: number
-  drafts: Record<number, PlannerRowDraft>
   onBusyChange: (busyMessage: string | null) => void
   onSetFcArrived: (rowId: number, arrived: boolean) => Promise<void>
   onRegisterManualPlotter?: (openManualPlotter: () => void) => void
@@ -38,7 +36,6 @@ export interface UseCarrierRouteOptions {
 export function useCarrierRoute({
   plan,
   lastVisitedIndex,
-  drafts,
   onBusyChange,
   onSetFcArrived,
   onRegisterManualPlotter,
@@ -120,9 +117,7 @@ export function useCarrierRoute({
 
   const nextFcStopEntry = useMemo(() => findNextCarrierStopEntry(plan), [plan])
 
-  const nextFcStopSystem = nextFcStopEntry
-    ? (drafts[nextFcStopEntry.row.id]?.systemName ?? nextFcStopEntry.row.systemName ?? '').trim()
-    : ''
+  const nextFcStopSystem = nextFcStopEntry ? (nextFcStopEntry.row.systemName ?? '').trim() : ''
 
   const isManualCarrierRoute =
     manualModeOverride ||
@@ -375,7 +370,7 @@ export function useCarrierRoute({
     setRoutePrompt({
       targetRowId: targetRow.id,
       origin: startSystem,
-      destination: (drafts[targetRow.id]?.systemName ?? targetRow.systemName ?? '').trim(),
+      destination: (targetRow.systemName ?? '').trim(),
       capacityUsed: String(defaults.capacity),
       depotTritium: String(defaults.depot),
       carrierType: defaultCarrierType,

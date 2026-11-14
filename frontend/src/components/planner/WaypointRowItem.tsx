@@ -1,4 +1,4 @@
-import { memo, type CSSProperties } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type React from 'react'
 import { expedition } from '../../../wailsjs/go/models'
 import { formatLy } from '../../utils/galacticTime'
@@ -8,8 +8,8 @@ import { HoverOpenInLinks } from './widgets/HoverOpenInLinks'
 import { RowManipulationButtons } from './widgets/RowManipulationButtons'
 
 /**
- * WaypointRowItemProps defines the row data, interaction flags, inline draft
- * values, and event callbacks for a single waypoint row in the flight planner table.
+ * WaypointRowItemProps defines the row data, interaction flags, and event
+ * callbacks for a single waypoint row in the flight planner table.
  */
 export interface WaypointRowItemProps {
   rowView: expedition.RowView
@@ -24,7 +24,6 @@ export interface WaypointRowItemProps {
   hasActiveCarrierRoute: boolean
   isNextWaypoint?: boolean
   playerSystem?: string
-  draft: { systemName: string; poiName: string; notes: string }
   copiedSystemRowId: number | null
   insertMenuOpen: boolean
   lastVisitedIndex: number
@@ -33,9 +32,8 @@ export interface WaypointRowItemProps {
   dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
   showCarrierStop?: boolean
+  onOriginSystemFilledChange?: (hasSystem: boolean) => void
   onToggleExpand: (id: number) => void
-  onDraftChange: (id: number, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
-  onFieldFocus: (id: number) => void
   onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
   onCopySystem: (id: number, name: string) => void
   onToggleFcStop: (row: expedition.Row) => void
@@ -132,7 +130,6 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   hasActiveCarrierRoute,
   isNextWaypoint,
   playerSystem,
-  draft,
   copiedSystemRowId,
   insertMenuOpen,
   lastVisitedIndex,
@@ -141,9 +138,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   dropProps,
   showNotes = true,
   showCarrierStop = true,
+  onOriginSystemFilledChange,
   onToggleExpand,
-  onDraftChange,
-  onFieldFocus,
   onFieldBlur,
   onCopySystem,
   onToggleFcStop,
@@ -158,6 +154,26 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   const row = rowView.row
   const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
   const isNext = Boolean(isNextWaypoint ?? rowView.isNextWaypoint) && !isPlanning
+  const isEditingRef = useRef(false)
+  const [draft, setDraft] = useState(() => ({
+    systemName: row.systemName ?? '',
+    poiName: row.poiName ?? '',
+    notes: row.notes ?? '',
+  }))
+
+  useEffect(() => {
+    if (isEditingRef.current) return
+    setDraft({
+      systemName: row.systemName ?? '',
+      poiName: row.poiName ?? '',
+      notes: row.notes ?? '',
+    })
+  }, [row.id, row.systemName, row.poiName, row.notes])
+
+  function handleBlur(fieldName: 'systemName' | 'poiName' | 'notes', fieldValue: string) {
+    isEditingRef.current = false
+    onFieldBlur(row, fieldName, fieldValue)
+  }
 
   return (
     <tr
@@ -243,12 +259,16 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 spellCheck={false}
                 value={draft.systemName}
                 placeholder="Star System"
-                onFocus={() => onFieldFocus(row.id)}
-                onChange={(event) =>
-                  onDraftChange(row.id, 'systemName', event.target.value)
-                }
+                onFocus={() => {
+                  isEditingRef.current = true
+                }}
+                onChange={(event) => {
+                  const nextValue = event.target.value
+                  setDraft((previous) => ({ ...previous, systemName: nextValue }))
+                  onOriginSystemFilledChange?.(Boolean(nextValue.trim()))
+                }}
                 onBlur={(event) => {
-                  onFieldBlur(row, 'systemName', event.target.value)
+                  handleBlur('systemName', event.target.value)
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -292,9 +312,11 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           value={draft.poiName}
           placeholder="POI Name"
           maxLines={3}
-          onFocus={() => onFieldFocus(row.id)}
-          onChange={(value) => onDraftChange(row.id, 'poiName', value)}
-          onBlur={(value) => onFieldBlur(row, 'poiName', value)}
+          onFocus={() => {
+            isEditingRef.current = true
+          }}
+          onChange={(value) => setDraft((previous) => ({ ...previous, poiName: value }))}
+          onBlur={(value) => handleBlur('poiName', value)}
           className="text-[#F4ECE4] placeholder:text-[#6e5b4b]"
         />
       </td>
@@ -306,9 +328,11 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             value={draft.notes}
             placeholder="Flight notes, reminders..."
             maxLines={3}
-            onFocus={() => onFieldFocus(row.id)}
-            onChange={(value) => onDraftChange(row.id, 'notes', value)}
-            onBlur={(value) => onFieldBlur(row, 'notes', value)}
+            onFocus={() => {
+              isEditingRef.current = true
+            }}
+            onChange={(value) => setDraft((previous) => ({ ...previous, notes: value }))}
+            onBlur={(value) => handleBlur('notes', value)}
             className="text-[#d6c7b8] placeholder:text-[#6e5b4b]"
           />
         </td>
@@ -357,7 +381,12 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   !isFcStopLocked && (
                     <button
                       type="button"
-                      onClick={() => onOpenCarrierRoutePrompt(index, row)}
+                      onClick={() =>
+                        onOpenCarrierRoutePrompt(
+                          index,
+                          expedition.Row.createFrom({ ...row, systemName: draft.systemName }),
+                        )
+                      }
                       title="Plot Fleet Carrier route to this next carrier waypoint"
                       className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
                     >

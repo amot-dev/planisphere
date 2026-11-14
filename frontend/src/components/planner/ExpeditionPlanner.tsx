@@ -23,7 +23,6 @@ import {
   computePlannerTableDimensions,
   executePlanMutation,
   type PlanMutationBehaviorOptions,
-  type PlannerRowDraft,
 } from './plannerPlanHelpers'
 import { PlannerRouteTable } from './PlannerRouteTable'
 import { useCarrierRoute } from './useCarrierRoute'
@@ -122,32 +121,11 @@ export function ExpeditionPlanner({
     })
   }, [])
 
-  // Keep track of which row currently has user focus so background updates don't clobber active typing
-  const editingRowIdRef = useRef<number | null>(null)
-  // Local draft inputs so typing in spreadsheet cells is instantaneous
-  const [drafts, setDrafts] = useState<Record<number, PlannerRowDraft>>({})
-
+  const firstWaypoint = plan?.rows?.find((rowView) => rowView?.row?.rowType === 'waypoint')
+  const [originHasDraftSystem, setOriginHasDraftSystem] = useState<boolean | null>(null)
   useEffect(() => {
-    if (!plan || !plan.rows) return
-    setDrafts((prev) => {
-      const next: Record<number, PlannerRowDraft> = { ...prev }
-      const activeEditingId = editingRowIdRef.current
-      for (const rowView of plan.rows ?? []) {
-        if (!rowView?.row) continue
-        const rowId = rowView.row.id
-        // Never clobber the row that is currently focused and being typed into
-        if (rowId === activeEditingId && prev[rowId]) {
-          continue
-        }
-        next[rowId] = {
-          systemName: rowView.row.systemName ?? '',
-          poiName: rowView.row.poiName ?? '',
-          notes: rowView.row.notes ?? '',
-        }
-      }
-      return next
-    })
-  }, [plan])
+    setOriginHasDraftSystem(null)
+  }, [firstWaypoint?.row.id, firstWaypoint?.row.systemName])
 
   // Highest row index that has been visited; rows at or above this index are locked
   // against structural edits (reordering, deleting, or changing system name).
@@ -192,7 +170,6 @@ export function ExpeditionPlanner({
   const carrierRoute = useCarrierRoute({
     plan,
     lastVisitedIndex,
-    drafts,
     onBusyChange,
     onSetFcArrived: setFcArrived,
     onRegisterManualPlotter,
@@ -397,10 +374,8 @@ export function ExpeditionPlanner({
   const isActive = currentExpedition.status === 'active'
   const isCompleted = currentExpedition.status === 'completed'
   const modesList = plan.modes ?? []
-  const firstWaypoint = plan.rows?.find((rowView) => rowView.row.rowType === 'waypoint')
-  const hasOriginWaypointSystem = Boolean(
-    (drafts[firstWaypoint?.row.id ?? 0]?.systemName ?? firstWaypoint?.row.systemName ?? '').trim(),
-  )
+  const hasOriginWaypointSystem =
+    originHasDraftSystem ?? Boolean((firstWaypoint?.row.systemName ?? '').trim())
 
   return (
     <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#070605]">
@@ -426,7 +401,6 @@ export function ExpeditionPlanner({
           expandedRowIds={expandedRowIds}
           detailsById={detailsById}
           loadingDetails={loadingDetails}
-          drafts={drafts}
           copiedSystemRowId={copiedSystemRowId}
           insertMenuAfterId={insertMenuAfterId}
           draggedIndex={draggedIndex}
@@ -446,19 +420,8 @@ export function ExpeditionPlanner({
           onDeleteRow={handleDeleteRow}
           onLegModeChange={handleLegModeChange}
           onToggleExpand={toggleExpand}
-          onDraftChange={(rowId, fallbackDraft, fieldName, fieldValue) =>
-            setDrafts((prev) => ({
-              ...prev,
-              [rowId]: { ...(prev[rowId] ?? fallbackDraft), [fieldName]: fieldValue },
-            }))
-          }
-          onFieldFocus={(id) => {
-            editingRowIdRef.current = id
-          }}
-          onFieldBlur={(waypointRow, fieldName, fieldValue) => {
-            editingRowIdRef.current = null
-            commitField(waypointRow, fieldName, fieldValue)
-          }}
+          onOriginSystemFilledChange={setOriginHasDraftSystem}
+          onFieldBlur={commitField}
           onCopySystem={handleCopySystem}
           onToggleFcStop={toggleFcStop}
           onOpenCarrierRoutePrompt={carrierRoute.openCarrierRoutePrompt}
