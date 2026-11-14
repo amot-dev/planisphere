@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CreateMode, DeleteMode, UpdateMode } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { app, modes } from '../../../wailsjs/go/models'
 
 /**
  * FlightModesSectionProps defines the current flight modes state and callbacks
@@ -24,6 +24,39 @@ export function FlightModesSection({
   const [newModeName, setNewModeName] = useState('')
   const [newModeDescription, setNewModeDescription] = useState('')
   const [newModeColor, setNewModeColor] = useState('#FF7100')
+  const [colorDraftsById, setColorDraftsById] = useState<Record<number, string>>({})
+  const pendingColorUpdatesRef = useRef<
+    Record<number, { timer: ReturnType<typeof setTimeout>; commit: () => void }>
+  >({})
+
+  useEffect(() => {
+    return () => {
+      for (const pendingUpdate of Object.values(pendingColorUpdatesRef.current)) {
+        clearTimeout(pendingUpdate.timer)
+        pendingUpdate.commit()
+      }
+      pendingColorUpdatesRef.current = {}
+    }
+  }, [])
+
+  function handleColorChange(modeItem: modes.Mode, nextColor: string) {
+    setColorDraftsById((previous) => ({ ...previous, [modeItem.id]: nextColor }))
+    const existingPending = pendingColorUpdatesRef.current[modeItem.id]
+    if (existingPending) {
+      clearTimeout(existingPending.timer)
+    }
+    const commit = () => {
+      delete pendingColorUpdatesRef.current[modeItem.id]
+      onSetError('')
+      UpdateMode(modeItem.id, modeItem.name, modeItem.description, nextColor).catch(
+        (updateError) => onSetError(String(updateError)),
+      )
+    }
+    pendingColorUpdatesRef.current[modeItem.id] = {
+      timer: setTimeout(commit, 200),
+      commit,
+    }
+  }
 
   async function handleCreateMode() {
     onSetError('')
@@ -38,6 +71,11 @@ export function FlightModesSection({
   }
 
   async function handleDeleteMode(modeId: number) {
+    const existingPending = pendingColorUpdatesRef.current[modeId]
+    if (existingPending) {
+      clearTimeout(existingPending.timer)
+      delete pendingColorUpdatesRef.current[modeId]
+    }
     onSetError('')
     try {
       await DeleteMode(modeId)
@@ -58,15 +96,8 @@ export function FlightModesSection({
             <div className="flex items-center gap-2.5 min-w-0">
               <input
                 type="color"
-                value={modeItem.color}
-                onChange={(event) =>
-                  UpdateMode(
-                    modeItem.id,
-                    modeItem.name,
-                    modeItem.description,
-                    event.target.value,
-                  ).then(onRefresh)
-                }
+                value={colorDraftsById[modeItem.id] ?? modeItem.color}
+                onChange={(event) => handleColorChange(modeItem, event.target.value)}
                 title={`Change color for ${modeItem.name}`}
                 className="w-5 h-5 ed-color-picker shrink-0 transition-colors"
               />
