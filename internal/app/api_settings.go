@@ -516,9 +516,3 @@ func (app *App) OpenURL(link string) error {
 	return nil
 }
 
-// ToGalactic converts an ISO-8601 UTC timestamp to "33XX-MM-DD HH:mm UTC".
-func (app *App) ToGalactic(iso string) string { return ed.ToGalactic(iso) }
-
-// FromGalactic converts "33XX-MM-DD HH:mm UTC" to an ISO-8601 UTC timestamp.
-func (app *App) FromGalactic(gst string) (string, error) { return ed.FromGalactic(gst) }
-

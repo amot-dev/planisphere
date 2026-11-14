@@ -242,12 +242,12 @@ func (engine *Engine) loadPopulationChunk(addressChunk []int64, untilTimestamp s
 	}
 	query := `SELECT system_address, raw_json FROM (
 		SELECT system_address, raw_json,
-		       ROW_NUMBER() OVER (PARTITION BY system_address ORDER BY timestamp DESC, id DESC) as rn
+		       ROW_NUMBER() OVER (PARTITION BY system_address ORDER BY timestamp DESC, id DESC) as row_rank
 		FROM journal_events
 		WHERE event IN ('FSDJump', 'Location', 'CarrierJump')
 		  AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
 		  AND system_address IN (` + placeholders + `)
-	) WHERE rn = 1`
+	) WHERE row_rank = 1`
 
 	rows, queryError := engine.DB.Query(query, queryArgs...)
 	if queryError != nil {

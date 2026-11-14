@@ -23,14 +23,14 @@ var (
 // steamLibraryRoots discovers Steam installation and library folders dynamically
 // from environment variables, XDG directories, and Steam's libraryfolders.vdf.
 func steamLibraryRoots(home string) []string {
-	xdgData := os.Getenv("XDG_DATA_HOME")
-	if xdgData == "" && home != "" {
-		xdgData = filepath.Join(home, ".local", "share")
+	xdgDataHome := os.Getenv("XDG_DATA_HOME")
+	if xdgDataHome == "" && home != "" {
+		xdgDataHome = filepath.Join(home, ".local", "share")
 	}
 
 	var baseSteamDirs []string
-	if xdgData != "" {
-		baseSteamDirs = append(baseSteamDirs, filepath.Join(xdgData, "Steam"))
+	if xdgDataHome != "" {
+		baseSteamDirs = append(baseSteamDirs, filepath.Join(xdgDataHome, "Steam"))
 	}
 	if home != "" {
 		baseSteamDirs = append(baseSteamDirs,
@@ -54,15 +54,15 @@ func steamLibraryRoots(home string) []string {
 
 	for _, base := range baseSteamDirs {
 		addRoot(base)
-		for _, vdfRel := range []string{
+		for _, relativeVDFPath := range []string{
 			filepath.Join("steamapps", "libraryfolders.vdf"),
 			filepath.Join("config", "libraryfolders.vdf"),
 		} {
-			data, readError := os.ReadFile(filepath.Join(base, vdfRel))
+			vdfBytes, readError := os.ReadFile(filepath.Join(base, relativeVDFPath))
 			if readError != nil {
 				continue
 			}
-			for _, match := range vdfPathRe.FindAllSubmatch(data, -1) {
+			for _, match := range vdfPathRe.FindAllSubmatch(vdfBytes, -1) {
 				libPath := strings.ReplaceAll(string(match[1]), `\\`, `\`)
 				addRoot(libPath)
 			}

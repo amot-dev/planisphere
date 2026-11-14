@@ -153,11 +153,11 @@ var (
 )
 
 func loadRegionGrid() {
-	var data struct {
+	var decodedRegionMap struct {
 		RegionMap [][][2]int `json:"regionmap"`
 	}
-	if unmarshalError := json.Unmarshal(regionMapJSON, &data); unmarshalError == nil {
-		regionGrid = data.RegionMap
+	if unmarshalError := json.Unmarshal(regionMapJSON, &decodedRegionMap); unmarshalError == nil {
+		regionGrid = decodedRegionMap.RegionMap
 	}
 }
 

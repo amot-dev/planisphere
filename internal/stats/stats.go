@@ -225,7 +225,7 @@ func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNam
 		return nil, fmt.Errorf("query journal events: %w", queryError)
 	}
 	defer rows.Close()
-	var out []eventRow
+	var loadedEvents []eventRow
 	for rows.Next() {
 		var eventItem eventRow
 		var starX, starY, starZ sql.NullFloat64
@@ -235,12 +235,12 @@ func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNam
 		if starX.Valid && starY.Valid && starZ.Valid {
 			eventItem.starPosition = &ed.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
 		}
-		out = append(out, eventItem)
+		loadedEvents = append(loadedEvents, eventItem)
 	}
 	if iterationError := rows.Err(); iterationError != nil {
 		return nil, fmt.Errorf("iterate journal events: %w", iterationError)
 	}
-	return out, nil
+	return loadedEvents, nil
 }
 
 type bodyKey struct{ systemAddress, bodyID int64 }

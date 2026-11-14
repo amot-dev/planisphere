@@ -93,21 +93,21 @@ func (resolver *Resolver) fromCache(name string) (*Info, error) {
 }
 
 func (resolver *Resolver) store(name string, systemInfo *Info) {
-	var xCoord, yCoord, zCoord, addressVal, edsmIDVal any
+	var xCoord, yCoord, zCoord, nullableSystemAddress, nullableEDSMID any
 	if systemInfo.Pos != nil {
 		xCoord, yCoord, zCoord = systemInfo.Pos.X, systemInfo.Pos.Y, systemInfo.Pos.Z
 	}
 	if systemInfo.SystemAddress != 0 {
-		addressVal = systemInfo.SystemAddress
+		nullableSystemAddress = systemInfo.SystemAddress
 	}
 	if systemInfo.EDSMID != 0 {
-		edsmIDVal = systemInfo.EDSMID
+		nullableEDSMID = systemInfo.EDSMID
 	}
 	_, _ = resolver.DB.Exec(`INSERT INTO system_cache(name_key, system_name, system_address, edsm_id, x, y, z, source, fetched_at)
 		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(name_key) DO UPDATE SET system_name=excluded.system_name,
 		system_address=excluded.system_address, edsm_id=excluded.edsm_id, x=excluded.x, y=excluded.y, z=excluded.z,
 		source=excluded.source, fetched_at=excluded.fetched_at`,
-		key(name), systemInfo.Name, addressVal, edsmIDVal, xCoord, yCoord, zCoord, systemInfo.Source, ed.NowISO())
+		key(name), systemInfo.Name, nullableSystemAddress, nullableEDSMID, xCoord, yCoord, zCoord, systemInfo.Source, ed.NowISO())
 }
 
 // Resolve looks a system up (journal -> cache -> EDSM).

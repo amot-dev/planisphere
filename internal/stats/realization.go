@@ -173,18 +173,10 @@ type RealizationLedger struct {
 	unattributedSales []unattributedSale
 }
 
-// HasRealizedOrganicBonus reports whether the ScanOrganic event with eventUID
-// was subsequently sold in SellOrganicData with a positive first-logged bonus.
-// Required because of Frontier Issue #81891 and remains required for backwards
-// compatibility with older journal files even if or when
-// https://issues.frontierstore.net/issue-detail/81891 is fixed.
-func (ledger *RealizationLedger) HasRealizedOrganicBonus(eventUID string) bool {
-	if ledger == nil || eventUID == "" {
-		return false
-	}
-	return ledger.organicSales[eventUID].bonusRealized
-}
-
+// organicSaleDetails returns realized Vista Genomics sale metadata for a
+// ScanOrganic event_uid, including bonusRealized (required because of Frontier
+// Issue #81891 and remains required for backwards compatibility with older
+// journal files even if or when https://issues.frontierstore.net/issue-detail/81891 is fixed).
 func (ledger *RealizationLedger) organicSaleDetails(eventUID string) (organicSaleOutcome, bool) {
 	if ledger == nil || eventUID == "" {
 		return organicSaleOutcome{}, false

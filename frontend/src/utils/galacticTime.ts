@@ -79,11 +79,11 @@ export function formatCredits(credits: number | undefined | null): string {
 /**
  * Formats credit loss values with negative prefix and "Cr" suffix.
  */
-export function formatLoss(val?: number | null): string {
-  if (!val || val === 0) {
+export function formatLoss(creditLoss?: number | null): string {
+  if (!creditLoss || creditLoss === 0) {
     return '0 Cr'
   }
-  return `-${formatCredits(val)}`
+  return `-${formatCredits(creditLoss)}`
 }
 
 /**
@@ -109,11 +109,7 @@ export function edsmSystemUrl(systemName: string): string {
   return `https://www.edsm.net/en/system?systemName=${encodeURIComponent(systemName.trim())}`
 }
 
-export function edastroGecUrl(
-  systemName: string,
-  _systemAddress?: number,
-  gecDirectUrl?: string,
-): string {
+export function edastroGecUrl(systemName: string, gecDirectUrl?: string): string {
   if (gecDirectUrl) return gecDirectUrl
   const query = systemName.trim()
   if (query) {

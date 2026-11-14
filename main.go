@@ -50,7 +50,7 @@ func main() {
 	// Implement OS-specific WebView hardware acceleration flags for Windows/WebView2.
 	// Microsoft WebView2 respects WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS when launching
 	// its renderer and compositor processes.
-	wv2Flags := []string{
+	webview2Flags := []string{
 		"--force-gpu-rasterization",
 		"--ignore-gpu-blocklist",
 		"--enable-gpu-rasterization",
@@ -58,9 +58,9 @@ func main() {
 	}
 	existingWv2Args := os.Getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
 	if existingWv2Args == "" {
-		_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", strings.Join(wv2Flags, " "))
+		_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", strings.Join(webview2Flags, " "))
 	} else {
-		for _, flag := range wv2Flags {
+		for _, flag := range webview2Flags {
 			if !strings.Contains(existingWv2Args, flag) {
 				existingWv2Args += " " + flag
 			}

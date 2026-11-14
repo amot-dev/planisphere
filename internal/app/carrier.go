@@ -299,26 +299,6 @@ func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 	return depotInfo, nil
 }
 
-// GetDefaultCarrierCapacity returns the most recently logged Fleet Carrier used capacity in tonnes,
-// or 5000 if no CarrierStats event exists in the journal archive.
-func (app *App) GetDefaultCarrierCapacity() int {
-	depotInfo, getError := app.GetCarrierDepotInfo()
-	if getError != nil || depotInfo.UsedCapacity <= 0 {
-		return 5000
-	}
-	return depotInfo.UsedCapacity
-}
-
-// GetDefaultCarrierDepot returns the most recently logged Fleet Carrier depot tritium in tonnes,
-// or 1000 (full tank) if no CarrierStats or CarrierDepositFuel event exists in the journal archive.
-func (app *App) GetDefaultCarrierDepot() int {
-	depotInfo, getError := app.GetCarrierDepotInfo()
-	if getError != nil || depotInfo.DepotTritium <= 0 {
-		return 1000
-	}
-	return depotInfo.DepotTritium
-}
-
 // RecordCarrierJump logs a single completed expedition carrier jump (from Spansh hop completion or Manual Mode)
 // into the expedition's manual carrier adjustments.
 func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritium int) error {

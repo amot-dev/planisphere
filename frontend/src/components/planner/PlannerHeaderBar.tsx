@@ -104,7 +104,6 @@ export function PlannerHeaderBar({
           )}
         </div>
 
-        {/* Lifecycle action buttons (Start Time and Reset to Planning removed; use Clone in Plans menu) */}
         {isPlanning && (
           <button
             type="button"

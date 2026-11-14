@@ -184,20 +184,20 @@ export function useBackendSync() {
       }
       setModesState(modesStateData)
 
-      const list = expeditionList || []
-      setExpeditions(list)
+      const loadedExpeditions = expeditionList || []
+      setExpeditions(loadedExpeditions)
 
       let chosenId = 0
-      const current = activeExpeditionIdRef.current
-      if (current && list.some((expeditionItem) => expeditionItem.id === current)) {
-        chosenId = current
+      const currentExpeditionId = activeExpeditionIdRef.current
+      if (currentExpeditionId && loadedExpeditions.some((expeditionItem) => expeditionItem.id === currentExpeditionId)) {
+        chosenId = currentExpeditionId
       } else if (
         settingsData.activeExpeditionId &&
-        list.some((expeditionItem) => expeditionItem.id === settingsData.activeExpeditionId)
+        loadedExpeditions.some((expeditionItem) => expeditionItem.id === settingsData.activeExpeditionId)
       ) {
         chosenId = settingsData.activeExpeditionId
-      } else if (list.length > 0) {
-        chosenId = list[0].id
+      } else if (loadedExpeditions.length > 0) {
+        chosenId = loadedExpeditions[0].id
       }
 
       if (chosenId > 0) {

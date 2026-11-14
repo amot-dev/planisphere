@@ -33,10 +33,10 @@ describe('Galactic Standard Time (+1286 years)', () => {
     expect(edsmSystemUrl('Beagle Point')).toBe(
       'https://www.edsm.net/en/system?systemName=Beagle%20Point',
     )
-    expect(edastroGecUrl('Sol', 10477373803, 'https://edastro.com/gec/view/10')).toBe(
+    expect(edastroGecUrl('Sol', 'https://edastro.com/gec/view/10')).toBe(
       'https://edastro.com/gec/view/10',
     )
-    expect(edastroGecUrl('Sol', 10477373803)).toBe(
+    expect(edastroGecUrl('Sol')).toBe(
       'https://edastro.com/gec/search?q=Sol',
     )
   })

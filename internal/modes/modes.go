@@ -231,11 +231,11 @@ func SetWindow(transaction *sql.Tx, replaceID, modeID int64, start, end string) 
 }
 
 func insertWindow(transaction *sql.Tx, modeID int64, startTime, endTime string) error {
-	var endVal any
+	var nullableEndTime any
 	if endTime != "" {
-		endVal = endTime
+		nullableEndTime = endTime
 	}
-	_, execError := transaction.Exec(`INSERT INTO mode_windows(mode_id, start_timestamp, end_timestamp) VALUES(?,?,?)`, modeID, startTime, endVal)
+	_, execError := transaction.Exec(`INSERT INTO mode_windows(mode_id, start_timestamp, end_timestamp) VALUES(?,?,?)`, modeID, startTime, nullableEndTime)
 	return execError
 }
 
@@ -298,9 +298,9 @@ func LoadTimeline(queryer db.Queryer) (*Timeline, error) {
 func (timeline *Timeline) ModeAt(targetTimestamp string) int64 {
 	// Last window starting at or before targetTimestamp. Windows written through SetWindow
 	// never overlap, so only that window can contain targetTimestamp.
-	i := sort.Search(len(timeline.windows), func(i int) bool { return timeline.windows[i].Start > targetTimestamp }) - 1
-	if i >= 0 && timeline.windows[i].Contains(targetTimestamp) {
-		return timeline.windows[i].ModeID
+	candidateIndex := sort.Search(len(timeline.windows), func(i int) bool { return timeline.windows[i].Start > targetTimestamp }) - 1
+	if candidateIndex >= 0 && timeline.windows[candidateIndex].Contains(targetTimestamp) {
+		return timeline.windows[candidateIndex].ModeID
 	}
 	return timeline.defaultModeID
 }

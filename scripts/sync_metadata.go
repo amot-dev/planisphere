@@ -30,14 +30,14 @@ func main() {
 	}
 
 	configPath := filepath.Join(rootDir, "app.config.json")
-	data, readError := os.ReadFile(configPath)
+	configBytes, readError := os.ReadFile(configPath)
 	if readError != nil {
 		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", configPath, readError)
 		os.Exit(1)
 	}
 
 	var appConfig Config
-	if parseError := json.Unmarshal(data, &appConfig); parseError != nil {
+	if parseError := json.Unmarshal(configBytes, &appConfig); parseError != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing %s: %v\n", configPath, parseError)
 		os.Exit(1)
 	}
@@ -119,13 +119,13 @@ func findRootDir() (string, error) {
 }
 
 func syncWailsJSON(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	manifestBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, readError)
 		return
 	}
 	var manifestMap map[string]any
-	if unmarshalError := json.Unmarshal(data, &manifestMap); unmarshalError != nil {
+	if unmarshalError := json.Unmarshal(manifestBytes, &manifestMap); unmarshalError != nil {
 		return
 	}
 	manifestMap["_comment"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
@@ -149,11 +149,11 @@ func syncWailsJSON(path string, appConfig Config) {
 			"comments":       appConfig.Description,
 		}
 	}
-	out, err := json.MarshalIndent(manifestMap, "", "  ")
+	encodedManifest, err := json.MarshalIndent(manifestMap, "", "  ")
 	if err != nil {
 		return
 	}
-	changed, writeErr := writeFileIfChanged(path, append(out, '\n'), 0644)
+	changed, writeErr := writeFileIfChanged(path, append(encodedManifest, '\n'), 0644)
 	if writeErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeErr)
 		return
@@ -164,23 +164,23 @@ func syncWailsJSON(path string, appConfig Config) {
 }
 
 func syncPackageJSON(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	packageBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		return
 	}
 	var packageMap map[string]any
-	if unmarshalError := json.Unmarshal(data, &packageMap); unmarshalError != nil {
+	if unmarshalError := json.Unmarshal(packageBytes, &packageMap); unmarshalError != nil {
 		return
 	}
 	packageMap["//"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
 	packageMap["name"] = appConfig.Name
 	packageMap["version"] = appConfig.Version
 	packageMap["description"] = appConfig.Description
-	out, err := json.MarshalIndent(packageMap, "", "  ")
+	encodedPackage, err := json.MarshalIndent(packageMap, "", "  ")
 	if err != nil {
 		return
 	}
-	changed, writeErr := writeFileIfChanged(path, append(out, '\n'), 0644)
+	changed, writeErr := writeFileIfChanged(path, append(encodedPackage, '\n'), 0644)
 	if writeErr != nil {
 		return
 	}
@@ -190,18 +190,18 @@ func syncPackageJSON(path string, appConfig Config) {
 }
 
 func syncPackageLockJSON(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	lockfileBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		return
 	}
-	text := string(data)
+	text := string(lockfileBytes)
 
-	packagesIdx := strings.Index(text, `"packages":`)
-	if packagesIdx == -1 {
+	packagesIndex := strings.Index(text, `"packages":`)
+	if packagesIndex == -1 {
 		return
 	}
-	header := text[:packagesIdx]
-	rest := text[packagesIdx:]
+	header := text[:packagesIndex]
+	rest := text[packagesIndex:]
 
 	nameRegex := regexp.MustCompile(`("name":\s*")[^"]*(")`)
 	versionRegex := regexp.MustCompile(`("version":\s*")[^"]*(")`)
@@ -209,14 +209,14 @@ func syncPackageLockJSON(path string, appConfig Config) {
 	header = nameRegex.ReplaceAllString(header, fmt.Sprintf("${1}%s${2}", appConfig.Name))
 	header = versionRegex.ReplaceAllString(header, fmt.Sprintf("${1}%s${2}", appConfig.Version))
 
-	emptyPkgIdx := strings.Index(rest, `"":`)
-	if emptyPkgIdx != -1 {
-		nextPkgIdx := strings.Index(rest, `"node_modules/`)
-		if nextPkgIdx != -1 && nextPkgIdx > emptyPkgIdx {
-			rootPkgBlock := rest[emptyPkgIdx:nextPkgIdx]
+	rootPackageIndex := strings.Index(rest, `"":`)
+	if rootPackageIndex != -1 {
+		nextPackageIndex := strings.Index(rest, `"node_modules/`)
+		if nextPackageIndex != -1 && nextPackageIndex > rootPackageIndex {
+			rootPkgBlock := rest[rootPackageIndex:nextPackageIndex]
 			updatedBlock := nameRegex.ReplaceAllString(rootPkgBlock, fmt.Sprintf("${1}%s${2}", appConfig.Name))
 			updatedBlock = versionRegex.ReplaceAllString(updatedBlock, fmt.Sprintf("${1}%s${2}", appConfig.Version))
-			rest = rest[:emptyPkgIdx] + updatedBlock + rest[nextPkgIdx:]
+			rest = rest[:rootPackageIndex] + updatedBlock + rest[nextPackageIndex:]
 		}
 	}
 	updated := header + rest
@@ -231,20 +231,20 @@ func syncPackageLockJSON(path string, appConfig Config) {
 }
 
 func syncNodeModulesStamp(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	stampBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		return
 	}
-	text := string(data)
+	text := string(stampBytes)
 
 	nameRegex := regexp.MustCompile(`("name":\s*")[^"]*(")`)
 	versionRegex := regexp.MustCompile(`("version":\s*")[^"]*(")`)
 
-	packagesIdx := strings.Index(text, `"packages":`)
+	packagesIndex := strings.Index(text, `"packages":`)
 	var updated string
-	if packagesIdx != -1 {
-		header := text[:packagesIdx]
-		rest := text[packagesIdx:]
+	if packagesIndex != -1 {
+		header := text[:packagesIndex]
+		rest := text[packagesIndex:]
 
 		header = nameRegex.ReplaceAllString(header, fmt.Sprintf("${1}%s${2}", appConfig.Name))
 		header = versionRegex.ReplaceAllString(header, fmt.Sprintf("${1}%s${2}", appConfig.Version))
@@ -259,14 +259,14 @@ func syncNodeModulesStamp(path string, appConfig Config) {
 }
 
 func syncIndexHTML(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	indexHTMLBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		return
 	}
 	// Replace title tag with comment banner and title
 	titleRegex := regexp.MustCompile(`(<!--.*?-->\s*)?<title>.*?</title>`)
 	newTitle := fmt.Sprintf("<!-- DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json -->\n    <title>%s — %s</title>", appConfig.ProductName, appConfig.Tagline)
-	replaced := titleRegex.ReplaceAllString(string(data), newTitle)
+	replaced := titleRegex.ReplaceAllString(string(indexHTMLBytes), newTitle)
 	changed, writeErr := writeFileIfChanged(path, []byte(replaced), 0644)
 	if writeErr != nil {
 		return
@@ -351,12 +351,12 @@ Keywords=elite;dangerous;expedition;astrometry;spansh;carrier;
 }
 
 func syncPKGBUILD(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	pkgbuildBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		return
 	}
 	banner := "# DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json\n"
-	text := string(data)
+	text := string(pkgbuildBytes)
 	if !strings.HasPrefix(text, banner) {
 		text = banner + text
 	}
@@ -384,12 +384,12 @@ func syncPKGBUILD(path string, appConfig Config) {
 }
 
 func syncNFPM(path string, appConfig Config) {
-	data, readError := os.ReadFile(path)
+	nfpmBytes, readError := os.ReadFile(path)
 	if readError != nil {
 		return
 	}
 	homepageRegex := regexp.MustCompile(`(?m)^homepage:\s*.*$`)
-	updated := homepageRegex.ReplaceAll(data, []byte(fmt.Sprintf("homepage: %q", appConfig.Repository)))
+	updated := homepageRegex.ReplaceAll(nfpmBytes, []byte(fmt.Sprintf("homepage: %q", appConfig.Repository)))
 
 	changed, writeErr := writeFileIfChanged(path, updated, 0644)
 	if writeErr != nil {

@@ -47,8 +47,8 @@ func UserDataDir() (string, error) {
 		}
 		return filepath.Join(home, "Library", "Application Support"), nil
 	default:
-		if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
-			return xdgData, nil
+		if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+			return xdgDataHome, nil
 		}
 		home, homeDirError := os.UserHomeDir()
 		if homeDirError != nil {
@@ -85,9 +85,9 @@ func bootstrapFilePath() (string, error) {
 // bootstrap.json if set, or DefaultPath() otherwise.
 func ResolveConfiguredPath() (string, error) {
 	if configFilePath, bootstrapError := bootstrapFilePath(); bootstrapError == nil {
-		if data, readError := os.ReadFile(configFilePath); readError == nil {
+		if configBytes, readError := os.ReadFile(configFilePath); readError == nil {
 			var config bootstrapConfig
-			if json.Unmarshal(data, &config) == nil && strings.TrimSpace(config.DBPath) != "" {
+			if json.Unmarshal(configBytes, &config) == nil && strings.TrimSpace(config.DBPath) != "" {
 				return filepath.Clean(strings.TrimSpace(config.DBPath)), nil
 			}
 		}
@@ -97,18 +97,18 @@ func ResolveConfiguredPath() (string, error) {
 
 // SaveConfiguredPath persists the user's chosen database path to bootstrap.json.
 func SaveConfiguredPath(dbPath string) error {
-	cfgFile, bootstrapError := bootstrapFilePath()
+	configFilePath, bootstrapError := bootstrapFilePath()
 	if bootstrapError != nil {
 		return bootstrapError
 	}
-	if mkdirError := os.MkdirAll(filepath.Dir(cfgFile), 0o755); mkdirError != nil {
+	if mkdirError := os.MkdirAll(filepath.Dir(configFilePath), 0o755); mkdirError != nil {
 		return mkdirError
 	}
-	data, marshalError := json.MarshalIndent(bootstrapConfig{DBPath: filepath.Clean(strings.TrimSpace(dbPath))}, "", "  ")
+	encodedConfig, marshalError := json.MarshalIndent(bootstrapConfig{DBPath: filepath.Clean(strings.TrimSpace(dbPath))}, "", "  ")
 	if marshalError != nil {
 		return marshalError
 	}
-	return os.WriteFile(cfgFile, append(data, '\n'), 0o644)
+	return os.WriteFile(configFilePath, append(encodedConfig, '\n'), 0o644)
 }
 
 // CreateDebugSnapshot allocates a unique temporary database path in the OS

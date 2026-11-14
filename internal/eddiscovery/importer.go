@@ -285,9 +285,9 @@ func Import(ctx context.Context, ingester *journal.Ingester, databasePath string
 		default:
 		}
 
-		reportProgress := func(current, total, files int, stage string) {
+		reportProgress := func(processedEntries, total, files int, stage string) {
 			if onProgress != nil {
-				onProgress(current, total, files, stage)
+				onProgress(processedEntries, total, files, stage)
 			}
 		}
 

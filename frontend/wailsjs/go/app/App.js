@@ -58,10 +58,6 @@ export function DeleteRow(arg1) {
   return window['go']['app']['App']['DeleteRow'](arg1);
 }
 
-export function FromGalactic(arg1) {
-  return window['go']['app']['App']['FromGalactic'](arg1);
-}
-
 export function GetActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['GetActiveCarrierRoute'](arg1);
 }
@@ -72,14 +68,6 @@ export function GetCarrierDepotInfo() {
 
 export function GetCarrierLastLocation() {
   return window['go']['app']['App']['GetCarrierLastLocation']();
-}
-
-export function GetDefaultCarrierCapacity() {
-  return window['go']['app']['App']['GetDefaultCarrierCapacity']();
-}
-
-export function GetDefaultCarrierDepot() {
-  return window['go']['app']['App']['GetDefaultCarrierDepot']();
 }
 
 export function GetIngestStatus() {
@@ -212,10 +200,6 @@ export function StartExpeditionOnArrival(arg1) {
 
 export function SwitchMode(arg1) {
   return window['go']['app']['App']['SwitchMode'](arg1);
-}
-
-export function ToGalactic(arg1) {
-  return window['go']['app']['App']['ToGalactic'](arg1);
 }
 
 export function UpdateExpedition(arg1, arg2, arg3) {

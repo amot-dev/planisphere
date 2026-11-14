@@ -98,11 +98,11 @@ var eventKey = []byte(`"event"`)
 // PeekEventName extracts the "event" value from a journal line without a full
 // JSON decode. Returns "" when not found.
 func PeekEventName(line []byte) string {
-	i := bytes.Index(line, eventKey)
-	if i < 0 {
+	eventKeyIndex := bytes.Index(line, eventKey)
+	if eventKeyIndex < 0 {
 		return ""
 	}
-	rest := line[i+len(eventKey):]
+	rest := line[eventKeyIndex+len(eventKey):]
 	quoteStart := bytes.IndexByte(rest, '"')
 	if quoteStart < 0 {
 		return ""

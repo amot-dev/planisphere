@@ -33,17 +33,11 @@ export function DeleteModeWindow(arg1:number):Promise<app.ModesState>;
 
 export function DeleteRow(arg1:number):Promise<void>;
 
-export function FromGalactic(arg1:string):Promise<string>;
-
 export function GetActiveCarrierRoute(arg1:number):Promise<app.ActiveCarrierRouteState>;
 
 export function GetCarrierDepotInfo():Promise<app.CarrierDepotInfo>;
 
 export function GetCarrierLastLocation():Promise<string>;
-
-export function GetDefaultCarrierCapacity():Promise<number>;
-
-export function GetDefaultCarrierDepot():Promise<number>;
 
 export function GetIngestStatus():Promise<app.IngestStatus>;
 
@@ -110,8 +104,6 @@ export function StartExpedition(arg1:number,arg2:string):Promise<void>;
 export function StartExpeditionOnArrival(arg1:number):Promise<void>;
 
 export function SwitchMode(arg1:number):Promise<app.ModesState>;
-
-export function ToGalactic(arg1:string):Promise<string>;
 
 export function UpdateExpedition(arg1:number,arg2:string,arg3:string):Promise<void>;
 
