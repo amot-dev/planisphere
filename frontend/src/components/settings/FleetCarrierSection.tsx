@@ -38,28 +38,21 @@ export function FleetCarrierSection({
     setPriceInput(String(configuredPrice))
   }, [configuredPrice])
 
-  async function handleSavePrice() {
+  async function applyTritiumPrice(targetPrice: number) {
     onSetError('')
-    const parsedPrice = Math.round(Number(priceInput) || 0)
-    const nextPrice = parsedPrice > 0 ? parsedPrice : defaultPrice
     try {
-      const updatedSettings = await SetTritiumPricePerTonne(nextPrice)
+      const updatedSettings = await SetTritiumPricePerTonne(targetPrice)
       setPriceInput(String(updatedSettings.tritiumPricePerTonne || defaultPrice))
       onRefresh()
-    } catch (saveError) {
-      onSetError(String(saveError))
+    } catch (priceError) {
+      onSetError(String(priceError))
     }
   }
 
-  async function handleResetDefaultPrice() {
-    onSetError('')
-    try {
-      const updatedSettings = await SetTritiumPricePerTonne(defaultPrice)
-      setPriceInput(String(updatedSettings.tritiumPricePerTonne || defaultPrice))
-      onRefresh()
-    } catch (resetError) {
-      onSetError(String(resetError))
-    }
+  function handleSavePrice() {
+    const parsedPrice = Math.round(Number(priceInput) || 0)
+    const nextPrice = parsedPrice > 0 ? parsedPrice : defaultPrice
+    return applyTritiumPrice(nextPrice)
   }
 
   return (
@@ -98,7 +91,7 @@ export function FleetCarrierSection({
         <button
           type="button"
           disabled={configuredPrice === defaultPrice && Number(priceInput) === defaultPrice}
-          onClick={handleResetDefaultPrice}
+          onClick={() => applyTritiumPrice(defaultPrice)}
           title="Reset Tritium price to the default 50,000 Cr per tonne"
           className="ed-btn"
         >

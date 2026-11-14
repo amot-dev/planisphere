@@ -46,6 +46,24 @@ export interface WaypointRowItemProps {
   onDragEnd: () => void
 }
 
+function UnknownDistanceSpan({
+  systemName,
+  unknownTitle,
+}: {
+  systemName: string | undefined
+  unknownTitle: string
+}) {
+  const hasSystemName = Boolean(systemName?.trim())
+  return (
+    <span
+      className="text-[#6e5b4b] uppercase text-[10px]"
+      title={hasSystemName ? unknownTitle : undefined}
+    >
+      {hasSystemName ? 'UNKNOWN' : '—'}
+    </span>
+  )
+}
+
 function renderDistanceValue(
   isNext: boolean,
   rowView: expedition.RowView,
@@ -64,16 +82,10 @@ function renderDistanceValue(
       )
     }
     return (
-      <span
-        className="text-[#6e5b4b] uppercase text-[10px]"
-        title={
-          row.systemName?.trim()
-            ? 'Coordinates unknown for this waypoint or player location'
-            : undefined
-        }
-      >
-        {row.systemName?.trim() ? 'UNKNOWN' : '—'}
-      </span>
+      <UnknownDistanceSpan
+        systemName={row.systemName}
+        unknownTitle="Coordinates unknown for this waypoint or player location"
+      />
     )
   }
 
@@ -100,16 +112,10 @@ function renderDistanceValue(
   }
 
   return (
-    <span
-      className="text-[#6e5b4b] uppercase text-[10px]"
-      title={
-        row.systemName?.trim()
-          ? 'Coordinates unknown for this waypoint or preceding waypoint'
-          : undefined
-      }
-    >
-      {row.systemName?.trim() ? 'UNKNOWN' : '—'}
-    </span>
+    <UnknownDistanceSpan
+      systemName={row.systemName}
+      unknownTitle="Coordinates unknown for this waypoint or preceding waypoint"
+    />
   )
 }
 

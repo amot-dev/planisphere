@@ -29,6 +29,10 @@ export interface UseCarrierRouteOptions {
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
 }
 
+function normalizeDepotTritium(depotTritium: number | undefined): number {
+  return depotTritium !== undefined && depotTritium >= 0 ? depotTritium : 1000
+}
+
 /**
  * useCarrierRoute manages Fleet Carrier route setup, persistence across restarts,
  * Spansh jump progression, depot fuel recalculation, and manual jump logging.
@@ -440,10 +444,7 @@ export function useCarrierRoute({
     if (!activeCarrierRoute) return
     // Refill depot to full (1000 or max possible) from storage.
     // If storage (used capacity) is available, transfer up to needed tonnes from storage into depot.
-    const currentDepot =
-      activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
-        ? activeCarrierRoute.depotTritium
-        : 1000
+    const currentDepot = normalizeDepotTritium(activeCarrierRoute.depotTritium)
     const neededTonnes = 1000 - currentDepot
     if (neededTonnes <= 0) return
 
@@ -463,10 +464,7 @@ export function useCarrierRoute({
     if (!carrierHop) return
 
     // Verify depot has sufficient tritium for this jump before proceeding
-    const currentDepot =
-      activeCarrierRoute.depotTritium !== undefined && activeCarrierRoute.depotTritium >= 0
-        ? activeCarrierRoute.depotTritium
-        : 1000
+    const currentDepot = normalizeDepotTritium(activeCarrierRoute.depotTritium)
     if (currentDepot < carrierHop.tritiumUsed) {
       return
     }

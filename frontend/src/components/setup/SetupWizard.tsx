@@ -120,17 +120,39 @@ export function SetupWizardModal({
     return { settings: currentSettings, ingestStatus: currentIngestStatus }
   }
 
-  async function handleBrowseDb() {
+  async function runWizardAction(
+    action: () => Promise<void>,
+    options?: { busyText?: string; setBusyFlag?: (busy: boolean) => void },
+  ) {
     setError('')
-    try {
-      const picked = await BrowseDBPath()
-      if (picked) {
-        userModifiedDbPathRef.current = true
-        setDbPath(picked)
-      }
-    } catch (browseError) {
-      setError(String(browseError))
+    if (options?.busyText) {
+      setBusyMessage(options.busyText)
     }
+    options?.setBusyFlag?.(true)
+    try {
+      await action()
+    } catch (actionError) {
+      setError(String(actionError))
+    } finally {
+      if (options?.busyText) {
+        setBusyMessage(null)
+      }
+      options?.setBusyFlag?.(false)
+    }
+  }
+
+  function browseWizardPath(
+    browse: () => Promise<string>,
+    modifiedRef: { current: boolean },
+    setPath: (nextPath: string) => void,
+  ) {
+    return runWizardAction(async () => {
+      const picked = await browse()
+      if (picked) {
+        modifiedRef.current = true
+        setPath(picked)
+      }
+    })
   }
 
   function handleResetDefaultDb() {
@@ -139,36 +161,10 @@ export function SetupWizardModal({
     setDbPath(localSettings?.defaultDbPath || '')
   }
 
-  async function handleBrowseJournals() {
-    setError('')
-    try {
-      const picked = await BrowseJournalDir()
-      if (picked) {
-        userModifiedJournalDirRef.current = true
-        setJournalDir(picked)
-      }
-    } catch (browseError) {
-      setError(String(browseError))
-    }
-  }
-
   function handleResetDefaultJournals() {
     setError('')
     userModifiedJournalDirRef.current = true
     setJournalDir(localSettings?.defaultJournalDir || '')
-  }
-
-  async function handleBrowseEdd() {
-    setError('')
-    try {
-      const picked = await BrowseEDDiscoveryDB()
-      if (picked) {
-        userModifiedEddPathRef.current = true
-        setEddPath(picked)
-      }
-    } catch (browseError) {
-      setError(String(browseError))
-    }
   }
 
   function handleResetDefaultEdd() {
@@ -179,117 +175,97 @@ export function SetupWizardModal({
     )
   }
 
-  async function handleRunEddImport() {
-    setError('')
-    setEddBusy(true)
-    try {
-      const count = await ImportEDDiscoveryHistory(eddPath)
-      setEddImportedCount(count)
-      await refreshWizardState()
-    } catch (importError) {
-      setError(String(importError))
-    } finally {
-      setEddBusy(false)
-    }
+  function handleRunEddImport() {
+    return runWizardAction(
+      async () => {
+        const count = await ImportEDDiscoveryHistory(eddPath)
+        setEddImportedCount(count)
+        await refreshWizardState()
+      },
+      { setBusyFlag: setEddBusy },
+    )
   }
 
-  async function handleToggleCommander(name: string, enabled: boolean) {
-    setError('')
-    try {
+  function handleToggleCommander(name: string, enabled: boolean) {
+    return runWizardAction(async () => {
       const next = await SetCommanderEnabled(name, enabled)
       setLocalSettings(next)
-    } catch (toggleError) {
-      setError(String(toggleError))
-    }
+    })
   }
 
-  async function handleToggleOnline(enabled: boolean) {
+  function handleToggleOnline(enabled: boolean) {
     userModifiedOnlineLookupsRef.current = true
-    setError('')
     setOnlineLookups(enabled)
-    try {
+    return runWizardAction(async () => {
       const next = await SetOnlineLookups(enabled)
       setLocalSettings(next)
-    } catch (toggleError) {
-      setError(String(toggleError))
-    }
+    })
   }
 
-  async function handleSyncGecNow() {
-    setError('')
-    setGecBusy(true)
-    try {
-      const count = await RefreshGEC()
-      setGecSyncedCount(count)
-      await refreshWizardState()
-    } catch (syncError) {
-      setError(String(syncError))
-    } finally {
-      setGecBusy(false)
-    }
+  function handleSyncGecNow() {
+    return runWizardAction(
+      async () => {
+        const count = await RefreshGEC()
+        setGecSyncedCount(count)
+        await refreshWizardState()
+      },
+      { setBusyFlag: setGecBusy },
+    )
   }
 
-  async function handleNext() {
-    setError('')
+  function handleNext() {
     if (step === 0) {
-      setBusyMessage('INITIALIZING DATABASE…')
-      try {
-        const nextSettings = await SetDatabasePath(dbPath)
-        const nextIngestStatus = await GetIngestStatus()
-        setLocalSettings(nextSettings)
-        setLocalIngest(nextIngestStatus)
-        setDbPath(nextSettings.dbPath)
-        if (!userModifiedJournalDirRef.current) {
-          setJournalDir(nextSettings.journalDir || nextSettings.defaultJournalDir || '')
-        }
-        if (!userModifiedEddPathRef.current) {
-          setEddPath(
-            nextSettings.edDiscoveryDbPath || nextSettings.defaultEdDiscoveryDbPath || '',
-          )
-        }
-        if (!userModifiedOnlineLookupsRef.current) {
-          setOnlineLookups(nextSettings.onlineLookups)
-        }
-        setStep(1)
-      } catch (stepError) {
-        setError(String(stepError))
-      } finally {
-        setBusyMessage(null)
-      }
-      return
+      return runWizardAction(
+        async () => {
+          const nextSettings = await SetDatabasePath(dbPath)
+          const nextIngestStatus = await GetIngestStatus()
+          setLocalSettings(nextSettings)
+          setLocalIngest(nextIngestStatus)
+          setDbPath(nextSettings.dbPath)
+          if (!userModifiedJournalDirRef.current) {
+            setJournalDir(nextSettings.journalDir || nextSettings.defaultJournalDir || '')
+          }
+          if (!userModifiedEddPathRef.current) {
+            setEddPath(
+              nextSettings.edDiscoveryDbPath || nextSettings.defaultEdDiscoveryDbPath || '',
+            )
+          }
+          if (!userModifiedOnlineLookupsRef.current) {
+            setOnlineLookups(nextSettings.onlineLookups)
+          }
+          setStep(1)
+        },
+        { busyText: 'INITIALIZING DATABASE…' },
+      )
     }
 
     if (step === 1) {
-      setBusyMessage('SCANNING PLAYER JOURNALS…')
-      try {
-        const currentIngestStatus = await SetupConfigureJournals(journalDir)
-        setLocalIngest(currentIngestStatus)
-        const currentSettings = await GetSettings()
-        setLocalSettings(currentSettings)
-        setStep(2)
-      } catch (stepError) {
-        setError(String(stepError))
-      } finally {
-        setBusyMessage(null)
-      }
-      return
+      return runWizardAction(
+        async () => {
+          const currentIngestStatus = await SetupConfigureJournals(journalDir)
+          setLocalIngest(currentIngestStatus)
+          const currentSettings = await GetSettings()
+          setLocalSettings(currentSettings)
+          setStep(2)
+        },
+        { busyText: 'SCANNING PLAYER JOURNALS…' },
+      )
     }
 
     if (step === 2) {
+      setError('')
       setStep(3)
       return
     }
 
     if (step === 3) {
-      setBusyMessage('FINALIZING SETUP…')
-      try {
-        await CompleteSetup()
-        onComplete()
-      } catch (stepError) {
-        setError(String(stepError))
-      } finally {
-        setBusyMessage(null)
-      }
+      return runWizardAction(
+        async () => {
+          await CompleteSetup()
+          onComplete()
+        },
+        { busyText: 'FINALIZING SETUP…' },
+      )
     }
   }
 
@@ -349,7 +325,7 @@ export function SetupWizardModal({
                 userModifiedDbPathRef.current = true
                 setDbPath(nextPath)
               }}
-              onBrowseDb={handleBrowseDb}
+              onBrowseDb={() => browseWizardPath(BrowseDBPath, userModifiedDbPathRef, setDbPath)}
               onResetDefaultDb={handleResetDefaultDb}
             />
           )}
@@ -363,7 +339,9 @@ export function SetupWizardModal({
                 userModifiedJournalDirRef.current = true
                 setJournalDir(nextDir)
               }}
-              onBrowseJournals={handleBrowseJournals}
+              onBrowseJournals={() =>
+                browseWizardPath(BrowseJournalDir, userModifiedJournalDirRef, setJournalDir)
+              }
               onResetDefaultJournals={handleResetDefaultJournals}
             />
           )}
@@ -383,7 +361,9 @@ export function SetupWizardModal({
                 userModifiedEddPathRef.current = true
                 setEddPath(nextPath)
               }}
-              onBrowseEdd={handleBrowseEdd}
+              onBrowseEdd={() =>
+                browseWizardPath(BrowseEDDiscoveryDB, userModifiedEddPathRef, setEddPath)
+              }
               onResetDefaultEdd={handleResetDefaultEdd}
               onRunEddImport={handleRunEddImport}
             />

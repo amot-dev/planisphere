@@ -31,6 +31,20 @@ function isNode(candidate: unknown): candidate is Node {
   return 'nodeType' in candidate || 'parentElement' in candidate || 'classList' in candidate
 }
 
+function canScrollAxis(element: HTMLElement, delta: number, axis: 'y' | 'x'): boolean {
+  if (delta === 0) return false
+  if (axis === 'y') {
+    return (
+      (delta > 0 && element.scrollTop + element.clientHeight < element.scrollHeight - 1) ||
+      (delta < 0 && element.scrollTop > 0)
+    )
+  }
+  return (
+    (delta > 0 && element.scrollLeft + element.clientWidth < element.scrollWidth - 1) ||
+    (delta < 0 && element.scrollLeft > 0)
+  )
+}
+
 /**
  * Finds the nearest ancestor element capable of scrolling along the requested wheel deltas.
  */
@@ -65,17 +79,11 @@ export function findScrollable(
         (currentElement.hasAttribute && currentElement.hasAttribute('data-scrollable')))
     )
 
-    if (isDeclaredScrollable) {
-      const canScrollY =
-        (deltaY > 0 && currentElement.scrollTop + currentElement.clientHeight < currentElement.scrollHeight - 1) ||
-        (deltaY < 0 && currentElement.scrollTop > 0)
-      const canScrollX =
-        (deltaX > 0 && currentElement.scrollLeft + currentElement.clientWidth < currentElement.scrollWidth - 1) ||
-        (deltaX < 0 && currentElement.scrollLeft > 0)
-
-      if (canScrollY || canScrollX) {
-        return currentElement
-      }
+    if (
+      isDeclaredScrollable &&
+      (canScrollAxis(currentElement, deltaY, 'y') || canScrollAxis(currentElement, deltaX, 'x'))
+    ) {
+      return currentElement
     }
 
     currentElement = currentElement.parentElement
@@ -96,17 +104,10 @@ export function findScrollable(
         (overflowX === 'auto' || overflowX === 'scroll') &&
         currentElement.scrollWidth > currentElement.clientWidth
 
-      const canScrollY =
-        hasScrollY &&
-        ((deltaY > 0 && currentElement.scrollTop + currentElement.clientHeight < currentElement.scrollHeight - 1) ||
-          (deltaY < 0 && currentElement.scrollTop > 0))
-
-      const canScrollX =
-        hasScrollX &&
-        ((deltaX > 0 && currentElement.scrollLeft + currentElement.clientWidth < currentElement.scrollWidth - 1) ||
-          (deltaX < 0 && currentElement.scrollLeft > 0))
-
-      if (canScrollY || canScrollX) {
+      if (
+        (hasScrollY && canScrollAxis(currentElement, deltaY, 'y')) ||
+        (hasScrollX && canScrollAxis(currentElement, deltaX, 'x'))
+      ) {
         return currentElement
       }
 
@@ -161,9 +162,7 @@ export function initScrollSpeedNormalizer(): () => void {
           typeof cachedScrollable.contains === 'function' &&
           cachedScrollable.contains(target as Node)))
     ) {
-      const canScrollY = deltaCheck(cachedScrollable, deltaY, 'y')
-      const canScrollX = deltaCheck(cachedScrollable, deltaX, 'x')
-      if (canScrollY || canScrollX) {
+      if (canScrollAxis(cachedScrollable, deltaY, 'y') || canScrollAxis(cachedScrollable, deltaX, 'x')) {
         scrollable = cachedScrollable
       }
     }
@@ -210,20 +209,6 @@ export function initScrollSpeedNormalizer(): () => void {
     if (deltaX !== 0) {
       scrollable.scrollLeft += deltaX
     }
-  }
-
-  function deltaCheck(element: HTMLElement, delta: number, axis: 'y' | 'x'): boolean {
-    if (delta === 0) return false
-    if (axis === 'y') {
-      return (
-        (delta > 0 && element.scrollTop + element.clientHeight < element.scrollHeight - 1) ||
-        (delta < 0 && element.scrollTop > 0)
-      )
-    }
-    return (
-      (delta > 0 && element.scrollLeft + element.clientWidth < element.scrollWidth - 1) ||
-      (delta < 0 && element.scrollLeft > 0)
-    )
   }
 
   window.addEventListener('wheel', handleWheel, { passive: false })

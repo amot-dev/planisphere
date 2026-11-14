@@ -8,6 +8,7 @@ import {
   UpdateRow,
 } from '../../../wailsjs/go/app/App'
 import { expedition } from '../../../wailsjs/go/models'
+import { useLocalStorageBoolean } from '../../hooks/useLocalStorageBoolean'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { PlannerActiveLegFooter } from './PlannerActiveLegFooter'
@@ -83,43 +84,11 @@ export function ExpeditionPlanner({
     }
   }, [])
 
-  const [showNotes, setShowNotes] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('planisphere_show_notes')
-      return saved !== null ? saved === 'true' : true
-    } catch {
-      return true
-    }
-  })
-
-  const [showCarrierStop, setShowCarrierStop] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('planisphere_show_carrier')
-      return saved !== null ? saved === 'true' : true
-    } catch {
-      return true
-    }
-  })
-
-  const toggleShowNotes = useCallback(() => {
-    setShowNotes((prev) => {
-      const next = !prev
-      try {
-        localStorage.setItem('planisphere_show_notes', String(next))
-      } catch {}
-      return next
-    })
-  }, [])
-
-  const toggleShowCarrierStop = useCallback(() => {
-    setShowCarrierStop((prev) => {
-      const next = !prev
-      try {
-        localStorage.setItem('planisphere_show_carrier', String(next))
-      } catch {}
-      return next
-    })
-  }, [])
+  const [showNotes, toggleShowNotes] = useLocalStorageBoolean('planisphere_show_notes', true)
+  const [showCarrierStop, toggleShowCarrierStop] = useLocalStorageBoolean(
+    'planisphere_show_carrier',
+    true,
+  )
 
   const firstWaypoint = plan?.rows?.find((rowView) => rowView?.row?.rowType === 'waypoint')
   const [originHasDraftSystem, setOriginHasDraftSystem] = useState<boolean | null>(null)

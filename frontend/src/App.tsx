@@ -9,6 +9,7 @@ import { SettingsModal } from './components/settings/SettingsModal'
 import { SetupWizardModal } from './components/setup/SetupWizard'
 import { StatsSidebar } from './components/sidebar/StatsSidebar'
 import { useBackendSync } from './hooks/useBackendSync'
+import { useLocalStorageBoolean } from './hooks/useLocalStorageBoolean'
 
 /**
  * App renders the root cockpit terminal shell, wiring backend state synchronization
@@ -42,24 +43,10 @@ export default function App() {
     null | 'start' | 'settings' | 'expeditions' | 'setup'
   >(null)
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('planisphere_sidebar_collapsed')
-      return saved !== null ? saved === 'true' : false
-    } catch {
-      return false
-    }
-  })
-
-  const toggleSidebarCollapsed = useCallback(() => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev
-      try {
-        localStorage.setItem('planisphere_sidebar_collapsed', String(next))
-      } catch {}
-      return next
-    })
-  }, [])
+  const [sidebarCollapsed, toggleSidebarCollapsed] = useLocalStorageBoolean(
+    'planisphere_sidebar_collapsed',
+    false,
+  )
 
   const openManualPlotterRef = useRef<(() => void) | null>(null)
   const [carrierRouteOpen, setCarrierRouteOpen] = useState(false)

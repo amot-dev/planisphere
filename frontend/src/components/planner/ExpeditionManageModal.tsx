@@ -38,50 +38,47 @@ export function ExpeditionManageModal({
   const [editDescription, setEditDescription] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
-  async function handleCreate() {
-    if (!name.trim()) return
+  async function runExpeditionAction(action: () => Promise<void>) {
     setErrorMessage('')
     try {
+      await action()
+    } catch (actionError) {
+      setErrorMessage(String(actionError))
+    }
+  }
+
+  function handleCreate() {
+    if (!name.trim()) return
+    return runExpeditionAction(async () => {
       const created = await CreateExpedition(name.trim(), description.trim())
       setName('')
       setDescription('')
       onSelect(created.id)
       onClose()
-    } catch (createError) {
-      setErrorMessage(String(createError))
-    }
+    })
   }
 
-  async function handleSaveEdit(id: number) {
-    setErrorMessage('')
-    try {
+  function handleSaveEdit(id: number) {
+    return runExpeditionAction(async () => {
       await UpdateExpedition(id, editName, editDescription)
       setEditingId(null)
       onRefresh()
-    } catch (updateError) {
-      setErrorMessage(String(updateError))
-    }
+    })
   }
 
-  async function handleClone(id: number) {
-    setErrorMessage('')
-    try {
+  function handleClone(id: number) {
+    return runExpeditionAction(async () => {
       const cloned = await CloneExpedition(id)
       onSelect(cloned.id)
       onClose()
-    } catch (cloneError) {
-      setErrorMessage(String(cloneError))
-    }
+    })
   }
 
-  async function handleDelete(expeditionId: number) {
-    setErrorMessage('')
-    try {
+  function handleDelete(expeditionId: number) {
+    return runExpeditionAction(async () => {
       await DeleteExpedition(expeditionId)
       onRefresh()
-    } catch (deleteError) {
-      setErrorMessage(String(deleteError))
-    }
+    })
   }
 
   return (
