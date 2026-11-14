@@ -157,16 +157,13 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 }
 
 func (app *App) saveJournalDirSetting(dir string) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	dir = strings.TrimSpace(dir)
-	if dir != "" && !journal.DirExists(dir) {
-		return fmt.Errorf("directory does not exist: %s", dir)
-	}
-	return db.SetSetting(app.db, settingJournalDir, dir)
+	return app.withReadyReadLock(func() error {
+		dir = strings.TrimSpace(dir)
+		if dir != "" && !journal.DirExists(dir) {
+			return fmt.Errorf("directory does not exist: %s", dir)
+		}
+		return db.SetSetting(app.db, settingJournalDir, dir)
+	})
 }
 
 func (app *App) scanAndStartWatcher() {
@@ -195,12 +192,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 		configuredDir string
 		shouldRefresh bool
 	)
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if setupError := app.withReadyReadLock(func() error {
 		if saveError := db.SetSetting(app.db, settingSetupCompleted, "1"); saveError != nil {
 			return saveError
 		}
@@ -211,8 +203,8 @@ func (app *App) CompleteSetup() (Settings, error) {
 			shouldRefresh = true
 		}
 		return nil
-	}(); err != nil {
-		return Settings{}, err
+	}); setupError != nil {
+		return Settings{}, setupError
 	}
 	if activeWatcher != nil {
 		activeWatcher.Start(watchContext, configuredDir)
@@ -226,15 +218,10 @@ func (app *App) CompleteSetup() (Settings, error) {
 
 // SetCommanderEnabled enables or disables a commander in statistics and plans.
 func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if toggleError := app.withReadyReadLock(func() error {
 		return journal.SetCommanderEnabled(app.db, name, enabled)
-	}(); err != nil {
-		return Settings{}, err
+	}); toggleError != nil {
+		return Settings{}, toggleError
 	}
 	stats.InvalidateLedgerCache()
 	app.invalidateAllTimeCache()
@@ -257,10 +244,7 @@ func (app *App) BrowseEDDiscoveryDB() (string, error) {
 // EDDiscovery SQLite database (EDDUser.sqlite) into our self-contained SQLite
 // archive so deleted older .log files are permanently recovered.
 func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
-	app.dbMu.RLock()
-	readyError := app.ready()
-	app.dbMu.RUnlock()
-	if readyError != nil {
+	if readyError := app.withReadyReadLock(nil); readyError != nil {
 		return 0, readyError
 	}
 
@@ -327,19 +311,14 @@ func (app *App) BrowseJournalDir() (string, error) {
 
 // SetOnlineLookups enables or disables EDSM and EDAstro network requests.
 func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if saveError := app.withReadyReadLock(func() error {
 		settingValue := "1"
 		if !enabled {
 			settingValue = "0"
 		}
 		return db.SetSetting(app.db, settingOnline, settingValue)
-	}(); err != nil {
-		return Settings{}, err
+	}); saveError != nil {
+		return Settings{}, saveError
 	}
 	if enabled {
 		app.spawnBackground(app.maybeRefreshGEC)
@@ -355,15 +334,10 @@ func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
 	clampedMilliseconds := strconv.FormatInt(clampedDuration.Milliseconds(), 10)
 
 	var runningWatcher *journal.Watcher
-	if saveError := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if saveError := app.withReadyReadLock(func() error {
 		runningWatcher = app.watcher
 		return db.SetSetting(app.db, settingJournalDebounceMs, clampedMilliseconds)
-	}(); saveError != nil {
+	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist journal debounce setting: %w", saveError)
 	}
 
@@ -380,14 +354,9 @@ func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
 	if pricePerTonne < 0 {
 		pricePerTonne = 0
 	}
-	if saveError := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if saveError := app.withReadyReadLock(func() error {
 		return db.SetSetting(app.db, settingTritiumPricePerTonne, strconv.FormatInt(pricePerTonne, 10))
-	}(); saveError != nil {
+	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist tritium price setting: %w", saveError)
 	}
 	app.changed("settings", 0)
@@ -459,10 +428,17 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	return status, nil
 }
 
-func (app *App) ensureReady() error {
+// withReadyReadLock acquires app.dbMu.RLock, waits for startup readiness, and runs action if non-nil.
+func (app *App) withReadyReadLock(action func() error) error {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
-	return app.ready()
+	if readyError := app.ready(); readyError != nil {
+		return readyError
+	}
+	if action == nil {
+		return nil
+	}
+	return action()
 }
 
 func (app *App) readyGECCatalog() (*gec.Catalog, error) {
@@ -479,7 +455,7 @@ func (app *App) readyGECCatalog() (*gec.Catalog, error) {
 
 // RescanJournals performs a full idempotent catch-up scan of the configured journal directory.
 func (app *App) RescanJournals() error {
-	if readyError := app.ensureReady(); readyError != nil {
+	if readyError := app.withReadyReadLock(nil); readyError != nil {
 		return readyError
 	}
 	app.runScan()

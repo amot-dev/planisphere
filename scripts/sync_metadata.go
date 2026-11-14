@@ -118,73 +118,68 @@ func findRootDir() (string, error) {
 	return ".", nil
 }
 
-func syncWailsJSON(path string, appConfig Config) {
-	manifestBytes, readError := os.ReadFile(path)
+func updateJSONFile(path string, warnOnError bool, mutate func(document map[string]any)) bool {
+	fileBytes, readError := os.ReadFile(path)
 	if readError != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, readError)
-		return
-	}
-	var manifestMap map[string]any
-	if unmarshalError := json.Unmarshal(manifestBytes, &manifestMap); unmarshalError != nil {
-		return
-	}
-	manifestMap["_comment"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
-	manifestMap["_frontend:install_comment"] = "Frontend dependencies are managed incrementally by Makefile (install-frontend)"
-	delete(manifestMap, "frontend:install")
-	manifestMap["name"] = appConfig.Name
-	manifestMap["outputfilename"] = appConfig.BinaryName
-	if author, ok := manifestMap["author"].(map[string]any); ok {
-		author["name"] = appConfig.Author
-	} else {
-		manifestMap["author"] = map[string]any{"name": appConfig.Author}
-	}
-	if info, ok := manifestMap["info"].(map[string]any); ok {
-		info["productName"] = appConfig.ProductName
-		info["productVersion"] = appConfig.Version
-		info["comments"] = appConfig.Description
-	} else {
-		manifestMap["info"] = map[string]any{
-			"productName":    appConfig.ProductName,
-			"productVersion": appConfig.Version,
-			"comments":       appConfig.Description,
+		if warnOnError {
+			fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", path, readError)
 		}
+		return false
 	}
-	encodedManifest, err := json.MarshalIndent(manifestMap, "", "  ")
-	if err != nil {
-		return
+	var document map[string]any
+	if unmarshalError := json.Unmarshal(fileBytes, &document); unmarshalError != nil {
+		return false
 	}
-	changed, writeErr := writeFileIfChanged(path, append(encodedManifest, '\n'), 0644)
-	if writeErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeErr)
-		return
+	mutate(document)
+	encodedBytes, marshalError := json.MarshalIndent(document, "", "  ")
+	if marshalError != nil {
+		return false
 	}
-	if changed {
+	changed, writeError := writeFileIfChanged(path, append(encodedBytes, '\n'), 0644)
+	if writeError != nil {
+		if warnOnError {
+			fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeError)
+		}
+		return false
+	}
+	return changed
+}
+
+func syncWailsJSON(path string, appConfig Config) {
+	if updateJSONFile(path, true, func(manifestMap map[string]any) {
+		manifestMap["_comment"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
+		manifestMap["_frontend:install_comment"] = "Frontend dependencies are managed incrementally by Makefile (install-frontend)"
+		delete(manifestMap, "frontend:install")
+		manifestMap["name"] = appConfig.Name
+		manifestMap["outputfilename"] = appConfig.BinaryName
+		if author, ok := manifestMap["author"].(map[string]any); ok {
+			author["name"] = appConfig.Author
+		} else {
+			manifestMap["author"] = map[string]any{"name": appConfig.Author}
+		}
+		if info, ok := manifestMap["info"].(map[string]any); ok {
+			info["productName"] = appConfig.ProductName
+			info["productVersion"] = appConfig.Version
+			info["comments"] = appConfig.Description
+		} else {
+			manifestMap["info"] = map[string]any{
+				"productName":    appConfig.ProductName,
+				"productVersion": appConfig.Version,
+				"comments":       appConfig.Description,
+			}
+		}
+	}) {
 		fmt.Printf("  -> Updated wails.json (name: %q, binary: %q, product: %q)\n", appConfig.Name, appConfig.BinaryName, appConfig.ProductName)
 	}
 }
 
 func syncPackageJSON(path string, appConfig Config) {
-	packageBytes, readError := os.ReadFile(path)
-	if readError != nil {
-		return
-	}
-	var packageMap map[string]any
-	if unmarshalError := json.Unmarshal(packageBytes, &packageMap); unmarshalError != nil {
-		return
-	}
-	packageMap["//"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
-	packageMap["name"] = appConfig.Name
-	packageMap["version"] = appConfig.Version
-	packageMap["description"] = appConfig.Description
-	encodedPackage, err := json.MarshalIndent(packageMap, "", "  ")
-	if err != nil {
-		return
-	}
-	changed, writeErr := writeFileIfChanged(path, append(encodedPackage, '\n'), 0644)
-	if writeErr != nil {
-		return
-	}
-	if changed {
+	if updateJSONFile(path, false, func(packageMap map[string]any) {
+		packageMap["//"] = "DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json"
+		packageMap["name"] = appConfig.Name
+		packageMap["version"] = appConfig.Version
+		packageMap["description"] = appConfig.Description
+	}) {
 		fmt.Printf("  -> Updated frontend/package.json (name: %q, version: %q)\n", appConfig.Name, appConfig.Version)
 	}
 }

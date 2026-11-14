@@ -188,14 +188,6 @@ type eventRow struct {
 
 var metricEvents = []string{"LoadGame", "Location", "FSDJump", "CarrierJump", "Scan", "SAAScanComplete", "ScanOrganic"}
 
-func (engine *Engine) hasDisabledCommanders() bool {
-	var hasDisabled int
-	if queryError := engine.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled); queryError != nil {
-		return true
-	}
-	return hasDisabled != 0
-}
-
 func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNames []string) ([]eventRow, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(eventNames)), ",")
 	args := make([]any, 0, len(eventNames)+2)
@@ -213,7 +205,7 @@ func (engine *Engine) loadEvents(afterTimestamp, untilTimestamp string, eventNam
 		eventColumn = "+event"
 	}
 	commanderPredicate := ""
-	if engine.hasDisabledCommanders() {
+	if hasDisabled, checkError := journal.HasDisabledCommanders(engine.DB); checkError != nil || hasDisabled {
 		commanderPredicate = " AND " + journal.CmdrFilterSQL
 	}
 	query := `SELECT event_uid, timestamp, event, system_address, body_id, star_x, star_y, star_z, raw_json

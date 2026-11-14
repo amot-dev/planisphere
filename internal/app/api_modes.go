@@ -93,43 +93,32 @@ func (app *App) CreateMode(name, description, color string) (modes.Mode, error) 
 
 // UpdateMode edits a mode.
 func (app *App) UpdateMode(id int64, name, description, color string) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
+	if updateError := app.withReadyReadLock(func() error {
+		return modes.Update(app.db, id, name, description, color)
+	}); updateError != nil {
+		return updateError
 	}
-	updateError := modes.Update(app.db, id, name, description, color)
-	if updateError == nil {
-		app.changed("modes", 0)
-	}
-	return updateError
+	app.changed("modes", 0)
+	return nil
 }
 
 // DeleteMode deletes a custom mode and its windows.
 func (app *App) DeleteMode(id int64) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
+	if deleteError := app.withReadyReadLock(func() error {
+		return modes.Delete(app.db, id)
+	}); deleteError != nil {
+		return deleteError
 	}
-	deleteError := modes.Delete(app.db, id)
-	if deleteError == nil {
-		app.changed("modes", 0)
-	}
-	return deleteError
+	app.changed("modes", 0)
+	return nil
 }
 
 // SwitchMode makes modeID the active mode from now (0 stops tracking a mode).
 func (app *App) SwitchMode(modeID int64) (ModesState, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if switchError := app.withReadyReadLock(func() error {
 		return db.WithTx(app.db, func(transaction *sql.Tx) error { return modes.Switch(transaction, modeID, "") })
-	}(); err != nil {
-		return ModesState{}, err
+	}); switchError != nil {
+		return ModesState{}, switchError
 	}
 	app.changed("modes", 0)
 	return app.GetModesState()
@@ -147,17 +136,12 @@ type ModeWindowInput struct {
 // SaveModeWindow writes a window retroactively; overlapping windows are
 // trimmed or split so that windows never overlap.
 func (app *App) SaveModeWindow(input ModeWindowInput) (ModesState, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if saveError := app.withReadyReadLock(func() error {
 		return db.WithTx(app.db, func(transaction *sql.Tx) error {
 			return modes.SetWindow(transaction, input.ID, input.ModeID, input.Start, input.End)
 		})
-	}(); err != nil {
-		return ModesState{}, err
+	}); saveError != nil {
+		return ModesState{}, saveError
 	}
 	app.changed("modes", 0)
 	return app.GetModesState()
@@ -165,15 +149,10 @@ func (app *App) SaveModeWindow(input ModeWindowInput) (ModesState, error) {
 
 // DeleteModeWindow removes a window.
 func (app *App) DeleteModeWindow(id int64) (ModesState, error) {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if deleteError := app.withReadyReadLock(func() error {
 		return modes.DeleteWindow(app.db, id)
-	}(); err != nil {
-		return ModesState{}, err
+	}); deleteError != nil {
+		return ModesState{}, deleteError
 	}
 	app.changed("modes", 0)
 	return app.GetModesState()

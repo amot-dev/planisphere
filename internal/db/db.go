@@ -138,28 +138,9 @@ func CreateDebugSnapshot(sourcePath string) (string, error) {
 		return tempPath, nil
 	}
 
-	sourceFile, openSourceError := os.Open(trimmedSourcePath)
-	if openSourceError != nil {
-		_ = tempFile.Close()
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, openSourceError)
-	}
-
-	_, copyError := io.Copy(tempFile, sourceFile)
-	_ = sourceFile.Close()
-	if copyError != nil {
-		_ = tempFile.Close()
+	if copyError := copyToOpenFile(trimmedSourcePath, tempFile); copyError != nil {
 		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, copyError)
-	}
-	if syncError := tempFile.Sync(); syncError != nil {
-		_ = tempFile.Close()
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, syncError)
-	}
-	if closeError := tempFile.Close(); closeError != nil {
-		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("copy source database %s to debug snapshot: %w", trimmedSourcePath, closeError)
 	}
 
 	// Copy any non-empty -wal companion file alongside the main database file so
@@ -190,17 +171,13 @@ func RemoveDebugSnapshot(tempPath string) {
 	_ = os.Remove(trimmedTempPath + "-shm")
 }
 
-func copyFileReadOnly(sourcePath, destinationPath string) error {
+func copyToOpenFile(sourcePath string, destinationFile *os.File) error {
 	sourceFile, openSourceError := os.Open(sourcePath)
 	if openSourceError != nil {
+		_ = destinationFile.Close()
 		return openSourceError
 	}
 	defer sourceFile.Close()
-
-	destinationFile, openDestinationError := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if openDestinationError != nil {
-		return openDestinationError
-	}
 
 	if _, copyError := io.Copy(destinationFile, sourceFile); copyError != nil {
 		_ = destinationFile.Close()
@@ -211,6 +188,14 @@ func copyFileReadOnly(sourcePath, destinationPath string) error {
 		return syncError
 	}
 	return destinationFile.Close()
+}
+
+func copyFileReadOnly(sourcePath, destinationPath string) error {
+	destinationFile, openDestinationError := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if openDestinationError != nil {
+		return openDestinationError
+	}
+	return copyToOpenFile(sourcePath, destinationFile)
 }
 
 // Open opens (creating if needed) the database at path, applies the

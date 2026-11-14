@@ -471,15 +471,25 @@ func (app *App) onlineEnabled() bool {
 	return settingValue != "0"
 }
 
+func (app *App) settingInt64(key string, defaultValue int64) int64 {
+	if app.db == nil {
+		return defaultValue
+	}
+	settingValue, getError := db.GetSetting(app.db, key)
+	trimmedValue := strings.TrimSpace(settingValue)
+	if getError != nil || trimmedValue == "" {
+		return defaultValue
+	}
+	parsedValue, parseError := strconv.ParseInt(trimmedValue, 10, 64)
+	if parseError != nil {
+		return defaultValue
+	}
+	return parsedValue
+}
+
 // activeExpeditionID returns the currently active expedition ID. Caller must hold app.dbMu.RLock.
 func (app *App) activeExpeditionID() int64 {
-	if app.db == nil {
-		return 0
-	}
-	settingValue, _ := db.GetSetting(app.db, settingActiveExpedition)
-	var expeditionID int64
-	fmt.Sscan(settingValue, &expeditionID)
-	return expeditionID
+	return app.settingInt64(settingActiveExpedition, 0)
 }
 
 // setupCompleted reports whether initial onboarding setup has finished. Caller must hold app.dbMu.RLock.
@@ -496,34 +506,17 @@ func (app *App) setupCompleted() bool {
 // Caller must hold app.dbMu.RLock or app.dbMu.Lock.
 func (app *App) journalDebounceMs() int {
 	defaultDebounceMilliseconds := int(journal.DefaultDebounceDelay / time.Millisecond)
-	if app.db == nil {
-		return defaultDebounceMilliseconds
-	}
-	settingValue, getError := db.GetSetting(app.db, settingJournalDebounceMs)
-	if getError != nil || strings.TrimSpace(settingValue) == "" {
-		return defaultDebounceMilliseconds
-	}
-	parsedMilliseconds, parseError := strconv.Atoi(strings.TrimSpace(settingValue))
-	if parseError != nil {
-		return defaultDebounceMilliseconds
-	}
-	clampedDuration := journal.ClampDebounceDelay(time.Duration(parsedMilliseconds) * time.Millisecond)
+	configuredMilliseconds := app.settingInt64(settingJournalDebounceMs, int64(defaultDebounceMilliseconds))
+	clampedDuration := journal.ClampDebounceDelay(time.Duration(configuredMilliseconds) * time.Millisecond)
 	return int(clampedDuration / time.Millisecond)
 }
 
 // tritiumPricePerTonne returns the configured or default Tritium cost in credits
 // per tonne. Caller must hold app.dbMu.RLock or app.dbMu.Lock.
 func (app *App) tritiumPricePerTonne() int64 {
-	if app.db == nil {
+	configuredPrice := app.settingInt64(settingTritiumPricePerTonne, ed.DefaultTritiumPricePerTonne)
+	if configuredPrice < 0 {
 		return ed.DefaultTritiumPricePerTonne
 	}
-	settingValue, getError := db.GetSetting(app.db, settingTritiumPricePerTonne)
-	if getError != nil || strings.TrimSpace(settingValue) == "" {
-		return ed.DefaultTritiumPricePerTonne
-	}
-	parsedPrice, parseError := strconv.ParseInt(strings.TrimSpace(settingValue), 10, 64)
-	if parseError != nil || parsedPrice < 0 {
-		return ed.DefaultTritiumPricePerTonne
-	}
-	return parsedPrice
+	return configuredPrice
 }

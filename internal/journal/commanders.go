@@ -22,6 +22,16 @@ type Status struct {
 // belonging to any commander the user has explicitly disabled in Settings.
 const CmdrFilterSQL = `(commander IS NULL OR commander = '' OR NOT EXISTS (SELECT 1 FROM commanders c WHERE c.name = journal_events.commander COLLATE NOCASE AND c.enabled = 0))`
 
+// HasDisabledCommanders reports whether any discovered commander is currently
+// disabled in Settings.
+func HasDisabledCommanders(queryer db.Queryer) (bool, error) {
+	var hasDisabled int
+	if queryError := queryer.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled); queryError != nil {
+		return false, queryError
+	}
+	return hasDisabled != 0, nil
+}
+
 // ArchiveStatus returns counts of tracked files and stored events.
 func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	var status Status
@@ -29,12 +39,12 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	if queryError := queryer.QueryRow(`SELECT COUNT(*) FROM ingested_journals`).Scan(&status.FilesTracked); queryError != nil {
 		return status, fmt.Errorf("count ingested journals: %w", queryError)
 	}
-	var hasDisabled int
-	if queryError := queryer.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled); queryError != nil {
-		return status, fmt.Errorf("check disabled commanders: %w", queryError)
+	hasDisabled, disabledCheckError := HasDisabledCommanders(queryer)
+	if disabledCheckError != nil {
+		return status, fmt.Errorf("check disabled commanders: %w", disabledCheckError)
 	}
 	var archiveQuery string
-	if hasDisabled == 0 {
+	if !hasDisabled {
 		archiveQuery = `SELECT
 			(SELECT COUNT(*) FROM journal_events),
 			(SELECT timestamp FROM journal_events ORDER BY timestamp ASC LIMIT 1),

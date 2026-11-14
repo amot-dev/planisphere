@@ -58,28 +58,35 @@ func parseShipState(timestamp, eventType, rawJSON string) (shipState, bool) {
 	return state, true
 }
 
+func appendQueriedShipStates(queryer db.Queryer, states []shipState, query string, queryArgs ...any) ([]shipState, error) {
+	rows, queryError := queryer.Query(query, queryArgs...)
+	if queryError != nil {
+		return nil, queryError
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var timestamp, eventType, rawJSON string
+		if scanError := rows.Scan(&timestamp, &eventType, &rawJSON); scanError != nil {
+			return nil, scanError
+		}
+		if state, parsedOK := parseShipState(timestamp, eventType, rawJSON); parsedOK {
+			states = append(states, state)
+		}
+	}
+	return states, rows.Err()
+}
+
 // fetchShipStates clamps timeline scans to the expedition window plus the latest active ship beforehand.
 func fetchShipStates(queryer db.Queryer, startTimestamp, endTimestamp string) ([]shipState, error) {
 	var states []shipState
 
 	if startTimestamp != "" {
 		shipFilter := `(event = 'ShipyardSwap' OR (json_extract(raw_json, '$.Ship') IS NOT NULL AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%suit%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%buggy%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%srv%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%fighter%' AND LOWER(json_extract(raw_json, '$.Ship')) NOT LIKE '%lander%'))`
-		rows, queryError := queryer.Query(`SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND timestamp <= ? AND `+shipFilter+` AND `+journal.CmdrFilterSQL+` ORDER BY timestamp DESC, id DESC LIMIT 1`, startTimestamp)
-		if queryError != nil {
-			return nil, queryError
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var timestamp, eventType, rawJSON string
-			if scanError := rows.Scan(&timestamp, &eventType, &rawJSON); scanError != nil {
-				return nil, scanError
-			}
-			if state, ok := parseShipState(timestamp, eventType, rawJSON); ok {
-				states = append(states, state)
-			}
-		}
-		if rowsError := rows.Err(); rowsError != nil {
-			return nil, rowsError
+		seedQuery := `SELECT timestamp, event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND timestamp <= ? AND ` + shipFilter + ` AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp DESC, id DESC LIMIT 1`
+		var seedError error
+		states, seedError = appendQueriedShipStates(queryer, states, seedQuery, startTimestamp)
+		if seedError != nil {
+			return nil, seedError
 		}
 	}
 
@@ -94,21 +101,7 @@ func fetchShipStates(queryer db.Queryer, startTimestamp, endTimestamp string) ([
 		queryArgs = append(queryArgs, endTimestamp)
 	}
 	query += ` AND ` + journal.CmdrFilterSQL + ` ORDER BY timestamp, id`
-	rows, queryError := queryer.Query(query, queryArgs...)
-	if queryError != nil {
-		return nil, queryError
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var timestamp, eventType, rawJSON string
-		if scanError := rows.Scan(&timestamp, &eventType, &rawJSON); scanError != nil {
-			return nil, scanError
-		}
-		if state, ok := parseShipState(timestamp, eventType, rawJSON); ok {
-			states = append(states, state)
-		}
-	}
-	return states, rows.Err()
+	return appendQueriedShipStates(queryer, states, query, queryArgs...)
 }
 
 func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) ([]shipState, error) {
