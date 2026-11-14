@@ -58,7 +58,7 @@ export function DatabaseArchiveSection({
   return (
     <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#00D2FF]">
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
           Database and Event Archive
         </span>
         <button
@@ -79,13 +79,17 @@ export function DatabaseArchiveSection({
         </div>
         <div className="p-2 bg-[#050506] border border-[#3d2816]">
           <div className="text-[10px] uppercase text-[#a6907c]">Stored Events</div>
-          <div className="text-sm font-bold text-[#FF7100]">
+          <div className="text-sm font-bold text-[#F4ECE4]">
             {(ingestStatus?.eventsStored ?? 0).toLocaleString()}
           </div>
         </div>
         <div className="p-2 bg-[#050506] border border-[#3d2816]">
           <div className="text-[10px] uppercase text-[#a6907c]">Live Watcher</div>
-          <div className="text-sm font-bold text-[#00D2FF]">
+          <div
+            className={`text-sm font-bold ${
+              ingestStatus?.watcherActive ? 'text-[#00D2FF]' : 'text-[#a6907c]'
+            }`}
+          >
             {ingestStatus?.watcherActive ? 'ACTIVE' : 'STANDBY'}
           </div>
         </div>

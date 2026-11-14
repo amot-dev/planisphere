@@ -76,7 +76,7 @@ export function EDDiscoveryImportSection({
   return (
     <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#00D2FF]">
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
           Historical Journal Import (EDDiscovery)
         </span>
       </div>
@@ -121,7 +121,7 @@ export function EDDiscoveryImportSection({
           </div>
           <div className="w-full h-2 bg-[#050506] border border-[#3d2816] overflow-hidden">
             <div
-              className="h-full bg-[#FF7100] transition-all duration-150"
+              className="h-full bg-[#00D2FF] transition-all duration-150"
               style={{ width: `${eddProgress?.total ? Math.max(2, eddProgress.percent) : 15}%` }}
             />
           </div>

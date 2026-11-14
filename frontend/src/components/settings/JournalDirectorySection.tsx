@@ -100,7 +100,7 @@ export function JournalDirectorySection({
           type="button"
           onClick={handleResetDefaultDirectory}
           title="Reset journal directory to the game default"
-          className="ed-btn-cyan"
+          className="ed-btn"
         >
           Reset to Default
         </button>

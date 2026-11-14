@@ -96,9 +96,13 @@ export function useCarrierRoute({
           const savedTritiumInput = saved.manualTritInput || ''
           manualDistanceInputRef.current = savedDistanceInput
           manualTritiumInputRef.current = savedTritiumInput
+          const maxJumpIndex =
+            saved.route.jumps && saved.route.jumps.length > 0
+              ? saved.route.jumps.length - 1
+              : 0
           setActiveCarrierRoute(saved.route)
           setActiveCarrierTargetRowId(saved.targetRowId)
-          setCarrierJumpIndex(saved.jumpIdx || 0)
+          setCarrierJumpIndex(Math.min(Math.max(0, saved.jumpIdx || 0), maxJumpIndex))
           setManualModeOverride(Boolean(saved.manualMode))
           setManualDistanceInput(savedDistanceInput)
           setManualTritiumInput(savedTritiumInput)
@@ -455,6 +459,10 @@ export function useCarrierRoute({
     try {
       await RecordCarrierJump(plan.expedition.id, carrierHop.distanceLy, carrierHop.tritiumUsed)
       const nextJumpIndex = carrierJumpIndex + 1
+      if (nextJumpIndex >= (activeCarrierRoute.jumps?.length ?? 0)) {
+        await handleCarrierArriveAtWaypoint()
+        return
+      }
       setCarrierJumpIndex(nextJumpIndex)
       // Deduct consumed fuel from the depot
       const nextDepot = Math.max(0, currentDepot - carrierHop.tritiumUsed)

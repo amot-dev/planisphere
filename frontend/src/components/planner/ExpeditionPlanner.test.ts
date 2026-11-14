@@ -872,6 +872,59 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(spanshModeHtml).not.toContain('Beagle Point')
     expect(spanshModeHtml).toContain('805.6 Ly')
     expect(spanshModeHtml).toMatch(/~(?:<!-- -->)?112(?:<!-- -->)? t/)
+    expect(spanshModeHtml).toContain('class="ed-btn-primary">COMPLETE JUMP #1</button>')
+
+    const spanshFinalJumpHtml = renderToString(
+      createElement(CarrierRouteBottomPanel, {
+        route: app.CarrierRouteResult.createFrom({
+          origin: 'Sol',
+          destination: 'Colonia',
+          carrierType: 'player',
+          manualMode: false,
+          jumps: [
+            {
+              systemName: 'Rohini',
+              distanceLy: 495.2,
+              tritiumUsed: 68,
+              fuelInTank: 932,
+              hasIcyRing: true,
+            },
+            {
+              systemName: 'Colonia',
+              distanceLy: 310.4,
+              tritiumUsed: 44,
+              fuelInTank: 888,
+              hasIcyRing: false,
+            },
+          ],
+        }),
+        jumpIndex: 1,
+        manualMode: false,
+        hasNextFcStop: true,
+        nextFcStopSystem: 'Colonia',
+        onCancelRoute: () => {},
+        onToggleManualMode: () => {},
+        onCompleteSpanshJump: () => {},
+        manualDistanceInput: '',
+        onChangeManualDistance: () => {},
+        manualTritiumInput: '',
+        onChangeManualTritium: () => {},
+        onLogManualJump: () => {},
+        manualLegJumps: 0,
+        manualLegDistance: 0,
+        manualLegTritium: 0,
+        loggingJump: false,
+        copiedNextJump: false,
+        onCopySystem: () => {},
+        onArrive: () => {},
+      }),
+    )
+
+    expect(spanshFinalJumpHtml).toContain(
+      'title="Complete final carrier jump to Colonia and mark waypoint arrival"',
+    )
+    expect(spanshFinalJumpHtml).toContain('class="ed-btn-cyan">COMPLETE JUMP #2</button>')
+    expect(spanshFinalJumpHtml).not.toContain('CARRIER ARRIVED')
 
     const lockedFcRowHtml = renderToString(
       createElement(WaypointRowItem, {

@@ -71,9 +71,7 @@ export const CarrierRouteBottomPanel = memo(function CarrierRouteBottomPanel({
       ? (nextFcStopSystem ?? route.destination ?? '').trim()
       : ''
   const destinationDisplay = destinationSystem || '???'
-  const canMarkArrival = !manualMode
-    ? Boolean(destinationSystem)
-    : effectiveHasNextFcStop && Boolean(destinationSystem)
+  const canMarkArrival = effectiveHasNextFcStop && Boolean(destinationSystem)
   const currentDepot =
     depotTritium !== undefined
       ? depotTritium
@@ -105,7 +103,6 @@ export const CarrierRouteBottomPanel = memo(function CarrierRouteBottomPanel({
           onCopySystem={onCopySystem}
           onRefillDepot={onRefillDepot}
           onCompleteSpanshJump={onCompleteSpanshJump}
-          onArrive={onArrive}
         />
       ) : (
         <ManualCarrierLoggerView
@@ -212,7 +209,6 @@ function SpanshCarrierStepView({
   onCopySystem,
   onRefillDepot,
   onCompleteSpanshJump,
-  onArrive,
 }: {
   route: app.CarrierRouteResult
   jumps: app.CarrierRouteJump[]
@@ -224,19 +220,20 @@ function SpanshCarrierStepView({
   onCopySystem: (systemName: string) => void
   onRefillDepot?: () => void
   onCompleteSpanshJump: () => void
-  onArrive: () => void
 }) {
+  const activeHopIndex = Math.min(Math.max(0, jumpIndex), jumps.length - 1)
   const currentSystem =
-    jumpIndex === 0
+    activeHopIndex === 0
       ? route.origin || '???'
-      : jumps[Math.min(jumpIndex - 1, jumps.length - 1)]?.systemName || destinationDisplay
-  const nextHop = jumpIndex < jumps.length ? jumps[jumpIndex] : null
-  const hopTritiumRequired = nextHop?.tritiumUsed ?? 0
-  const isDepotInsufficient = nextHop !== null && currentDepot < hopTritiumRequired
-  const remainingJumps = Math.max(0, jumps.length - jumpIndex)
+      : jumps[activeHopIndex - 1]?.systemName || destinationDisplay
+  const nextHop = jumps[activeHopIndex]
+  const isFinalJump = activeHopIndex === jumps.length - 1
+  const hopTritiumRequired = nextHop.tritiumUsed ?? 0
+  const isDepotInsufficient = currentDepot < hopTritiumRequired
+  const remainingJumps = Math.max(0, jumps.length - activeHopIndex)
   let remainingDistanceLy = 0
   let remainingTritiumTonnes = 0
-  for (let hopIndex = Math.max(0, jumpIndex); hopIndex < jumps.length; hopIndex++) {
+  for (let hopIndex = activeHopIndex; hopIndex < jumps.length; hopIndex++) {
     const jump = jumps[hopIndex]
     remainingDistanceLy += jump.distanceLy || 0
     remainingTritiumTonnes += jump.tritiumUsed || 0
@@ -256,45 +253,37 @@ function SpanshCarrierStepView({
 
         <div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
-            Next Carrier Jump {nextHop ? `[#${jumpIndex + 1} OF ${jumps.length}]` : ''}
+            Next Carrier Jump [#{activeHopIndex + 1} OF {jumps.length}]
           </span>
-          {nextHop ? (
-            <div className="flex items-center gap-2">
-              <span className="font-mono-tabular text-sm font-extrabold text-[#FF7100]">
-                {nextHop.systemName}
-              </span>
-              <button
-                type="button"
-                onClick={() => onCopySystem(nextHop.systemName)}
-                title="Copy next jump system name to clipboard"
-                className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#140e09] hover:bg-[#FF7100] text-[#F4ECE4] hover:text-[#050506] border border-[#472e19] cursor-pointer"
-              >
-                {copiedNextJump ? 'COPIED' : 'COPY'}
-              </button>
-              {nextHop.hasIcyRing && (
-                <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]/50">
-                  [ICY RING]
-                </span>
-              )}
-            </div>
-          ) : (
-            <span className="font-mono-tabular text-sm font-bold text-[#00D2FF]">
-              ARRIVED AT {route.destination}
+          <div className="flex items-center gap-2">
+            <span className="font-mono-tabular text-sm font-extrabold text-[#FF7100]">
+              {nextHop.systemName}
             </span>
-          )}
+            <button
+              type="button"
+              onClick={() => onCopySystem(nextHop.systemName)}
+              title="Copy next jump system name to clipboard"
+              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#140e09] hover:bg-[#FF7100] text-[#F4ECE4] hover:text-[#050506] border border-[#472e19] cursor-pointer"
+            >
+              {copiedNextJump ? 'COPIED' : 'COPY'}
+            </button>
+            {nextHop.hasIcyRing && (
+              <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]/50">
+                [ICY RING]
+              </span>
+            )}
+          </div>
         </div>
 
-        {nextHop && (
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
-              Next Hop Telemetry
-            </span>
-            <span className="font-mono-tabular text-xs text-[#F4ECE4]">
-              {formatLy(nextHop.distanceLy, 2)} ·{' '}
-              <span className="text-[#00D2FF] font-bold">{nextHop.tritiumUsed} t TRITIUM</span>
-            </span>
-          </div>
-        )}
+        <div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+            Next Hop Telemetry
+          </span>
+          <span className="font-mono-tabular text-xs text-[#F4ECE4]">
+            {formatLy(nextHop.distanceLy, 2)} ·{' '}
+            <span className="text-[#00D2FF] font-bold">{nextHop.tritiumUsed} t TRITIUM</span>
+          </span>
+        </div>
 
         <div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
@@ -341,29 +330,21 @@ function SpanshCarrierStepView({
       </div>
 
       <div className="flex items-center gap-2">
-        {nextHop ? (
-          <button
-            type="button"
-            disabled={loggingJump || isDepotInsufficient}
-            onClick={onCompleteSpanshJump}
-            title={
-              isDepotInsufficient
-                ? `Refill required: Tritium depot (${formatInt(currentDepot)} t) is insufficient for this jump (${formatInt(hopTritiumRequired)} t)`
+        <button
+          type="button"
+          disabled={loggingJump || isDepotInsufficient}
+          onClick={onCompleteSpanshJump}
+          title={
+            isDepotInsufficient
+              ? `Refill required: Tritium depot (${formatInt(currentDepot)} t) is insufficient for this jump (${formatInt(hopTritiumRequired)} t)`
+              : isFinalJump
+                ? `Complete final carrier jump to ${destinationDisplay} and mark waypoint arrival`
                 : undefined
-            }
-            className="ed-btn-primary"
-          >
-            {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${jumpIndex + 1}`}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onArrive}
-            className="ed-btn-cyan"
-          >
-            CARRIER ARRIVED — MARK ARRIVAL
-          </button>
-        )}
+          }
+          className={isFinalJump ? 'ed-btn-cyan' : 'ed-btn-primary'}
+        >
+          {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${activeHopIndex + 1}`}
+        </button>
       </div>
     </div>
   )

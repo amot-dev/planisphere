@@ -63,7 +63,7 @@ export function CommandersSection({
                   </span>
                 </div>
               </div>
-              <span className="font-mono-tabular text-xs font-bold text-[#00D2FF] shrink-0">
+              <span className="font-mono-tabular text-xs font-bold text-[#F4ECE4] shrink-0">
                 {commanderItem.eventCount.toLocaleString()} events
               </span>
             </label>

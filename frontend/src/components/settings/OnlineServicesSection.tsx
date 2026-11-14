@@ -60,6 +60,9 @@ export function OnlineServicesSection({
 
   return (
     <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2.5">
+      <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
+        Online Services
+      </div>
       <label className="flex items-center justify-between cursor-pointer">
         <div>
           <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
@@ -86,7 +89,7 @@ export function OnlineServicesSection({
           type="button"
           disabled={gecBusy}
           onClick={handleRefreshGec}
-          className="ed-btn"
+          className="ed-btn-cyan"
         >
           {gecBusy ? 'Syncing…' : 'Sync GEC Catalog'}
         </button>

@@ -65,10 +65,10 @@ export function FleetCarrierSection({
   return (
     <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#00D2FF]">
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
           Fleet Carrier Cost Valuation
         </span>
-        <span className="text-[10px] font-mono-tabular font-bold uppercase px-2 py-0.5 border bg-[#08151c] border-[#00D2FF]/60 text-[#00D2FF]">
+        <span className="text-[10px] font-mono-tabular font-bold uppercase px-2 py-0.5 border bg-[#16100b] border-[#3d2816] text-[#F4ECE4]">
           {configuredPrice.toLocaleString()} Cr / t
         </span>
       </div>
@@ -100,7 +100,7 @@ export function FleetCarrierSection({
           disabled={configuredPrice === defaultPrice && Number(priceInput) === defaultPrice}
           onClick={handleResetDefaultPrice}
           title="Reset Tritium price to the default 50,000 Cr per tonne"
-          className="ed-btn-cyan"
+          className="ed-btn"
         >
           Reset to Default
         </button>
