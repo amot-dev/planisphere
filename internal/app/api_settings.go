@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -188,7 +189,12 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 // CompleteSetup marks the first-time setup wizard as finished and triggers
 // any deferred startup tasks (watcher and GEC catalog sync).
 func (app *App) CompleteSetup() (Settings, error) {
-	var shouldRefresh bool
+	var (
+		activeWatcher *journal.Watcher
+		watchContext  context.Context
+		configuredDir string
+		shouldRefresh bool
+	)
 	if err := func() error {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
@@ -198,8 +204,8 @@ func (app *App) CompleteSetup() (Settings, error) {
 		if saveError := db.SetSetting(app.db, settingSetupCompleted, "1"); saveError != nil {
 			return saveError
 		}
-		if app.watcher != nil {
-			app.watcher.Start(app.ctx, app.journalDir())
+		if app.watcher != nil && (app.ctx == nil || app.ctx.Err() == nil) {
+			activeWatcher, watchContext, configuredDir = app.watcher, app.ctx, app.journalDir()
 		}
 		if app.onlineEnabled() && app.gec != nil && app.gec.Count() == 0 {
 			shouldRefresh = true
@@ -207,6 +213,9 @@ func (app *App) CompleteSetup() (Settings, error) {
 		return nil
 	}(); err != nil {
 		return Settings{}, err
+	}
+	if activeWatcher != nil {
+		activeWatcher.Start(watchContext, configuredDir)
 	}
 	if shouldRefresh {
 		app.spawnBackground(app.maybeRefreshGEC)

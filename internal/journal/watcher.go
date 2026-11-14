@@ -38,6 +38,7 @@ type Watcher struct {
 	debounceNanos   atomic.Int64
 	debounceChanged chan struct{}
 
+	opMu      sync.Mutex // serializes Start and Stop lifecycle transitions
 	mu        sync.Mutex
 	dir       string
 	cancel    context.CancelFunc
@@ -88,7 +89,16 @@ func (watcher *Watcher) Active() (bool, string) {
 
 // Start (re)starts watching dir. Any previous watch is stopped.
 func (watcher *Watcher) Start(parent context.Context, dir string) {
-	watcher.Stop()
+	watcher.opMu.Lock()
+	defer watcher.opMu.Unlock()
+
+	watcher.stopLocked()
+	if parent != nil && parent.Err() != nil {
+		return
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	watcher.mu.Lock()
@@ -101,6 +111,13 @@ func (watcher *Watcher) Start(parent context.Context, dir string) {
 
 // Stop stops watching.
 func (watcher *Watcher) Stop() {
+	watcher.opMu.Lock()
+	defer watcher.opMu.Unlock()
+
+	watcher.stopLocked()
+}
+
+func (watcher *Watcher) stopLocked() {
 	watcher.mu.Lock()
 	if watcher.cancel != nil {
 		watcher.cancel()
