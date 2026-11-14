@@ -250,13 +250,19 @@ func (app *App) BrowseEDDiscoveryDB() (string, error) {
 func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	app.dbMu.RLock()
 	readyError := app.ready()
-	ingester := app.ingester
 	app.dbMu.RUnlock()
-
 	if readyError != nil {
 		return 0, readyError
 	}
-	if ingester == nil {
+
+	app.ingestMu.RLock()
+	defer app.ingestMu.RUnlock()
+
+	app.dbMu.RLock()
+	database := app.db
+	ingester := app.ingester
+	app.dbMu.RUnlock()
+	if database == nil || ingester == nil {
 		return 0, errorNotReady
 	}
 
@@ -274,7 +280,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	}
 
 	app.dbMu.RLock()
-	if app.db != nil {
+	if app.db == database {
 		_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
 		_ = db.SetSetting(app.db, "edd_db_path", eddPath)
 		_ = db.SetSetting(app.db, "edd_history_realization_v6", "1")

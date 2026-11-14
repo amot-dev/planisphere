@@ -36,6 +36,8 @@ func (app *App) executeJournalScan() (bool, bool) {
 	}
 	defer app.scanning.Store(false)
 	app.emit(EventIngest, nil)
+	app.ingestMu.RLock()
+	defer app.ingestMu.RUnlock()
 	app.dbMu.RLock()
 	dir := app.journalDir()
 	ingester := app.ingester
@@ -53,8 +55,8 @@ func (app *App) executeJournalScan() (bool, bool) {
 		app.setError("")
 	}
 	app.dbMu.RLock()
-	if app.db != nil {
-		if settingError := db.SetSetting(app.db, settingLastScanAt, ed.NowISO()); settingError != nil {
+	if app.db == database {
+		if settingError := db.SetSetting(database, settingLastScanAt, ed.NowISO()); settingError != nil {
 			log.Printf("persist last scan timestamp: %v", settingError)
 		}
 	}
@@ -257,6 +259,8 @@ func (app *App) maybeRefreshGEC() {
 }
 
 func (app *App) maybeCatchUpEDD() {
+	app.ingestMu.RLock()
+	defer app.ingestMu.RUnlock()
 	app.dbMu.RLock()
 	database := app.db
 	ingester := app.ingester

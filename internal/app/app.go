@@ -69,6 +69,7 @@ type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	ingestMu        sync.RWMutex
 	dbMu            sync.RWMutex
 	db              *sql.DB
 	dbPath          string
@@ -284,6 +285,9 @@ func (app *App) openAndWireDB(dbPath string) error {
 	if openError != nil {
 		return fmt.Errorf("open database %s: %w", dbPath, openError)
 	}
+
+	app.ingestMu.Lock()
+	defer app.ingestMu.Unlock()
 
 	app.dbMu.Lock()
 	defer app.dbMu.Unlock()
