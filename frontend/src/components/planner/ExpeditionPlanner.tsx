@@ -3,7 +3,6 @@ import {
   AddRow,
   DeleteRow,
   MoveRow,
-  SetActiveLegMode,
   SetLegMode,
   UpdateRow,
 } from '../../../wailsjs/go/app/App'
@@ -14,7 +13,6 @@ import { CarrierRouteModal } from './CarrierRouteModal'
 import { PlannerActiveLegFooter } from './PlannerActiveLegFooter'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
 import {
-  buildOptimisticActiveLegModePlan,
   buildOptimisticDeletedRowPlan,
   buildOptimisticFcArrivedPlan,
   buildOptimisticFcStopTogglePlan,
@@ -102,7 +100,7 @@ export function ExpeditionPlanner({
     if (!plan || !plan.rows || isPlanning) return -1
     let maxIndex = -1
     ;(plan.rows ?? []).forEach((rowView, index) => {
-      if (rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')) {
+      if (rowView && rowView.visitState === 'visited') {
         maxIndex = index
       }
     })
@@ -224,16 +222,6 @@ export function ExpeditionPlanner({
     )
   }
 
-  async function handleActiveLegModeChange(modeId: number) {
-    if (!plan) return
-    await runPlanMutation(
-      'UPDATING ACTIVE LEG MODE',
-      'Failed to update active leg flight mode',
-      () => SetActiveLegMode(plan.expedition.id, modeId),
-      { optimisticPlan: buildOptimisticActiveLegModePlan(plan, modeId), onSuccess: onRefreshAll },
-    )
-  }
-
   async function changeRegion(rowId: number, regionId: number) {
     await runPlanMutation(
       'UPDATING GALACTIC REGION',
@@ -340,7 +328,6 @@ export function ExpeditionPlanner({
   }
 
   const currentExpedition = plan.expedition
-  const isActive = currentExpedition.status === 'active'
   const isCompleted = currentExpedition.status === 'completed'
   const modesList = plan.modes ?? []
   const hasOriginWaypointSystem =
@@ -406,12 +393,8 @@ export function ExpeditionPlanner({
         />
 
         <PlannerActiveLegFooter
-          plan={plan}
           isPlanning={isPlanning}
-          isActive={isActive}
           isCompleted={isCompleted}
-          modesList={modesList}
-          onActiveLegModeChange={handleActiveLegModeChange}
           onAppendRow={(rowType) => handleInsert(0, rowType)}
         />
       </div>

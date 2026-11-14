@@ -154,10 +154,6 @@ export function SetActiveExpedition(arg1) {
   return window['go']['app']['App']['SetActiveExpedition'](arg1);
 }
 
-export function SetActiveLegMode(arg1, arg2) {
-  return window['go']['app']['App']['SetActiveLegMode'](arg1, arg2);
-}
-
 export function SetCommanderEnabled(arg1, arg2) {
   return window['go']['app']['App']['SetCommanderEnabled'](arg1, arg2);
 }

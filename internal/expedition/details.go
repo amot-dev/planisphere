@@ -33,7 +33,7 @@ func InvalidateOriginMetricsCache() {
 // WaypointDetails is the content of a waypoint's expandable drawer.
 type WaypointDetails struct {
 	RowID        int64                      `json:"rowId"`
-	Kind         string                     `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1), "future"
+	Kind         string                     `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
 	Number       int                        `json:"number"`
 	From         string                     `json:"from"`
 	To           string                     `json:"to"`
@@ -43,31 +43,6 @@ type WaypointDetails struct {
 	PrevSystem   string                     `json:"prevSystem"`
 	Metrics      stats.Metrics              `json:"metrics"`
 	Realization  stats.RealizationBreakdown `json:"realization"`
-
-	EstDistFromPrevLy    *float64 `json:"estDistFromPrevLy,omitempty"`
-	EstDistFromCurrentLy *float64 `json:"estDistFromCurrentLy,omitempty"`
-	CurrentSystem        string   `json:"currentSystem"`
-	MissingCoords        bool     `json:"missingCoords"`
-}
-
-func populateFutureWaypointDetails(waypointDetails *WaypointDetails, targetRow Row, previousWaypoint, currentWaypoint *Row) {
-	waypointDetails.Kind = "future"
-	if previousWaypoint != nil && previousWaypoint.HasCoords && targetRow.HasCoords {
-		startPosition, _ := previousWaypoint.Coords()
-		endPosition, _ := targetRow.Coords()
-		distanceLy := ed.Distance(startPosition, endPosition)
-		waypointDetails.EstDistFromPrevLy = &distanceLy
-	}
-	if currentWaypoint != nil && currentWaypoint.HasCoords && targetRow.HasCoords {
-		currentPosition, _ := currentWaypoint.Coords()
-		endPosition, _ := targetRow.Coords()
-		distanceLy := ed.Distance(currentPosition, endPosition)
-		waypointDetails.EstDistFromCurrentLy = &distanceLy
-	}
-	if currentWaypoint != nil {
-		waypointDetails.CurrentSystem = currentWaypoint.SystemName
-	}
-	waypointDetails.MissingCoords = !targetRow.HasCoords || (previousWaypoint != nil && !previousWaypoint.HasCoords)
 }
 
 func populateOriginWaypointDetails(conn *sql.DB, statsEngine *stats.Engine, targetRow Row, waypointDetails *WaypointDetails) error {
@@ -114,12 +89,12 @@ func populateOriginWaypointDetails(conn *sql.DB, statsEngine *stats.Engine, targ
 	return nil
 }
 
-func populateVisitedLegDetails(conn *sql.DB, statsEngine *stats.Engine, targetRow Row, rows []Row, waypointDetails *WaypointDetails) error {
+func populateLegDetails(conn *sql.DB, statsEngine *stats.Engine, targetRow Row, rows []Row, waypointDetails *WaypointDetails) error {
 	waypointDetails.Kind = "leg"
 	// The leg starts at the visit of the waypoint visited immediately before this one.
 	afterTimestamp := ""
 	for _, rowItem := range rows {
-		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && rowItem.VisitedAt < targetRow.VisitedAt && rowItem.VisitedAt > afterTimestamp {
+		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && (targetRow.VisitedAt == "" || rowItem.VisitedAt < targetRow.VisitedAt) && rowItem.VisitedAt > afterTimestamp {
 			afterTimestamp = rowItem.VisitedAt
 			waypointDetails.PrevSystem = rowItem.SystemName
 		}
@@ -143,7 +118,22 @@ func populateVisitedLegDetails(conn *sql.DB, statsEngine *stats.Engine, targetRo
 	return realizationError
 }
 
-// Details computes the drawer content for a waypoint row.
+func formatLegElapsed(fromTimestamp, toTimestamp string) string {
+	startTime, parseStartError := ed.ParseISO(fromTimestamp)
+	if parseStartError != nil {
+		return ""
+	}
+	if toTimestamp == "" {
+		return ed.DurationLabel(time.Now().UTC().Sub(startTime))
+	}
+	endTime, parseEndError := ed.ParseISO(toTimestamp)
+	if parseEndError != nil {
+		return ""
+	}
+	return ed.DurationLabel(endTime.Sub(startTime))
+}
+
+// Details computes the drawer content for a visited or active current waypoint row.
 func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 	targetRow, rowError := GetRow(conn, rowID)
 	if rowError != nil {
@@ -159,12 +149,11 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 	}
 
 	var (
-		waypointNumber   int
-		selfNumber       int
-		previousWaypoint *Row
-		currentWaypoint  *Row
+		waypointNumber     int
+		selfNumber         int
+		hasVisitedWaypoint bool
+		nextWaypointID     int64
 	)
-
 	for i := range rows {
 		rowItem := &rows[i]
 		if !rowItem.IsWaypoint() {
@@ -173,30 +162,30 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 		waypointNumber++
 		if rowItem.ID == rowID {
 			selfNumber = waypointNumber
-		} else if selfNumber == 0 {
-			previousCopy := *rowItem
-			previousWaypoint = &previousCopy
 		}
-		if rowItem.VisitedAt != "" && (currentWaypoint == nil || rowItem.VisitedAt > currentWaypoint.VisitedAt) {
-			currentWaypoint = rowItem
+		if rowItem.VisitedAt != "" {
+			hasVisitedWaypoint = true
+		} else if nextWaypointID == 0 {
+			nextWaypointID = rowItem.ID
 		}
 	}
 
 	if selfNumber == 0 {
 		return WaypointDetails{}, nil
 	}
+	if targetRow.VisitedAt == "" {
+		if !hasVisitedWaypoint || nextWaypointID != rowID {
+			return WaypointDetails{}, nil
+		}
+		expeditionRecord, getError := Get(conn, targetRow.ExpeditionID)
+		if getError != nil || expeditionRecord.Status != StatusActive {
+			return WaypointDetails{}, getError
+		}
+	}
 
 	waypointDetails := WaypointDetails{
 		RowID:  rowID,
 		Number: selfNumber,
-	}
-	if previousWaypoint != nil {
-		waypointDetails.PrevSystem = previousWaypoint.SystemName
-	}
-
-	if targetRow.VisitedAt == "" {
-		populateFutureWaypointDetails(&waypointDetails, targetRow, previousWaypoint, currentWaypoint)
-		return waypointDetails, nil
 	}
 
 	statsEngine := stats.NewEngine(conn)
@@ -205,16 +194,12 @@ func Details(conn *sql.DB, rowID int64) (WaypointDetails, error) {
 			return waypointDetails, originError
 		}
 	} else {
-		if legError := populateVisitedLegDetails(conn, statsEngine, targetRow, rows, &waypointDetails); legError != nil {
+		if legError := populateLegDetails(conn, statsEngine, targetRow, rows, &waypointDetails); legError != nil {
 			return waypointDetails, legError
 		}
 	}
 
-	if startTime, parseStartError := ed.ParseISO(waypointDetails.From); parseStartError == nil {
-		if endTime, parseEndError := ed.ParseISO(waypointDetails.To); parseEndError == nil {
-			waypointDetails.Elapsed = ed.DurationLabel(endTime.Sub(startTime))
-		}
-	}
+	waypointDetails.Elapsed = formatLegElapsed(waypointDetails.From, waypointDetails.To)
 	return waypointDetails, nil
 }
 

@@ -28,7 +28,7 @@ export function PlannerHeaderBar({
   const isPlanning = currentExpedition.status === 'planning'
   const isActive = currentExpedition.status === 'active'
   const isCompleted = currentExpedition.status === 'completed'
-  const canComplete = (plan.visitedCount ?? 0) >= 2
+  const canComplete = (plan.visitedWaypointCount ?? 0) >= 2
 
   const coveredLy =
     plan.coveredLy ??
@@ -51,7 +51,7 @@ export function PlannerHeaderBar({
               {currentExpedition.name}
             </h2>
             <span className="text-[11px] font-mono-tabular px-2 py-0.5 bg-[#16100b] border border-[#3d2816] text-[#FF7100]">
-              {plan.visitedCount} / {plan.waypointCount} WAYPOINTS VISITED
+              {plan.visitedWaypointCount} / {plan.waypointCount} WAYPOINTS VISITED
             </span>
           </div>
           {currentExpedition.description && (

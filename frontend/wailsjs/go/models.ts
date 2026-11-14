@@ -768,14 +768,10 @@ export namespace expedition {
 	    nextFcStopRowId: number;
 	    playerSystem?: string;
 	    waypointCount: number;
-	    visitedCount: number;
+	    visitedWaypointCount: number;
 	    plannedLy: number;
 	    coveredLy: number;
 	    remainingLy: number;
-	    pendingTransitions: Transition[];
-	    activeModeId: number;
-	    activeModeName: string;
-	    activeModeColor: string;
 	    modes: modes.Mode[];
 	
 	    static createFrom(source: any = {}) {
@@ -793,14 +789,10 @@ export namespace expedition {
 	        this.nextFcStopRowId = source["nextFcStopRowId"];
 	        this.playerSystem = source["playerSystem"];
 	        this.waypointCount = source["waypointCount"];
-	        this.visitedCount = source["visitedCount"];
+	        this.visitedWaypointCount = source["visitedWaypointCount"];
 	        this.plannedLy = source["plannedLy"];
 	        this.coveredLy = source["coveredLy"];
 	        this.remainingLy = source["remainingLy"];
-	        this.pendingTransitions = this.convertValues(source["pendingTransitions"], Transition);
-	        this.activeModeId = source["activeModeId"];
-	        this.activeModeName = source["activeModeName"];
-	        this.activeModeColor = source["activeModeColor"];
 	        this.modes = this.convertValues(source["modes"], modes.Mode);
 	    }
 	
@@ -863,10 +855,6 @@ export namespace expedition {
 	    prevSystem: string;
 	    metrics: stats.Metrics;
 	    realization: stats.RealizationBreakdown;
-	    estDistFromPrevLy?: number;
-	    estDistFromCurrentLy?: number;
-	    currentSystem: string;
-	    missingCoords: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new WaypointDetails(source);
@@ -885,10 +873,6 @@ export namespace expedition {
 	        this.prevSystem = source["prevSystem"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], stats.RealizationBreakdown);
-	        this.estDistFromPrevLy = source["estDistFromPrevLy"];
-	        this.estDistFromCurrentLy = source["estDistFromCurrentLy"];
-	        this.currentSystem = source["currentSystem"];
-	        this.missingCoords = source["missingCoords"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

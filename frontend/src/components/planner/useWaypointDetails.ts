@@ -20,7 +20,7 @@ function computeLegStartTimestamp(plan: expedition.PlanView, targetVisitedAt: st
     if (
       rowView.row.rowType === 'waypoint' &&
       candidateVisitedAt !== '' &&
-      candidateVisitedAt < targetVisitedAt &&
+      (targetVisitedAt === '' || candidateVisitedAt < targetVisitedAt) &&
       candidateVisitedAt > afterTimestamp
     ) {
       afterTimestamp = candidateVisitedAt
@@ -116,18 +116,16 @@ export function useWaypointDetails(
     }
   }, [activeExpeditionId, isPlanning])
 
-  // Refresh open visited drawers when their leg bounds or journal archive revision change.
+  // Refresh open drawers when their leg bounds or journal archive revision change.
   useEffect(() => {
     if (!plan || isPlanning) return
     for (const [idString, isOpen] of Object.entries(expandedRowIdsRef.current)) {
       if (!isOpen) continue
       const rowId = Number(idString)
       const rowView = plan.rows?.find((candidate) => candidate.row.id === rowId)
-      const isVisited =
-        rowView &&
-        rowView.row.rowType === 'waypoint' &&
-        (rowView.visitState === 'visited' || rowView.visitState === 'current')
-      if (!isVisited) continue
+      if (!rowView || rowView.row.rowType !== 'waypoint' || rowView.visitState === 'future') {
+        continue
+      }
 
       const loadedDetails = detailsByIdRef.current[rowId]
       if (
@@ -148,9 +146,7 @@ export function useWaypointDetails(
 
   function toggleExpand(rowId: number) {
     const rowView = plan?.rows?.find((candidate) => candidate.row.id === rowId)
-    const isVisited =
-      rowView && (rowView.visitState === 'visited' || rowView.visitState === 'current')
-    if (isPlanning || !isVisited) return
+    if (isPlanning || !rowView || rowView.visitState === 'future') return
 
     const nextOpen = !expandedRowIdsRef.current[rowId]
     setExpandedRowIds((previous) => {

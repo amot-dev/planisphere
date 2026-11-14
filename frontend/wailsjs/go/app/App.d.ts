@@ -81,8 +81,6 @@ export function SaveModeWindow(arg1:app.ModeWindowInput):Promise<app.ModesState>
 
 export function SetActiveExpedition(arg1:number):Promise<void>;
 
-export function SetActiveLegMode(arg1:number,arg2:number):Promise<void>;
-
 export function SetCommanderEnabled(arg1:string,arg2:boolean):Promise<app.Settings>;
 
 export function SetDatabasePath(arg1:string):Promise<app.Settings>;

@@ -1,4 +1,3 @@
-import { RetryResolve } from '../../../wailsjs/go/app/App'
 import { expedition, modes, stats } from '../../../wailsjs/go/models'
 import {
   formatCredits,
@@ -23,9 +22,8 @@ export interface WaypointDetailsDrawerProps {
 }
 
 /**
- * WaypointDetailsDrawer renders the expandable row drawer displaying either
- * estimated straight-line distances for future waypoints or delta leg telemetry
- * and exploration valuations for visited waypoints.
+ * WaypointDetailsDrawer renders the expandable row drawer displaying delta leg
+ * telemetry and exploration valuations for visited and active current waypoints.
  */
 export function WaypointDetailsDrawer({
   details,
@@ -44,95 +42,6 @@ export function WaypointDetailsDrawer({
     )
   }
 
-  if (details.kind === 'future') {
-    return <FutureWaypointDrawerPanel details={details} rowView={rowView} />
-  }
-
-  return (
-    <VisitedWaypointDrawerPanel
-      details={details}
-      rowView={rowView}
-      modeId={modeId}
-      modeColor={modeColor}
-      modesList={modesList}
-      onChangeMode={onChangeMode}
-    />
-  )
-}
-
-function FutureWaypointDrawerPanel({
-  details,
-  rowView,
-}: {
-  details: expedition.WaypointDetails
-  rowView: expedition.RowView
-}) {
-  return (
-    <div className="px-6 py-3.5 bg-[#0b0907] border-l-2 border-l-[#00D2FF] shadow-[inset_0_1px_0_0_#3d2816] flex flex-wrap items-center justify-between gap-4 text-xs">
-      <div className="flex flex-wrap items-center gap-6">
-        <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
-            Est. Straight-Line Distance (from Preceding Waypoint
-            {details.prevSystem ? `: ${details.prevSystem}` : ''})
-          </span>
-          <span className="font-mono-tabular text-sm font-bold text-[#00D2FF]">
-            {details.estDistFromPrevLy !== undefined
-              ? formatLy(details.estDistFromPrevLy)
-              : 'COORDINATES PENDING / UNKNOWN'}
-          </span>
-        </div>
-        <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
-            Est. Straight-Line Distance (from Current Location
-            {details.currentSystem ? `: ${details.currentSystem}` : ''})
-          </span>
-          <span className="font-mono-tabular text-sm font-bold text-[#FF7100]">
-            {details.estDistFromCurrentLy !== undefined
-              ? formatLy(details.estDistFromCurrentLy)
-              : '—'}
-          </span>
-        </div>
-        {rowView.row.hasCoords && (
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
-              Galactic Coordinates (X, Y, Z)
-            </span>
-            <span className="font-mono-tabular text-xs text-[#F4ECE4]">
-              ({rowView.row.x.toFixed(2)}, {rowView.row.y.toFixed(2)}, {rowView.row.z.toFixed(2)})
-              {rowView.detectedRegion && ` · ${rowView.detectedRegion}`}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {!rowView.row.hasCoords && rowView.row.systemName && (
-        <button
-          type="button"
-          onClick={() => RetryResolve(rowView.row.id).catch(console.error)}
-          className="ed-btn"
-        >
-          Retry Coordinate Lookup
-        </button>
-      )}
-    </div>
-  )
-}
-
-function VisitedWaypointDrawerPanel({
-  details,
-  rowView,
-  modeId,
-  modeColor,
-  modesList,
-  onChangeMode,
-}: {
-  details: expedition.WaypointDetails
-  rowView: expedition.RowView
-  modeId?: number
-  modeColor?: string
-  modesList?: modes.Mode[]
-  onChangeMode?: (nextModeId: number) => void
-}) {
   const metrics = details.metrics
   const realization = details.realization
   const isOrigin = details.kind === 'origin'
@@ -157,13 +66,17 @@ function VisitedWaypointDrawerPanel({
           {details.prevSystem && !isOrigin && (
             <span className="font-mono-tabular text-[#a6907c]">
               {details.prevSystem} →{' '}
-              <span className="text-[#F4ECE4] font-bold">{rowView.row.systemName}</span>
+              <span className="text-[#F4ECE4] font-bold">
+                {rowView.row.systemName?.trim() || 'TBD'}
+              </span>
             </span>
           )}
         </div>
         <div className="font-mono-tabular text-[11px] text-[#a6907c]">
           {details.fromGalactic || 'Earliest Archive'} →{' '}
-          <span className="text-[#00D2FF] font-bold">{details.toGalactic}</span>
+          <span className="text-[#00D2FF] font-bold">
+            {details.toGalactic || 'IN PROGRESS'}
+          </span>
           {details.elapsed && <span className="ml-2 text-[#F4ECE4]">[{details.elapsed}]</span>}
         </div>
       </div>

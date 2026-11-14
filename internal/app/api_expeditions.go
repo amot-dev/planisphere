@@ -223,7 +223,7 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 }
 
 // SetLegMode assigns a mode to the leg arriving at rowID and updates the
-// corresponding time window in mode_windows when the waypoint has been visited.
+// corresponding time window in mode_windows.
 func (app *App) SetLegMode(rowID, modeID int64) error {
 	var expeditionID int64
 	if err := func() error {
@@ -236,25 +236,6 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 			var setModeError error
 			expeditionID, setModeError = expedition.SetLegMode(transaction, rowID, modeID)
 			return setModeError
-		})
-	}(); err != nil {
-		return err
-	}
-	app.changed("modes", expeditionID)
-	return nil
-}
-
-// SetActiveLegMode sets the mode for the current in-progress leg (since the
-// latest visited waypoint).
-func (app *App) SetActiveLegMode(expeditionID, modeID int64) error {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		return db.WithTx(app.db, func(transaction *sql.Tx) error {
-			return expedition.SetActiveLegMode(transaction, expeditionID, modeID)
 		})
 	}(); err != nil {
 		return err

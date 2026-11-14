@@ -49,7 +49,7 @@ export function computePlannerTableDimensions(
 
 /**
  * buildPlannerTableItems flattens an expedition plan's rows and any expanded
- * visited waypoint telemetry drawers into a single renderable sequence.
+ * waypoint telemetry drawers into a single renderable sequence.
  */
 export function buildPlannerTableItems(
   plan: expedition.PlanView | null,
@@ -64,10 +64,9 @@ export function buildPlannerTableItems(
     if (row.rowType === 'region') {
       items.push({ kind: 'region', rowView, index, key: `region-${row.id}` })
     } else {
-      const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
       items.push({ kind: 'waypoint', rowView, index, key: `row-${row.id}` })
       const isExpanded = Boolean(expandedRowIds[row.id])
-      if (!isPlanning && isVisited && isExpanded) {
+      if (!isPlanning && rowView.visitState !== 'future' && isExpanded) {
         items.push({ kind: 'drawer', rowView, index, key: `drawer-${row.id}` })
       }
     }
@@ -156,23 +155,6 @@ export function buildOptimisticLegModePlan(
   return expedition.PlanView.createFrom({
     ...plan,
     rows: optimisticRows,
-  })
-}
-
-/**
- * buildOptimisticActiveLegModePlan returns an optimistic PlanView updating the
- * active open-ended leg's flight mode.
- */
-export function buildOptimisticActiveLegModePlan(
-  plan: expedition.PlanView,
-  modeId: number,
-): expedition.PlanView {
-  const pickedMode = (plan.modes ?? []).find((mode) => mode.id === modeId)
-  return expedition.PlanView.createFrom({
-    ...plan,
-    activeModeId: modeId,
-    activeModeName: pickedMode?.name ?? plan.activeModeName,
-    activeModeColor: pickedMode?.color ?? plan.activeModeColor,
   })
 }
 

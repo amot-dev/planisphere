@@ -129,7 +129,7 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 		t.Fatal(planError)
 	}
 	// Expected waypoint sequence after auto-reordering:
-	// #1 Sol (visited) -> #2 Dryooe Prou FF-Z d696 (visited) -> #3 Beagle Point (current, moved up!) -> #4 Outotz LS-K d8-3 (future; pre-start visit ignored) -> #5 Sagittarius A* (future).
+	// #1 Sol (visited) -> #2 Dryooe Prou FF-Z d696 (visited) -> #3 Beagle Point (visited, moved up!) -> #4 Outotz LS-K d8-3 (current; pre-start visit ignored) -> #5 Sagittarius A* (future).
 	var waypointSystems []string
 	var waypointNumbers []int
 	var waypointStates []string
@@ -149,7 +149,7 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 			t.Fatalf("waypoint numbering = %v", waypointNumbers)
 		}
 	}
-	wantStates := []string{expedition.VisitVisited, expedition.VisitVisited, expedition.VisitCurrent, expedition.VisitFuture, expedition.VisitFuture}
+	wantStates := []string{expedition.VisitVisited, expedition.VisitVisited, expedition.VisitVisited, expedition.VisitCurrent, expedition.VisitFuture}
 	if strings.Join(waypointStates, "|") != strings.Join(wantStates, "|") {
 		t.Fatalf("visit states = %v, want %v", waypointStates, wantStates)
 	}
@@ -367,6 +367,9 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 	exp, wp1 := createExpeditionWithOriginRow(t, dbConn, "Details Test Expedition", "")
 	solName := "Sol"
 	solVis := "2026-01-18T10:00:00Z"
+	if _, err := dbConn.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = ? WHERE id = ?`, solVis, exp.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, solVis, wp1.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -382,10 +385,16 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Insert WP3 (future waypoint)
+	// Insert WP3 (active current leg)
 	wp3 := mustInsert(t, dbConn, exp.ID, wp2.ID, expedition.RowWaypoint, 0)
 	barnardName := "Barnard's Star"
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 16, y = 0, z = 0 WHERE id = ?`, barnardName, wp3.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert WP4 (future waypoint beyond the current leg)
+	wp4 := mustInsert(t, dbConn, exp.ID, wp3.ID, expedition.RowWaypoint, 0)
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Wolf 359', x = 24, y = 0, z = 0 WHERE id = ?`, wp4.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -416,7 +425,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("expected wp1 From '2026-01-01T10:00:00Z', got %q", wp1Details.From)
 	}
 
-	// Details for WP2 (leg)
+	// Details for WP2 (visited leg)
 	wp2Details, err := expedition.Details(dbConn, wp2.ID)
 	if err != nil {
 		t.Fatalf("Details for wp2 failed: %v", err)
@@ -440,28 +449,37 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("expected non-empty elapsed duration for wp2 leg")
 	}
 
-	// Details for WP3 (future)
+	// Details for WP3 (active current leg)
 	wp3Details, err := expedition.Details(dbConn, wp3.ID)
 	if err != nil {
 		t.Fatalf("Details for wp3 failed: %v", err)
 	}
-	if wp3Details.Kind != "future" {
-		t.Errorf("expected wp3 kind 'future', got %q", wp3Details.Kind)
+	if wp3Details.Kind != "leg" {
+		t.Errorf("expected wp3 kind 'leg', got %q", wp3Details.Kind)
 	}
 	if wp3Details.Number != 3 {
 		t.Errorf("expected wp3 number 3, got %d", wp3Details.Number)
 	}
+	if wp3Details.From != alphaVis {
+		t.Errorf("expected wp3 leg start %q, got %q", alphaVis, wp3Details.From)
+	}
+	if wp3Details.To != "" {
+		t.Errorf("expected wp3 leg end empty for active leg, got %q", wp3Details.To)
+	}
 	if wp3Details.PrevSystem != alphaName {
 		t.Errorf("expected wp3 prev system %q, got %q", alphaName, wp3Details.PrevSystem)
 	}
-	if wp3Details.CurrentSystem != alphaName {
-		t.Errorf("expected wp3 current active system %q, got %q", alphaName, wp3Details.CurrentSystem)
+	if wp3Details.Elapsed == "" {
+		t.Errorf("expected non-empty elapsed duration for active wp3 leg")
 	}
-	if wp3Details.EstDistFromPrevLy == nil || *wp3Details.EstDistFromPrevLy != 6.0 {
-		t.Errorf("expected wp3 dist from prev ly 6.0, got %v", wp3Details.EstDistFromPrevLy)
+
+	// Details for WP4 (future waypoint): should return empty details
+	wp4Details, err := expedition.Details(dbConn, wp4.ID)
+	if err != nil {
+		t.Fatalf("Details for wp4 failed: %v", err)
 	}
-	if wp3Details.EstDistFromCurrentLy == nil || *wp3Details.EstDistFromCurrentLy != 6.0 {
-		t.Errorf("expected wp3 dist from current ly 6.0, got %v", wp3Details.EstDistFromCurrentLy)
+	if wp4Details.Number != 0 || wp4Details.Kind != "" {
+		t.Errorf("expected empty details for future wp4 row, got %+v", wp4Details)
 	}
 }
 

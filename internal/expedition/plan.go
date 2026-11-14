@@ -59,24 +59,20 @@ type RowView struct {
 
 // PlanView is the full planner sheet.
 type PlanView struct {
-	Expedition         Expedition   `json:"expedition"`
-	StartGalactic      string       `json:"startGalactic"`
-	EndGalactic        string       `json:"endGalactic"`
-	Rows               []RowView    `json:"rows"`
-	CurrentRowID       int64        `json:"currentRowId"`
-	NextWaypointRowID  int64        `json:"nextWaypointRowId,omitempty"`
-	NextFCStopRowID    int64        `json:"nextFcStopRowId"`
-	PlayerSystem       string       `json:"playerSystem,omitempty"`
-	WaypointCount      int          `json:"waypointCount"`
-	VisitedCount       int          `json:"visitedCount"`
-	PlannedLy          float64      `json:"plannedLy"`          // sum of straight-line distances across all planned waypoint legs
-	CoveredLy          float64      `json:"coveredLy"`          // sum of straight-line distances across visited waypoint legs
-	RemainingLy        float64      `json:"remainingLy"`        // straight-line distance from current player position to next waypoint plus remaining unvisited legs
-	PendingTransitions []Transition `json:"pendingTransitions"` // ships flown since the current waypoint
-	ActiveModeID       int64        `json:"activeModeId"`
-	ActiveModeName     string       `json:"activeModeName"`
-	ActiveModeColor    string       `json:"activeModeColor"`
-	Modes              []modes.Mode `json:"modes"`
+	Expedition        Expedition   `json:"expedition"`
+	StartGalactic     string       `json:"startGalactic"`
+	EndGalactic       string       `json:"endGalactic"`
+	Rows              []RowView    `json:"rows"`
+	CurrentRowID      int64        `json:"currentRowId"`
+	NextWaypointRowID int64        `json:"nextWaypointRowId,omitempty"`
+	NextFCStopRowID   int64        `json:"nextFcStopRowId"`
+	PlayerSystem      string       `json:"playerSystem,omitempty"`
+	WaypointCount        int          `json:"waypointCount"`
+	VisitedWaypointCount int          `json:"visitedWaypointCount"`
+	PlannedLy            float64      `json:"plannedLy"`   // sum of straight-line distances across all planned waypoint legs
+	CoveredLy         float64      `json:"coveredLy"`   // sum of straight-line distances across visited waypoint legs
+	RemainingLy       float64      `json:"remainingLy"` // straight-line distance from current player position to next waypoint plus remaining unvisited legs
+	Modes             []modes.Mode `json:"modes"`
 }
 
 // GECLookup resolves GEC entries for a system.
@@ -224,6 +220,41 @@ func accumulateRemainingDistanceLy(expeditionStatus string, rowItem Row, rowView
 	return 0
 }
 
+func populateWaypointLegTelemetry(buildCtx *planBuildContext, rowItem Row, waypointNumber int, rowViewItem *RowView) {
+	switch rowViewItem.VisitState {
+	case VisitVisited:
+		rowViewItem.VisitedAtGalactic = ed.ToGalactic(rowItem.VisitedAt)
+		if afterTimestamp, ok := buildCtx.previousVisitByID[rowItem.ID]; ok && buildCtx.shipTimeline != nil {
+			rowViewItem.Transitions = shipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
+			modeID := rowItem.LegModeID
+			if modeID == 0 && buildCtx.modeTimeline != nil {
+				modeID = buildCtx.modeTimeline.ModeAt(rowItem.VisitedAt)
+			}
+			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(modeID)
+		}
+	case VisitCurrent:
+		untilTimestamp := buildCtx.expeditionRecord.EndTimestamp
+		if untilTimestamp == "" {
+			untilTimestamp = ed.NowISO()
+		}
+		if buildCtx.shipTimeline != nil {
+			rowViewItem.Transitions = shipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, buildCtx.currentWaypoint.VisitedAt, untilTimestamp)
+		}
+		var modeID int64
+		if buildCtx.modeTimeline != nil {
+			modeID = buildCtx.modeTimeline.ModeAt(untilTimestamp)
+		}
+		rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(modeID)
+	default:
+		if waypointNumber > 1 && rowItem.LegModeID > 0 {
+			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(rowItem.LegModeID)
+		}
+	}
+	if rowViewItem.Transitions == nil {
+		rowViewItem.Transitions = []Transition{}
+	}
+}
+
 func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumber int, previousWaypoint *Row, planView *PlanView) RowView {
 	rowViewItem := RowView{Row: rowItem, Number: waypointNumber, Transitions: []Transition{}}
 	if rowItem.FCStop && !rowItem.FCArrived && planView.NextFCStopRowID == 0 {
@@ -236,28 +267,16 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 	}
 
 	switch {
-	case buildCtx.currentWaypoint != nil && rowItem.ID == buildCtx.currentWaypoint.ID:
-		rowViewItem.VisitState = VisitCurrent
 	case rowItem.VisitedAt != "":
 		rowViewItem.VisitState = VisitVisited
+		planView.VisitedWaypointCount++
+	case buildCtx.currentWaypoint != nil && buildCtx.nextWaypointRowID > 0 && rowItem.ID == buildCtx.nextWaypointRowID:
+		rowViewItem.VisitState = VisitCurrent
 	default:
 		rowViewItem.VisitState = VisitFuture
 	}
 
-	if rowItem.VisitedAt != "" {
-		planView.VisitedCount++
-		rowViewItem.VisitedAtGalactic = ed.ToGalactic(rowItem.VisitedAt)
-		if afterTimestamp, ok := buildCtx.previousVisitByID[rowItem.ID]; ok && buildCtx.shipTimeline != nil {
-			rowViewItem.Transitions = shipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
-			modeID := rowItem.LegModeID
-			if modeID == 0 && buildCtx.modeTimeline != nil {
-				modeID = buildCtx.modeTimeline.ModeAt(rowItem.VisitedAt)
-			}
-			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(modeID)
-		}
-	} else if waypointNumber > 1 && rowItem.LegModeID > 0 {
-		rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(rowItem.LegModeID)
-	}
+	populateWaypointLegTelemetry(buildCtx, rowItem, waypointNumber, &rowViewItem)
 
 	if previousWaypoint != nil && previousWaypoint.HasCoords && rowItem.HasCoords {
 		startPosition, _ := previousWaypoint.Coords()
@@ -332,19 +351,6 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 	if planView.Rows == nil {
 		planView.Rows = []RowView{}
 	}
-
-	planView.PendingTransitions = []Transition{}
-	if buildCtx.currentWaypoint != nil && buildCtx.shipTimeline != nil {
-		untilTimestamp := expeditionRecord.EndTimestamp
-		if untilTimestamp == "" {
-			untilTimestamp = ed.NowISO()
-		}
-		planView.PendingTransitions = shipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, buildCtx.currentWaypoint.VisitedAt, untilTimestamp)
-		modeID := buildCtx.modeTimeline.ModeAt(untilTimestamp)
-		planView.ActiveModeID, planView.ActiveModeName, planView.ActiveModeColor = buildCtx.resolveMode(modeID)
-	} else {
-		planView.ActiveModeID, planView.ActiveModeName, planView.ActiveModeColor = buildCtx.resolveMode(buildCtx.modeTimeline.ModeAt(ed.NowISO()))
-	}
 	return planView, nil
 }
 
@@ -363,20 +369,22 @@ func addOneSecond(isoTimestamp string) string {
 
 // SetLegMode updates the single mode assigned to the leg arriving at rowID.
 // When the waypoint has been visited (after a previous visited waypoint), it
-// also updates the corresponding time window (prevVisit, rowVisit] in mode_windows
-// so filtered expedition and all-time stats immediately reflect the change.
+// updates the closed time window (prevVisit, rowVisit] in mode_windows; when
+// the waypoint is the active in-progress leg, it updates the open-ended window
+// (latestVisit, +inf) so filtered expedition and all-time stats immediately
+// reflect the change.
 func SetLegMode(transaction *sql.Tx, rowID int64, modeID int64) (int64, error) {
 	targetRow, rowError := GetRow(transaction, rowID)
 	if rowError != nil {
 		return 0, rowError
 	}
-	if _, updateError := UpdateRow(transaction, RowPatch{ID: rowID, LegModeID: &modeID}); updateError != nil {
-		return 0, updateError
+	rows, listError := ListRows(transaction, targetRow.ExpeditionID)
+	if listError != nil {
+		return targetRow.ExpeditionID, listError
 	}
 	if targetRow.VisitedAt != "" {
-		rows, listError := ListRows(transaction, targetRow.ExpeditionID)
-		if listError != nil {
-			return targetRow.ExpeditionID, listError
+		if _, updateError := UpdateRow(transaction, RowPatch{ID: rowID, LegModeID: &modeID}); updateError != nil {
+			return 0, updateError
 		}
 		previousTimestamp := ""
 		for _, candidateRow := range rows {
@@ -393,25 +401,17 @@ func SetLegMode(transaction *sql.Tx, rowID int64, modeID int64) (int64, error) {
 				}
 			}
 		}
+		return targetRow.ExpeditionID, nil
 	}
-	return targetRow.ExpeditionID, nil
-}
 
-// SetActiveLegMode sets the mode for the current in-progress leg (from the
-// latest visited waypoint's timestamp forward).
-func SetActiveLegMode(transaction *sql.Tx, expeditionID int64, modeID int64) error {
-	rows, listError := ListRows(transaction, expeditionID)
-	if listError != nil {
-		return listError
-	}
 	latestTimestamp := ""
-	for _, rowItem := range rows {
-		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && rowItem.VisitedAt > latestTimestamp {
-			latestTimestamp = rowItem.VisitedAt
+	for _, candidateRow := range rows {
+		if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt > latestTimestamp {
+			latestTimestamp = candidateRow.VisitedAt
 		}
 	}
 	if latestTimestamp != "" {
-		return modes.SetWindow(transaction, 0, modeID, addOneSecond(latestTimestamp), "")
+		return targetRow.ExpeditionID, modes.SetWindow(transaction, 0, modeID, addOneSecond(latestTimestamp), "")
 	}
-	return modes.Switch(transaction, modeID, "")
+	return targetRow.ExpeditionID, modes.Switch(transaction, modeID, "")
 }

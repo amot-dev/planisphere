@@ -61,7 +61,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
             seq: 1,
           },
           number: 2,
-          visitState: 'current',
+          visitState: 'visited',
           legModeId: 1,
           legModeName: 'Travel',
           legModeColor: '#FF7100',
@@ -78,7 +78,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
             seq: 2,
           },
           number: 3,
-          visitState: 'future',
+          visitState: 'current',
         },
         {
           row: {
@@ -91,13 +91,13 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
             notes: 'Refuel',
           },
           number: 4,
-          visitState: 'unvisited',
+          visitState: 'future',
         },
       ],
       modes: [
         { id: 1, name: 'Travel', color: '#FF7100' } as any,
       ],
-      visitedCount: 2,
+      visitedWaypointCount: 2,
       waypointCount: 4,
       activeRowId: 402,
     })
@@ -112,10 +112,10 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     // Visited waypoints are rendered without intermediate lines or banners
     expect(html).not.toContain('h-[3px]')
     expect(html).not.toContain('title="Leg Mode:')
-    // Only visited (Sol) and current (Alpha Centauri) rows have dropdown chevrons; future and unvisited do not
+    // Visited (Sol, Alpha Centauri) and current (Rohini) rows have dropdown chevrons; future (Colonia) does not
     const activeChevrons = html.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
-    expect(activeChevrons).toHaveLength(2)
-    // Waypoint 2 (row 402, index 1) is the last visited/current waypoint and gets data-last-visited="true"
+    expect(activeChevrons).toHaveLength(3)
+    // Waypoint 2 (row 402, index 1) is the last visited waypoint and gets data-last-visited="true"
     expect(html).toContain('data-row-id="402"')
     expect(html).toContain('data-row-index="1"')
     expect(html).toMatch(/data-row-id="402"[^>]*data-last-visited="true"/)
@@ -135,7 +135,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       },
       rows: [],
       modes: [],
-      visitedCount: 0,
+      visitedWaypointCount: 0,
       waypointCount: 0,
       activeRowId: 0,
     })
@@ -159,7 +159,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       },
       rows: null as any,
       modes: [],
-      visitedCount: 0,
+      visitedWaypointCount: 0,
       waypointCount: 0,
       activeRowId: 0,
     })
@@ -206,7 +206,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         },
       ],
       modes: [],
-      visitedCount: 3,
+      visitedWaypointCount: 3,
       waypointCount: 3,
       activeRowId: 32,
       plannedLy: 10.3,
@@ -247,7 +247,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           },
           number: 0,
           regionName: 'Galactic Core',
-          visitState: 'unvisited',
+          visitState: 'future',
         },
         {
           row: {
@@ -260,7 +260,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
             notes: 'Center of Galaxy',
           },
           number: 1,
-          visitState: 'unvisited',
+          visitState: 'future',
         },
         {
           row: {
@@ -276,7 +276,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         },
       ],
       modes: [],
-      visitedCount: 0,
+      visitedWaypointCount: 0,
       waypointCount: 2,
       activeRowId: 0,
       plannedLy: 4.3,
@@ -329,7 +329,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         {
           row: { id: 2, expeditionId: 7, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2 },
           number: 2,
-          visitState: 'future',
+          visitState: 'current',
           isNextWaypoint: true,
           distFromPrevLy: 4.3,
           distFromCurrentLy: 2.1,
@@ -345,7 +345,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       nextWaypointRowId: 2,
       playerSystem: 'Interim Sol System',
       modes: [],
-      visitedCount: 1,
+      visitedWaypointCount: 1,
       waypointCount: 3,
       plannedLy: 10.3,
       remainingLy: 8.1, // 2.1 (player to WP2) + 6.0 (WP2 to WP3)
@@ -368,7 +368,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('6.0 Ly')
     expect(html).toContain('Estimated straight-line distance from previous waypoint')
 
-    // With only Waypoint #1 visited (visitedCount: 1), Complete button is disabled until Waypoint #2 is visited:
+    // With only Waypoint #1 visited (visitedWaypointCount: 1), Complete button is disabled until Waypoint #2 is visited:
     expect(html).toContain(
       'disabled="" title="Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete flight plan in Plans)"',
     )
@@ -380,7 +380,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       rows: activePlan.rows.map((rowView) =>
         rowView.row.id === 2 ? { ...rowView, visitState: 'visited', isNextWaypoint: false } : rowView,
       ),
-      visitedCount: 2,
+      visitedWaypointCount: 2,
       coveredLy: 4.3,
       remainingLy: 5.0,
     })

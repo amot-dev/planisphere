@@ -102,7 +102,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
         notes: '',
       },
       number: 17,
-      visitState: 'unvisited',
+      visitState: 'future',
       distFromPrevLy: 42.5,
     })
 
@@ -159,7 +159,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
           fcArrived: false,
         },
         number: 2,
-        visitState: 'unvisited',
+        visitState: 'future',
       }),
       index: 1,
       isFcStopLocked: true,
@@ -339,7 +339,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
         notes: 'Secret mining location',
       },
       number: 3,
-      visitState: 'unvisited',
+      visitState: 'future',
     })
 
     const htmlHidden = renderRowItem({
@@ -368,7 +368,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
         notes: '',
       },
       number: 2,
-      visitState: 'future',
+      visitState: 'current',
       distFromPrevLy: 380.5,
       distFromCurrentLy: 42.1,
       isNextWaypoint: true,
@@ -381,10 +381,48 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       playerSystem: 'Merope',
     })
 
-    // Should display distance from player (42.1 Ly) with player location tooltip, not 380.5 Ly
+    // Should display distance from player (42.1 Ly) with player location tooltip, not 380.5 Ly, and render expand chevron
     expect(html).toContain('42.1 Ly')
     expect(html).not.toContain('380.5 Ly')
     expect(html).toContain('Estimated straight-line distance from player location (Merope)')
+    expect(html).toContain('title="Toggle per-waypoint leg telemetry / distance drawer"')
+  })
+
+  it('renders WaypointDetailsDrawer for active current leg with IN PROGRESS and TBD fallback', () => {
+    const currentLegRowView = expedition.RowView.createFrom({
+      row: {
+        id: 22,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: '',
+      },
+      number: 3,
+      visitState: 'current',
+    })
+
+    const currentLegDetails = expedition.WaypointDetails.createFrom({
+      kind: 'leg',
+      number: 3,
+      prevSystem: 'Alpha Centauri',
+      fromGalactic: '3312-01-19 12:00 UTC',
+      toGalactic: '',
+      elapsed: '4h 15m',
+      metrics: {} as any,
+    })
+
+    const html = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: currentLegDetails,
+        loading: false,
+        rowView: currentLegRowView,
+      }),
+    )
+
+    expect(html).toContain('LEG #2 → #3 // DELTA TELEMETRY')
+    expect(html).toContain('Alpha Centauri')
+    expect(html).toContain('TBD')
+    expect(html).toContain('IN PROGRESS')
+    expect(html).toContain('4h 15m')
   })
 
   it('renders distance from previous waypoint in planning status even if next waypoint', () => {

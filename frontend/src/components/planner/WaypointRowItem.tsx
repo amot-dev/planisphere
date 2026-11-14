@@ -158,8 +158,11 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   onDragEnd,
 }: WaypointRowItemProps) {
   const row = rowView.row
-  const isVisited = rowView.visitState === 'visited' || rowView.visitState === 'current'
-  const isNext = Boolean(isNextWaypoint ?? rowView.isNextWaypoint) && !isPlanning
+  const isVisited = rowView.visitState === 'visited'
+  const hasDrawer = !isPlanning && rowView.visitState !== 'future'
+  const isNext =
+    Boolean(isNextWaypoint ?? (rowView.visitState === 'current' || rowView.isNextWaypoint)) &&
+    !isPlanning
   const isEditingRef = useRef(false)
   const [draft, setDraft] = useState(() => ({
     systemName: row.systemName ?? '',
@@ -206,7 +209,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           }`}
         >
           <div className="h-7 flex items-center justify-center">
-            {isVisited && (
+            {hasDrawer && (
               <button
                 type="button"
                 onClick={() => onToggleExpand(row.id)}
