@@ -64,22 +64,18 @@ export function useCarrierRoute({
   useEffect(() => {
     return () => {
       if (copiedNextJumpTimerRef.current) clearTimeout(copiedNextJumpTimerRef.current)
-      if (persistManualInputsTimerRef.current) clearTimeout(persistManualInputsTimerRef.current)
     }
   }, [])
 
   // Load persisted carrier route state on mount or when active expedition changes
   useEffect(() => {
-    if (persistManualInputsTimerRef.current) {
-      clearTimeout(persistManualInputsTimerRef.current)
-      persistManualInputsTimerRef.current = null
-    }
+    manualDistanceInputRef.current = ''
+    manualTritiumInputRef.current = ''
+    setRoutePrompt(null)
+    setActiveCarrierRoute(null)
+    setActiveCarrierTargetRowId(0)
     const expeditionId = plan?.expedition?.id
-    if (!expeditionId || expeditionId <= 0) {
-      setActiveCarrierRoute(null)
-      setActiveCarrierTargetRowId(0)
-      return
-    }
+    if (!expeditionId || expeditionId <= 0) return
     let cancelled = false
     GetActiveCarrierRoute(expeditionId)
       .then((saved) => {
@@ -118,6 +114,7 @@ export function useCarrierRoute({
 
     return () => {
       cancelled = true
+      flushPendingManualInputs()
     }
   }, [plan?.expedition?.id])
 
@@ -155,6 +152,10 @@ export function useCarrierRoute({
     manualLegDist?: number
     manualLegTrit?: number
   }) {
+    if (persistManualInputsTimerRef.current) {
+      clearTimeout(persistManualInputsTimerRef.current)
+      persistManualInputsTimerRef.current = null
+    }
     const expeditionId = plan?.expedition?.id
     if (!expeditionId || expeditionId <= 0) return
     const route = updates.route !== undefined ? updates.route : activeCarrierRoute
@@ -185,16 +186,36 @@ export function useCarrierRoute({
     SaveActiveCarrierRoute(state).catch(console.error)
   }
 
+  const persistRouteStateRef = useRef(persistRouteState)
+  useEffect(() => {
+    persistRouteStateRef.current = persistRouteState
+  }, [
+    plan?.expedition?.id,
+    activeCarrierRoute,
+    activeCarrierTargetRowId,
+    carrierJumpIndex,
+    manualModeOverride,
+    manualLegJumps,
+    manualLegDistance,
+    manualLegTritium,
+  ])
+
+  function flushPendingManualInputs() {
+    if (!persistManualInputsTimerRef.current) return
+    clearTimeout(persistManualInputsTimerRef.current)
+    persistManualInputsTimerRef.current = null
+    persistRouteStateRef.current({
+      manualDistInput: manualDistanceInputRef.current,
+      manualTritInput: manualTritiumInputRef.current,
+    })
+  }
+
   // Resets per-leg counters and inputs and persists a newly started Spansh or manual carrier route.
   function activateCarrierRoute(
     route: app.CarrierRouteResult,
     targetRowId: number,
     manualMode: boolean,
   ) {
-    if (persistManualInputsTimerRef.current) {
-      clearTimeout(persistManualInputsTimerRef.current)
-      persistManualInputsTimerRef.current = null
-    }
     manualDistanceInputRef.current = ''
     manualTritiumInputRef.current = ''
     setActiveCarrierTargetRowId(targetRowId)
@@ -225,7 +246,7 @@ export function useCarrierRoute({
     }
     persistManualInputsTimerRef.current = setTimeout(() => {
       persistManualInputsTimerRef.current = null
-      persistRouteState({
+      persistRouteStateRef.current({
         manualDistInput: manualDistanceInputRef.current,
         manualTritInput: manualTritiumInputRef.current,
       })
@@ -270,10 +291,6 @@ export function useCarrierRoute({
   }
 
   function switchActiveRouteToManualMode() {
-    if (persistManualInputsTimerRef.current) {
-      clearTimeout(persistManualInputsTimerRef.current)
-      persistManualInputsTimerRef.current = null
-    }
     setManualModeOverride(true)
     let initialDistanceInput = ''
     let initialTritiumInput = ''
@@ -334,9 +351,14 @@ export function useCarrierRoute({
     activateCarrierRoute(manualRoute, targetRowId, true)
   }
 
+  const openManualPlotterRef = useRef(openManualCarrierPlotter)
+  openManualPlotterRef.current = openManualCarrierPlotter
+
   useEffect(() => {
-    onRegisterManualPlotter?.(openManualCarrierPlotter)
-  })
+    onRegisterManualPlotter?.(() => {
+      void openManualPlotterRef.current()
+    })
+  }, [onRegisterManualPlotter])
 
   useEffect(() => {
     onCarrierRouteOpenChange?.(Boolean(activeCarrierRoute))
