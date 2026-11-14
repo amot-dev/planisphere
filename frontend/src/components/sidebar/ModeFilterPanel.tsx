@@ -104,7 +104,7 @@ export function ModeFilterPanel({
             title="Collapse Telemetry Sidebar"
             className="h-[26px] w-[26px] flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] bg-[#140e09] border border-[#3d2816] hover:bg-[#1f150d] cursor-pointer shrink-0"
           >
-            ◀
+            <span>◀</span>
           </button>
         )}
       </div>

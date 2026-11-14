@@ -31,6 +31,9 @@ function isNode(candidate: unknown): candidate is Node {
   return 'nodeType' in candidate || 'parentElement' in candidate || 'classList' in candidate
 }
 
+/**
+ * Finds the nearest ancestor element capable of scrolling along the requested wheel deltas.
+ */
 export function findScrollable(
   start: EventTarget | null,
   deltaY: number,
@@ -114,6 +117,9 @@ export function findScrollable(
   return null
 }
 
+/**
+ * Registers a global wheel listener that normalizes discrete mouse-wheel scroll speed on WebKitGTK and returns a cleanup disposer.
+ */
 export function initScrollSpeedNormalizer(): () => void {
   if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
     return () => {}

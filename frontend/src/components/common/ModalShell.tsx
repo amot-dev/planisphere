@@ -49,7 +49,7 @@ export function ModalShell({
             onClick={onClose}
             className="px-2 py-1 text-[#a6907c] hover:text-[#F4ECE4] hover:bg-[#24180e] cursor-pointer"
           >
-            ✕
+            <span>✕</span>
           </button>
         </div>
         <div className="p-5 overflow-y-auto space-y-4 text-xs">{children}</div>

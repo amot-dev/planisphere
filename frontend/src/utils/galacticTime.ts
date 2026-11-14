@@ -87,7 +87,7 @@ export function formatLoss(creditLoss?: number | null): string {
 }
 
 /**
- * Formats compact credit values (e.g. "95.05M Cr" or "1,420,100 Cr").
+ * Formats distances in light-years with thousands separators, configurable decimal places, and "Ly" suffix.
  */
 export function formatLy(lightYears: number | undefined | null, decimals = 2): string {
   const value = lightYears ?? 0
@@ -97,18 +97,30 @@ export function formatLy(lightYears: number | undefined | null, decimals = 2): s
   })} Ly`
 }
 
+/**
+ * Formats rounded integer values with thousands separators.
+ */
 export function formatInt(value: number | undefined | null): string {
   return Math.round(value ?? 0).toLocaleString('en-US')
 }
 
+/**
+ * Builds an Inara star system search URL for the given system name.
+ */
 export function inaraSystemUrl(systemName: string): string {
   return `https://inara.cz/elite/starsystem/?search=${encodeURIComponent(systemName.trim())}`
 }
 
+/**
+ * Builds an EDSM star system lookup URL for the given system name.
+ */
 export function edsmSystemUrl(systemName: string): string {
   return `https://www.edsm.net/en/system?systemName=${encodeURIComponent(systemName.trim())}`
 }
 
+/**
+ * Returns a direct EDAstro GEC entry URL when provided, falling back to a GEC system search URL.
+ */
 export function edastroGecUrl(systemName: string, gecDirectUrl?: string): string {
   if (gecDirectUrl) return gecDirectUrl
   const query = systemName.trim()

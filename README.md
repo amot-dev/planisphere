@@ -54,7 +54,7 @@ See what your discoveries are worth as you scan them, and track what actually hi
 
 - **Live Cartography Estimates:** Calculates credit values for FSS body scans (`Scan`) and Horizons or Odyssey DSS surface mapping (`SAAScanComplete`) as they happen, including terraformable, First Discovery, and First Mapped bonuses.
 - **Live Exobiology Estimates:** Values organic species sampled in your Artemis suit (`ScanOrganic`), including the First Logged multiplier on untouched worlds.
-- **Realized Earnings Breakdown:** Compares your estimated survey value against the net credits you actually pocket at Universal Cartographics and Vista Genomics, breaking down losses from death, stolen first-discovery or first-logged bonuses, the 25 percent Fleet Carrier tariff, and active NPC crew cuts.
+- **Realized Earnings Breakdown:** Compares your estimated survey value against the net credits you actually pocket at Universal Cartographics and Vista Genomics, breaking down losses from death, stolen first-discovery or first-logged bonuses, the 25 percent Fleet Carrier tariff, and hired NPC crew cuts (active or inactive).
 - **Expedition and All-Time Scopes:** Switch the telemetry sidebar between your active expedition (with flight mode filters) and all-time career totals across your entire journal archive, with travel distance broken down between ship FSD jumps and carrier passenger rides.
 
 
@@ -122,6 +122,10 @@ Everything in Planisphere is stored in a local SQLite database on your machine: 
 > [!WARNING]
 > The Elite Dangerous journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent directories do not emit kernel filesystem notifications and are not supported for live telemetry.
 
+### Updates
+
+Planisphere checks GitHub Releases for newer versions on startup, even when **Online Services** is turned off in Settings.
+
 
 ## Design Choices
 
@@ -129,7 +133,7 @@ Everything in Planisphere is stored in a local SQLite database on your machine: 
 Planisphere tracks two separate credit totals: what your scans were worth in theory when you collected them (**Cartographics Value** and **Exobiology Value**), and the **net credits pocketed** after station tariffs and crew cuts (**Realized Value**):
 
 - **Scan-Time Leg and Mode Attribution:** When you sell exploration data, the realized earnings and any associated deductions (tariffs, crew wages, stolen bonuses, or death losses) are attributed back to the **expedition leg and flight mode where each scan was originally taken**, rather than dumping the entire payout into whichever leg or mode is active when you dock at a station. (Sales that have no matching prior scan in the database fall back to the sale timestamp.)
-- **Universal Cartographics** (`SellExplorationData` and `MultiSellExplorationData`) logs `TotalEarnings` already net of both the 25 percent Fleet Carrier tariff and active NPC crew wage shares.
+- **Universal Cartographics** (`SellExplorationData` and `MultiSellExplorationData`) logs `TotalEarnings` already net of both the 25 percent Fleet Carrier tariff and hired NPC crew wage shares (active or inactive).
 - **Vista Genomics** (`SellOrganicData`) logs gross `Value + Bonus` before crew deductions, so Planisphere subtracts matched `NpcCrewPaidWage` events logged within five seconds of the sale.
 
 Every subline displayed beneath `Realized Value` (`Cartographics Lost (Death)`, `Exobiology Lost (Death)`, `Cartographics Stolen`, `Exobiology Stolen`, `Carrier Tariffs`, and `NPC Crew Payouts`) is an **informational breakdown of deductions and unrealized losses already absent from `Realized Value`**, not an additional fee to subtract again. Once all data has been sold, `Realized Value` stays at or below `(Cartographics Value + Exobiology Value) - Sum(Sublines)` within 1 to 2 percent due to Elite's internal mass-curve rounding; any larger gap represents unsold pending scans still aboard your ship or suit.
@@ -165,7 +169,7 @@ Several journal edge cases cannot be reconstructed deterministically from Fronti
 
 - **Exobiology First Logged Detection ([Frontier Issue #81891](https://issues.frontierstore.net/issue-detail/81891)):** Because Elite Dangerous journals do not reliably populate `WasLogged` on `ScanOrganic` events when another commander has already logged a species, Planisphere checks `WasFootfalled == false` on the parent body's `Scan` event (falling back to `!WasDiscovered` and `!WasMapped` on pre-2025 journals that predate `WasFootfalled`) to estimate first-logged bonuses and detect stolen exobiology bonuses. As a tradeoff, if another commander previously achieved First Footfall on a body without sampling its organics, those samples are initially estimated at base value (`1x`) and automatically upgraded to `5x` once sold at Vista Genomics. If you die before selling at Vista Genomics on a previously footfalled world, lost samples can only be valued at base value (`1x`).
 - **Stolen Bonuses on Bulk `MultiSellExplorationData` Sales:** Unlike single-system `SellExplorationData` (which lists `Discovered` bodies), bulk `MultiSellExplorationData` bakes First Discovery and First Mapped bonuses directly into `BaseValue` and reserves `Bonus` strictly for flat system-completion bonuses. Because per-body discovery flags are omitted on bulk pages, Planisphere cannot detect stolen discovery bonuses on multi-system sales and does not infer losses from `Estimated - BaseValue`, which naturally varies by 1 to 2 percent due to mass-curve rounding and passive star or asteroid-belt honks without `Scan` events.
-- **Unlogged Vista Genomics NPC Crew Cuts:** Frontier occasionally deducts an active NPC pilot's cut from Vista Genomics payouts without writing an `NpcCrewPaidWage` journal event. Planisphere only deducts explicitly logged `NpcCrewPaidWage` events within five seconds of a sale rather than estimating cuts from `Statistics` ledger deltas, which blend combat, trade, and exploration crew wages across sessions.
+- **Unlogged Vista Genomics NPC Crew Cuts:** Frontier occasionally deducts a hired NPC pilot's cut (active or inactive) from Vista Genomics payouts without writing an `NpcCrewPaidWage` journal event. Planisphere only deducts explicitly logged `NpcCrewPaidWage` events within five seconds of a sale rather than estimating cuts from `Statistics` ledger deltas, which blend combat, trade, and exploration crew wages across sessions.
 - **Detention Ship Impounds and Unmanned Mothership Rebuys:** When your ship is impounded at a penal facility after an on-foot bounty death, or when an unmanned mothership is destroyed while you are on foot, in an SRV, or piloting a Nomad, Odyssey preserves your shipboard Universal Cartographics data in-game yet still logs `Resurrect` with `Option: "rebuy"` and a positive `Cost` identical to a manned ship destruction. Planisphere marks pending cartography under `Cartographics Lost (Death)` on `rebuy`, and does not retroactively clear death losses if those system names later reappear in `MultiSellExplorationData` (which would erase genuine ship-destruction losses whenever a system is passively honked on a return trip). When that surviving data is sold, the payout still lands in `Realized Value`.
 - **Voluntary Starter Sidewinder Forfeit:** Because death losses are classified from the journal's `Resurrect` event, if you can afford your ship's insurance (`Bankrupt: false`) but voluntarily forfeit your ship for a free starter Sidewinder and the journal logs `Option: "free"` with `Cost: 0` instead of `"freewinder"`, that respawn cannot be distinguished from a free on-foot redeployment to orbit.
 
@@ -182,7 +186,7 @@ Several journal edge cases cannot be reconstructed deterministically from Fronti
 ### Architecture
 
 - **Debounced Filesystem Watcher**: The journal ingester watches the active journal directory via `fsnotify` with a configurable debounce window (`0.3s` to `30s`, `2s` default) to coalesce rapid write bursts such as FSS body scans and handle out-of-order writes safely.
-- **Single Source of Truth Config**: Versioning, product name, repository, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, and package manifests in sync.
+- **Single Source of Truth Config**: Versioning, product name, repository, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, the Linux `.desktop` entry, and package manifests in sync.
 
 ### Commands
 

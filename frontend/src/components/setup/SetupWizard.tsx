@@ -328,7 +328,7 @@ export function SetupWizardModal({
               title="Close setup wizard"
               className="px-2 py-1 text-xs text-[#a6907c] hover:text-[#F4ECE4] hover:bg-[#24180e] cursor-pointer"
             >
-              ✕
+              <span>✕</span>
             </button>
           )}
         </div>
