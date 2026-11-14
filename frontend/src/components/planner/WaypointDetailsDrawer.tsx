@@ -59,13 +59,23 @@ export function WaypointDetailsDrawer({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2e1f12] pb-2">
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 text-[10px] font-mono-tabular font-extrabold uppercase tracking-[0.14em] bg-[#211307] text-[#FF7100] border border-[#FF7100]">
-            {isOrigin
-              ? 'WAYPOINT #1 // HISTORICAL BASELINE (ARCHIVE START → EXPEDITION START)'
-              : `LEG #${details.number - 1} → #${details.number} // DELTA TELEMETRY`}
+            {isOrigin ? (
+              <>
+                WAYPOINT #1 // HISTORICAL BASELINE (ARCHIVE START{' '}
+                <span className="relative -top-px">→</span> EXPEDITION START)
+              </>
+            ) : (
+              <>
+                {`LEG #${details.number - 1} `}
+                <span className="relative -top-px">→</span>
+                {` #${details.number} // DELTA TELEMETRY`}
+              </>
+            )}
           </span>
           {details.prevSystem && !isOrigin && (
             <span className="font-mono-tabular text-[#a6907c]">
-              {details.prevSystem} →{' '}
+              {`${details.prevSystem} `}
+              <span className="relative -top-0.5">→</span>{' '}
               <span className="text-[#F4ECE4] font-bold">
                 {rowView.row.systemName?.trim() || 'TBD'}
               </span>
@@ -73,11 +83,12 @@ export function WaypointDetailsDrawer({
           )}
         </div>
         <div className="font-mono-tabular text-[11px] text-[#a6907c]">
-          {details.fromGalactic || 'Earliest Archive'} →{' '}
+          {`${details.fromGalactic || 'Earliest Archive'} `}
+          <span className="relative -top-0.5">→</span>{' '}
           <span className="text-[#00D2FF] font-bold">
             {details.toGalactic || 'IN PROGRESS'}
           </span>
-          {details.elapsed && <span className="ml-2 text-[#F4ECE4]">[{details.elapsed}]</span>}
+          {details.elapsed && <span className="ml-2 text-[#F4ECE4]">{`[${details.elapsed}]`}</span>}
         </div>
       </div>
 

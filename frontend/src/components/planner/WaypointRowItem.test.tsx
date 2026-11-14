@@ -418,11 +418,14 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
 
-    expect(html).toContain('LEG #2 → #3 // DELTA TELEMETRY')
-    expect(html).toContain('Alpha Centauri')
-    expect(html).toContain('TBD')
-    expect(html).toContain('IN PROGRESS')
-    expect(html).toContain('4h 15m')
+    expect(html).toContain('LEG #2 <span class="relative -top-px">→</span> #3 // DELTA TELEMETRY')
+    expect(html).toContain(
+      'Alpha Centauri <span class="relative -top-0.5">→</span> <span class="text-[#F4ECE4] font-bold">TBD</span>',
+    )
+    expect(html).toContain(
+      '3312-01-19 12:00 UTC <span class="relative -top-0.5">→</span> <span class="text-[#00D2FF] font-bold">IN PROGRESS</span>',
+    )
+    expect(html).toContain('[4h 15m]')
   })
 
   it('renders distance from previous waypoint in planning status even if next waypoint', () => {
