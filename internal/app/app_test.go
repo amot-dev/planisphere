@@ -324,7 +324,7 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T
 	}
 }
 
-func seedDatabaseWithExpedition(testingContext *testing.T, databasePath, expeditionName, expeditionDescription string) {
+func seedDatabaseWithExpedition(testingContext *testing.T, databasePath, expeditionName, expeditionDescription string, settingPairs ...[2]string) {
 	testingContext.Helper()
 	seedApp := New()
 	seedApp.debugMode = false
@@ -333,6 +333,16 @@ func seedDatabaseWithExpedition(testingContext *testing.T, databasePath, expedit
 		cancelSeed()
 		testingContext.Fatalf("seed initialize %s: %v", databasePath, initError)
 	}
+	for _, settingPair := range settingPairs {
+		if _, setError := seedApp.db.Exec(
+			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			settingPair[0], settingPair[1],
+		); setError != nil {
+			cancelSeed()
+			seedApp.shutdown(seedContext)
+			testingContext.Fatalf("seed setting %s: %v", settingPair[0], setError)
+		}
+	}
 	if _, createError := seedApp.CreateExpedition(expeditionName, expeditionDescription); createError != nil {
 		cancelSeed()
 		seedApp.shutdown(seedContext)
@@ -340,6 +350,32 @@ func seedDatabaseWithExpedition(testingContext *testing.T, databasePath, expedit
 	}
 	cancelSeed()
 	seedApp.shutdown(seedContext)
+}
+
+func startExpeditionAtOrigin(testingContext *testing.T, targetApp *App, expeditionID int64, originSystemName string) int64 {
+	testingContext.Helper()
+	planView, planError := targetApp.GetPlan(expeditionID)
+	if planError != nil || len(planView.Rows) == 0 {
+		testingContext.Fatalf("GetPlan(%d): len=%d err=%v", expeditionID, len(planView.Rows), planError)
+	}
+	originRowID := planView.Rows[0].Row.ID
+	if updateError := targetApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &originSystemName}); updateError != nil {
+		testingContext.Fatalf("UpdateRow SystemName: %v", updateError)
+	}
+	if startError := targetApp.StartExpedition(expeditionID, "2026-01-01T00:00:00Z"); startError != nil {
+		testingContext.Fatalf("StartExpedition: %v", startError)
+	}
+	return originRowID
+}
+
+func createAndStartExpedition(testingContext *testing.T, targetApp *App, expeditionName, originSystemName string) int64 {
+	testingContext.Helper()
+	createdExpedition, createError := targetApp.CreateExpedition(expeditionName, "")
+	if createError != nil {
+		testingContext.Fatalf("CreateExpedition %q: %v", expeditionName, createError)
+	}
+	startExpeditionAtOrigin(testingContext, targetApp, createdExpedition.ID, originSystemName)
+	return createdExpedition.ID
 }
 
 func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
@@ -651,34 +687,15 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 		testingContext.Fatalf("create journal dir: %v", mkdirError)
 	}
 
-	seedApp := New()
-	seedApp.debugMode = false
-	seedContext, cancelSeed := context.WithCancel(context.Background())
-	if initError := seedApp.initialize(seedContext, seededDatabasePath); initError != nil {
-		cancelSeed()
-		testingContext.Fatalf("seed initialize: %v", initError)
-	}
-	for _, settingPair := range [][2]string{
-		{settingSetupCompleted, "1"},
-		{settingOnline, "0"},
-		{settingJournalDir, emptyJournalDirectory},
-	} {
-		if _, setError := seedApp.db.Exec(
-			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			settingPair[0], settingPair[1],
-		); setError != nil {
-			cancelSeed()
-			seedApp.shutdown(seedContext)
-			testingContext.Fatalf("seed setting %s: %v", settingPair[0], setError)
-		}
-	}
-	if _, createError := seedApp.CreateExpedition("Boot Sync Survey", ""); createError != nil {
-		cancelSeed()
-		seedApp.shutdown(seedContext)
-		testingContext.Fatalf("seed CreateExpedition: %v", createError)
-	}
-	cancelSeed()
-	seedApp.shutdown(seedContext)
+	seedDatabaseWithExpedition(
+		testingContext,
+		seededDatabasePath,
+		"Boot Sync Survey",
+		"",
+		[2]string{settingSetupCompleted, "1"},
+		[2]string{settingOnline, "0"},
+		[2]string{settingJournalDir, emptyJournalDirectory},
+	)
 
 	testingContext.Setenv("ED_PLANNER_DB", seededDatabasePath)
 
@@ -726,21 +743,7 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *testing.T) {
 	temporaryDirectory := testingContext.TempDir()
 	productionDBPath := filepath.Join(temporaryDirectory, "shutdown-sync.sqlite")
-
-	seedApp := New()
-	seedApp.debugMode = false
-	seedContext, cancelSeed := context.WithCancel(context.Background())
-	if initError := seedApp.initialize(seedContext, productionDBPath); initError != nil {
-		cancelSeed()
-		testingContext.Fatalf("seed initialize: %v", initError)
-	}
-	if _, createError := seedApp.CreateExpedition("Shutdown Sync Expedition", ""); createError != nil {
-		cancelSeed()
-		seedApp.shutdown(seedContext)
-		testingContext.Fatalf("seed CreateExpedition: %v", createError)
-	}
-	cancelSeed()
-	seedApp.shutdown(seedContext)
+	seedDatabaseWithExpedition(testingContext, productionDBPath, "Shutdown Sync Expedition", "")
 
 	debugApp := New()
 	debugApp.debugMode = true

@@ -2,6 +2,7 @@ package journal_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,12 +15,59 @@ import (
 	"planisphere/internal/journal"
 )
 
-func TestIngestFile(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
+func openJournalTestDB(testingContext *testing.T) *sql.DB {
+	testingContext.Helper()
+	databaseConnection, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatal(openError)
 	}
-	defer conn.Close()
+	testingContext.Cleanup(func() {
+		_ = databaseConnection.Close()
+	})
+	return databaseConnection
+}
+
+func seedByteZeroBackfillFixture(testingContext *testing.T, logFilename, locationTimestamp, loadGameTimestamp string) (*sql.DB, *journal.Ingester, string) {
+	testingContext.Helper()
+	databaseConnection := openJournalTestDB(testingContext)
+	temporaryDirectory := testingContext.TempDir()
+	logFilePath := filepath.Join(temporaryDirectory, logFilename)
+	earlyLine := `{"timestamp":"` + locationTimestamp + `","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`
+	loadLine := `{"timestamp":"` + loadGameTimestamp + `","event":"LoadGame","Commander":"CmdrAlpha","FID":"F10","Ship":"mandalay"}`
+	if writeError := os.WriteFile(logFilePath, []byte(earlyLine+"\n"+loadLine+"\n"), 0o644); writeError != nil {
+		testingContext.Fatal(writeError)
+	}
+
+	earlyEvent, _, parseEarlyError := journal.ParseLine([]byte(earlyLine), logFilename)
+	if parseEarlyError != nil {
+		testingContext.Fatal(parseEarlyError)
+	}
+	loadEvent, _, parseLoadError := journal.ParseLine([]byte(loadLine), logFilename)
+	if parseLoadError != nil {
+		testingContext.Fatal(parseLoadError)
+	}
+
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO ingested_journals (file_name, file_path, byte_offset, updated_at) VALUES (?, ?, 0, ?)`,
+		logFilename, logFilePath, loadGameTimestamp,
+	); execError != nil {
+		testingContext.Fatal(execError)
+	}
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
+		 VALUES (?, ?, 'Location', 'Sol', 1001, NULL, ?, '{}', ?),
+		        (?, ?, 'LoadGame', '', 0, 'cmdralpha', ?, '{}', ?)`,
+		earlyEvent.UID, locationTimestamp, logFilename, loadGameTimestamp,
+		loadEvent.UID, loadGameTimestamp, logFilename, loadGameTimestamp,
+	); execError != nil {
+		testingContext.Fatal(execError)
+	}
+
+	return databaseConnection, journal.NewIngester(databaseConnection), logFilePath
+}
+
+func TestIngestFile(t *testing.T) {
+	conn := openJournalTestDB(t)
 
 	temporaryDir := t.TempDir()
 	logFile := filepath.Join(temporaryDir, "Journal.2026-01-18T190000.01.log")
@@ -55,11 +103,7 @@ func TestIngestFile(t *testing.T) {
 }
 
 func TestIngestFilePartialLine(t *testing.T) {
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
+	conn := openJournalTestDB(t)
 
 	temporaryDir := t.TempDir()
 	logFile := filepath.Join(temporaryDir, "Journal.2026-01-18T200000.01.log")
@@ -192,11 +236,7 @@ func TestWatcherReconnectWhenDirectoryCreated(t *testing.T) {
 }
 
 func TestScanDir_ContextCancellation(t *testing.T) {
-	temporaryDatabaseConnection, databaseOpenError := db.Open(":memory:")
-	if databaseOpenError != nil {
-		t.Fatal(databaseOpenError)
-	}
-	defer temporaryDatabaseConnection.Close()
+	temporaryDatabaseConnection := openJournalTestDB(t)
 
 	temporaryDirectory := t.TempDir()
 	journalFilePath := filepath.Join(temporaryDirectory, "Journal.2026-01-18T190000.01.log")
@@ -239,11 +279,7 @@ func TestComputeUIDDeterministicAndConcurrent(t *testing.T) {
 }
 
 func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
-	temporaryDatabaseConnection, databaseOpenError := db.Open(":memory:")
-	if databaseOpenError != nil {
-		t.Fatal(databaseOpenError)
-	}
-	defer temporaryDatabaseConnection.Close()
+	temporaryDatabaseConnection := openJournalTestDB(t)
 
 	temporaryJournalDirectory := t.TempDir()
 	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
@@ -311,61 +347,28 @@ func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
 }
 
 func TestReingestFromByteZeroBackfillsUnattributedEvents(t *testing.T) {
-	conn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer conn.Close()
+	conn, ingester, logFile := seedByteZeroBackfillFixture(
+		t,
+		"Journal.2026-03-01T120000.01.log",
+		"2026-03-01T12:00:00Z",
+		"2026-03-01T12:01:00Z",
+	)
 
-	fileName := "Journal.2026-03-01T120000.01.log"
-	tmpDir := t.TempDir()
-	logFile := filepath.Join(tmpDir, fileName)
-	lines := []string{
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-		`{"timestamp":"2026-03-01T12:01:00Z","event":"LoadGame","Commander":"CmdrBackfill","FID":"F9","Ship":"mandalay"}`,
-		`{"timestamp":"2026-03-01T12:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":4.3}`,
-	}
-	if writeError := os.WriteFile(logFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		t.Fatal(writeError)
-	}
-
-	// Simulate an EDDiscovery or partial DB state at byte_offset = 0 where an
-	// earlier event lacks commander attribution while a later event already has it.
-	if _, execError := conn.Exec(
-		`INSERT INTO ingested_journals (file_name, file_path, byte_offset, updated_at) VALUES (?, ?, 0, '2026-03-01T12:05:00Z')`,
-		fileName, logFile,
-	); execError != nil {
-		t.Fatal(execError)
-	}
-	if _, execError := conn.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
-		 VALUES ('uid-early', '2026-03-01T12:00:00Z', 'Location', 'Sol', 1001, NULL, ?, '{}', '2026-03-01T12:05:00Z'),
-		        ('uid-late', '2026-03-01T12:05:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBackfill', ?, '{}', '2026-03-01T12:05:00Z')`,
-		fileName, fileName,
-	); execError != nil {
-		t.Fatal(execError)
-	}
-
-	ingester := journal.NewIngester(conn)
 	if _, ingestError := ingester.IngestFile(logFile); ingestError != nil {
 		t.Fatalf("ingest file: %v", ingestError)
 	}
 
 	var commanderName string
-	if queryError := conn.QueryRow(`SELECT COALESCE(commander, '') FROM journal_events WHERE event_uid = 'uid-early'`).Scan(&commanderName); queryError != nil {
+	if queryError := conn.QueryRow(`SELECT COALESCE(commander, '') FROM journal_events WHERE event = 'Location'`).Scan(&commanderName); queryError != nil {
 		t.Fatal(queryError)
 	}
-	if commanderName != "CmdrBackfill" {
-		t.Fatalf("expected unattributed early event to be backfilled to CmdrBackfill, got %q", commanderName)
+	if commanderName != "CmdrAlpha" {
+		t.Fatalf("expected unattributed early event to be backfilled to CmdrAlpha, got %q", commanderName)
 	}
 }
 
 func TestArchiveStatusPropagatesDisabledCommanderQueryError(t *testing.T) {
-	conn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer conn.Close()
+	conn := openJournalTestDB(t)
 
 	if _, dropError := conn.Exec(`DROP TABLE commanders`); dropError != nil {
 		t.Fatal(dropError)
@@ -381,29 +384,12 @@ func TestArchiveStatusPropagatesDisabledCommanderQueryError(t *testing.T) {
 }
 
 func TestListCommandersEventCountCachingAndBackfillInvalidation(t *testing.T) {
-	conn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer conn.Close()
-
-	fileName := "Journal.2026-04-01T120000.01.log"
-	temporaryDirectory := t.TempDir()
-	logFilePath := filepath.Join(temporaryDirectory, fileName)
-	earlyLine := `{"timestamp":"2026-04-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`
-	loadLine := `{"timestamp":"2026-04-01T12:01:00Z","event":"LoadGame","Commander":"CmdrAlpha","FID":"F10","Ship":"mandalay"}`
-	if writeError := os.WriteFile(logFilePath, []byte(earlyLine+"\n"+loadLine+"\n"), 0o644); writeError != nil {
-		t.Fatal(writeError)
-	}
-
-	earlyEvent, _, parseEarlyError := journal.ParseLine([]byte(earlyLine), fileName)
-	if parseEarlyError != nil {
-		t.Fatal(parseEarlyError)
-	}
-	loadEvent, _, parseLoadError := journal.ParseLine([]byte(loadLine), fileName)
-	if parseLoadError != nil {
-		t.Fatal(parseLoadError)
-	}
+	conn, ingester, logFilePath := seedByteZeroBackfillFixture(
+		t,
+		"Journal.2026-04-01T120000.01.log",
+		"2026-04-01T12:00:00Z",
+		"2026-04-01T12:01:00Z",
+	)
 
 	if _, execError := conn.Exec(
 		`INSERT INTO commanders (name, fid, enabled, first_seen, last_seen)
@@ -413,17 +399,8 @@ func TestListCommandersEventCountCachingAndBackfillInvalidation(t *testing.T) {
 		t.Fatal(execError)
 	}
 	if _, execError := conn.Exec(
-		`INSERT INTO ingested_journals (file_name, file_path, byte_offset, updated_at) VALUES (?, ?, 0, '2026-04-01T12:01:00Z')`,
-		fileName, logFilePath,
-	); execError != nil {
-		t.Fatal(execError)
-	}
-	if _, execError := conn.Exec(
 		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
-		 VALUES (?, '2026-04-01T12:00:00Z', 'Location', 'Sol', 1001, NULL, ?, '{}', '2026-04-01T12:01:00Z'),
-		        (?, '2026-04-01T12:01:00Z', 'LoadGame', '', 0, 'cmdralpha', ?, '{}', '2026-04-01T12:01:00Z'),
-		        ('uid-beta', '2026-04-02T12:00:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBeta', 'other.log', '{}', '2026-04-02T12:00:00Z')`,
-		earlyEvent.UID, fileName, loadEvent.UID, fileName,
+		 VALUES ('uid-beta', '2026-04-02T12:00:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBeta', 'other.log', '{}', '2026-04-02T12:00:00Z')`,
 	); execError != nil {
 		t.Fatal(execError)
 	}
@@ -449,7 +426,6 @@ func TestListCommandersEventCountCachingAndBackfillInvalidation(t *testing.T) {
 	assertCounts(1, 1)
 	assertCounts(1, 1)
 
-	ingester := journal.NewIngester(conn)
 	if _, ingestError := ingester.IngestFile(logFilePath); ingestError != nil {
 		t.Fatalf("IngestFile: %v", ingestError)
 	}

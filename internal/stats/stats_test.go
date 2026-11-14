@@ -15,16 +15,25 @@ import (
 	"planisphere/internal/stats"
 )
 
-func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
-	conn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
+func seedStatsDBFromLines(testingContext *testing.T, journalLines []string) *sql.DB {
+	testingContext.Helper()
+	databaseConnection := setupRealizationDB(testingContext)
+	temporaryDirectory := testingContext.TempDir()
+	journalFilePath := filepath.Join(temporaryDirectory, "Journal.2026-03-10T100000.01.log")
+	if writeError := os.WriteFile(journalFilePath, []byte(strings.Join(journalLines, "\n")+"\n"), 0o644); writeError != nil {
+		testingContext.Fatal(writeError)
 	}
-	defer conn.Close()
+	scanResult, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory)
+	if scanError != nil {
+		testingContext.Fatal(scanError)
+	}
+	if scanResult.NewEvents != len(journalLines) {
+		testingContext.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(journalLines))
+	}
+	return databaseConnection
+}
 
-	tmpDir := t.TempDir()
-	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
-
+func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	// Setup a timeline of events:
 	// 19:05 - LoadGame
 	// 19:10 - Location in Sol (0, 0, 0)
@@ -41,19 +50,7 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 		`{"timestamp":"2026-01-18T19:40:00Z","event":"CarrierStats","CarrierID":9001,"FuelLevel":960,"SpaceUsage":{"FreeSpace":20000,"TotalCapacity":25000}}`,
 		`{"timestamp":"2026-01-18T19:50:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1003,"StarPos":[0,0,106],"JumpDist":6.0}`,
 	}
-
-	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		t.Fatal(writeError)
-	}
-
-	ingester := journal.NewIngester(conn)
-	scanResult, scanError := ingester.ScanDir(context.Background(), tmpDir)
-	if scanError != nil {
-		t.Fatal(scanError)
-	}
-	if scanResult.NewEvents != len(lines) {
-		t.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(lines))
-	}
+	conn := seedStatsDBFromLines(t, lines)
 
 	// Fetch default modes
 	modeList, listError := modes.List(conn)
@@ -175,15 +172,6 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 }
 
 func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
-	conn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer conn.Close()
-
-	tmpDir := t.TempDir()
-	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T200000.01.log")
-
 	// Jump 1 at 20:10 during Mode A (Travel=false) -> 100 Ly
 	// Jump 2 at 20:30 during Mode B (Travel=true) -> 200 Ly
 	lines := []string{
@@ -192,15 +180,7 @@ func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
 		`{"timestamp":"2026-01-18T20:10:00Z","event":"CarrierJump","StarSystem":"System1","SystemAddress":1002,"StarPos":[0,0,100]}`,
 		`{"timestamp":"2026-01-18T20:30:00Z","event":"CarrierJump","StarSystem":"System2","SystemAddress":1003,"StarPos":[0,0,300]}`,
 	}
-
-	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		t.Fatal(writeError)
-	}
-
-	ingester := journal.NewIngester(conn)
-	if _, scanError := ingester.ScanDir(context.Background(), tmpDir); scanError != nil {
-		t.Fatal(scanError)
-	}
+	conn := seedStatsDBFromLines(t, lines)
 
 	modeList, listError := modes.List(conn)
 	if listError != nil || len(modeList) < 2 {
@@ -248,15 +228,6 @@ func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
 }
 
 func TestPreloadScansForMappedBodies(t *testing.T) {
-	conn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer conn.Close()
-
-	tmpDir := t.TempDir()
-	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T180000.01.log")
-
 	// Scan at 18:00 (before expedition)
 	// Expedition range is 19:00 -> 20:00
 	// SAAScanComplete at 19:30 (during expedition)
@@ -265,14 +236,7 @@ func TestPreloadScansForMappedBodies(t *testing.T) {
 		`{"timestamp":"2026-01-18T18:05:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Test Planet 1","BodyID":5,"StarSystem":"TestSys","SystemAddress":9999,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"SAAScanComplete","BodyName":"Test Planet 1","BodyID":5,"SystemAddress":9999,"ProbesUsed":4,"EfficiencyTarget":6}`,
 	}
-	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		t.Fatal(writeError)
-	}
-
-	ingester := journal.NewIngester(conn)
-	if _, err := ingester.ScanDir(context.Background(), tmpDir); err != nil {
-		t.Fatal(err)
-	}
+	conn := seedStatsDBFromLines(t, lines)
 
 	engine := stats.NewEngine(conn)
 	// Compute strictly from 19:00 onward (Scan at 18:00 is outside timeRange)
@@ -304,12 +268,7 @@ func (countingQueryer *timelineQueryCountingQueryer) Query(query string, args ..
 }
 
 func TestFilterPreparedSetsReuse(testingContext *testing.T) {
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	defer databaseConnection.Close()
-	defer stats.InvalidateLedgerCache()
+	databaseConnection := setupRealizationDB(testingContext)
 
 	modeList, listError := modes.List(databaseConnection)
 	if listError != nil || len(modeList) == 0 {

@@ -115,22 +115,7 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 
 func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-	createdExpedition, createError := testApp.CreateExpedition("Cache Key Test", "")
-	if createError != nil {
-		testingContext.Fatalf("CreateExpedition: %v", createError)
-	}
-	systemName := "Sol"
-	planView, planError := testApp.GetPlan(createdExpedition.ID)
-	if planError != nil || len(planView.Rows) == 0 {
-		testingContext.Fatalf("GetPlan: len=%d err=%v", len(planView.Rows), planError)
-	}
-	originRowID := planView.Rows[0].Row.ID
-	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &systemName}); updateError != nil {
-		testingContext.Fatalf("UpdateRow SystemName: %v", updateError)
-	}
-	if startError := testApp.StartExpedition(createdExpedition.ID, "2026-01-01T00:00:00Z"); startError != nil {
-		testingContext.Fatalf("StartExpedition: %v", startError)
-	}
+	expeditionID := createAndStartExpedition(testingContext, testApp, "Cache Key Test", "Sol")
 
 	testApp.warmInitialStats()
 
@@ -145,7 +130,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		{Enabled: false, Modes: []stats.ModeSelection{}},
 		{Enabled: false, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}}},
 	} {
-		if _, statsError := testApp.GetSidebarStats(createdExpedition.ID, filterVariant); statsError != nil {
+		if _, statsError := testApp.GetSidebarStats(expeditionID, filterVariant); statsError != nil {
 			testingContext.Fatalf("GetSidebarStats unfiltered: %v", statsError)
 		}
 	}
@@ -160,7 +145,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}, {ModeID: 2, Discovery: true}}},
 		{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 99, Travel: false, Discovery: false}, {ModeID: 2, Discovery: true}, {ModeID: 1, Travel: true}}},
 	} {
-		if _, statsError := testApp.GetSidebarStats(createdExpedition.ID, filterVariant); statsError != nil {
+		if _, statsError := testApp.GetSidebarStats(expeditionID, filterVariant); statsError != nil {
 			testingContext.Fatalf("GetSidebarStats filtered: %v", statsError)
 		}
 	}
@@ -172,9 +157,13 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("expected canonical filtered variants to share 1 entry (total 2), got %d entries", afterFilteredSize)
 	}
 
+	planView, planError := testApp.GetPlan(expeditionID)
+	if planError != nil || len(planView.Rows) == 0 {
+		testingContext.Fatalf("GetPlan: len=%d err=%v", len(planView.Rows), planError)
+	}
 	noteText := "Updated scenic notes"
 	poiText := "Sol Origin"
-	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, Notes: &noteText, POIName: &poiText}); updateError != nil {
+	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: planView.Rows[0].Row.ID, Notes: &noteText, POIName: &poiText}); updateError != nil {
 		testingContext.Fatalf("UpdateRow cosmetic: %v", updateError)
 	}
 	testApp.liveStatsMu.Lock()
@@ -185,7 +174,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("expected cosmetic plan edit to preserve cache (size=%d gen=%d vs %d)", sizeAfterCosmetic, generationAfterCosmetic, generationBeforeCosmetic)
 	}
 
-	if completeError := testApp.CompleteExpedition(createdExpedition.ID); completeError != nil {
+	if completeError := testApp.CompleteExpedition(expeditionID); completeError != nil {
 		testingContext.Fatalf("CompleteExpedition: %v", completeError)
 	}
 	testApp.liveStatsMu.Lock()

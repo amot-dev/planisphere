@@ -129,27 +129,12 @@ func TestRecordCarrierJump(testingContext *testing.T) {
 
 func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-
-	expeditionRecord, createError := testApp.CreateExpedition("Stats Cache Test", "Testing live stats caching")
-	if createError != nil {
-		testingContext.Fatalf("failed to create expedition: %v", createError)
-	}
-
-	plan, _ := testApp.GetPlan(expeditionRecord.ID)
-	if len(plan.Rows) > 0 {
-		originSystemName := "Sol"
-		_ = testApp.UpdateRow(expedition.RowPatch{ID: plan.Rows[0].Row.ID, SystemName: &originSystemName})
-	}
-
-	// Start expedition so stats computing is active
-	if err := testApp.StartExpedition(expeditionRecord.ID, "2026-01-01T00:00:00Z"); err != nil {
-		testingContext.Fatalf("StartExpedition failed: %v", err)
-	}
+	expeditionID := createAndStartExpedition(testingContext, testApp, "Stats Cache Test", "Sol")
 
 	filter := stats.Filter{Enabled: false}
 
 	// First call to GetSidebarStats should populate liveStatsCache
-	sidebar1, err := testApp.GetSidebarStats(expeditionRecord.ID, filter)
+	sidebar1, err := testApp.GetSidebarStats(expeditionID, filter)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats failed: %v", err)
 	}
@@ -165,7 +150,7 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	}
 
 	// Record carrier jump
-	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 500.0, 100); err != nil {
+	if err := testApp.RecordCarrierJump(expeditionID, 500.0, 100); err != nil {
 		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
 	}
 
@@ -178,7 +163,7 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	}
 
 	// Second call to GetSidebarStats uses the cached live metrics and combines with new adjustments
-	sidebar2, err := testApp.GetSidebarStats(expeditionRecord.ID, filter)
+	sidebar2, err := testApp.GetSidebarStats(expeditionID, filter)
 	if err != nil {
 		testingContext.Fatalf("second GetSidebarStats failed: %v", err)
 	}
@@ -243,14 +228,7 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 	}
 
 	// Start and complete expedition over exactly 7 days, and log 2 carrier jumps consuming 150t of tritium.
-	plan, _ := testApp.GetPlan(expeditionRecord.ID)
-	if len(plan.Rows) > 0 {
-		originSystemName := "Sol"
-		_ = testApp.UpdateRow(expedition.RowPatch{ID: plan.Rows[0].Row.ID, SystemName: &originSystemName})
-	}
-	if err := testApp.StartExpedition(expeditionRecord.ID, "2026-01-01T00:00:00Z"); err != nil {
-		testingContext.Fatalf("StartExpedition failed: %v", err)
-	}
+	startExpeditionAtOrigin(testingContext, testApp, expeditionRecord.ID, "Sol")
 	if err := db.WithTx(testApp.db, func(transaction *sql.Tx) error {
 		return expedition.Complete(transaction, expeditionRecord.ID, "2026-01-08T00:00:00Z")
 	}); err != nil {

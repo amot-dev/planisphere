@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { WaypointRowItem } from './WaypointRowItem'
-import { AutoExpandingTextarea } from '../common/AutoExpandingTextarea'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
 import { expedition } from '../../../wailsjs/go/models'
 
@@ -45,25 +44,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     )
   }
 
-  it('AutoExpandingTextarea renders with rows="1" and min-h-[28px] without artificial wrap for 43-char LFT 509 notes', () => {
-    const lftNotes = 'Returning to Bubble to participate in event'
-    const html = renderToString(
-      createElement(AutoExpandingTextarea, {
-        value: lftNotes,
-        placeholder: 'Flight notes, reminders...',
-        onChange: () => {},
-        onBlur: () => {},
-      }),
-    )
-
-    // Ensure native rows is 1 and not artificially forced to 2
-    expect(html).toContain('rows="1"')
-    expect(html).not.toContain('rows="2"')
-    expect(html).toContain('min-h-[28px]')
-    expect(html).toContain('py-[3px]')
-  })
-
-  it('renders visited row with uniform h-7 (28px) elements and align-top cells', () => {
+  it('renders visited row with uniform h-7 (28px) elements, align-top cells, and inset shadow left border', () => {
     const mockRowView = expedition.RowView.createFrom({
       row: {
         id: 11,
@@ -91,6 +72,9 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('align-top')
     expect(html).toContain('py-1.5')
 
+    // Chevron cell has border-l-2 and inset shadow bottom line so it never miters or clips the left border
+    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]')
+
     // Uniform 28px (h-7) on chevron, waypoint #, star system, carrier stop, telemetry, and controls
     expect(html).toContain('h-7 flex items-center justify-center') // Chevron container
     expect(html).toContain('h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5') // Waypoint #
@@ -99,9 +83,11 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5') // Telemetry container (visited)
     expect(html).toContain('h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap') // Controls container
 
-    // Textareas have min-h-[28px] and rows=1
+    // Textareas have min-h-[28px], py-[3px], and native rows="1" without artificial wrap
     expect(html).toContain('min-h-[28px]')
+    expect(html).toContain('py-[3px]')
     expect(html).toContain('rows="1"')
+    expect(html).not.toContain('rows="2"')
   })
 
   it('renders unvisited row with matching h-7 (28px) elements and input box model', () => {
@@ -161,81 +147,33 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('ARRIVED')
     expect(html).toContain('h-5 px-1.5 inline-flex items-center justify-center')
     expect(html).toContain('h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap')
-  })
 
-  it('renders visited chevron cell with inset shadow to prevent bottom border from clipping the 2px orange left border', () => {
-    const mockRowView = expedition.RowView.createFrom({
-      row: {
-        id: 12,
-        expeditionId: 1,
-        rowType: 'waypoint',
-        systemName: 'Sol',
-        seq: 11,
-      },
-      number: 12,
-      visitState: 'visited',
-    })
-
-    const html = renderRowItem({
-      rowView: mockRowView,
-      index: 11,
-      isLocked: true,
-      isExpanded: true,
-      lastVisitedIndex: 11,
-      totalRows: 25,
-    })
-
-    // Chevron cell has border-l-2 and inset shadow bottom line so it never miters or clips the left border
-    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]')
-  })
-
-  it('renders WaypointDetailsDrawer with matching border-l-2 and inset shadow top line without clipping', () => {
-    const mockRowView = expedition.RowView.createFrom({
-      row: {
-        id: 12,
-        expeditionId: 1,
-        rowType: 'waypoint',
-        systemName: 'Sol',
-      },
-      number: 12,
-      visitState: 'visited',
-    })
-
-    const mockDetails = expedition.WaypointDetails.createFrom({
-      kind: 'historical',
-      number: 12,
-      metrics: {
-        distanceLy: 350.67,
-        shipDistanceLy: 350.67,
-        jumps: 15,
-        jetConeBoosts: 0,
-        premiumBoosts: 0,
-        standardBoosts: 0,
-        basicBoosts: 0,
-        bodiesScanned: 24,
-        bodiesMapped: 6,
-        firstDiscoveries: 0,
-        firstMapped: 0,
-        scanValueTotal: 1250000,
-        scanValueBase: 1000000,
-        scanValueBonus: 250000,
-      },
-    })
-
-    const html = renderToString(
-      createElement(WaypointDetailsDrawer, {
-        details: mockDetails,
-        loading: false,
-        rowView: mockRowView,
+    const lockedFcRowHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 501,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Rohini',
+          fcStop: true,
+          fcArrived: false,
+        },
+        number: 2,
+        visitState: 'unvisited',
       }),
-    )
+      index: 1,
+      isFcStopLocked: true,
+      hasActiveCarrierRoute: true,
+      lastVisitedIndex: 0,
+      totalRows: 3,
+    })
 
-    // Matches header 2px border and uses inset shadow top line
-    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816]')
-    expect(html).not.toContain('border-l-3')
+    expect(lockedFcRowHtml).toContain('ROUTING')
+    expect(lockedFcRowHtml).not.toContain('Remove Fleet Carrier stop designation')
+    expect(lockedFcRowHtml).not.toContain('+ FC STOP')
   })
 
-  it('renders WaypointDetailsDrawer with Vessel Flown and 1-Click Mode toggle for leg waypoints (number > 1)', () => {
+  it('renders WaypointDetailsDrawer with matching border-l-2, Vessel Flown, and 1-Click Mode toggle for leg waypoints (number > 1)', () => {
     const mockRowView = expedition.RowView.createFrom({
       row: {
         id: 15,
@@ -280,6 +218,8 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
 
+    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816]')
+    expect(html).not.toContain('border-l-3')
     expect(html).toContain('[VESSEL FLOWN]:')
     expect(html).toContain('Anaconda')
     expect(html).toContain('[MODE]:')

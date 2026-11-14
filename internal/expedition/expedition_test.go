@@ -15,6 +15,55 @@ import (
 	"planisphere/internal/stats"
 )
 
+func openExpeditionTestDB(testingContext *testing.T) *sql.DB {
+	testingContext.Helper()
+	databaseConnection, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatal(openError)
+	}
+	testingContext.Cleanup(func() {
+		_ = databaseConnection.Close()
+	})
+	return databaseConnection
+}
+
+func ingestJournalLines(testingContext *testing.T, databaseConnection *sql.DB, journalLines []string) string {
+	testingContext.Helper()
+	temporaryDirectory := testingContext.TempDir()
+	journalFilePath := filepath.Join(temporaryDirectory, "Journal.2026-01-18T190000.01.log")
+	if writeError := os.WriteFile(journalFilePath, []byte(strings.Join(journalLines, "\n")+"\n"), 0o644); writeError != nil {
+		testingContext.Fatal(writeError)
+	}
+	scanResult, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory)
+	if scanError != nil {
+		testingContext.Fatal(scanError)
+	}
+	if scanResult.NewEvents != len(journalLines) {
+		testingContext.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(journalLines))
+	}
+	return journalFilePath
+}
+
+func setRowSystemName(testingContext *testing.T, databaseConnection *sql.DB, rowID int64, systemName string) {
+	testingContext.Helper()
+	if _, updateError := expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
+		testingContext.Fatal(updateError)
+	}
+}
+
+func createExpeditionWithOriginRow(testingContext *testing.T, databaseConnection *sql.DB, expeditionName, expeditionDescription string) (expedition.Expedition, expedition.Row) {
+	testingContext.Helper()
+	expeditionRecord, createError := expedition.Create(databaseConnection, expeditionName, expeditionDescription)
+	if createError != nil {
+		testingContext.Fatal(createError)
+	}
+	initialRows, listError := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listError != nil || len(initialRows) != 1 {
+		testingContext.Fatalf("expected 1 initial row, got %d (%v)", len(initialRows), listError)
+	}
+	return expeditionRecord, initialRows[0]
+}
+
 func mustInsert(t *testing.T, dbConn *sql.DB, expeditionID, afterID int64, rowType string, regionID int) expedition.Row {
 	t.Helper()
 	var insertedRow expedition.Row
@@ -29,15 +78,7 @@ func mustInsert(t *testing.T, dbConn *sql.DB, expeditionID, afterID int64, rowTy
 }
 
 func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer dbConn.Close()
-
-	tmpDir := t.TempDir()
-	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
-
+	dbConn := openExpeditionTestDB(t)
 	lines := []string{
 		// Pre-expedition visit to Waypoint #3 (must be ignored because it is before expedition_start_timestamp).
 		`{"timestamp":"2026-01-10T10:00:00Z","event":"FSDJump","StarSystem":"Outotz LS-K d8-3","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":45.0}`,
@@ -55,18 +96,7 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 		`{"timestamp":"2026-01-18T21:00:00Z","event":"ShipyardSwap","ShipType":"explorer_nx","ShipType_Localised":"Caspian Explorer","ShipID":2,"StoreOldShip":"mandalay","StoreShipID":1}`,
 		`{"timestamp":"2026-01-18T21:30:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1005,"StarPos":[0,0,65000],"JumpDist":60.5,"BoostUsed":3}`,
 	}
-	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		t.Fatal(writeError)
-	}
-
-	ingester := journal.NewIngester(dbConn)
-	scanResult, scanError := ingester.ScanDir(context.Background(), tmpDir)
-	if scanError != nil {
-		t.Fatal(scanError)
-	}
-	if scanResult.NewEvents != len(lines) {
-		t.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(lines))
-	}
+	journalFile := ingestJournalLines(t, dbConn, lines)
 
 	// Delete the journal file from disk: zero data may be lost.
 	if removeError := os.Remove(journalFile); removeError != nil {
@@ -74,30 +104,18 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 	}
 
 	// Create an expedition with 5 waypoints + a region header.
-	expeditionRecord, createError := expedition.Create(dbConn, "Distant Worlds III", "Deep space survey")
-	if createError != nil {
-		t.Fatal(createError)
-	}
-	rows, listError := expedition.ListRows(dbConn, expeditionRecord.ID)
-	if listError != nil || len(rows) != 1 {
-		t.Fatalf("expected 1 seeded row, got %d (%v)", len(rows), listError)
-	}
-	setName := func(rowID int64, systemName string) {
-		if _, updateError := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
-			t.Fatal(updateError)
-		}
-	}
-	setName(rows[0].ID, "Sol")
+	expeditionRecord, originRow := createExpeditionWithOriginRow(t, dbConn, "Distant Worlds III", "Deep space survey")
+	setRowSystemName(t, dbConn, originRow.ID, "Sol")
 
-	waypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, rows[0].ID, expedition.RowWaypoint, 0)
-	setName(waypoint2.ID, "Dryooe Prou FF-Z d696")
+	waypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, originRow.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(t, dbConn, waypoint2.ID, "Dryooe Prou FF-Z d696")
 	regionHeader := mustInsert(t, dbConn, expeditionRecord.ID, waypoint2.ID, expedition.RowRegion, 1)
 	waypoint3 := mustInsert(t, dbConn, expeditionRecord.ID, regionHeader.ID, expedition.RowWaypoint, 0)
-	setName(waypoint3.ID, "Outotz LS-K d8-3")
+	setRowSystemName(t, dbConn, waypoint3.ID, "Outotz LS-K d8-3")
 	waypoint4 := mustInsert(t, dbConn, expeditionRecord.ID, waypoint3.ID, expedition.RowWaypoint, 0)
-	setName(waypoint4.ID, "Sagittarius A*")
+	setRowSystemName(t, dbConn, waypoint4.ID, "Sagittarius A*")
 	waypoint5 := mustInsert(t, dbConn, expeditionRecord.ID, waypoint4.ID, expedition.RowWaypoint, 0)
-	setName(waypoint5.ID, "Beagle Point")
+	setRowSystemName(t, dbConn, waypoint5.ID, "Beagle Point")
 
 	// Start expedition at 2026-01-18T19:42:10Z.
 	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
@@ -179,38 +197,21 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 }
 
 func TestPruneEmptyRowsOnComplete(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer dbConn.Close()
-
-	expeditionRecord, createError := expedition.Create(dbConn, "Prune Test", "Test pruning empty rows on complete")
-	if createError != nil {
-		t.Fatal(createError)
-	}
-	initialRows, listError := expedition.ListRows(dbConn, expeditionRecord.ID)
-	if listError != nil || len(initialRows) != 1 {
-		t.Fatalf("expected 1 initial row, got %d", len(initialRows))
-	}
-	setSys := func(rowID int64, systemName string) {
-		if _, updateError := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
-			t.Fatal(updateError)
-		}
-	}
-	setSys(initialRows[0].ID, "Sol")
+	dbConn := openExpeditionTestDB(t)
+	expeditionRecord, originRow := createExpeditionWithOriginRow(t, dbConn, "Prune Test", "Test pruning empty rows on complete")
+	setRowSystemName(t, dbConn, originRow.ID, "Sol")
 
 	// Header 1: Inner Orion Spur (followed by non-empty waypoints)
-	header1 := mustInsert(t, dbConn, expeditionRecord.ID, initialRows[0].ID, expedition.RowRegion, 1)
+	header1 := mustInsert(t, dbConn, expeditionRecord.ID, originRow.ID, expedition.RowRegion, 1)
 	waypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, header1.ID, expedition.RowWaypoint, 0)
-	setSys(waypoint2.ID, "Alpha Centauri")
+	setRowSystemName(t, dbConn, waypoint2.ID, "Alpha Centauri")
 
 	// Header 2: Elysian Shore (followed only by empty waypoints)
 	header2 := mustInsert(t, dbConn, expeditionRecord.ID, waypoint2.ID, expedition.RowRegion, 2)
 	emptyWaypoint1 := mustInsert(t, dbConn, expeditionRecord.ID, header2.ID, expedition.RowWaypoint, 0)
-	setSys(emptyWaypoint1.ID, "")
+	setRowSystemName(t, dbConn, emptyWaypoint1.ID, "")
 	emptyWaypoint2 := mustInsert(t, dbConn, expeditionRecord.ID, emptyWaypoint1.ID, expedition.RowWaypoint, 0)
-	setSys(emptyWaypoint2.ID, "   ")
+	setRowSystemName(t, dbConn, emptyWaypoint2.ID, "   ")
 
 	// Header 3: Empty header at end (no waypoints at all)
 	_ = mustInsert(t, dbConn, expeditionRecord.ID, emptyWaypoint2.ID, expedition.RowRegion, 3)
@@ -254,16 +255,9 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 }
 
 func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer dbConn.Close()
-
+	dbConn := openExpeditionTestDB(t)
 	expedition.InvalidateShipCache()
 
-	tmpDir := t.TempDir()
-	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
 	lines := []string{
 		// Historical ship swaps before expedition
 		`{"timestamp":"2026-01-01T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1}`,
@@ -297,31 +291,12 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		// Post-expedition ship swap (should be clamped out)
 		`{"timestamp":"2026-01-25T12:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"empire_trader","ShipType_Localised":"Imperial Cutter","ShipID":30}`,
 	}
-	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")), 0644); err != nil {
-		t.Fatal(err)
-	}
-	ingester := journal.NewIngester(dbConn)
-	if _, err := ingester.ScanDir(context.Background(), tmpDir); err != nil {
-		t.Fatal(err)
-	}
+	ingestJournalLines(t, dbConn, lines)
 
-	exp, err := expedition.Create(dbConn, "Ship Clamping Test", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	initialRows, err := expedition.ListRows(dbConn, exp.ID)
-	if err != nil || len(initialRows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(initialRows))
-	}
-	solName := "Sol"
-	if _, err := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: initialRows[0].ID, SystemName: &solName}); err != nil {
-		t.Fatal(err)
-	}
-	alpha := mustInsert(t, dbConn, exp.ID, initialRows[0].ID, expedition.RowWaypoint, 0)
-	alphaName := "Alpha Centauri"
-	if _, err := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: alpha.ID, SystemName: &alphaName}); err != nil {
-		t.Fatal(err)
-	}
+	exp, originRow := createExpeditionWithOriginRow(t, dbConn, "Ship Clamping Test", "")
+	setRowSystemName(t, dbConn, originRow.ID, "Sol")
+	alpha := mustInsert(t, dbConn, exp.ID, originRow.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(t, dbConn, alpha.ID, "Alpha Centauri")
 
 	// Start at 2026-01-18T10:00:00Z, complete at 2026-01-21T10:00:00Z
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
@@ -379,38 +354,17 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 }
 
 func TestDetailsLightweightAndOriginCache(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer dbConn.Close()
-
+	dbConn := openExpeditionTestDB(t)
 	expedition.InvalidateShipCache()
 
-	tmpDir := t.TempDir()
-	journalFile := filepath.Join(tmpDir, "Journal.2026-01-18T190000.01.log")
 	lines := []string{
 		`{"timestamp":"2026-01-01T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":20.0}`,
 		`{"timestamp":"2026-01-19T12:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 	}
-	if err := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")), 0644); err != nil {
-		t.Fatal(err)
-	}
-	ingester := journal.NewIngester(dbConn)
-	if _, err := ingester.ScanDir(context.Background(), tmpDir); err != nil {
-		t.Fatal(err)
-	}
+	ingestJournalLines(t, dbConn, lines)
 
-	exp, err := expedition.Create(dbConn, "Details Test Expedition", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err := expedition.ListRows(dbConn, exp.ID)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
-	}
-	wp1 := rows[0]
+	exp, wp1 := createExpeditionWithOriginRow(t, dbConn, "Details Test Expedition", "")
 	solName := "Sol"
 	solVis := "2026-01-18T10:00:00Z"
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, solVis, wp1.ID); err != nil {
@@ -512,22 +466,8 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 }
 
 func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer dbConn.Close()
-
-	expeditionRecord, createError := expedition.Create(dbConn, "Batch Test", "Test position updates")
-	if createError != nil {
-		t.Fatal(createError)
-	}
-
-	rows, listError := expedition.ListRows(dbConn, expeditionRecord.ID)
-	if listError != nil || len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
-	}
-	wp1 := rows[0]
+	dbConn := openExpeditionTestDB(t)
+	expeditionRecord, wp1 := createExpeditionWithOriginRow(t, dbConn, "Batch Test", "Test position updates")
 
 	// Insert at end
 	wp2 := mustInsert(t, dbConn, expeditionRecord.ID, expedition.InsertAtEnd, expedition.RowWaypoint, 0)
@@ -540,7 +480,7 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 	}
 
 	// Verify all 3 positions
-	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	rows, _ := expedition.ListRows(dbConn, expeditionRecord.ID)
 	if len(rows) != 3 || rows[0].Position != 1 || rows[1].Position != 2 || rows[2].Position != 3 {
 		t.Fatalf("unexpected rows after end inserts: %+v", rows)
 	}
@@ -585,17 +525,11 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 	}
 
 	// Test Reevaluate consolidated updates
-	// Setup systems
-	setSys := func(rowID int64, name string) {
-		if _, updateError := expedition.UpdateRow(dbConn, expedition.RowPatch{ID: rowID, SystemName: &name}); updateError != nil {
-			t.Fatal(updateError)
-		}
-	}
-	setSys(wpTop.ID, "Alpha")
-	setSys(wp1.ID, "Beta")
-	setSys(wpMid.ID, "Gamma")
-	setSys(wp2.ID, "Delta")
-	setSys(wp3.ID, "Epsilon")
+	setRowSystemName(t, dbConn, wpTop.ID, "Alpha")
+	setRowSystemName(t, dbConn, wp1.ID, "Beta")
+	setRowSystemName(t, dbConn, wpMid.ID, "Gamma")
+	setRowSystemName(t, dbConn, wp2.ID, "Delta")
+	setRowSystemName(t, dbConn, wp3.ID, "Epsilon")
 
 	// Start expedition
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
@@ -652,38 +586,21 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 }
 
 func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatal(openError)
-	}
-	defer dbConn.Close()
-
+	dbConn := openExpeditionTestDB(t)
 	expedition.InvalidateShipCache()
 
-	expeditionRecord, err := expedition.Create(dbConn, "Route Telemetry Test", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rows, err := expedition.ListRows(dbConn, expeditionRecord.ID)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
-	}
-	firstWaypoint := rows[0]
-	solName := "Sol"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, firstWaypoint.ID); err != nil {
+	expeditionRecord, firstWaypoint := createExpeditionWithOriginRow(t, dbConn, "Route Telemetry Test", "")
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Sol', x = 0, y = 0, z = 0 WHERE id = ?`, firstWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	secondWaypoint := mustInsert(t, dbConn, expeditionRecord.ID, firstWaypoint.ID, expedition.RowWaypoint, 0)
-	secondWaypointName := "Alpha Centauri"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 100, y = 0, z = 0 WHERE id = ?`, secondWaypointName, secondWaypoint.ID); err != nil {
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Alpha Centauri', x = 100, y = 0, z = 0 WHERE id = ?`, secondWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	thirdWaypoint := mustInsert(t, dbConn, expeditionRecord.ID, secondWaypoint.ID, expedition.RowWaypoint, 0)
-	thirdWaypointName := "Barnard's Star"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 250, y = 0, z = 0 WHERE id = ?`, thirdWaypointName, thirdWaypoint.ID); err != nil {
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Barnard''s Star', x = 250, y = 0, z = 0 WHERE id = ?`, thirdWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -825,12 +742,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 }
 
 func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testing.T) {
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	defer databaseConnection.Close()
-
+	databaseConnection := openExpeditionTestDB(testingContext)
 	stats.InvalidateLedgerCache()
 	expedition.InvalidateOriginMetricsCache()
 
@@ -848,19 +760,10 @@ func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testin
 		testingContext.Fatal(execError)
 	}
 
-	expeditionRecord, createError := expedition.Create(databaseConnection, "Realization Cache Test", "")
-	if createError != nil {
-		testingContext.Fatal(createError)
-	}
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Realization Cache Test", "")
 	if _, execError := databaseConnection.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T12:00:00Z' WHERE id = ?`, expeditionRecord.ID); execError != nil {
 		testingContext.Fatal(execError)
 	}
-
-	existingRows, listRowsError := expedition.ListRows(databaseConnection, expeditionRecord.ID)
-	if listRowsError != nil || len(existingRows) != 1 {
-		testingContext.Fatalf("expected 1 initial row, got %d (error: %v)", len(existingRows), listRowsError)
-	}
-	originWaypoint := existingRows[0]
 	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 18)
 
 	originVisitedAt := "2026-01-01T12:00:00Z"

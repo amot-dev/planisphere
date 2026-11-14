@@ -86,38 +86,23 @@ describe('Scroll Performance and Normalizer', () => {
       ;(globalThis as any).window = originalWindow
     })
 
-    it('safely processes wheel event when target is not a Node (e.g. window)', () => {
-      const wheelHandler = listeners['wheel']
-      expect(typeof wheelHandler).toBe('function')
-
-      // Wheel event targeted at Window object
-      const fakeWheelEvent: any = {
-        target: mockWindow,
-        deltaY: 50,
-        deltaX: 0,
-        deltaMode: 0,
-        ctrlKey: false,
-        shiftKey: false,
-        cancelable: true,
-        preventDefault: () => {},
-      }
-
-      // Should not throw TypeError: parameter 1 is not of type 'Node'
-      expect(() => wheelHandler(fakeWheelEvent)).not.toThrow()
-    })
-
-    it('scales discrete mouse wheel deltas by 2.8x on scrollable containers and prevents default', () => {
-      const container = createMockElement(['overflow-y-auto'], {
+    function createVerticalScrollContainer(): HTMLElement {
+      return createMockElement(['overflow-y-auto'], {
         clientHeight: 400,
         scrollHeight: 1200,
         scrollTop: 50,
       })
-      let prevented = false
-      const wheelHandler = listeners['wheel']
+    }
 
+    function dispatchWheel(
+      wheelHandler: Function,
+      target: unknown,
+      overrides: Record<string, unknown> = {},
+    ): { prevented: boolean } {
+      let prevented = false
       wheelHandler({
-        target: container,
-        deltaY: 20,
+        target,
+        deltaY: 0,
         deltaX: 0,
         deltaMode: 0,
         ctrlKey: false,
@@ -126,7 +111,22 @@ describe('Scroll Performance and Normalizer', () => {
         preventDefault: () => {
           prevented = true
         },
+        ...overrides,
       })
+      return { prevented }
+    }
+
+    it('safely processes wheel event when target is not a Node (e.g. window)', () => {
+      const wheelHandler = listeners['wheel']
+      expect(typeof wheelHandler).toBe('function')
+
+      // Should not throw TypeError: parameter 1 is not of type 'Node'
+      expect(() => dispatchWheel(wheelHandler, mockWindow, { deltaY: 50 })).not.toThrow()
+    })
+
+    it('scales discrete mouse wheel deltas by 2.8x on scrollable containers and prevents default', () => {
+      const container = createVerticalScrollContainer()
+      const { prevented } = dispatchWheel(listeners['wheel'], container, { deltaY: 20 })
 
       expect(prevented).toBe(true)
       // 50 + (20 * 2.8) = 106
@@ -134,68 +134,23 @@ describe('Scroll Performance and Normalizer', () => {
     })
 
     it('bypasses continuous touchpad inputs (fractional or small deltas) to preserve hardware compositor momentum', () => {
-      const container = createMockElement(['overflow-y-auto'], {
-        clientHeight: 400,
-        scrollHeight: 1200,
-        scrollTop: 50,
-      })
-      let prevented = false
+      const container = createVerticalScrollContainer()
       const wheelHandler = listeners['wheel']
 
       // Fractional delta
-      wheelHandler({
-        target: container,
-        deltaY: 4.5,
-        deltaX: 0,
-        deltaMode: 0,
-        ctrlKey: false,
-        shiftKey: false,
-        cancelable: true,
-        preventDefault: () => {
-          prevented = true
-        },
-      })
-      expect(prevented).toBe(false)
+      const fractionalResult = dispatchWheel(wheelHandler, container, { deltaY: 4.5 })
+      expect(fractionalResult.prevented).toBe(false)
       expect(container.scrollTop).toBe(50)
 
       // Small integer delta (|dy| < 12)
-      wheelHandler({
-        target: container,
-        deltaY: 8,
-        deltaX: 0,
-        deltaMode: 0,
-        ctrlKey: false,
-        shiftKey: false,
-        cancelable: true,
-        preventDefault: () => {
-          prevented = true
-        },
-      })
-      expect(prevented).toBe(false)
+      const smallResult = dispatchWheel(wheelHandler, container, { deltaY: 8 })
+      expect(smallResult.prevented).toBe(false)
       expect(container.scrollTop).toBe(50)
     })
 
     it('scales DOM_DELTA_LINE events (deltaMode: 1) by 35px per line', () => {
-      const container = createMockElement(['overflow-y-auto'], {
-        clientHeight: 400,
-        scrollHeight: 1200,
-        scrollTop: 50,
-      })
-      let prevented = false
-      const wheelHandler = listeners['wheel']
-
-      wheelHandler({
-        target: container,
-        deltaY: 2,
-        deltaX: 0,
-        deltaMode: 1,
-        ctrlKey: false,
-        shiftKey: false,
-        cancelable: true,
-        preventDefault: () => {
-          prevented = true
-        },
-      })
+      const container = createVerticalScrollContainer()
+      const { prevented } = dispatchWheel(listeners['wheel'], container, { deltaY: 2, deltaMode: 1 })
 
       expect(prevented).toBe(true)
       // 50 + (2 * 35) = 120
@@ -203,26 +158,8 @@ describe('Scroll Performance and Normalizer', () => {
     })
 
     it('passes through browser zoom shortcuts when ctrlKey is pressed', () => {
-      const container = createMockElement(['overflow-y-auto'], {
-        clientHeight: 400,
-        scrollHeight: 1200,
-        scrollTop: 50,
-      })
-      let prevented = false
-      const wheelHandler = listeners['wheel']
-
-      wheelHandler({
-        target: container,
-        deltaY: 20,
-        deltaX: 0,
-        deltaMode: 0,
-        ctrlKey: true,
-        shiftKey: false,
-        cancelable: true,
-        preventDefault: () => {
-          prevented = true
-        },
-      })
+      const container = createVerticalScrollContainer()
+      const { prevented } = dispatchWheel(listeners['wheel'], container, { deltaY: 20, ctrlKey: true })
 
       expect(prevented).toBe(false)
       expect(container.scrollTop).toBe(50)
@@ -236,21 +173,7 @@ describe('Scroll Performance and Normalizer', () => {
         clientHeight: 400,
         scrollHeight: 400,
       })
-      let prevented = false
-      const wheelHandler = listeners['wheel']
-
-      wheelHandler({
-        target: container,
-        deltaY: 20,
-        deltaX: 0,
-        deltaMode: 0,
-        ctrlKey: false,
-        shiftKey: true,
-        cancelable: true,
-        preventDefault: () => {
-          prevented = true
-        },
-      })
+      const { prevented } = dispatchWheel(listeners['wheel'], container, { deltaY: 20, shiftKey: true })
 
       expect(prevented).toBe(true)
       // 10 + (20 * 2.8) = 66

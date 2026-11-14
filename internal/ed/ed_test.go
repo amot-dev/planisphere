@@ -216,9 +216,11 @@ func TestCarrierTritiumCost(t *testing.T) {
 	if gameCost != 90 {
 		t.Fatalf("CarrierTritiumCost(494.89, 8548, 1000) = %d, want 90", gameCost)
 	}
+}
 
+func TestDistance(testingContext *testing.T) {
 	if math.Abs(Distance(Vec3{0, 0, 0}, Vec3{3, 4, 12})-13) > 1e-9 {
-		t.Fatalf("Distance failed")
+		testingContext.Fatalf("Distance failed")
 	}
 }
 
