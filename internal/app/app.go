@@ -376,10 +376,16 @@ func (app *App) startConfiguredWatcher() {
 	}
 }
 
+// prepareInitialState runs before markStartupComplete opens startupDone so the
+// initial frontend boot wave reads reconciled expedition progress and pre-warmed
+// telemetry caches without racing a concurrent background stats computation.
 func (app *App) prepareInitialState() {
 	if !app.isSetupCompleted() {
 		return
 	}
+	// When runScan ingests new events it already calls reevaluateActive; still
+	// re-evaluate on zero-new-event boots to reconcile active expeditions after
+	// external database edits or schema upgrades.
 	if !app.runScan() {
 		app.reevaluateActive()
 	}
