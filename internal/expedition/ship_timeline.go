@@ -246,3 +246,125 @@ func LatestPlayerLocation(queryer db.Queryer) (*ed.Vec3, string, error) {
 	return &ed.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}, systemName.String, nil
 }
 
+var (
+	visitCacheMu      sync.Mutex
+	visitCacheQueryer db.Queryer
+	visitCacheMap     = make(map[string]int)
+)
+
+// InvalidateVisitCache clears cached per-system journal visit counts.
+func InvalidateVisitCache() {
+	visitCacheMu.Lock()
+	visitCacheQueryer = nil
+	visitCacheMap = make(map[string]int)
+	visitCacheMu.Unlock()
+}
+
+func normalizeSystemKey(systemName string) string {
+	return strings.ToLower(strings.Join(strings.Fields(systemName), " "))
+}
+
+func queryUncachedSystemVisits(queryer db.Queryer, missingNames []string) (map[string]int, error) {
+	predicates := make([]string, len(missingNames))
+	queryArgs := make([]any, len(missingNames))
+	for i, name := range missingNames {
+		predicates[i] = `system_name = ? COLLATE NOCASE`
+		queryArgs[i] = name
+	}
+	query := `SELECT system_name, COUNT(*), COALESCE(SUM(CASE WHEN event IN ('FSDJump', 'CarrierJump') THEN 1 ELSE 0 END), 0)
+		FROM journal_events
+		WHERE (` + strings.Join(predicates, " OR ") + `)
+		  AND (event IN ('FSDJump', 'Location', 'CarrierJump') OR star_x IS NOT NULL)
+		  AND ` + journal.CmdrFilterSQL + `
+		GROUP BY LOWER(TRIM(system_name))`
+	rows, queryError := queryer.Query(query, queryArgs...)
+	if queryError != nil {
+		return nil, queryError
+	}
+	defer rows.Close()
+	totalBySystem := make(map[string]int, len(missingNames))
+	jumpsBySystem := make(map[string]int, len(missingNames))
+	for rows.Next() {
+		var matchedSystem string
+		var totalEvents, jumpEvents int
+		if scanError := rows.Scan(&matchedSystem, &totalEvents, &jumpEvents); scanError != nil {
+			return nil, scanError
+		}
+		normalizedName := normalizeSystemKey(matchedSystem)
+		totalBySystem[normalizedName] += totalEvents
+		jumpsBySystem[normalizedName] += jumpEvents
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(missingNames))
+	for _, name := range missingNames {
+		if totalBySystem[name] > 0 {
+			visitCount := jumpsBySystem[name]
+			if visitCount == 0 {
+				visitCount = 1
+			}
+			counts[name] = visitCount
+		} else {
+			counts[name] = 0
+		}
+	}
+	return counts, nil
+}
+
+func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
+	uniqueNames := make([]string, 0, len(rows))
+	seenNames := make(map[string]bool, len(rows))
+	for _, rowItem := range rows {
+		if !rowItem.IsWaypoint() {
+			continue
+		}
+		normalizedName := normalizeSystemKey(rowItem.SystemName)
+		if normalizedName != "" && !seenNames[normalizedName] {
+			seenNames[normalizedName] = true
+			uniqueNames = append(uniqueNames, normalizedName)
+		}
+	}
+	if len(uniqueNames) == 0 {
+		return nil
+	}
+
+	visitCacheMu.Lock()
+	if visitCacheQueryer != queryer {
+		visitCacheQueryer = queryer
+		visitCacheMap = make(map[string]int)
+	}
+	var missingNames []string
+	visitCounts := make(map[string]int, len(uniqueNames))
+	for _, normalizedName := range uniqueNames {
+		if cachedCount, exists := visitCacheMap[normalizedName]; exists {
+			visitCounts[normalizedName] = cachedCount
+		} else {
+			missingNames = append(missingNames, normalizedName)
+		}
+	}
+	visitCacheMu.Unlock()
+
+	if len(missingNames) == 0 {
+		return visitCounts
+	}
+
+	queriedCounts, queryError := queryUncachedSystemVisits(queryer, missingNames)
+	if queryError != nil {
+		return visitCounts
+	}
+
+	visitCacheMu.Lock()
+	if visitCacheQueryer == queryer {
+		for normalizedName, visitCount := range queriedCounts {
+			visitCacheMap[normalizedName] = visitCount
+		}
+	}
+	visitCacheMu.Unlock()
+
+	for normalizedName, visitCount := range queriedCounts {
+		visitCounts[normalizedName] = visitCount
+	}
+	return visitCounts
+}
+

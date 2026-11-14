@@ -185,6 +185,9 @@ func (accumulator *archiveImportAccumulator) processEntry(
 	if journal.IsRealizationEvent(parsedEvent.Event) {
 		result.HasRealizationEvents = true
 	}
+	if journal.IsArrivalEvent(parsedEvent.Event) {
+		result.HasArrivalEvents = true
+	}
 	if firstSeen, exists := accumulator.fileFirstTimestamps[normalizedFileName]; !exists || parsedEvent.Timestamp < firstSeen {
 		accumulator.fileFirstTimestamps[normalizedFileName] = parsedEvent.Timestamp
 	}

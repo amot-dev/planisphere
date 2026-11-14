@@ -17,6 +17,7 @@ import (
 	"planisphere/internal/db"
 	"planisphere/internal/ed"
 	"planisphere/internal/eddiscovery"
+	"planisphere/internal/expedition"
 	"planisphere/internal/gec"
 	"planisphere/internal/journal"
 	"planisphere/internal/stats"
@@ -224,6 +225,7 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 		return Settings{}, toggleError
 	}
 	stats.InvalidateLedgerCache()
+	expedition.InvalidateVisitCache()
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
 	app.changed("journal", 0)
@@ -281,6 +283,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	app.dbMu.RUnlock()
 
 	stats.InvalidateLedgerCache()
+	expedition.InvalidateVisitCache()
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
 	app.changed("journal", 0)

@@ -54,6 +54,7 @@ type Result struct {
 	LinesRead            int
 	NewEvents            int // count of events actually inserted (not previously known)
 	HasRealizationEvents bool
+	HasArrivalEvents     bool
 	Errors               []string
 }
 
@@ -63,6 +64,7 @@ func (result *Result) merge(other Result) {
 	result.LinesRead += other.LinesRead
 	result.NewEvents += other.NewEvents
 	result.HasRealizationEvents = result.HasRealizationEvents || other.HasRealizationEvents
+	result.HasArrivalEvents = result.HasArrivalEvents || other.HasArrivalEvents
 	result.Errors = append(result.Errors, other.Errors...)
 }
 
@@ -72,6 +74,16 @@ func IsRealizationEvent(eventName string) bool {
 	case "Scan", "SAAScanComplete", "ScanOrganic",
 		"SellExplorationData", "MultiSellExplorationData", "SellOrganicData",
 		"Resurrect", "NpcCrewPaidWage":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsArrivalEvent reports whether eventName records a commander's arrival or presence in a star system.
+func IsArrivalEvent(eventName string) bool {
+	switch eventName {
+	case "FSDJump", "Location", "CarrierJump":
 		return true
 	default:
 		return false
@@ -315,6 +327,9 @@ func ingestAppendedLines(
 			result.NewEvents++
 			if IsRealizationEvent(parsedEvent.Event) {
 				result.HasRealizationEvents = true
+			}
+			if IsArrivalEvent(parsedEvent.Event) {
+				result.HasArrivalEvents = true
 			}
 			if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
 				state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}

@@ -706,6 +706,7 @@ export namespace expedition {
 	    regionName: string;
 	    detectedRegionId: number;
 	    detectedRegion: string;
+	    visitCount: number;
 	    visitState: string;
 	    visitedAtGalactic: string;
 	    distFromPrevLy?: number;
@@ -728,6 +729,7 @@ export namespace expedition {
 	        this.regionName = source["regionName"];
 	        this.detectedRegionId = source["detectedRegionId"];
 	        this.detectedRegion = source["detectedRegion"];
+	        this.visitCount = source["visitCount"];
 	        this.visitState = source["visitState"];
 	        this.visitedAtGalactic = source["visitedAtGalactic"];
 	        this.distFromPrevLy = source["distFromPrevLy"];

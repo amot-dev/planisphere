@@ -22,11 +22,15 @@ export const CoordStatusIndicator = memo(function CoordStatusIndicator({
   if (!row.systemName) return null
   if (row.hasCoords) {
     const isJournal = row.coordsSource?.toLowerCase() === 'journal'
+    const regionPrefix = rowView.detectedRegion ? `${rowView.detectedRegion} ` : ''
+    const coordsLabel = `(${row.x.toFixed(1)}, ${row.y.toFixed(1)}, ${row.z.toFixed(1)})`
+    const visitCount = rowView.visitCount || 1
+    const visitSuffix = isJournal
+      ? `via Journal (${visitCount} ${visitCount === 1 ? 'Visit' : 'Visits'})`
+      : 'via EDSM (Never Visited)'
     return (
       <span
-        title={`Coordinates (${row.x.toFixed(1)}, ${row.y.toFixed(1)}, ${row.z.toFixed(1)}) via ${row.coordsSource.toUpperCase()}${
-          isJournal ? ' (Previously Visited in Flight Logs)' : ' (EDSM Star Map)'
-        }${rowView.detectedRegion ? ` — ${rowView.detectedRegion}` : ''}`}
+        title={`${regionPrefix}${coordsLabel} ${visitSuffix}`}
         className={`w-1.5 h-3 shrink-0 ${isJournal ? 'bg-[#00E599]' : 'bg-[#00D2FF]'}`}
       />
     )

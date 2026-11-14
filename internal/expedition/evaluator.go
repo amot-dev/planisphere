@@ -411,7 +411,11 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	}
 
 	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals, modeTimeline)
-	return persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
+	changed, persistError := persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
+	if changed {
+		InvalidateVisitCache()
+	}
+	return changed, persistError
 }
 
 // ActiveExpeditionIDs returns expeditions that need re-evaluation on new

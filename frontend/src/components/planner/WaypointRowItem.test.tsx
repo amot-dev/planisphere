@@ -458,5 +458,49 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).not.toContain('42.1 Ly')
     expect(html).toContain('Estimated straight-line distance from previous waypoint')
   })
+
+  it('renders CoordStatusIndicator tooltip with region, coordinates, and EDSM or Journal visit count', () => {
+    const edsmRowHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 30,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Beagle Point',
+          hasCoords: true,
+          coordsSource: 'edsm',
+          x: -1111.6,
+          y: -134.2,
+          z: 65269.8,
+        },
+        number: 1,
+        detectedRegion: 'The Abyss',
+        visitCount: 0,
+        visitState: 'future',
+      }),
+    })
+    expect(edsmRowHtml).toContain('title="The Abyss (-1111.6, -134.2, 65269.8) via EDSM (Never Visited)"')
+
+    const journalRowHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 31,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Sol',
+          hasCoords: true,
+          coordsSource: 'journal',
+          x: 0,
+          y: 0,
+          z: 0,
+        },
+        number: 2,
+        detectedRegion: 'Inner Orion Spur',
+        visitCount: 3,
+        visitState: 'visited',
+      }),
+    })
+    expect(journalRowHtml).toContain('title="Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)"')
+  })
 })
 

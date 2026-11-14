@@ -45,6 +45,7 @@ type RowView struct {
 	RegionName        string       `json:"regionName"`
 	DetectedRegionID  int          `json:"detectedRegionId"` // region containing the coordinates
 	DetectedRegion    string       `json:"detectedRegion"`
+	VisitCount        int          `json:"visitCount"`
 	VisitState        string       `json:"visitState"`
 	VisitedAtGalactic string       `json:"visitedAtGalactic"`
 	DistFromPrevLy    *float64     `json:"distFromPrevLy,omitempty"`
@@ -79,18 +80,20 @@ type PlanView struct {
 type GECLookup func(systemName string, systemAddress int64) *GECRef
 
 type planBuildContext struct {
-	expeditionRecord  Expedition
-	currentWaypoint   *Row
-	playerPosition    *ed.Vec3
-	nextWaypointRowID int64
-	shipTimeline      []shipState
-	jumpTimestamps    []string
-	modeTimeline      *modes.Timeline
-	modeList          []modes.Mode
-	modeByID          map[int64]modes.Mode
-	defaultModeID     int64
-	previousVisitByID map[int64]string
-	gecLookup         GECLookup
+	queryer            db.Queryer
+	expeditionRecord   Expedition
+	currentWaypoint    *Row
+	playerPosition     *ed.Vec3
+	nextWaypointRowID  int64
+	shipTimeline       []shipState
+	jumpTimestamps     []string
+	modeTimeline       *modes.Timeline
+	modeList           []modes.Mode
+	modeByID           map[int64]modes.Mode
+	defaultModeID      int64
+	previousVisitByID  map[int64]string
+	visitCountBySystem map[string]int
+	gecLookup          GECLookup
 }
 
 func (buildCtx *planBuildContext) resolveMode(modeID int64) (int64, string, string) {
@@ -126,10 +129,12 @@ func buildPreviousVisitMap(rows []Row) map[int64]string {
 
 func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView) (*planBuildContext, error) {
 	buildCtx := &planBuildContext{
-		expeditionRecord:  expeditionRecord,
-		modeByID:          map[int64]modes.Mode{},
-		previousVisitByID: buildPreviousVisitMap(rows),
-		gecLookup:         gecLookup,
+		queryer:            queryer,
+		expeditionRecord:   expeditionRecord,
+		modeByID:           map[int64]modes.Mode{},
+		previousVisitByID:  buildPreviousVisitMap(rows),
+		visitCountBySystem: loadSystemVisitCounts(queryer, rows),
+		gecLookup:          gecLookup,
 	}
 
 	// Current waypoint is the visited waypoint with the latest visit time.
@@ -263,6 +268,16 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 	if rowItem.HasCoords {
 		if region, ok := ed.RegionAt(rowItem.X, rowItem.Y, rowItem.Z); ok {
 			rowViewItem.DetectedRegionID, rowViewItem.DetectedRegion = region.ID, region.Name
+		}
+		visitCount := buildCtx.visitCountBySystem[normalizeSystemKey(rowItem.SystemName)]
+		rowViewItem.VisitCount = visitCount
+		if visitCount > 0 && rowViewItem.Row.CoordsSource != "journal" {
+			rowViewItem.Row.CoordsSource = "journal"
+			if rowItem.CoordsSource == "edsm" && buildCtx.queryer != nil {
+				_, _ = buildCtx.queryer.Exec(`UPDATE expedition_rows SET coords_source = 'journal' WHERE id = ? AND coords_source = 'edsm'`, rowItem.ID)
+			}
+		} else if visitCount == 0 && rowViewItem.Row.CoordsSource == "journal" {
+			rowViewItem.Row.CoordsSource = "edsm"
 		}
 	}
 

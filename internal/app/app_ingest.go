@@ -65,9 +65,18 @@ func (app *App) executeJournalScan() (bool, bool) {
 	if scanResult.HasRealizationEvents {
 		stats.InvalidateLedgerCache()
 	}
+	if scanResult.HasArrivalEvents {
+		expedition.InvalidateVisitCache()
+	}
 	if hasNewEvents {
 		app.invalidateAllTimeCache()
 		app.reevaluateActive()
+		if scanResult.HasArrivalEvents {
+			app.dbMu.RLock()
+			currentActiveID := app.activeExpeditionID()
+			app.dbMu.RUnlock()
+			app.kickResolution(currentActiveID, false)
+		}
 	}
 	return hasNewEvents, true
 }
@@ -115,8 +124,17 @@ func (app *App) onJournalBatch(scanResult journal.Result) {
 	if scanResult.HasRealizationEvents {
 		stats.InvalidateLedgerCache()
 	}
+	if scanResult.HasArrivalEvents {
+		expedition.InvalidateVisitCache()
+	}
 	app.invalidateAllTimeCache()
 	app.reevaluateActive()
+	if scanResult.HasArrivalEvents {
+		app.dbMu.RLock()
+		currentActiveID := app.activeExpeditionID()
+		app.dbMu.RUnlock()
+		app.kickResolution(currentActiveID, false)
+	}
 	app.changed("journal", 0)
 }
 
@@ -292,6 +310,7 @@ func (app *App) maybeCatchUpEDD() {
 	})
 	if importError == nil {
 		stats.InvalidateLedgerCache()
+		expedition.InvalidateVisitCache()
 		if settingError := db.SetSetting(database, "edd_history_realization_v6", "1"); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}

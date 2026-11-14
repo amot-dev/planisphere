@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"planisphere/internal/db"
+	"planisphere/internal/ed"
 	"planisphere/internal/expedition"
 	"planisphere/internal/journal"
 	"planisphere/internal/modes"
@@ -836,4 +837,40 @@ func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testin
 	}
 	stats.InvalidateLedgerCache()
 	expedition.InvalidateOriginMetricsCache()
+}
+
+func TestBuildPlanVisitCountAndEDSMToJournalUpgrade(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expedition.InvalidateVisitCache()
+
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Visit Count Plan", "")
+	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
+	if setCoordsError := expedition.SetRowCoords(databaseConnection, originWaypoint.ID, "Sol", 10477373803, 27, &ed.Vec3{X: 0, Y: 0, Z: 0}, "edsm"); setCoordsError != nil {
+		testingContext.Fatal(setCoordsError)
+	}
+
+	initialPlan, initialPlanError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
+	if initialPlanError != nil {
+		testingContext.Fatal(initialPlanError)
+	}
+	if initialPlan.Rows[0].Row.CoordsSource != "edsm" || initialPlan.Rows[0].VisitCount != 0 {
+		testingContext.Fatalf("expected initial EDSM source with 0 visits, got source=%q visits=%d", initialPlan.Rows[0].Row.CoordsSource, initialPlan.Rows[0].VisitCount)
+	}
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay"}`,
+		`{"timestamp":"2026-01-18T19:10:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-01-18T19:20:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-01-18T19:40:00Z","event":"CarrierJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+	})
+	expedition.InvalidateVisitCache()
+
+	updatedPlan, updatedPlanError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
+	if updatedPlanError != nil {
+		testingContext.Fatal(updatedPlanError)
+	}
+	if updatedPlan.Rows[0].Row.CoordsSource != "journal" || updatedPlan.Rows[0].VisitCount != 2 {
+		testingContext.Fatalf("expected upgraded journal source with 2 visits (FSDJump + CarrierJump, ignoring Location relogs), got source=%q visits=%d", updatedPlan.Rows[0].Row.CoordsSource, updatedPlan.Rows[0].VisitCount)
+	}
 }
