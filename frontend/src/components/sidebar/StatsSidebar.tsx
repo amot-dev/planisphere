@@ -38,6 +38,9 @@ export const StatsSidebar = memo(function StatsSidebar({
   onLogCarrierJump,
 }: StatsSidebarProps) {
   const [viewScope, setViewScope] = useState<'expedition' | 'allTime'>('expedition')
+  const [flightOpsExpanded, setFlightOpsExpanded] = useState(true)
+  const [carrierOpsExpanded, setCarrierOpsExpanded] = useState(true)
+  const [scienceOpsExpanded, setScienceOpsExpanded] = useState(true)
   const [scanExpanded, setScanExpanded] = useState(true)
   const [organicExpanded, setOrganicExpanded] = useState(true)
   const [realizedExpanded, setRealizedExpanded] = useState(true)
@@ -126,15 +129,21 @@ export const StatsSidebar = memo(function StatsSidebar({
           sidebarStats={sidebarStats}
           displayedMetrics={displayedMetrics}
           carrierRouteOpen={carrierRouteOpen}
+          flightOpsExpanded={flightOpsExpanded}
+          carrierOpsExpanded={carrierOpsExpanded}
+          onToggleFlightOpsExpanded={() => setFlightOpsExpanded((previous) => !previous)}
+          onToggleCarrierOpsExpanded={() => setCarrierOpsExpanded((previous) => !previous)}
           onLogCarrierJump={onLogCarrierJump}
         />
 
         <ExplorationValuationSection
           displayedMetrics={displayedMetrics}
           displayedRealization={displayedRealization}
+          scienceOpsExpanded={scienceOpsExpanded}
           scanExpanded={scanExpanded}
           organicExpanded={organicExpanded}
           realizedExpanded={realizedExpanded}
+          onToggleScienceOpsExpanded={() => setScienceOpsExpanded((previous) => !previous)}
           onToggleScanExpanded={() => setScanExpanded((previous) => !previous)}
           onToggleOrganicExpanded={() => setOrganicExpanded((previous) => !previous)}
           onToggleRealizedExpanded={() => setRealizedExpanded((previous) => !previous)}

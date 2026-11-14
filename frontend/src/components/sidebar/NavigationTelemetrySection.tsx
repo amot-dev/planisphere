@@ -12,11 +12,15 @@ export interface NavigationTelemetrySectionProps {
   sidebarStats: app.SidebarStats | null
   displayedMetrics: stats.Metrics
   carrierRouteOpen: boolean
+  flightOpsExpanded?: boolean
+  carrierOpsExpanded?: boolean
+  onToggleFlightOpsExpanded?: () => void
+  onToggleCarrierOpsExpanded?: () => void
   onLogCarrierJump?: () => void
 }
 
 /**
- * NavigationTelemetrySection renders the Duration, Personal Navigation Metrics,
+ * NavigationTelemetrySection renders the Duration, Flight Operations,
  * and Carrier Operations cards in the telemetry sidebar.
  */
 export function NavigationTelemetrySection({
@@ -24,6 +28,10 @@ export function NavigationTelemetrySection({
   sidebarStats,
   displayedMetrics,
   carrierRouteOpen,
+  flightOpsExpanded = true,
+  carrierOpsExpanded = true,
+  onToggleFlightOpsExpanded,
+  onToggleCarrierOpsExpanded,
   onLogCarrierJump,
 }: NavigationTelemetrySectionProps) {
   const isActiveExpeditionClock = Boolean(sidebarStats?.started && sidebarStats?.endIsNow)
@@ -105,60 +113,119 @@ export function NavigationTelemetrySection({
         )}
       </div>
 
-      {/* Personal Navigation Metrics (Ship and Carrier Passenger Travel) */}
-      <div className="border border-[#3d2816] bg-[#0e0a07] divide-y divide-[#24180e]">
-        {/* Distance Travelled (Ly) — Total and Breakdown */}
-        <div className="p-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#F4ECE4]">
-              Distance Travelled (Ly)
-            </span>
-            <span className="font-mono-tabular text-xs font-extrabold text-[#FF7100]">
-              {formatLy(displayedMetrics.distanceLy)}
-            </span>
-          </div>
-          <div className="mt-1.5 pl-3.5 space-y-0.5 border-l-2 border-[#FF7100]/50 text-[11px]">
-            <div className="flex items-center justify-between text-[#a6907c]">
-              <span>By Ship (FSD)</span>
-              <span className="font-mono-tabular text-[#F4ECE4]">
-                {formatLy(
-                  displayedMetrics.shipDistanceLy ||
-                    Math.max(
-                      0,
-                      displayedMetrics.distanceLy - (displayedMetrics.carrierPassengerLy || 0),
-                    ),
-                )}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[#a6907c]">
-              <span>By Carrier (Passenger)</span>
-              <span className="font-mono-tabular text-[#F4ECE4]">
-                {formatLy(displayedMetrics.carrierPassengerLy)}
-              </span>
-            </div>
+      {/* Flight Operations (Ship and Carrier Passenger Travel) */}
+      <div className="border border-[#3d2816] bg-[#0e0a07] overflow-hidden">
+        <div
+          className={`px-2 py-1.5 bg-[#140e09] ${
+            flightOpsExpanded ? 'border-b border-[#3d2816]' : ''
+          } text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#F4ECE4] flex items-center justify-between`}
+        >
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onToggleFlightOpsExpanded}
+              title="Toggle Flight Operations section"
+              className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
+                flightOpsExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
+              }`}
+            >
+              <svg
+                className={`w-3.5 h-3.5 transition-transform ${
+                  flightOpsExpanded ? 'rotate-90' : ''
+                }`}
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.25 4.5a.75.75 0 01-1.06-.02z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+            <span>Flight Operations</span>
           </div>
         </div>
+        {flightOpsExpanded && (
+          <div className="divide-y divide-[#24180e]">
+            {/* Distance Travelled (Ly) — Total and Breakdown */}
+            <div className="p-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#F4ECE4]">
+                  Distance Travelled (Ly)
+                </span>
+                <span className="font-mono-tabular text-xs font-extrabold text-[#FF7100]">
+                  {formatLy(displayedMetrics.distanceLy)}
+                </span>
+              </div>
+              <div className="mt-1.5 pl-3.5 space-y-0.5 border-l-2 border-[#FF7100]/50 text-[11px]">
+                <div className="flex items-center justify-between text-[#a6907c]">
+                  <span>By Ship (FSD)</span>
+                  <span className="font-mono-tabular text-[#F4ECE4]">
+                    {formatLy(
+                      displayedMetrics.shipDistanceLy ||
+                        Math.max(
+                          0,
+                          displayedMetrics.distanceLy - (displayedMetrics.carrierPassengerLy || 0),
+                        ),
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[#a6907c]">
+                  <span>By Carrier (Passenger)</span>
+                  <span className="font-mono-tabular text-[#F4ECE4]">
+                    {formatLy(displayedMetrics.carrierPassengerLy)}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-        <StatRow label="Hyperspace Jumps" value={formatInt(displayedMetrics.jumps)} />
-        <StatRow label="Jet Cone Boosts" value={formatInt(displayedMetrics.jetConeBoosts)} />
-        <StatRow label="Premium Boosts" value={formatInt(displayedMetrics.premiumBoosts)} />
-        <StatRow label="Standard Boosts" value={formatInt(displayedMetrics.standardBoosts)} />
-        <StatRow label="Basic Boosts" value={formatInt(displayedMetrics.basicBoosts)} />
+            <StatRow label="Hyperspace Jumps" value={formatInt(displayedMetrics.jumps)} />
+            <StatRow label="Jet Cone Boosts" value={formatInt(displayedMetrics.jetConeBoosts)} />
+            <StatRow label="Premium Boosts" value={formatInt(displayedMetrics.premiumBoosts)} />
+            <StatRow label="Standard Boosts" value={formatInt(displayedMetrics.standardBoosts)} />
+            <StatRow label="Basic Boosts" value={formatInt(displayedMetrics.basicBoosts)} />
+          </div>
+        )}
       </div>
 
       {/* Expedition / Personal Carrier Operations */}
       <div className="border border-[#3d2816] bg-[#0e0a07] overflow-hidden">
-        <div className="px-3 py-1.5 bg-[#140e09] border-b border-[#3d2816] text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#F4ECE4] flex items-center justify-between">
-          <span>
-            {viewScope === 'allTime'
-              ? 'Personal Carrier Operations'
-              : 'Expedition Carrier Operations'}
-          </span>
-          {viewScope === 'allTime' ? (
-            <span className="text-[9px] text-[#a6907c] font-mono-tabular">
-              OWNED VESSEL
+        <div
+          className={`px-2 py-1.5 bg-[#140e09] ${
+            carrierOpsExpanded ? 'border-b border-[#3d2816]' : ''
+          } text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#F4ECE4] flex items-center justify-between`}
+        >
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onToggleCarrierOpsExpanded}
+              title="Toggle Carrier Operations section"
+              className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
+                carrierOpsExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
+              }`}
+            >
+              <svg
+                className={`w-3.5 h-3.5 transition-transform ${
+                  carrierOpsExpanded ? 'rotate-90' : ''
+                }`}
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.25 4.5a.75.75 0 01-1.06-.02z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+            <span>
+              {viewScope === 'allTime'
+                ? 'Personal Carrier Operations'
+                : 'Expedition Carrier Operations'}
             </span>
-          ) : sidebarStats?.status !== 'completed' ? (
+          </div>
+          {viewScope !== 'allTime' && sidebarStats?.status !== 'completed' ? (
             <button
               type="button"
               disabled={carrierRouteOpen}
@@ -178,28 +245,30 @@ export function NavigationTelemetrySection({
             </button>
           ) : null}
         </div>
-        <div className="divide-y divide-[#24180e]">
-          <StatRow
-            label={
-              viewScope === 'allTime'
-                ? 'Personal Carrier Dist (Ly)'
-                : 'Expedition Carrier Dist (Ly)'
-            }
-            value={formatLy(displayedMetrics.carrierDistanceLy)}
-          />
-          <StatRow
-            label={
-              viewScope === 'allTime' ? 'Personal Carrier Jumps' : 'Expedition Carrier Jumps'
-            }
-            value={formatInt(displayedMetrics.carrierJumps)}
-          />
-          <StatRow
-            label={
-              viewScope === 'allTime' ? 'Personal Carrier Tritium' : 'Expedition Carrier Tritium'
-            }
-            value={`${formatInt(displayedMetrics.tritiumUsed || 0)} t`}
-          />
-        </div>
+        {carrierOpsExpanded && (
+          <div className="divide-y divide-[#24180e]">
+            <StatRow
+              label={
+                viewScope === 'allTime'
+                  ? 'Personal Carrier Dist (Ly)'
+                  : 'Expedition Carrier Dist (Ly)'
+              }
+              value={formatLy(displayedMetrics.carrierDistanceLy)}
+            />
+            <StatRow
+              label={
+                viewScope === 'allTime' ? 'Personal Carrier Jumps' : 'Expedition Carrier Jumps'
+              }
+              value={formatInt(displayedMetrics.carrierJumps)}
+            />
+            <StatRow
+              label={
+                viewScope === 'allTime' ? 'Personal Carrier Tritium' : 'Expedition Carrier Tritium'
+              }
+              value={`${formatInt(displayedMetrics.tritiumUsed || 0)} t`}
+            />
+          </div>
+        )}
       </div>
     </>
   )
