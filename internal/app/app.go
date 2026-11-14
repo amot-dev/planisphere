@@ -289,15 +289,18 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.ingestMu.Lock()
 	defer app.ingestMu.Unlock()
 
-	app.dbMu.Lock()
-	defer app.dbMu.Unlock()
+	// Release dbMu before stopping the watcher and closing the previous database
+	// because active watcher callbacks acquire dbMu.RLock.
+	app.dbMu.RLock()
+	previousWatcher := app.watcher
+	app.dbMu.RUnlock()
+	if previousWatcher != nil {
+		previousWatcher.Stop()
+	}
 
-	if app.watcher != nil {
-		app.watcher.Stop()
-	}
-	if app.db != nil {
-		_ = app.db.Close()
-	}
+	app.dbMu.Lock()
+	remainingWatcher := app.watcher
+	previousDB := app.db
 	app.db, app.dbPath = dbConn, dbPath
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
@@ -306,6 +309,14 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.gec = gec.NewCatalog(dbConn)
 	stats.InvalidateLedgerCache()
 	app.invalidateAllTimeCache()
+	app.dbMu.Unlock()
+
+	if remainingWatcher != nil && remainingWatcher != previousWatcher {
+		remainingWatcher.Stop()
+	}
+	if previousDB != nil {
+		_ = previousDB.Close()
+	}
 	return nil
 }
 
