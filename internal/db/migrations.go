@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -165,36 +166,59 @@ func migrateIngestParserV2(dbConn *sql.DB) error {
 }
 
 func migrateGECSchemaV2(dbConn *sql.DB) error {
-	_, _ = dbConn.Exec(`DELETE FROM gec_pois_cache`)
-	_ = SetSetting(dbConn, "gec_fetched_at", "")
+	if _, deleteError := dbConn.Exec(`DELETE FROM gec_pois_cache`); deleteError != nil {
+		return fmt.Errorf("clear gec_pois_cache (v2): %w", deleteError)
+	}
+	if setSettingError := SetSetting(dbConn, "gec_fetched_at", ""); setSettingError != nil {
+		return fmt.Errorf("reset gec_fetched_at (v2): %w", setSettingError)
+	}
 	return nil
 }
 
 func migrateCommanderSchemaV3(dbConn *sql.DB) error {
-	_, _ = dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`)
-	_, _ = dbConn.Exec(`UPDATE expeditions SET baseline_json = json_set(baseline_json, '$.bodiesMapped', 0) WHERE baseline_source = 'statistics'`)
+	if _, resetOffsetsError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); resetOffsetsError != nil {
+		return fmt.Errorf("reset ingested_journals offsets (v3): %w", resetOffsetsError)
+	}
+	if _, resetBaselineError := dbConn.Exec(`UPDATE expeditions SET baseline_json = json_set(baseline_json, '$.bodiesMapped', 0) WHERE baseline_source = 'statistics'`); resetBaselineError != nil {
+		return fmt.Errorf("reset statistics bodiesMapped baseline (v3): %w", resetBaselineError)
+	}
 	return nil
 }
 
 func migrateFCArrivedV4(dbConn *sql.DB) error {
-	_, _ = dbConn.Exec(`UPDATE expedition_rows SET fc_arrived = 1
+	if _, updateError := dbConn.Exec(`UPDATE expedition_rows SET fc_arrived = 1
 		WHERE fc_stop = 1 AND visited_at IS NOT NULL AND visited_at != ''
 		AND id IN (
 			SELECT MIN(expedition_rows.id) FROM expedition_rows
 			JOIN expeditions ON expeditions.id = expedition_rows.expedition_id
 			WHERE expeditions.status IN ('active', 'completed') AND expedition_rows.row_type = 'waypoint'
 			GROUP BY expedition_rows.expedition_id
-		)`)
+		)`); updateError != nil {
+		return fmt.Errorf("seed fc_arrived on initial waypoints (v4): %w", updateError)
+	}
 	return nil
 }
 
 func migrateGECSchemaV5(dbConn *sql.DB) error {
-	_, _ = dbConn.Exec(`ALTER TABLE gec_pois_cache ADD COLUMN source TEXT NOT NULL DEFAULT 'GEC'`)
-	_, _ = dbConn.Exec(`DELETE FROM gec_pois_cache`)
-	_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&#39;', '''') WHERE poi_name LIKE '%&#39;%'`)
-	_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&amp;', '&') WHERE poi_name LIKE '%&amp;%'`)
-	_, _ = dbConn.Exec(`UPDATE expedition_rows SET poi_name = replace(poi_name, '&quot;', '"') WHERE poi_name LIKE '%&quot;%'`)
-	_ = SetSetting(dbConn, "gec_fetched_at", "")
+	if _, alterError := dbConn.Exec(`ALTER TABLE gec_pois_cache ADD COLUMN source TEXT NOT NULL DEFAULT 'GEC'`); alterError != nil && !strings.Contains(strings.ToLower(alterError.Error()), "duplicate column name") {
+		return fmt.Errorf("add gec_pois_cache source column (v5): %w", alterError)
+	}
+	if _, deleteError := dbConn.Exec(`DELETE FROM gec_pois_cache`); deleteError != nil {
+		return fmt.Errorf("clear gec_pois_cache (v5): %w", deleteError)
+	}
+	entityReplacements := []string{
+		`UPDATE expedition_rows SET poi_name = replace(poi_name, '&#39;', '''') WHERE poi_name LIKE '%&#39;%'`,
+		`UPDATE expedition_rows SET poi_name = replace(poi_name, '&amp;', '&') WHERE poi_name LIKE '%&amp;%'`,
+		`UPDATE expedition_rows SET poi_name = replace(poi_name, '&quot;', '"') WHERE poi_name LIKE '%&quot;%'`,
+	}
+	for _, updateQuery := range entityReplacements {
+		if _, updateError := dbConn.Exec(updateQuery); updateError != nil {
+			return fmt.Errorf("unescape expedition_rows poi_name entities (v5): %w", updateError)
+		}
+	}
+	if setSettingError := SetSetting(dbConn, "gec_fetched_at", ""); setSettingError != nil {
+		return fmt.Errorf("reset gec_fetched_at (v5): %w", setSettingError)
+	}
 	return nil
 }
 

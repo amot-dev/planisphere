@@ -87,10 +87,13 @@ func (catalog *Catalog) Reload() error {
 			byAddr[poiItem.SystemAddress] = append(byAddr[poiItem.SystemAddress], poiItem)
 		}
 	}
+	if rowsError := rows.Err(); rowsError != nil {
+		return rowsError
+	}
 	catalog.mu.Lock()
 	catalog.byName, catalog.byAddr = byName, byAddr
 	catalog.mu.Unlock()
-	return rows.Err()
+	return nil
 }
 
 // Count returns the number of cached POIs.
