@@ -57,14 +57,23 @@ export function useWaypointDetails(
   archiveRevisionRef.current = archiveRevision
 
   const loadedArchiveRevisionByIdRef = useRef<Record<number, string>>({})
+  const requestSeqByRowIdRef = useRef<Record<number, number>>({})
 
   const loadDetails = useCallback((rowId: number) => {
     const requestExpeditionId = activeExpeditionIdRef.current
-    loadedArchiveRevisionByIdRef.current[rowId] = archiveRevisionRef.current
+    const requestArchiveRevision = archiveRevisionRef.current
+    const requestSequence = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
+    requestSeqByRowIdRef.current[rowId] = requestSequence
     setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
     GetWaypointDetails(rowId)
       .then((details) => {
-        if (activeExpeditionIdRef.current !== requestExpeditionId) return
+        if (
+          activeExpeditionIdRef.current !== requestExpeditionId ||
+          requestSeqByRowIdRef.current[rowId] !== requestSequence
+        ) {
+          return
+        }
+        loadedArchiveRevisionByIdRef.current[rowId] = requestArchiveRevision
         setDetailsById((previous) => {
           const nextDetails = { ...previous, [rowId]: details }
           detailsByIdRef.current = nextDetails
@@ -72,13 +81,21 @@ export function useWaypointDetails(
         })
       })
       .catch((detailsError) => {
-        if (activeExpeditionIdRef.current === requestExpeditionId) {
+        if (
+          activeExpeditionIdRef.current === requestExpeditionId &&
+          requestSeqByRowIdRef.current[rowId] === requestSequence
+        ) {
           delete loadedArchiveRevisionByIdRef.current[rowId]
           console.error('Failed to load waypoint details:', detailsError)
         }
       })
       .finally(() => {
-        if (activeExpeditionIdRef.current !== requestExpeditionId) return
+        if (
+          activeExpeditionIdRef.current !== requestExpeditionId ||
+          requestSeqByRowIdRef.current[rowId] !== requestSequence
+        ) {
+          return
+        }
         setLoadingDetails((previous) => ({ ...previous, [rowId]: false }))
       })
   }, [])
@@ -86,6 +103,7 @@ export function useWaypointDetails(
   // Reset open drawers and cached payloads when switching expeditions or entering planning mode.
   useEffect(() => {
     loadedArchiveRevisionByIdRef.current = {}
+    requestSeqByRowIdRef.current = {}
     if (
       Object.keys(expandedRowIdsRef.current).length > 0 ||
       Object.keys(detailsByIdRef.current).length > 0
