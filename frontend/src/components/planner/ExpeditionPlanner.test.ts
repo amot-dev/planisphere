@@ -113,7 +113,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).not.toContain('h-[3px]')
     expect(html).not.toContain('title="Leg Mode:')
     // Visited (Sol, Alpha Centauri) and current (Rohini) rows have dropdown chevrons; future (Colonia) does not
-    const activeChevrons = html.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
+    const activeChevrons = html.match(/title="Toggle per-waypoint leg telemetry drawer"/g)
     expect(activeChevrons).toHaveLength(3)
     // Waypoint 2 (row 402, index 1) is the last visited waypoint and gets data-last-visited="true"
     expect(html).toContain('data-row-id="402"')
@@ -293,7 +293,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('Supermassive Black Hole')
 
     // Planning rows omit dropdown chevrons and data-last-visited markers, and include bottom add buttons + spacer
-    const planningChevrons = html.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
+    const planningChevrons = html.match(/title="Toggle per-waypoint leg telemetry drawer"/g)
     expect(planningChevrons).toBeNull()
     expect(html).not.toContain('data-last-visited="true"')
     expect(html).toContain('ADD WAYPOINT')

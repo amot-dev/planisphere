@@ -226,7 +226,7 @@ func profileVisitedLegsBatch(
 			for idx, targetRowID := range visitedRowIDs {
 				label := fmt.Sprintf("expedition.Details[Leg #%d]", idx+1)
 				var callErr error
-				_ = recorder.withSubSpan(label, "internal/expedition/details.go:147", 1, "drawer", func() error {
+				_ = recorder.withSubSpan(label, "internal/expedition/details.go:137", 1, "drawer", func() error {
 					lastDetails, callErr = expedition.Details(database, targetRowID)
 					return callErr
 				})

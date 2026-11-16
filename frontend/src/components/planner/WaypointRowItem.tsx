@@ -213,7 +213,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
               <button
                 type="button"
                 onClick={() => onToggleExpand(row.id)}
-                title="Toggle per-waypoint leg telemetry / distance drawer"
+                title="Toggle per-waypoint leg telemetry drawer"
                 className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
                   isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
                 }`}

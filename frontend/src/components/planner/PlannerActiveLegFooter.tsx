@@ -9,8 +9,8 @@ export interface PlannerActiveLegFooterProps {
 }
 
 /**
- * PlannerActiveLegFooter renders the bottom Add Waypoint and Add Galactic Region
- * Header action bar and scroll spacer.
+ * PlannerActiveLegFooter renders the bottom Add Waypoint and Add Region Header
+ * action bar and scroll spacer.
  */
 export function PlannerActiveLegFooter({
   isPlanning,

@@ -8,7 +8,7 @@ export interface StatusBadgeProps {
 }
 
 /**
- * StatusBadge renders the high-level expedition lifecycle state (Planning / Active / Completed).
+ * StatusBadge renders the high-level expedition lifecycle state (Planning / Armed / Active / Completed).
  */
 export function StatusBadge({ status, armedAt }: StatusBadgeProps) {
   if (status === 'armed' || status === 'active') {

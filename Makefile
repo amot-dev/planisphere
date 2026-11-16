@@ -115,7 +115,7 @@ typecheck: install-frontend
 	(cd frontend && npm run typecheck)
 
 # Run the live data profiler against an isolated temporary snapshot of the active database
-# Optional variables: RUN=<filter> ITER=<count> SAVE=<file.json> BASELINE=<file.json> SKIP_FRONTEND=1
+# Optional variables: RUN=<filter> ITER=<count> SAVE=<file.json> BASELINE=<file.json> SKIP_FRONTEND=1 ED_PLANNER_DB=<path>
 profile: install-frontend
 	@echo "==> Running Live Data Profiler (isolated temporary snapshot)..."
 	@mkdir -p frontend/dist && touch frontend/dist/index.html

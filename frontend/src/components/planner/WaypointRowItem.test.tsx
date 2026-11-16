@@ -385,7 +385,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('42.1 Ly')
     expect(html).not.toContain('380.5 Ly')
     expect(html).toContain('Estimated straight-line distance from player location (Merope)')
-    expect(html).toContain('title="Toggle per-waypoint leg telemetry / distance drawer"')
+    expect(html).toContain('title="Toggle per-waypoint leg telemetry drawer"')
   })
 
   it('renders WaypointDetailsDrawer for active current leg with IN PROGRESS and TBD fallback', () => {

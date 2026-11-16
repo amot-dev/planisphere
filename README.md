@@ -223,6 +223,7 @@ make test-frontend
 make typecheck
 
 # Run the live data profiler against a temporary snapshot of the active database
+# Optional: RUN=<filter> ITER=<count> SAVE=<file.json> BASELINE=<file.json> SKIP_FRONTEND=1 ED_PLANNER_DB=<path>
 make profile
 
 # Re-sync app.config.json metadata across all targets
