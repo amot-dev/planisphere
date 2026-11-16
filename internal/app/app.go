@@ -20,6 +20,7 @@ import (
 
 	"planisphere/internal/db"
 	"planisphere/internal/ed"
+	"planisphere/internal/expedition"
 	"planisphere/internal/gec"
 	"planisphere/internal/journal"
 	"planisphere/internal/stats"
@@ -308,6 +309,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.resolver = systems.NewResolver(dbConn, app.onlineEnabled)
 	app.gec = gec.NewCatalog(dbConn)
 	stats.InvalidateLedgerCache()
+	expedition.InvalidateVisitCache()
 	app.invalidateAllTimeCache()
 	app.dbMu.Unlock()
 

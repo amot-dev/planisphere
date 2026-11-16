@@ -247,17 +247,19 @@ func LatestPlayerLocation(queryer db.Queryer) (*ed.Vec3, string, error) {
 }
 
 var (
-	visitCacheMu      sync.Mutex
-	visitCacheQueryer db.Queryer
-	visitCacheMap     = make(map[string]int)
+	visitCacheMu  sync.Mutex
+	visitCacheDB  *sql.DB
+	visitCacheGen uint64
+	visitCacheMap = make(map[string]int)
 )
 
 // InvalidateVisitCache clears cached per-system journal visit counts.
 func InvalidateVisitCache() {
 	visitCacheMu.Lock()
-	visitCacheQueryer = nil
+	defer visitCacheMu.Unlock()
+	visitCacheDB = nil
+	visitCacheGen++
 	visitCacheMap = make(map[string]int)
-	visitCacheMu.Unlock()
 }
 
 func normalizeSystemKey(systemName string) string {
@@ -329,11 +331,22 @@ func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
 		return nil
 	}
 
+	sqlDB, isSQLDB := queryer.(*sql.DB)
+	if !isSQLDB {
+		queriedCounts, queryError := queryUncachedSystemVisits(queryer, uniqueNames)
+		if queryError != nil {
+			return make(map[string]int, len(uniqueNames))
+		}
+		return queriedCounts
+	}
+
 	visitCacheMu.Lock()
-	if visitCacheQueryer != queryer {
-		visitCacheQueryer = queryer
+	if visitCacheDB != sqlDB {
+		visitCacheDB = sqlDB
+		visitCacheGen++
 		visitCacheMap = make(map[string]int)
 	}
+	capturedGeneration := visitCacheGen
 	var missingNames []string
 	visitCounts := make(map[string]int, len(uniqueNames))
 	for _, normalizedName := range uniqueNames {
@@ -355,7 +368,8 @@ func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
 	}
 
 	visitCacheMu.Lock()
-	if visitCacheQueryer == queryer {
+	// Require matching DB pointer and generation so stale results cannot overwrite the cache after ABA invalidation while unlocked.
+	if visitCacheDB == sqlDB && visitCacheGen == capturedGeneration {
 		for normalizedName, visitCount := range queriedCounts {
 			visitCacheMap[normalizedName] = visitCount
 		}
