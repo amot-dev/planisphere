@@ -265,18 +265,18 @@ func normalizeSystemKey(systemName string) string {
 }
 
 func queryUncachedSystemVisits(queryer db.Queryer, missingNames []string) (map[string]int, error) {
-	predicates := make([]string, len(missingNames))
+	placeholders := make([]string, len(missingNames))
 	queryArgs := make([]any, len(missingNames))
 	for i, name := range missingNames {
-		predicates[i] = `system_name = ? COLLATE NOCASE`
+		placeholders[i] = "?"
 		queryArgs[i] = name
 	}
 	query := `SELECT system_name, COUNT(*), COALESCE(SUM(CASE WHEN event IN ('FSDJump', 'CarrierJump') THEN 1 ELSE 0 END), 0)
 		FROM journal_events
-		WHERE (` + strings.Join(predicates, " OR ") + `)
+		WHERE system_name COLLATE NOCASE IN (` + strings.Join(placeholders, ",") + `)
 		  AND (event IN ('FSDJump', 'Location', 'CarrierJump') OR star_x IS NOT NULL)
 		  AND ` + journal.CmdrFilterSQL + `
-		GROUP BY LOWER(TRIM(system_name))`
+		GROUP BY system_name COLLATE NOCASE`
 	rows, queryError := queryer.Query(query, queryArgs...)
 	if queryError != nil {
 		return nil, queryError
