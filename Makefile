@@ -1,4 +1,4 @@
-.PHONY: all build dev run test test-backend test-frontend typecheck sync-metadata clean install-frontend \
+.PHONY: all build dev run test test-backend test-frontend typecheck profile sync-metadata clean install-frontend \
         package-tarball package-appimage package-windows package-deb package-rpm package-arch
 
 VERSION := $(shell grep -o '"version": *"[^"]*"' app.config.json 2>/dev/null | cut -d'"' -f4)
@@ -113,6 +113,14 @@ test-frontend: typecheck
 typecheck: install-frontend
 	@echo "==> Running frontend type check..."
 	(cd frontend && npm run typecheck)
+
+# Run the live data profiler against an isolated temporary snapshot of the active database
+# Optional variables: RUN=<filter> ITER=<count> SAVE=<file.json> BASELINE=<file.json> SKIP_FRONTEND=1
+profile: install-frontend
+	@echo "==> Running Live Data Profiler (isolated temporary snapshot)..."
+	@mkdir -p frontend/dist && touch frontend/dist/index.html
+	PROFILE_FILTER="$(RUN)" PROFILE_ITER="$(ITER)" PROFILE_SAVE="$(SAVE)" PROFILE_BASELINE="$(BASELINE)" PROFILE_SKIP_FRONTEND="$(SKIP_FRONTEND)" \
+		go test -tags profile -v -count=1 -timeout 5m -run TestLiveDataProfile ./internal/profile
 
 # Package Linux tarball distribution
 package-tarball: build

@@ -222,6 +222,9 @@ make test-frontend
 # Run frontend TypeScript typecheck
 make typecheck
 
+# Run the live data profiler against a temporary snapshot of the active database
+make profile
+
 # Re-sync app.config.json metadata across all targets
 make sync-metadata
 
