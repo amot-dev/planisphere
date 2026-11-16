@@ -24,6 +24,7 @@ type shipState struct {
 var (
 	shipCacheMu      sync.Mutex
 	shipCacheMap           = make(map[string][]shipState)
+	arrivalsCacheMap       = make(map[string][]Arrival)
 	lastMaxJournalID int64 = -1
 )
 
@@ -32,6 +33,7 @@ func InvalidateShipCache() {
 	shipCacheMu.Lock()
 	lastMaxJournalID = -1
 	shipCacheMap = make(map[string][]shipState)
+	arrivalsCacheMap = make(map[string][]Arrival)
 	shipCacheMu.Unlock()
 	InvalidateOriginMetricsCache()
 }
@@ -117,6 +119,7 @@ func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) (
 	shipCacheMu.Lock()
 	if maxJournalID != lastMaxJournalID {
 		shipCacheMap = make(map[string][]shipState)
+		arrivalsCacheMap = make(map[string][]Arrival)
 		lastMaxJournalID = maxJournalID
 	} else if cachedTimeline, ok := shipCacheMap[cacheKey]; ok {
 		shipCacheMu.Unlock()
@@ -255,6 +258,9 @@ var (
 
 // InvalidateVisitCache clears cached per-system journal visit counts.
 func InvalidateVisitCache() {
+	shipCacheMu.Lock()
+	arrivalsCacheMap = make(map[string][]Arrival)
+	shipCacheMu.Unlock()
 	visitCacheMu.Lock()
 	defer visitCacheMu.Unlock()
 	visitCacheDB = nil

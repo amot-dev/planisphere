@@ -1,6 +1,7 @@
 import type { CSSProperties, DragEvent } from 'react'
 import { app, expedition, modes } from '../../../wailsjs/go/models'
 import type { NextCarrierStopEntry } from './carrierRouteHelpers'
+import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
 import type { PlannerTableItem } from './plannerPlanHelpers'
 import { PlannerRegionRow } from './PlannerRegionRow'
 import { PlannerTableHeader } from './PlannerTableHeader'
@@ -24,6 +25,7 @@ export interface PlannerRouteTableProps {
   isPlanning: boolean
   isCompleted: boolean
   lastVisitedIndex: number
+  lastFcArrivedIndex: number
   visibleColumnCount: number
   tableMinWidthPixels: number
   showNotes: boolean
@@ -33,27 +35,33 @@ export interface PlannerRouteTableProps {
   loadingDetails: Record<number, boolean>
   copiedSystemRowId: number | null
   insertMenuAfterId: number | null
+  heldOrDraggedIndex: number | null
   draggedIndex: number | null
-  dragOverIndex: number | null
+  dragOverGapIndex: number | null
   activeCarrierRoute: app.CarrierRouteResult | null
   activeCarrierTargetRowId: number
   isManualCarrierRoute: boolean
   nextFcStopEntry: NextCarrierStopEntry | null
   routedCarrierStopIndex: number
-  getRowDropProps: (
-    index: number,
-    isDraggable: boolean,
-  ) => {
-    onDragOver?: (event: DragEvent) => void
-    onDrop?: (event: DragEvent) => void
+  getRowDropProps: (index: number) => {
+    onDragOver?: (event: DragEvent<HTMLTableRowElement>) => void
+    onDrop?: (event: DragEvent<HTMLTableRowElement>) => void
   }
+  getSlotDropProps: (
+    gapIndex: number,
+    targetIndex: number,
+    preview: expedition.DropSlotPreview,
+  ) => {
+    onDragOver: (event: DragEvent<HTMLTableRowElement>) => void
+    onDrop: (event: DragEvent<HTMLTableRowElement>) => void
+  }
+  onClearDragOverGap: () => void
   onToggleShowNotes: () => void
   onToggleShowCarrierStop: () => void
   onChangeRegion: (rowId: number, regionId: number) => void
   onSetInsertMenuAfterId: (rowId: number | null) => void
   onInsert: (afterRowId: number, rowType: 'waypoint' | 'region') => void
-  onMoveRow: (rowId: number, fromIndex: number, toIndex: number) => void
-  onDeleteRow: (rowId: number) => void
+  onDeleteRow: (rowView: expedition.RowView) => void
   onLegModeChange: (rowId: number, modeId: number) => void
   onToggleExpand: (rowId: number) => void
   onOriginSystemFilledChange?: (hasSystem: boolean) => void
@@ -64,14 +72,18 @@ export interface PlannerRouteTableProps {
   ) => void
   onCopySystem: (rowId: number, systemName: string) => void
   onToggleFcStop: (row: expedition.Row) => void
+  onOverrideFcArrived: (rowView: expedition.RowView) => void
   onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) => void
+  onRowHoldStart: (index: number) => void
+  onRowHoldEnd: () => void
   onRowDragStart: (dragRowIndex: number, dragRowId: number, event: DragEvent) => void
   onRowDragEnd: () => void
 }
 
 /**
  * PlannerRouteTable renders the expedition flight plan table header and rows,
- * dispatching region banners, waypoint rows, and expanded leg telemetry drawers.
+ * dispatching region banners, waypoint rows, collapsed visited summaries,
+ * dashed historical drop slots, and expanded leg telemetry drawers.
  */
 export function PlannerRouteTable({
   plan,
@@ -80,6 +92,7 @@ export function PlannerRouteTable({
   isPlanning,
   isCompleted,
   lastVisitedIndex,
+  lastFcArrivedIndex,
   visibleColumnCount,
   tableMinWidthPixels,
   showNotes,
@@ -89,20 +102,22 @@ export function PlannerRouteTable({
   loadingDetails,
   copiedSystemRowId,
   insertMenuAfterId,
+  heldOrDraggedIndex,
   draggedIndex,
-  dragOverIndex,
+  dragOverGapIndex,
   activeCarrierRoute,
   activeCarrierTargetRowId,
   isManualCarrierRoute,
   nextFcStopEntry,
   routedCarrierStopIndex,
   getRowDropProps,
+  getSlotDropProps,
+  onClearDragOverGap,
   onToggleShowNotes,
   onToggleShowCarrierStop,
   onChangeRegion,
   onSetInsertMenuAfterId,
   onInsert,
-  onMoveRow,
   onDeleteRow,
   onLegModeChange,
   onToggleExpand,
@@ -110,11 +125,23 @@ export function PlannerRouteTable({
   onFieldBlur,
   onCopySystem,
   onToggleFcStop,
+  onOverrideFcArrived,
   onOpenCarrierRoutePrompt,
+  onRowHoldStart,
+  onRowHoldEnd,
   onRowDragStart,
   onRowDragEnd,
 }: PlannerRouteTableProps) {
   const currentExpedition = plan.expedition
+  const totalRows = plan.rows?.length ?? 0
+  const heldRowView = heldOrDraggedIndex !== null ? plan.rows?.[heldOrDraggedIndex] : null
+  const grabbedSystemName = heldRowView?.row?.systemName ?? ''
+  const dropSlotGaps = new Set<number>()
+  for (const item of tableItems) {
+    if (item.kind === 'drop_slot') {
+      dropSlotGaps.add(item.gapIndex)
+    }
+  }
 
   return (
     <table
@@ -131,14 +158,52 @@ export function PlannerRouteTable({
 
       <tbody className="text-xs">
         {tableItems.map((item) => {
+          if (item.kind === 'collapsed_visited') {
+            return (
+              <PlannerCollapsedVisitedRow
+                key={item.key}
+                visibleColumnCount={visibleColumnCount}
+                waypointCount={item.waypointCount}
+                regionCount={item.regionCount}
+                firstWaypointNumber={item.firstWaypointNumber}
+                firstSystemName={item.firstSystemName}
+                lastWaypointNumber={item.lastWaypointNumber}
+                lastSystemName={item.lastSystemName}
+                onDragOver={onClearDragOverGap}
+              />
+            )
+          }
+
+          if (item.kind === 'drop_slot') {
+            const slotDropProps = getSlotDropProps(item.gapIndex, item.targetIndex, item.preview)
+            return (
+              <PlannerDropSlotRow
+                key={item.key}
+                gapIndex={item.gapIndex}
+                visibleColumnCount={visibleColumnCount}
+                grabbedSystemName={grabbedSystemName}
+                preview={item.preview}
+                isDragTarget={dragOverGapIndex === item.gapIndex && draggedIndex !== null}
+                onDragOver={slotDropProps.onDragOver}
+                onDrop={slotDropProps.onDrop}
+              />
+            )
+          }
+
           const rowView = item.rowView
           const row = rowView.row
           const index = item.index
-          const isLocked = isCompleted || index <= lastVisitedIndex
-          const isDraggable = !isLocked
-          const isBeingDragged = draggedIndex === index
-          const isDragTarget =
-            dragOverIndex === index && draggedIndex !== null && draggedIndex !== index
+          const isLocked = isCompleted
+          const isBeingDragged = heldOrDraggedIndex === index
+          const topGapHighlight =
+            draggedIndex !== null &&
+            dragOverGapIndex === index &&
+            !dropSlotGaps.has(index)
+          const bottomGapHighlight =
+            draggedIndex !== null &&
+            (index === totalRows - 1 || item.kind === 'region') &&
+            dragOverGapIndex === index + 1 &&
+            !dropSlotGaps.has(index + 1)
 
           if (item.kind === 'region') {
             return (
@@ -148,21 +213,23 @@ export function PlannerRouteTable({
                 rowView={rowView}
                 index={index}
                 visibleColumnCount={visibleColumnCount}
+                isPlanning={isPlanning}
                 isLocked={isLocked}
                 isBeingDragged={isBeingDragged}
-                isDragTarget={isDragTarget}
+                topGapHighlight={topGapHighlight}
+                bottomGapHighlight={bottomGapHighlight}
                 lastVisitedIndex={lastVisitedIndex}
-                totalRows={plan.rows?.length ?? 0}
                 insertMenuOpen={insertMenuAfterId === row.id}
                 rowStyle={rowStyle}
-                dropProps={getRowDropProps(index, isDraggable)}
+                dropProps={getRowDropProps(index)}
                 onChangeRegion={onChangeRegion}
                 onToggleInsertMenu={() =>
                   onSetInsertMenuAfterId(insertMenuAfterId === row.id ? null : row.id)
                 }
                 onInsert={(insertType) => onInsert(row.id, insertType)}
-                onMove={(targetIndex) => onMoveRow(row.id, index, targetIndex)}
-                onDelete={() => onDeleteRow(row.id)}
+                onDelete={() => onDeleteRow(rowView)}
+                onHoldStart={() => onRowHoldStart(index)}
+                onHoldEnd={onRowHoldEnd}
                 onDragStart={(event) => onRowDragStart(index, row.id, event)}
                 onDragEnd={onRowDragEnd}
               />
@@ -216,8 +283,11 @@ export function PlannerRouteTable({
               isPlanning={isPlanning}
               isLocked={isLocked}
               isFcStopLocked={isFcStopLocked}
+              isActivelyRoutedFcStop={hasActiveCarrierRoute}
+              lastFcArrivedIndex={lastFcArrivedIndex}
               isBeingDragged={isBeingDragged}
-              isDragTarget={isDragTarget}
+              topGapHighlight={topGapHighlight}
+              bottomGapHighlight={bottomGapHighlight}
               isExpanded={isExpanded}
               isNextFcStop={isNextFcStop && !activeCarrierRoute}
               isNextWaypoint={isNextWaypoint}
@@ -226,9 +296,8 @@ export function PlannerRouteTable({
               copiedSystemRowId={copiedSystemRowId}
               insertMenuOpen={insertMenuAfterId === row.id}
               lastVisitedIndex={lastVisitedIndex}
-              totalRows={plan.rows?.length ?? 0}
               rowStyle={rowStyle}
-              dropProps={getRowDropProps(index, isDraggable)}
+              dropProps={getRowDropProps(index)}
               showNotes={showNotes}
               showCarrierStop={showCarrierStop}
               onOriginSystemFilledChange={
@@ -238,13 +307,15 @@ export function PlannerRouteTable({
               onFieldBlur={onFieldBlur}
               onCopySystem={onCopySystem}
               onToggleFcStop={onToggleFcStop}
+              onOverrideFcArrived={onOverrideFcArrived}
               onOpenCarrierRoutePrompt={onOpenCarrierRoutePrompt}
               onToggleInsertMenu={(id) =>
                 onSetInsertMenuAfterId(insertMenuAfterId === id ? null : id)
               }
               onInsert={onInsert}
-              onMove={(id, targetIndex) => onMoveRow(id, index, targetIndex)}
-              onDelete={onDeleteRow}
+              onDelete={() => onDeleteRow(rowView)}
+              onHoldStart={onRowHoldStart}
+              onHoldEnd={onRowHoldEnd}
               onDragStart={onRowDragStart}
               onDragEnd={onRowDragEnd}
             />

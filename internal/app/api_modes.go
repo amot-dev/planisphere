@@ -124,37 +124,3 @@ func (app *App) SwitchMode(modeID int64) (ModesState, error) {
 	return app.GetModesState()
 }
 
-// ModeWindowInput creates (ID 0) or edits a mode window. Start and End are
-// ISO-8601 UTC; End "" means open-ended.
-type ModeWindowInput struct {
-	ID     int64  `json:"id"`
-	ModeID int64  `json:"modeId"`
-	Start  string `json:"start"`
-	End    string `json:"end"`
-}
-
-// SaveModeWindow writes a window retroactively; overlapping windows are
-// trimmed or split so that windows never overlap.
-func (app *App) SaveModeWindow(input ModeWindowInput) (ModesState, error) {
-	if saveError := app.withReadyReadLock(func() error {
-		return db.WithTx(app.db, func(transaction *sql.Tx) error {
-			return modes.SetWindow(transaction, input.ID, input.ModeID, input.Start, input.End)
-		})
-	}); saveError != nil {
-		return ModesState{}, saveError
-	}
-	app.changed("modes", 0)
-	return app.GetModesState()
-}
-
-// DeleteModeWindow removes a window.
-func (app *App) DeleteModeWindow(id int64) (ModesState, error) {
-	if deleteError := app.withReadyReadLock(func() error {
-		return modes.DeleteWindow(app.db, id)
-	}); deleteError != nil {
-		return ModesState{}, deleteError
-	}
-	app.changed("modes", 0)
-	return app.GetModesState()
-}
-

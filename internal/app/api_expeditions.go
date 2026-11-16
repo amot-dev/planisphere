@@ -244,31 +244,26 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 	return nil
 }
 
-// RetryResolve re-runs coordinate resolution for a waypoint.
-func (app *App) RetryResolve(rowID int64) error {
-	var rowItem expedition.Row
+// OverrideCarrierStopArrival manually overrides the Fleet Carrier arrival status
+// on rowID and cascades the status across preceding or subsequent carrier stops
+// to preserve the arrived-before-pending order invariant.
+func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
+	var expeditionID int64
 	if err := func() error {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		var getError error
-		rowItem, getError = expedition.GetRow(app.db, rowID)
-		if getError != nil {
-			return getError
-		}
-		if rowItem.SystemName == "" {
-			return nil
-		}
-		_, _ = app.db.Exec(`DELETE FROM system_cache WHERE name_key = ? AND source = 'notfound'`, strings.ToLower(rowItem.SystemName))
-		return nil
+		return db.WithTx(app.db, func(transaction *sql.Tx) error {
+			var overrideError error
+			expeditionID, overrideError = expedition.SetCarrierArrivalOverride(transaction, rowID, arrived)
+			return overrideError
+		})
 	}(); err != nil {
 		return err
 	}
-	if rowItem.SystemName != "" {
-		app.resolveRowAsync(rowItem, true)
-	}
+	app.changed("plan", expeditionID)
 	return nil
 }
 

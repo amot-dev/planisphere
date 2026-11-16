@@ -50,10 +50,6 @@ export function DeleteMode(arg1) {
   return window['go']['app']['App']['DeleteMode'](arg1);
 }
 
-export function DeleteModeWindow(arg1) {
-  return window['go']['app']['App']['DeleteModeWindow'](arg1);
-}
-
 export function DeleteRow(arg1) {
   return window['go']['app']['App']['DeleteRow'](arg1);
 }
@@ -118,6 +114,10 @@ export function OpenURL(arg1) {
   return window['go']['app']['App']['OpenURL'](arg1);
 }
 
+export function OverrideCarrierStopArrival(arg1, arg2) {
+  return window['go']['app']['App']['OverrideCarrierStopArrival'](arg1, arg2);
+}
+
 export function PlotCarrierRoute(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['PlotCarrierRoute'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -138,16 +138,8 @@ export function RescanJournals() {
   return window['go']['app']['App']['RescanJournals']();
 }
 
-export function RetryResolve(arg1) {
-  return window['go']['app']['App']['RetryResolve'](arg1);
-}
-
 export function SaveActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['SaveActiveCarrierRoute'](arg1);
-}
-
-export function SaveModeWindow(arg1) {
-  return window['go']['app']['App']['SaveModeWindow'](arg1);
 }
 
 export function SetActiveExpedition(arg1) {

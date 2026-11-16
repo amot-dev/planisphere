@@ -1,6 +1,6 @@
 // Package expedition implements expedition plans (waypoints and region
-// headers), the expedition lifecycle, the waypoint visit evaluator with
-// out-of-order auto-reordering, and per-waypoint leg statistics.
+// headers), the expedition lifecycle, the sequential waypoint visit evaluator,
+// and per-waypoint leg statistics.
 package expedition
 
 import (
@@ -32,9 +32,6 @@ type Expedition struct {
 	StartTimestamp      string        `json:"startTimestamp"`
 	EndTimestamp        string        `json:"endTimestamp"`
 	ArmedAt             string        `json:"armedAt"`
-	BaselineEnabled     bool          `json:"baselineEnabled"`
-	BaselineSource      string        `json:"baselineSource"`
-	Baseline            stats.Metrics `json:"baseline"`
 	Adjustments         stats.Metrics `json:"adjustments"`
 	CarrierType         string        `json:"carrierType"`
 	CarrierWeeklyUpkeep int64         `json:"carrierWeeklyUpkeep"`
@@ -43,14 +40,14 @@ type Expedition struct {
 }
 
 const expeditionCols = `id, name, description, status, COALESCE(start_timestamp,''), COALESCE(end_timestamp,''),
-	COALESCE(armed_at,''), baseline_enabled, baseline_source, baseline_json, adjustments_json,
+	COALESCE(armed_at,''), adjustments_json,
 	COALESCE(carrier_type,'player'), COALESCE(carrier_weekly_upkeep,0), created_at, updated_at`
 
 func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error) {
 	var expeditionRecord Expedition
-	var baselineJSON, adjustmentsJSON string
+	var adjustmentsJSON string
 	scanError := scanner.Scan(&expeditionRecord.ID, &expeditionRecord.Name, &expeditionRecord.Description, &expeditionRecord.Status, &expeditionRecord.StartTimestamp, &expeditionRecord.EndTimestamp, &expeditionRecord.ArmedAt,
-		&expeditionRecord.BaselineEnabled, &expeditionRecord.BaselineSource, &baselineJSON, &adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
+		&adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
 	if scanError != nil {
 		return expeditionRecord, scanError
 	}
@@ -60,7 +57,6 @@ func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error)
 	if expeditionRecord.CarrierType == "" {
 		expeditionRecord.CarrierType = "player"
 	}
-	_ = json.Unmarshal([]byte(baselineJSON), &expeditionRecord.Baseline)
 	_ = json.Unmarshal([]byte(adjustmentsJSON), &expeditionRecord.Adjustments)
 	return expeditionRecord, nil
 }
@@ -212,19 +208,6 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTimestamp, endTimestamp, armedTimestamp any) error {
 	_, execError := queryer.Exec(`UPDATE expeditions SET status = ?, start_timestamp = ?, end_timestamp = ?, armed_at = ?, updated_at = ? WHERE id = ?`,
 		status, startTimestamp, endTimestamp, armedTimestamp, ed.NowISO(), expeditionID)
-	return execError
-}
-
-func clearVisits(queryer db.Queryer, expeditionID int64) error {
-	_, execError := queryer.Exec(`UPDATE expedition_rows SET visited_at = NULL, visit_event_uid = NULL, fc_arrived = 0 WHERE expedition_id = ?`, expeditionID)
-	return execError
-}
-
-// SaveBaseline stores the "before expedition" baseline.
-func SaveBaseline(queryer db.Queryer, expeditionID int64, enabled bool, source string, baselineMetrics stats.Metrics) error {
-	baselineJSON, _ := json.Marshal(baselineMetrics)
-	_, execError := queryer.Exec(`UPDATE expeditions SET baseline_enabled = ?, baseline_source = ?, baseline_json = ?, updated_at = ? WHERE id = ?`,
-		enabled, source, string(baselineJSON), ed.NowISO(), expeditionID)
 	return execError
 }
 

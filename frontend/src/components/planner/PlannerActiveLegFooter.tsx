@@ -5,6 +5,7 @@
 export interface PlannerActiveLegFooterProps {
   isPlanning: boolean
   isCompleted: boolean
+  isReordering?: boolean
   onAppendRow: (rowType: 'waypoint' | 'region') => void
 }
 
@@ -15,6 +16,7 @@ export interface PlannerActiveLegFooterProps {
 export function PlannerActiveLegFooter({
   isPlanning,
   isCompleted,
+  isReordering = false,
   onAppendRow,
 }: PlannerActiveLegFooterProps) {
   return (
@@ -43,14 +45,21 @@ export function PlannerActiveLegFooter({
 
           <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-[#a6907c]">
             {isPlanning
-              ? 'DRAG (⋮⋮) OR USE ARROWS TO REORDER WAYPOINTS AND REGION HEADERS'
-              : 'UNVISITED WAYPOINTS DRAGGABLE · CLONE IN EXPEDITIONS MENU TO RE-PLAN'}
+              ? 'HOLD AND DRAG (⋮⋮) TO REORDER WAYPOINTS AND REGION HEADERS'
+              : 'HOLD (⋮⋮) TO PREVIEW VALID CHRONOLOGICAL BOUNDS · CLONE IN EXPEDITIONS MENU TO RE-PLAN'}
           </div>
         </div>
       )}
 
       {/* Breathing room to scroll past the bottom of the list */}
-      <div className="h-48 shrink-0 pointer-events-none" aria-hidden="true" />
+      <div
+        className={
+          isReordering
+            ? 'h-[85vh] shrink-0 pointer-events-none'
+            : 'h-48 shrink-0 pointer-events-none'
+        }
+        aria-hidden="true"
+      />
     </>
   )
 }

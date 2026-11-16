@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from 'react'
 import {
   AddRow,
   DeleteRow,
   MoveRow,
+  OverrideCarrierStopArrival,
   SetLegMode,
   UpdateRow,
 } from '../../../wailsjs/go/app/App'
@@ -11,6 +20,7 @@ import { useLocalStorageBoolean } from '../../hooks/useLocalStorageBoolean'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { PlannerActiveLegFooter } from './PlannerActiveLegFooter'
+import { PlannerConfirmModal, type PlannerConfirmState } from './PlannerConfirmModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
 import {
   buildOptimisticDeletedRowPlan,
@@ -21,6 +31,7 @@ import {
   buildPlannerTableItems,
   computePlannerTableDimensions,
   executePlanMutation,
+  gapToTargetIndex,
   type PlanMutationBehaviorOptions,
 } from './plannerPlanHelpers'
 import { PlannerRouteTable } from './PlannerRouteTable'
@@ -29,6 +40,11 @@ import { useInitialExpeditionScroll } from './useInitialExpeditionScroll'
 import { useWaypointDetails } from './useWaypointDetails'
 
 const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
+const DRAG_AUTOSCROLL_ZONE_PIXELS = 72
+const DRAG_AUTOSCROLL_MIN_SPEED = 2
+const DRAG_AUTOSCROLL_MAX_SPEED = 20
+const STICKY_TABLE_HEADER_PIXELS = 36
+const HOLD_PREVIEW_DELAY_MS = 140
 
 /**
  * ExpeditionPlannerProps defines the active expedition plan state, journal
@@ -70,17 +86,78 @@ export function ExpeditionPlanner({
   )
 
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
-  // Drag-and-drop state for unvisited / planning rows
+  const [heldIndex, setHeldIndex] = useState<number | null>(null)
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [dragOverGapIndex, setDragOverGapIndex] = useState<number | null>(null)
+  const [confirmState, setConfirmState] = useState<PlannerConfirmState | null>(null)
   const [copiedSystemRowId, setCopiedSystemRowId] = useState<number | null>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const grabbedRowAnchorRef = useRef<{ visualTop: number } | null>(null)
+  const uncollapseRowAnchorRef = useRef<{ rowId: number; visualTop: number } | null>(null)
+  const dragStartClientYRef = useRef<number | null>(null)
+  const dragClientYRef = useRef<number | null>(null)
+
+  const recordDragOverClientY = useCallback((clientY: number) => {
+    if (dragStartClientYRef.current !== null) {
+      if (Math.abs(clientY - dragStartClientYRef.current) < 12) {
+        return
+      }
+      dragStartClientYRef.current = null
+    }
+    dragClientYRef.current = clientY
+  }, [])
+
+  const captureGrabAnchor = useCallback((rowIndex: number) => {
+    const container = scrollContainerRef.current
+    const rowElement = container?.querySelector<HTMLElement>(`tr[data-row-index="${rowIndex}"]`)
+    if (container && rowElement) {
+      grabbedRowAnchorRef.current = {
+        visualTop: rowElement.getBoundingClientRect().top - container.getBoundingClientRect().top,
+      }
+    }
+  }, [])
+
+  const captureUncollapseAnchor = useCallback(
+    (rowIndex: number | null) => {
+      if (rowIndex === null || !plan?.rows) return
+      const rowId = plan.rows[rowIndex]?.row?.id
+      const container = scrollContainerRef.current
+      const rowElement = container?.querySelector<HTMLElement>(`tr[data-row-index="${rowIndex}"]`)
+      if (rowId && container && rowElement) {
+        uncollapseRowAnchorRef.current = {
+          rowId,
+          visualTop: rowElement.getBoundingClientRect().top - container.getBoundingClientRect().top,
+        }
+      }
+    },
+    [plan],
+  )
 
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (heldIndex === null || draggedIndex !== null || typeof window === 'undefined') return
+    const clearHeld = () => {
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current)
+        holdTimerRef.current = null
+      }
+      captureUncollapseAnchor(heldIndex)
+      setHeldIndex(null)
+    }
+    window.addEventListener('pointerup', clearHeld)
+    window.addEventListener('blur', clearHeld)
+    return () => {
+      window.removeEventListener('pointerup', clearHeld)
+      window.removeEventListener('blur', clearHeld)
+    }
+  }, [captureUncollapseAnchor, heldIndex, draggedIndex])
 
   const [showNotes, toggleShowNotes] = useLocalStorageBoolean('planisphere_show_notes', true)
   const [showCarrierStop, toggleShowCarrierStop] = useLocalStorageBoolean(
@@ -94,17 +171,22 @@ export function ExpeditionPlanner({
     setOriginHasDraftSystem(null)
   }, [firstWaypoint?.row.id, firstWaypoint?.row.systemName])
 
-  // Highest row index that has been visited; rows at or above this index are locked
-  // against structural edits (reordering, deleting, or changing system name).
-  const lastVisitedIndex = useMemo(() => {
-    if (!plan || !plan.rows || isPlanning) return -1
-    let maxIndex = -1
+  const { lastVisitedIndex, lastFcArrivedIndex } = useMemo(() => {
+    if (!plan || !plan.rows || isPlanning) {
+      return { lastVisitedIndex: -1, lastFcArrivedIndex: -1 }
+    }
+    let maxVisited = -1
+    let maxFcArrived = -1
     ;(plan.rows ?? []).forEach((rowView, index) => {
-      if (rowView && rowView.visitState === 'visited') {
-        maxIndex = index
+      if (!rowView) return
+      if (rowView.visitState === 'visited') {
+        maxVisited = index
+      }
+      if (rowView.row?.rowType === 'waypoint' && rowView.row.fcStop && rowView.row.fcArrived) {
+        maxFcArrived = index
       }
     })
-    return maxIndex
+    return { lastVisitedIndex: maxVisited, lastFcArrivedIndex: maxFcArrived }
   }, [plan, isPlanning])
 
   const runPlanMutation = useCallback(
@@ -165,9 +247,7 @@ export function ExpeditionPlanner({
       document.execCommand('copy')
       document.body.removeChild(textareaElement)
     }
-    if (copiedTimerRef.current) {
-      clearTimeout(copiedTimerRef.current)
-    }
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
     setCopiedSystemRowId(rowId)
     copiedTimerRef.current = setTimeout(() => {
       setCopiedSystemRowId((currentId) => (currentId === rowId ? null : currentId))
@@ -193,7 +273,6 @@ export function ExpeditionPlanner({
     if (!plan) return
     if (carrierRoute.activeCarrierRoute && carrierRoute.routedCarrierStopIndex >= 0) {
       const rowIndex = plan.rows.findIndex((rowView) => rowView?.row?.id === row.id)
-      // Manual logging leaves the target stop editable until arrival is logged; Spansh routes lock through the plotted stop.
       if (
         rowIndex >= 0 &&
         (carrierRoute.isManualCarrierRoute
@@ -210,6 +289,27 @@ export function ExpeditionPlanner({
       () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, fcStop: nextFcStop })),
       { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop), onSuccess: onRefreshPlan },
     )
+  }
+
+  function handleRequestOverrideFcArrived(rowView: expedition.RowView) {
+    if (!plan) return
+    const targetArrived = !rowView.row.fcArrived
+    const rowIndex = plan.rows.findIndex((item) => item?.row?.id === rowView.row.id)
+    let cascadedCount = 0
+    ;(plan.rows ?? []).forEach((candidateView, idx) => {
+      const candidateRow = candidateView?.row
+      if (!candidateRow || candidateRow.rowType !== 'waypoint' || !candidateRow.fcStop) return
+      if (targetArrived && idx < rowIndex && !candidateRow.fcArrived) cascadedCount++
+      if (!targetArrived && idx > rowIndex && candidateRow.fcArrived) cascadedCount++
+    })
+    setConfirmState({
+      kind: 'override_fc_arrival',
+      rowId: rowView.row.id,
+      waypointNumber: rowView.number,
+      systemName: rowView.row.systemName ?? '',
+      targetArrived,
+      cascadedCount,
+    })
   }
 
   async function handleLegModeChange(rowId: number, modeId: number) {
@@ -242,7 +342,7 @@ export function ExpeditionPlanner({
     )
   }
 
-  async function handleDeleteRow(rowId: number) {
+  async function executeDeleteRow(rowId: number) {
     if (!plan) return
     const targetRow = plan.rows?.find((rowView) => rowView?.row?.id === rowId)?.row
     await runPlanMutation(
@@ -253,15 +353,34 @@ export function ExpeditionPlanner({
     )
   }
 
-  const handleMoveRow = useCallback(
-    async (rowId: number, fromIndex: number, toIndex: number) => {
-      if (!plan) return
-      const minAllowed = lastVisitedIndex + 1
-      if (fromIndex < minAllowed || toIndex < minAllowed || toIndex >= plan.rows.length) {
+  function handleRequestDeleteRow(rowView: expedition.RowView) {
+    if (!isPlanning && rowView.row.rowType === 'waypoint') {
+      if (rowView.visitState === 'visited') {
+        setConfirmState({
+          kind: 'delete_visited',
+          rowId: rowView.row.id,
+          waypointNumber: rowView.number,
+          systemName: rowView.row.systemName ?? '',
+          visitedAtGalactic: rowView.visitedAtGalactic,
+        })
         return
       }
-      if (fromIndex === toIndex) return
+      if (rowView.row.fcStop && rowView.row.fcArrived) {
+        setConfirmState({
+          kind: 'delete_arrived_fc',
+          rowId: rowView.row.id,
+          waypointNumber: rowView.number,
+          systemName: rowView.row.systemName ?? '',
+        })
+        return
+      }
+    }
+    void executeDeleteRow(rowView.row.id)
+  }
 
+  const executeMoveRow = useCallback(
+    async (rowId: number, fromIndex: number, toIndex: number) => {
+      if (!plan) return
       await runPlanMutation(
         'REORDERING ROUTE',
         'Failed to reorder route row',
@@ -269,8 +388,53 @@ export function ExpeditionPlanner({
         { optimisticPlan: buildOptimisticMovedRowPlan(plan, fromIndex, toIndex), onSuccess: onRefreshPlan },
       )
     },
-    [lastVisitedIndex, onRefreshPlan, plan, runPlanMutation],
+    [onRefreshPlan, plan, runPlanMutation],
   )
+
+  const handleMoveRow = useCallback(
+    (rowId: number, fromIndex: number, toIndex: number) => {
+      if (!plan || fromIndex === toIndex || toIndex < 0 || toIndex >= plan.rows.length) return
+      const draggedRowView = plan.rows?.[fromIndex]
+      if (!draggedRowView) return
+      if (!isPlanning && draggedRowView.row.rowType === 'waypoint') {
+        const preview = draggedRowView.dropPreviews?.[toIndex]
+        if (preview && (preview.status === 'invalid' || preview.status === 'blocked_fc')) {
+          return
+        }
+        if (preview?.resetsFcArrived) {
+          setConfirmState({
+            kind: 'move_reset_fc',
+            rowId,
+            fromIndex,
+            toIndex,
+            waypointNumber: draggedRowView.number,
+            systemName: draggedRowView.row.systemName ?? '',
+          })
+          return
+        }
+      }
+      void executeMoveRow(rowId, fromIndex, toIndex)
+    },
+    [executeMoveRow, isPlanning, plan],
+  )
+
+  async function handleConfirmModalAction() {
+    if (!confirmState) return
+    const activeConfirm = confirmState
+    setConfirmState(null)
+    if (activeConfirm.kind === 'delete_visited' || activeConfirm.kind === 'delete_arrived_fc') {
+      await executeDeleteRow(activeConfirm.rowId)
+    } else if (activeConfirm.kind === 'move_reset_fc') {
+      await executeMoveRow(activeConfirm.rowId, activeConfirm.fromIndex, activeConfirm.toIndex)
+    } else if (activeConfirm.kind === 'override_fc_arrival') {
+      await runPlanMutation(
+        'UPDATING CARRIER ARRIVAL',
+        'Failed to override carrier arrival',
+        () => OverrideCarrierStopArrival(activeConfirm.rowId, activeConfirm.targetArrived),
+        { onSuccess: onRefreshPlan, rollbackOnError: true },
+      )
+    }
+  }
 
   async function handleLifecycleAction(label: string, actionFunction: () => Promise<void>) {
     await runPlanMutation(label, 'Failed to update expedition lifecycle state', actionFunction, {
@@ -285,40 +449,272 @@ export function ExpeditionPlanner({
     showCarrierStop,
   )
 
+  const heldOrDraggedIndex = draggedIndex ?? heldIndex
+  const isCompleted = plan?.expedition?.status === 'completed'
+
   const tableItems = useMemo(
-    () => buildPlannerTableItems(plan, expandedRowIds, isPlanning),
-    [plan, expandedRowIds, isPlanning],
+    () =>
+      buildPlannerTableItems(
+        plan,
+        expandedRowIds,
+        Boolean(isPlanning),
+        heldOrDraggedIndex,
+        lastVisitedIndex,
+      ),
+    [plan, expandedRowIds, isPlanning, heldOrDraggedIndex, lastVisitedIndex],
+  )
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const alignRowSelector = (selector: string, targetVisualTop: number) => {
+      const rowElement = container.querySelector<HTMLElement>(selector)
+      if (!rowElement) return
+      const currentVisualTop =
+        rowElement.getBoundingClientRect().top - container.getBoundingClientRect().top
+      const deltaY = currentVisualTop - targetVisualTop
+      if (Math.abs(deltaY) > 0.5) {
+        container.scrollTop = Math.max(0, Math.round(container.scrollTop + deltaY))
+      }
+    }
+
+    if (heldOrDraggedIndex !== null && grabbedRowAnchorRef.current !== null) {
+      const { visualTop } = grabbedRowAnchorRef.current
+      const selector = `tr[data-row-index="${heldOrDraggedIndex}"]`
+      grabbedRowAnchorRef.current = null
+      alignRowSelector(selector, visualTop)
+      const frameId = window.requestAnimationFrame(() => {
+        alignRowSelector(selector, visualTop)
+      })
+      return () => window.cancelAnimationFrame(frameId)
+    }
+
+    if (heldOrDraggedIndex === null && uncollapseRowAnchorRef.current !== null) {
+      const { rowId, visualTop } = uncollapseRowAnchorRef.current
+      const selector = `tr[data-row-id="${rowId}"]`
+      uncollapseRowAnchorRef.current = null
+      alignRowSelector(selector, visualTop)
+      const frameId = window.requestAnimationFrame(() => {
+        alignRowSelector(selector, visualTop)
+      })
+      return () => window.cancelAnimationFrame(frameId)
+    }
+  }, [heldOrDraggedIndex, plan])
+
+  const computeAutoScrollDelta = useCallback((clientY: number | null): number => {
+    const container = scrollContainerRef.current
+    if (!container || clientY === null) return 0
+    const rect = container.getBoundingClientRect()
+    const topZoneBottom = rect.top + STICKY_TABLE_HEADER_PIXELS + DRAG_AUTOSCROLL_ZONE_PIXELS
+    const bottomZoneTop = rect.bottom - DRAG_AUTOSCROLL_ZONE_PIXELS
+    if (clientY >= rect.top - 32 && clientY < topZoneBottom && container.scrollTop > 0) {
+      const rawDepth =
+        (topZoneBottom - clientY) / (DRAG_AUTOSCROLL_ZONE_PIXELS + STICKY_TABLE_HEADER_PIXELS)
+      const clampedDepth = Math.max(0, Math.min(1, rawDepth))
+      const speed =
+        DRAG_AUTOSCROLL_MIN_SPEED +
+        (DRAG_AUTOSCROLL_MAX_SPEED - DRAG_AUTOSCROLL_MIN_SPEED) * clampedDepth * clampedDepth
+      return -speed
+    }
+    if (
+      clientY > bottomZoneTop &&
+      clientY <= rect.bottom + 32 &&
+      container.scrollTop + container.clientHeight < container.scrollHeight - 1
+    ) {
+      const rawDepth = (clientY - bottomZoneTop) / DRAG_AUTOSCROLL_ZONE_PIXELS
+      const clampedDepth = Math.max(0, Math.min(1, rawDepth))
+      const speed =
+        DRAG_AUTOSCROLL_MIN_SPEED +
+        (DRAG_AUTOSCROLL_MAX_SPEED - DRAG_AUTOSCROLL_MIN_SPEED) * clampedDepth * clampedDepth
+      return speed
+    }
+    return 0
+  }, [])
+
+  useEffect(() => {
+    if (draggedIndex === null || typeof window === 'undefined') {
+      dragClientYRef.current = null
+      dragStartClientYRef.current = null
+      return
+    }
+    const updateDragClientY = (event: globalThis.DragEvent) => {
+      if (event.clientY > 0) {
+        recordDragOverClientY(event.clientY)
+      }
+    }
+    window.addEventListener('dragover', updateDragClientY)
+
+    let animationFrameId = 0
+    const stepAutoScroll = () => {
+      const container = scrollContainerRef.current
+      const delta = computeAutoScrollDelta(dragClientYRef.current)
+      if (container && delta !== 0) {
+        container.scrollTop = Math.max(0, container.scrollTop + delta)
+      }
+      animationFrameId = window.requestAnimationFrame(stepAutoScroll)
+    }
+    animationFrameId = window.requestAnimationFrame(stepAutoScroll)
+
+    return () => {
+      window.removeEventListener('dragover', updateDragClientY)
+      window.cancelAnimationFrame(animationFrameId)
+    }
+  }, [computeAutoScrollDelta, draggedIndex, recordDragOverClientY])
+
+  const resolveHoverGapForRow = useCallback(
+    (
+      index: number,
+      event: DragEvent<HTMLTableRowElement>,
+    ): { gapIndex: number; targetIndex: number } | null => {
+      if (isCompleted || draggedIndex === null || !plan?.rows) return null
+      const draggedRowView = plan.rows[draggedIndex]
+      if (!draggedRowView?.row) return null
+      const isDraggingWaypointInActive =
+        !isPlanning && draggedRowView.row.rowType === 'waypoint'
+      if (isDraggingWaypointInActive && index <= lastVisitedIndex) {
+        return null
+      }
+
+      const rect = event.currentTarget.getBoundingClientRect()
+      const isTopHalf = event.clientY < rect.top + rect.height / 2
+      let candidateGapIndex = isTopHalf ? index : index + 1
+      if (isDraggingWaypointInActive && candidateGapIndex <= lastVisitedIndex) {
+        candidateGapIndex = index + 1
+      }
+
+      let targetIndex = gapToTargetIndex(draggedIndex, candidateGapIndex)
+      if (targetIndex === null) {
+        candidateGapIndex = isTopHalf ? index + 1 : index
+        if (isDraggingWaypointInActive && candidateGapIndex <= lastVisitedIndex) {
+          return null
+        }
+        targetIndex = gapToTargetIndex(draggedIndex, candidateGapIndex)
+        if (targetIndex === null) return null
+      }
+
+      if (isDraggingWaypointInActive) {
+        const preview = draggedRowView.dropPreviews?.[targetIndex]
+        if (preview?.status === 'valid_visited' || preview?.status === 'blocked_fc') {
+          candidateGapIndex = index + 1
+          targetIndex = gapToTargetIndex(draggedIndex, candidateGapIndex)
+          if (targetIndex === null) return null
+        }
+        const finalPreview = draggedRowView.dropPreviews?.[targetIndex]
+        if (!finalPreview || finalPreview.status !== 'valid_unvisited') {
+          return null
+        }
+      }
+
+      return { gapIndex: candidateGapIndex, targetIndex }
+    },
+    [draggedIndex, isCompleted, isPlanning, lastVisitedIndex, plan],
   )
 
   const getRowDropProps = useCallback(
-    (index: number, isDraggable: boolean) => {
-      if (!isDraggable) return {}
-      return {
-        onDragOver: (event: DragEvent) => {
+    (index: number) => ({
+      onDragOver: (event: DragEvent<HTMLTableRowElement>) => {
+        recordDragOverClientY(event.clientY)
+        if (computeAutoScrollDelta(dragClientYRef.current) !== 0) {
           event.preventDefault()
-          if (index > lastVisitedIndex) {
-            event.dataTransfer.dropEffect = 'move'
-            if (dragOverIndex !== index) {
-              setDragOverIndex(index)
+          return
+        }
+        const resolved = resolveHoverGapForRow(index, event)
+        if (!resolved) {
+          if (dragOverGapIndex !== null) setDragOverGapIndex(null)
+          return
+        }
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        if (dragOverGapIndex !== resolved.gapIndex) {
+          setDragOverGapIndex(resolved.gapIndex)
+        }
+      },
+      onDrop: (event: DragEvent<HTMLTableRowElement>) => {
+        const resolved = resolveHoverGapForRow(index, event)
+        if (!resolved) return
+        event.preventDefault()
+        const from = draggedIndex
+        const container = scrollContainerRef.current
+        const dropTargetTop = container
+          ? event.currentTarget.getBoundingClientRect().top -
+            container.getBoundingClientRect().top
+          : null
+        setHeldIndex(null)
+        setDraggedIndex(null)
+        setDragOverGapIndex(null)
+        if (from !== null && plan) {
+          const draggedRow = plan.rows?.[from]?.row
+          if (draggedRow) {
+            if (dropTargetTop !== null) {
+              uncollapseRowAnchorRef.current = { rowId: draggedRow.id, visualTop: dropTargetTop }
             }
+            handleMoveRow(draggedRow.id, from, resolved.targetIndex)
+          }
+        }
+      },
+    }),
+    [
+      computeAutoScrollDelta,
+      dragOverGapIndex,
+      draggedIndex,
+      handleMoveRow,
+      plan,
+      recordDragOverClientY,
+      resolveHoverGapForRow,
+    ],
+  )
+
+  const getSlotDropProps = useCallback(
+    (gapIndex: number, targetIndex: number, preview: expedition.DropSlotPreview) => {
+      const isAllowed =
+        !isCompleted &&
+        (preview.status === 'valid_visited' || preview.status === 'valid_unvisited')
+      return {
+        onDragOver: (event: DragEvent<HTMLTableRowElement>) => {
+          recordDragOverClientY(event.clientY)
+          if (!isAllowed) {
+            if (dragOverGapIndex !== null) setDragOverGapIndex(null)
+            return
+          }
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          if (dragOverGapIndex !== gapIndex) {
+            setDragOverGapIndex(gapIndex)
           }
         },
-        onDrop: (event: DragEvent) => {
+        onDrop: (event: DragEvent<HTMLTableRowElement>) => {
+          if (!isAllowed) return
           event.preventDefault()
           const from = draggedIndex
+          const container = scrollContainerRef.current
+          const dropTargetTop = container
+            ? event.currentTarget.getBoundingClientRect().top -
+              container.getBoundingClientRect().top
+            : null
+          setHeldIndex(null)
           setDraggedIndex(null)
-          setDragOverIndex(null)
-          if (from !== null && from !== index && index > lastVisitedIndex && plan) {
+          setDragOverGapIndex(null)
+          if (from !== null && plan) {
             const draggedRow = plan.rows?.[from]?.row
             if (draggedRow) {
-              handleMoveRow(draggedRow.id, from, index)
+              if (dropTargetTop !== null) {
+                uncollapseRowAnchorRef.current = { rowId: draggedRow.id, visualTop: dropTargetTop }
+              }
+              handleMoveRow(draggedRow.id, from, targetIndex)
             }
           }
         },
       }
     },
-    [lastVisitedIndex, dragOverIndex, draggedIndex, plan, handleMoveRow],
+    [dragOverGapIndex, draggedIndex, handleMoveRow, isCompleted, plan, recordDragOverClientY],
   )
+
+  const handleClearDragOverGap = useCallback(() => {
+    if (dragOverGapIndex !== null) {
+      setDragOverGapIndex(null)
+    }
+  }, [dragOverGapIndex])
 
   if (!plan) {
     return (
@@ -329,13 +725,20 @@ export function ExpeditionPlanner({
   }
 
   const currentExpedition = plan.expedition
-  const isCompleted = currentExpedition.status === 'completed'
   const modesList = plan.modes ?? []
   const hasOriginWaypointSystem =
     originHasDraftSystem ?? Boolean((firstWaypoint?.row.systemName ?? '').trim())
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#070605]">
+    <div
+      onDragOver={(event) => {
+        if (draggedIndex !== null) {
+          recordDragOverClientY(event.clientY)
+          event.preventDefault()
+        }
+      }}
+      className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#070605]"
+    >
       <PlannerHeaderBar
         plan={plan}
         hasOriginWaypointSystem={hasOriginWaypointSystem}
@@ -343,7 +746,66 @@ export function ExpeditionPlanner({
         onLifecycleAction={handleLifecycleAction}
       />
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-auto bg-[#070605]">
+      <div
+        ref={scrollContainerRef}
+        onDragLeave={(event) => {
+          const relatedTarget = event.relatedTarget as Node | null
+          if (!relatedTarget || !scrollContainerRef.current?.contains(relatedTarget)) {
+            dragClientYRef.current = null
+          }
+        }}
+        onDragOver={(event) => {
+          recordDragOverClientY(event.clientY)
+          if (draggedIndex !== null) {
+            event.preventDefault()
+          }
+          if (isCompleted || draggedIndex === null || !plan?.rows?.length) return
+          const targetEl = event.target as HTMLElement | null
+          if (targetEl?.closest('tbody')) return
+          const tbodyEl = scrollContainerRef.current?.querySelector('tbody')
+          if (!tbodyEl || event.clientY < tbodyEl.getBoundingClientRect().bottom) {
+            if (dragOverGapIndex !== null) setDragOverGapIndex(null)
+            return
+          }
+          const tailGapIndex = plan.rows.length
+          const tailTargetIndex = gapToTargetIndex(draggedIndex, tailGapIndex)
+          if (tailTargetIndex === null) return
+          const draggedRowView = plan.rows[draggedIndex]
+          if (!isPlanning && draggedRowView?.row?.rowType === 'waypoint') {
+            const preview = draggedRowView.dropPreviews?.[tailTargetIndex]
+            if (!preview || preview.status !== 'valid_unvisited') return
+          }
+          event.dataTransfer.dropEffect = 'move'
+          if (dragOverGapIndex !== tailGapIndex) {
+            setDragOverGapIndex(tailGapIndex)
+          }
+        }}
+        onDrop={(event) => {
+          if (isCompleted || draggedIndex === null || !plan?.rows?.length) return
+          const targetEl = event.target as HTMLElement | null
+          if (targetEl?.closest('tbody')) return
+          const tbodyEl = scrollContainerRef.current?.querySelector('tbody')
+          if (!tbodyEl || event.clientY < tbodyEl.getBoundingClientRect().bottom) return
+          const tailGapIndex = plan.rows.length
+          const tailTargetIndex = gapToTargetIndex(draggedIndex, tailGapIndex)
+          if (tailTargetIndex === null) return
+          const draggedRowView = plan.rows[draggedIndex]
+          if (!isPlanning && draggedRowView?.row?.rowType === 'waypoint') {
+            const preview = draggedRowView.dropPreviews?.[tailTargetIndex]
+            if (!preview || preview.status !== 'valid_unvisited') return
+          }
+          event.preventDefault()
+          const from = draggedIndex
+          captureUncollapseAnchor(from)
+          setHeldIndex(null)
+          setDraggedIndex(null)
+          setDragOverGapIndex(null)
+          if (draggedRowView?.row) {
+            handleMoveRow(draggedRowView.row.id, from, tailTargetIndex)
+          }
+        }}
+        className="flex-1 overflow-y-auto overflow-x-auto bg-[#070605] [overflow-anchor:none]"
+      >
         <PlannerRouteTable
           plan={plan}
           tableItems={tableItems}
@@ -351,6 +813,7 @@ export function ExpeditionPlanner({
           isPlanning={isPlanning}
           isCompleted={isCompleted}
           lastVisitedIndex={lastVisitedIndex}
+          lastFcArrivedIndex={lastFcArrivedIndex}
           visibleColumnCount={visibleColumnCount}
           tableMinWidthPixels={tableMinWidthPixels}
           showNotes={showNotes}
@@ -360,47 +823,92 @@ export function ExpeditionPlanner({
           loadingDetails={loadingDetails}
           copiedSystemRowId={copiedSystemRowId}
           insertMenuAfterId={insertMenuAfterId}
+          heldOrDraggedIndex={heldOrDraggedIndex}
           draggedIndex={draggedIndex}
-          dragOverIndex={dragOverIndex}
+          dragOverGapIndex={dragOverGapIndex}
           activeCarrierRoute={carrierRoute.activeCarrierRoute}
           activeCarrierTargetRowId={carrierRoute.activeCarrierTargetRowId}
           isManualCarrierRoute={carrierRoute.isManualCarrierRoute}
           nextFcStopEntry={carrierRoute.nextFcStopEntry}
           routedCarrierStopIndex={carrierRoute.routedCarrierStopIndex}
           getRowDropProps={getRowDropProps}
+          getSlotDropProps={getSlotDropProps}
+          onClearDragOverGap={handleClearDragOverGap}
           onToggleShowNotes={toggleShowNotes}
           onToggleShowCarrierStop={toggleShowCarrierStop}
           onChangeRegion={changeRegion}
           onSetInsertMenuAfterId={setInsertMenuAfterId}
           onInsert={handleInsert}
-          onMoveRow={handleMoveRow}
-          onDeleteRow={handleDeleteRow}
+          onDeleteRow={handleRequestDeleteRow}
           onLegModeChange={handleLegModeChange}
           onToggleExpand={toggleExpand}
           onOriginSystemFilledChange={setOriginHasDraftSystem}
           onFieldBlur={commitField}
           onCopySystem={handleCopySystem}
           onToggleFcStop={toggleFcStop}
+          onOverrideFcArrived={handleRequestOverrideFcArrived}
           onOpenCarrierRoutePrompt={carrierRoute.openCarrierRoutePrompt}
+          onRowHoldStart={(holdRowIndex) => {
+            captureGrabAnchor(holdRowIndex)
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current)
+            holdTimerRef.current = setTimeout(() => {
+              holdTimerRef.current = null
+              setHeldIndex(holdRowIndex)
+            }, HOLD_PREVIEW_DELAY_MS)
+          }}
+          onRowHoldEnd={() => {
+            if (holdTimerRef.current) {
+              clearTimeout(holdTimerRef.current)
+              holdTimerRef.current = null
+            }
+            if (draggedIndex === null) {
+              captureUncollapseAnchor(heldIndex)
+              setHeldIndex(null)
+            }
+          }}
           onRowDragStart={(dragRowIndex, dragRowId, event) => {
-            setDraggedIndex(dragRowIndex)
+            if (holdTimerRef.current) {
+              clearTimeout(holdTimerRef.current)
+              holdTimerRef.current = null
+            }
+            if (heldIndex === null) {
+              captureGrabAnchor(dragRowIndex)
+            }
+            dragStartClientYRef.current = event.clientY
+            dragClientYRef.current = null
             event.dataTransfer.effectAllowed = 'move'
             event.dataTransfer.setData('text/plain', String(dragRowId))
+            window.requestAnimationFrame(() => {
+              setHeldIndex(dragRowIndex)
+              setDraggedIndex(dragRowIndex)
+            })
           }}
           onRowDragEnd={() => {
+            if (holdTimerRef.current) {
+              clearTimeout(holdTimerRef.current)
+              holdTimerRef.current = null
+            }
+            grabbedRowAnchorRef.current = null
+            dragStartClientYRef.current = null
+            dragClientYRef.current = null
+            const activeRowIndex = draggedIndex ?? heldIndex
+            if (activeRowIndex !== null && uncollapseRowAnchorRef.current === null) {
+              captureUncollapseAnchor(activeRowIndex)
+            }
+            setHeldIndex(null)
             setDraggedIndex(null)
-            setDragOverIndex(null)
+            setDragOverGapIndex(null)
           }}
         />
 
         <PlannerActiveLegFooter
           isPlanning={isPlanning}
           isCompleted={isCompleted}
+          isReordering={heldOrDraggedIndex !== null}
           onAppendRow={(rowType) => handleInsert(0, rowType)}
         />
       </div>
 
-      {/* Bottom Panel: Active Carrier Route (Spansh or Manual Mode) */}
       {carrierRoute.activeCarrierRoute && (
         <CarrierRouteBottomPanel
           key={currentExpedition.id}
@@ -433,7 +941,6 @@ export function ExpeditionPlanner({
         />
       )}
 
-      {/* Carrier Route Setup Prompt Modal */}
       {carrierRoute.routePrompt && (
         <CarrierRouteModal
           prompt={carrierRoute.routePrompt}
@@ -442,6 +949,14 @@ export function ExpeditionPlanner({
           }
           onStart={carrierRoute.handleStartCarrierRoute}
           onClose={() => carrierRoute.setRoutePrompt(null)}
+        />
+      )}
+
+      {confirmState && (
+        <PlannerConfirmModal
+          confirmState={confirmState}
+          onConfirm={() => void handleConfirmModalAction()}
+          onCancel={() => setConfirmState(null)}
         />
       )}
     </div>

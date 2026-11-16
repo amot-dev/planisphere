@@ -144,10 +144,6 @@ func buildFrontendFixture(database *sql.DB, dataset DatasetSummary) (frontendLiv
 		Adjustments:            planView.Expedition.Adjustments,
 		Expedition:             liveMetrics.Add(planView.Expedition.Adjustments),
 		AllJournals:            allMetrics,
-		BaselineEnabled:        planView.Expedition.BaselineEnabled,
-		BaselineSource:         planView.Expedition.BaselineSource,
-		Baseline:               planView.Expedition.Baseline,
-		Lifetime:               planView.Expedition.Baseline.Add(liveMetrics.Add(planView.Expedition.Adjustments)),
 		Realization:            liveRealization,
 		AllJournalsRealization: allRealization,
 	}

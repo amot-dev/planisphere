@@ -53,7 +53,7 @@ export function PlannerTableHeader({
         <th className="w-60 px-3 py-2.5 align-top border-b border-[#FF7100]/70">
           Telemetry / Timestamp
         </th>
-        <th className="w-[380px] px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">
+        <th className="w-[320px] px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">
           <div className="inline-flex items-center justify-end gap-2">
             <span>Controls</span>
             <div className="relative inline-block text-left">

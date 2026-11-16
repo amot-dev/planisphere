@@ -78,7 +78,7 @@ func mustInsert(t *testing.T, dbConn *sql.DB, expeditionID, afterID int64, rowTy
 	return insertedRow
 }
 
-func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
+func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	dbConn := openExpeditionTestDB(t)
 	lines := []string{
 		// Pre-expedition visit to Waypoint #3 (must be ignored because it is before expedition_start_timestamp).
@@ -125,12 +125,36 @@ func TestZeroDataLossAndOutOfOrderReordering(t *testing.T) {
 		t.Fatal(startTxError)
 	}
 
+	// Without automatic out-of-order reordering, Beagle Point remains at #5 (future) while #3 is current.
+	initialPlan, initialPlanErr := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
+	if initialPlanErr != nil {
+		t.Fatal(initialPlanErr)
+	}
+	if initialPlan.VisitedWaypointCount != 2 {
+		t.Fatalf("initial visited count = %d, want 2", initialPlan.VisitedWaypointCount)
+	}
+	beagleInitialView := initialPlan.Rows[5]
+	if len(beagleInitialView.DropPreviews) != 6 || beagleInitialView.DropPreviews[2].Status != expedition.DropSlotValidVisited {
+		t.Fatalf("expected Beagle Point drop preview at index 2 to be valid_visited, got %+v", beagleInitialView.DropPreviews)
+	}
+
+	// Manually reorder Beagle Point to index 2 (immediately after Dryooe Prou FF-Z d696).
+	if moveTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		if _, moveErr := expedition.MoveRow(transaction, waypoint5.ID, 2); moveErr != nil {
+			return moveErr
+		}
+		_, reevalErr := expedition.Reevaluate(transaction, expeditionRecord.ID)
+		return reevalErr
+	}); moveTxError != nil {
+		t.Fatal(moveTxError)
+	}
+
 	plan, planError := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil)
 	if planError != nil {
 		t.Fatal(planError)
 	}
-	// Expected waypoint sequence after auto-reordering:
-	// #1 Sol (visited) -> #2 Dryooe Prou FF-Z d696 (visited) -> #3 Beagle Point (visited, moved up!) -> #4 Outotz LS-K d8-3 (current; pre-start visit ignored) -> #5 Sagittarius A* (future).
+	// Expected waypoint sequence after user reorders Beagle Point to #3:
+	// #1 Sol (visited) -> #2 Dryooe Prou FF-Z d696 (visited) -> #3 Beagle Point (visited) -> #4 Outotz LS-K d8-3 (current; pre-start visit ignored) -> #5 Sagittarius A* (future).
 	var waypointSystems []string
 	var waypointNumbers []int
 	var waypointStates []string
@@ -543,23 +567,27 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 		}
 	}
 
-	// Test Reevaluate consolidated updates
+	// Test sequential Reevaluate, duplicate system protection, and chronological MoveRow bounds
 	setRowSystemName(t, dbConn, wpTop.ID, "Alpha")
 	setRowSystemName(t, dbConn, wp1.ID, "Beta")
 	setRowSystemName(t, dbConn, wpMid.ID, "Gamma")
 	setRowSystemName(t, dbConn, wp2.ID, "Delta")
-	setRowSystemName(t, dbConn, wp3.ID, "Epsilon")
+	setRowSystemName(t, dbConn, wp3.ID, "Alpha")
 
 	// Start expedition
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		return expedition.Start(transaction, expeditionRecord.ID, "2026-02-01T10:00:00Z")
 	})
 
-	// Add an arrival that skips Beta and visits Gamma directly, triggering out-of-order reordering,
-	// position updates, visited_at, visit_event_uid, leg_mode_id all in one evaluation.
+	// Commander jumps Alpha -> Interim -> Alpha (early return before Beta) -> Beta -> Gamma.
+	// The early return to Alpha must NOT consume the final return waypoint wp3 ("Alpha"),
+	// and Beta + Gamma must be marked visited in sequence.
 	_, err := dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at)
 		VALUES ('ev-start', '2026-02-01T10:00:00Z', 'FSDJump', 'Alpha', '{}', '2026-02-01T10:00:00Z'),
-		       ('ev-gamma', '2026-02-01T12:00:00Z', 'FSDJump', 'Gamma', '{}', '2026-02-01T12:00:00Z')`)
+		       ('ev-interim', '2026-02-01T10:30:00Z', 'FSDJump', 'Interim', '{}', '2026-02-01T10:30:00Z'),
+		       ('ev-alpha-early', '2026-02-01T11:00:00Z', 'FSDJump', 'Alpha', '{}', '2026-02-01T11:00:00Z'),
+		       ('ev-beta', '2026-02-01T12:00:00Z', 'FSDJump', 'Beta', '{}', '2026-02-01T12:00:00Z'),
+		       ('ev-gamma', '2026-02-01T13:00:00Z', 'FSDJump', 'Gamma', '{}', '2026-02-01T13:00:00Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,13 +600,11 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 		t.Fatalf("expected Reevaluate to report changes")
 	}
 
-	// Verify rows after reevaluation:
-	// Alpha (visited, pos 1) -> Gamma (visited, moved to pos 2) -> Beta (unvisited, pos 3) -> Delta (pos 4) -> Epsilon (pos 5)
 	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
 	if len(rows) != 5 {
 		t.Fatalf("expected 5 rows, got %d", len(rows))
 	}
-	expectedOrder := []string{"Alpha", "Gamma", "Beta", "Delta", "Epsilon"}
+	expectedOrder := []string{"Alpha", "Beta", "Gamma", "Delta", "Alpha"}
 	for i, expectedSys := range expectedOrder {
 		if rows[i].SystemName != expectedSys {
 			t.Errorf("row %d system %s, want %s", i, rows[i].SystemName, expectedSys)
@@ -588,10 +614,38 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 		}
 	}
 	if rows[0].VisitedAt != "2026-02-01T10:00:00Z" {
-		t.Errorf("Alpha visited_at mismatch: %q", rows[0].VisitedAt)
+		t.Errorf("Alpha origin visited_at mismatch: %q", rows[0].VisitedAt)
 	}
-	if rows[1].VisitedAt != "2026-02-01T12:00:00Z" || rows[1].VisitEventUID != "ev-gamma" {
-		t.Errorf("Gamma visit mismatch: %q / %q", rows[1].VisitedAt, rows[1].VisitEventUID)
+	if rows[1].VisitedAt != "2026-02-01T12:00:00Z" || rows[1].VisitEventUID != "ev-beta" {
+		t.Errorf("Beta visit mismatch: %q / %q", rows[1].VisitedAt, rows[1].VisitEventUID)
+	}
+	if rows[2].VisitedAt != "2026-02-01T13:00:00Z" || rows[2].VisitEventUID != "ev-gamma" {
+		t.Errorf("Gamma visit mismatch: %q / %q", rows[2].VisitedAt, rows[2].VisitEventUID)
+	}
+	if rows[4].VisitedAt != "" {
+		t.Errorf("expected final return Alpha waypoint to remain unvisited, got %q", rows[4].VisitedAt)
+	}
+
+	// Moving wp3 ("Alpha", visited at 11:00 between Alpha@10:00 and Beta@12:00) to index 1 (before Beta) is valid!
+	// Moving wp2 ("Delta", never visited) to index 1 (before Beta) must be rejected as out of chronological bounds.
+	if invalidMoveErr := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		_, moveErr := expedition.MoveRow(transaction, wp2.ID, 1)
+		return moveErr
+	}); invalidMoveErr == nil {
+		t.Fatalf("expected moving unvisited Delta before visited Beta to fail")
+	}
+	if validMoveErr := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		if _, moveErr := expedition.MoveRow(transaction, wp3.ID, 1); moveErr != nil {
+			return moveErr
+		}
+		_, err := expedition.Reevaluate(transaction, expeditionRecord.ID)
+		return err
+	}); validMoveErr != nil {
+		t.Fatalf("expected moving Alpha to its 11:00 historical window to succeed, got %v", validMoveErr)
+	}
+	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if rows[1].ID != wp3.ID || rows[1].VisitedAt != "2026-02-01T11:00:00Z" {
+		t.Fatalf("expected moved Alpha at index 1 to bind to 2026-02-01T11:00:00Z, got %+v", rows[1])
 	}
 
 	// Second reevaluation with no new events should be a no-op (changed = false)
@@ -872,5 +926,103 @@ func TestBuildPlanVisitCountAndEDSMToJournalUpgrade(testingContext *testing.T) {
 	}
 	if updatedPlan.Rows[0].Row.CoordsSource != "journal" || updatedPlan.Rows[0].VisitCount != 2 {
 		testingContext.Fatalf("expected upgraded journal source with 2 visits (FSDJump + CarrierJump, ignoring Location relogs), got source=%q visits=%d", updatedPlan.Rows[0].Row.CoordsSource, updatedPlan.Rows[0].VisitCount)
+	}
+}
+
+func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expedition.InvalidateShipCache()
+	expedition.InvalidateVisitCache()
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-01-18T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-01-18T11:00:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1004,"StarPos":[5,0,0],"JumpDist":5.0}`,
+		`{"timestamp":"2026-01-18T12:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"JumpDist":4.0}`,
+		`{"timestamp":"2026-01-18T13:00:00Z","event":"FSDJump","StarSystem":"Sirius","SystemAddress":1003,"StarPos":[8,0,0],"JumpDist":8.0}`,
+		`{"timestamp":"2026-01-18T14:00:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1004,"StarPos":[5,0,0],"JumpDist":5.0}`,
+	})
+
+	expeditionRecord, wp1 := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Frontier Test", "")
+	setRowSystemName(testingContext, databaseConnection, wp1.ID, "Sol")
+	wp2 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp1.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wp2.ID, "Alpha Centauri")
+	wp3 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp2.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wp3.ID, "Sirius")
+	wp4 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp3.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wp4.ID, "Barnard's Star")
+
+	fcTrue := true
+	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: wp1.ID, FCStop: &fcTrue})
+	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: wp3.ID, FCStop: &fcTrue})
+	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: wp4.ID, FCStop: &fcTrue})
+
+	if startErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
+		return expedition.Start(tx, expeditionRecord.ID, "2026-01-18T10:00:00Z")
+	}); startErr != nil {
+		testingContext.Fatal(startErr)
+	}
+
+	// Mark wp3 (Sirius) as carrier arrived via SetCarrierArrivalOverride; wp1 and wp3 are now ARRIVED, wp4 is PENDING.
+	if overrideErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
+		_, err := expedition.SetCarrierArrivalOverride(tx, wp3.ID, true)
+		return err
+	}); overrideErr != nil {
+		testingContext.Fatal(overrideErr)
+	}
+
+	plan, planErr := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
+	if planErr != nil {
+		testingContext.Fatal(planErr)
+	}
+	// wp4 ("Barnard's Star") was visited at 11:00 (between wp1 Sol@10:00 and wp2 Alpha Centauri@12:00),
+	// so index 1 is chronologically valid, but blocked_fc because wp4 is a PENDING FC stop and wp3 (at index 2) is ARRIVED!
+	if plan.Rows[3].DropPreviews[1].Status != expedition.DropSlotBlockedFC {
+		testingContext.Fatalf("expected wp4 drop preview at index 1 to be blocked_fc, got %+v", plan.Rows[3].DropPreviews[1])
+	}
+	// wp3 ("Sirius", ARRIVED) moved to index 3 (below PENDING wp4) sets ResetsFCArrived = true.
+	if !plan.Rows[2].DropPreviews[3].ResetsFCArrived {
+		testingContext.Fatalf("expected wp3 drop preview at index 3 to set ResetsFCArrived=true, got %+v", plan.Rows[2].DropPreviews[3])
+	}
+
+	// Add an unvisited non-FC waypoint wp5 ("Vega") before PENDING wp4; moving ARRIVED wp3 into the unvisited
+	// slot after wp5 (but still before PENDING wp4) must NOT set ResetsFCArrived.
+	wp5 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp3.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wp5.ID, "Vega")
+	if reevalErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
+		_, err := expedition.Reevaluate(tx, expeditionRecord.ID)
+		return err
+	}); reevalErr != nil {
+		testingContext.Fatal(reevalErr)
+	}
+	planWithUnvisited, _ := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
+	// Moving wp3 (index 2, ARRIVED) to index 3 (after unvisited Vega, but before wp4 at index 4) makes wp3 unvisited
+	// without crossing any PENDING FC stop, so ResetsFCArrived must be false.
+	if planWithUnvisited.Rows[2].DropPreviews[3].Status != expedition.DropSlotValidUnvisited || planWithUnvisited.Rows[2].DropPreviews[3].ResetsFCArrived {
+		testingContext.Fatalf("expected wp3 drop preview at unvisited index 3 before pending stop to keep ResetsFCArrived=false, got %+v", planWithUnvisited.Rows[2].DropPreviews[3])
+	}
+	if moveBeforePendingErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
+		if _, err := expedition.MoveRow(tx, wp3.ID, 3); err != nil {
+			return err
+		}
+		_, err := expedition.Reevaluate(tx, expeditionRecord.ID)
+		return err
+	}); moveBeforePendingErr != nil {
+		testingContext.Fatal(moveBeforePendingErr)
+	}
+	movedRow3, _ := expedition.GetRow(databaseConnection, wp3.ID)
+	if !movedRow3.FCArrived {
+		testingContext.Fatalf("expected wp3 to remain FCArrived=true when moved into unvisited slot before first pending stop")
+	}
+
+	// Cascading override: setting wp1 to arrived=false cascades to wp3 as well.
+	if cascadeErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
+		_, err := expedition.SetCarrierArrivalOverride(tx, wp1.ID, false)
+		return err
+	}); cascadeErr != nil {
+		testingContext.Fatal(cascadeErr)
+	}
+	reloadedAfterCascade, _ := expedition.GetRow(databaseConnection, wp3.ID)
+	if reloadedAfterCascade.FCArrived {
+		testingContext.Fatalf("expected SetCarrierArrivalOverride(wp1, false) to cascade to wp3")
 	}
 }

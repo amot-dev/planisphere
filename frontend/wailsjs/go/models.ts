@@ -200,24 +200,6 @@ export namespace app {
 	        this.currentShip = source["currentShip"];
 	    }
 	}
-	export class ModeWindowInput {
-	    id: number;
-	    modeId: number;
-	    start: string;
-	    end: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ModeWindowInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.modeId = source["modeId"];
-	        this.start = source["start"];
-	        this.end = source["end"];
-	    }
-	}
 	export class ModeWindowView {
 	    id: number;
 	    modeId: number;
@@ -408,10 +390,6 @@ export namespace app {
 	    adjustments: stats.Metrics;
 	    expedition: stats.Metrics;
 	    allJournals: stats.Metrics;
-	    baselineEnabled: boolean;
-	    baselineSource: string;
-	    baseline: stats.Metrics;
-	    lifetime: stats.Metrics;
 	    realization: stats.RealizationBreakdown;
 	    allJournalsRealization: stats.RealizationBreakdown;
 	    carrierCost: CarrierCostBreakdown;
@@ -439,10 +417,6 @@ export namespace app {
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
 	        this.expedition = this.convertValues(source["expedition"], stats.Metrics);
 	        this.allJournals = this.convertValues(source["allJournals"], stats.Metrics);
-	        this.baselineEnabled = source["baselineEnabled"];
-	        this.baselineSource = source["baselineSource"];
-	        this.baseline = this.convertValues(source["baseline"], stats.Metrics);
-	        this.lifetime = this.convertValues(source["lifetime"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], stats.RealizationBreakdown);
 	        this.allJournalsRealization = this.convertValues(source["allJournalsRealization"], stats.RealizationBreakdown);
 	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCostBreakdown);
@@ -548,6 +522,24 @@ export namespace expedition {
 	        this.systemAddress = source["systemAddress"];
 	    }
 	}
+	export class DropSlotPreview {
+	    targetIndex: number;
+	    status: string;
+	    visitedAtGalactic?: string;
+	    resetsFcArrived?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DropSlotPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.targetIndex = source["targetIndex"];
+	        this.status = source["status"];
+	        this.visitedAtGalactic = source["visitedAtGalactic"];
+	        this.resetsFcArrived = source["resetsFcArrived"];
+	    }
+	}
 	export class Expedition {
 	    id: number;
 	    name: string;
@@ -556,9 +548,6 @@ export namespace expedition {
 	    startTimestamp: string;
 	    endTimestamp: string;
 	    armedAt: string;
-	    baselineEnabled: boolean;
-	    baselineSource: string;
-	    baseline: stats.Metrics;
 	    adjustments: stats.Metrics;
 	    carrierType: string;
 	    carrierWeeklyUpkeep: number;
@@ -578,9 +567,6 @@ export namespace expedition {
 	        this.startTimestamp = source["startTimestamp"];
 	        this.endTimestamp = source["endTimestamp"];
 	        this.armedAt = source["armedAt"];
-	        this.baselineEnabled = source["baselineEnabled"];
-	        this.baselineSource = source["baselineSource"];
-	        this.baseline = this.convertValues(source["baseline"], stats.Metrics);
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
 	        this.carrierType = source["carrierType"];
 	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];
@@ -630,10 +616,7 @@ export namespace expedition {
 	    kind: string;
 	    at: string;
 	    atGalactic: string;
-	    from: string;
 	    to: string;
-	    fromColor: string;
-	    toColor: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Transition(source);
@@ -644,10 +627,7 @@ export namespace expedition {
 	        this.kind = source["kind"];
 	        this.at = source["at"];
 	        this.atGalactic = source["atGalactic"];
-	        this.from = source["from"];
 	        this.to = source["to"];
-	        this.fromColor = source["fromColor"];
-	        this.toColor = source["toColor"];
 	    }
 	}
 	export class Row {
@@ -717,6 +697,7 @@ export namespace expedition {
 	    legModeName: string;
 	    legModeColor: string;
 	    gec?: GECRef;
+	    dropPreviews?: DropSlotPreview[];
 	
 	    static createFrom(source: any = {}) {
 	        return new RowView(source);
@@ -740,6 +721,7 @@ export namespace expedition {
 	        this.legModeName = source["legModeName"];
 	        this.legModeColor = source["legModeColor"];
 	        this.gec = this.convertValues(source["gec"], GECRef);
+	        this.dropPreviews = this.convertValues(source["dropPreviews"], DropSlotPreview);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

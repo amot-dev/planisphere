@@ -2,12 +2,43 @@ import { expedition } from '../../../wailsjs/go/models'
 
 /**
  * PlannerTableItem represents a rendered row in the flattened expedition flight
- * plan table (galactic region header, waypoint row, or expanded telemetry drawer).
+ * plan table (galactic region header, waypoint row, expanded telemetry drawer,
+ * collapsed visited-rows summary bar, or dashed drop-slot gap row).
  */
 export type PlannerTableItem =
   | { kind: 'region'; rowView: expedition.RowView; index: number; key: string }
   | { kind: 'waypoint'; rowView: expedition.RowView; index: number; key: string }
   | { kind: 'drawer'; rowView: expedition.RowView; index: number; key: string }
+  | {
+      kind: 'collapsed_visited'
+      startIndex: number
+      endIndex: number
+      waypointCount: number
+      regionCount: number
+      firstWaypointNumber: number
+      firstSystemName: string
+      lastWaypointNumber: number
+      lastSystemName: string
+      key: string
+    }
+  | {
+      kind: 'drop_slot'
+      gapIndex: number
+      targetIndex: number
+      preview: expedition.DropSlotPreview
+      key: string
+    }
+
+/**
+ * gapToTargetIndex converts a gap position (0..rows.length, where gap g sits
+ * immediately before row g) into the 0-based target index expected by MoveRow
+ * after removing the source row at fromIndex. Returns null if dropping into
+ * gapIndex leaves the row at its current position.
+ */
+export function gapToTargetIndex(fromIndex: number, gapIndex: number): number | null {
+  if (gapIndex === fromIndex || gapIndex === fromIndex + 1) return null
+  return gapIndex < fromIndex ? gapIndex : gapIndex - 1
+}
 
 const ALWAYS_VISIBLE_COLUMN_COUNT = 5
 const LEG_EXPAND_COLUMN_WIDTH_PIXELS = 32
@@ -17,7 +48,7 @@ const POI_BODY_COLUMN_WIDTH_PIXELS = 192
 const FLIGHT_NOTES_COLUMN_WIDTH_PIXELS = 224
 const CARRIER_STOP_COLUMN_WIDTH_PIXELS = 160
 const TELEMETRY_COLUMN_WIDTH_PIXELS = 240
-const CONTROLS_COLUMN_WIDTH_PIXELS = 380
+const CONTROLS_COLUMN_WIDTH_PIXELS = 320
 
 /**
  * computePlannerTableDimensions calculates the visible column count and minimum
@@ -47,18 +78,216 @@ export function computePlannerTableDimensions(
   return { visibleColumnCount, tableMinWidthPixels }
 }
 
+function buildCollapsedVisitedItem(
+  rows: expedition.RowView[],
+  startIndex: number,
+  endIndex: number,
+): PlannerTableItem {
+  let waypointCount = 0
+  let regionCount = 0
+  let firstWaypointNumber = 0
+  let firstSystemName = ''
+  let lastWaypointNumber = 0
+  let lastSystemName = ''
+
+  for (let idx = startIndex; idx <= endIndex; idx++) {
+    const rowView = rows[idx]
+    if (!rowView?.row) continue
+    if (rowView.row.rowType === 'waypoint') {
+      waypointCount++
+      if (firstWaypointNumber === 0) {
+        firstWaypointNumber = rowView.number
+        firstSystemName = rowView.row.systemName ?? ''
+      }
+      lastWaypointNumber = rowView.number
+      lastSystemName = rowView.row.systemName ?? ''
+    } else {
+      regionCount++
+    }
+  }
+
+  return {
+    kind: 'collapsed_visited',
+    startIndex,
+    endIndex,
+    waypointCount,
+    regionCount,
+    firstWaypointNumber,
+    firstSystemName,
+    lastWaypointNumber,
+    lastSystemName,
+    key: `collapsed-${startIndex}-${endIndex}`,
+  }
+}
+
+function markFlankingVisitedWaypointsVisible(
+  rows: expedition.RowView[],
+  visibleSet: Set<number>,
+  prevStartIndex: number,
+  nextStartIndex: number,
+  lastVisitedIndex: number,
+): void {
+  let prevIdx = Math.max(0, prevStartIndex)
+  while (prevIdx > 0 && rows[prevIdx]?.row?.rowType !== 'waypoint') {
+    prevIdx--
+  }
+  let nextIdx = Math.min(Math.max(0, nextStartIndex), lastVisitedIndex)
+  while (nextIdx < lastVisitedIndex && rows[nextIdx]?.row?.rowType !== 'waypoint') {
+    nextIdx++
+  }
+  for (let visIdx = Math.max(0, prevIdx); visIdx <= Math.min(lastVisitedIndex, nextIdx); visIdx++) {
+    visibleSet.add(visIdx)
+  }
+}
+
+function collectVisitedDropSlotsAndVisibleRows(
+  rows: expedition.RowView[],
+  heldIndex: number,
+  lastVisitedIndex: number,
+): {
+  slotsByGap: Map<number, { targetIndex: number; preview: expedition.DropSlotPreview }>
+  visibleVisitedRowIndices: Set<number>
+} {
+  const heldRowView = rows[heldIndex]
+  const slotsByGap = new Map<number, { targetIndex: number; preview: expedition.DropSlotPreview }>()
+  const visibleVisitedRowIndices = new Set<number>()
+  if (heldIndex <= lastVisitedIndex) {
+    markFlankingVisitedWaypointsVisible(
+      rows,
+      visibleVisitedRowIndices,
+      heldIndex - 1,
+      heldIndex + 1,
+      lastVisitedIndex,
+    )
+  }
+
+  const hasAnyUnvisitedWaypoint = rows.some(
+    (rowView, idx) => idx > lastVisitedIndex && rowView?.row?.rowType === 'waypoint',
+  )
+  for (let gapIndex = 1; gapIndex <= rows.length; gapIndex++) {
+    const targetIndex = gapToTargetIndex(heldIndex, gapIndex)
+    if (targetIndex === null) continue
+    const preview = heldRowView?.dropPreviews?.[targetIndex]
+    if (!preview) continue
+    const isEndOfAllVisitedTable =
+      gapIndex === rows.length &&
+      !hasAnyUnvisitedWaypoint &&
+      preview.status === 'valid_unvisited'
+    if (
+      preview.status === 'valid_visited' ||
+      preview.status === 'blocked_fc' ||
+      isEndOfAllVisitedTable
+    ) {
+      slotsByGap.set(gapIndex, { targetIndex, preview })
+      markFlankingVisitedWaypointsVisible(
+        rows,
+        visibleVisitedRowIndices,
+        gapIndex - 1,
+        gapIndex,
+        lastVisitedIndex,
+      )
+    }
+  }
+
+  return { slotsByGap, visibleVisitedRowIndices }
+}
+
+function buildGrabbedWaypointTableItems(
+  rows: expedition.RowView[],
+  heldIndex: number,
+  lastVisitedIndex: number,
+): PlannerTableItem[] {
+  const { slotsByGap, visibleVisitedRowIndices } = collectVisitedDropSlotsAndVisibleRows(
+    rows,
+    heldIndex,
+    lastVisitedIndex,
+  )
+  const items: PlannerTableItem[] = []
+  let collapseStart: number | null = null
+
+  for (let index = 0; index < rows.length; index++) {
+    const slotBefore = slotsByGap.get(index)
+    if (slotBefore) {
+      if (collapseStart !== null) {
+        items.push(buildCollapsedVisitedItem(rows, collapseStart, index - 1))
+        collapseStart = null
+      }
+      items.push({
+        kind: 'drop_slot',
+        gapIndex: index,
+        targetIndex: slotBefore.targetIndex,
+        preview: slotBefore.preview,
+        key: `drop-slot-${index}`,
+      })
+    }
+
+    const rowView = rows[index]
+    if (!rowView?.row) continue
+    const isVisitedZone = index <= lastVisitedIndex
+    if (isVisitedZone && !visibleVisitedRowIndices.has(index)) {
+      if (collapseStart === null) collapseStart = index
+      continue
+    }
+
+    if (collapseStart !== null) {
+      items.push(buildCollapsedVisitedItem(rows, collapseStart, index - 1))
+      collapseStart = null
+    }
+
+    items.push({
+      kind: rowView.row.rowType === 'region' ? 'region' : 'waypoint',
+      rowView,
+      index,
+      key: `${rowView.row.rowType === 'region' ? 'region' : 'row'}-${rowView.row.id}`,
+    })
+  }
+
+  if (collapseStart !== null) {
+    items.push(buildCollapsedVisitedItem(rows, collapseStart, lastVisitedIndex))
+  }
+
+  const slotAtTableEnd = slotsByGap.get(rows.length)
+  if (slotAtTableEnd) {
+    items.push({
+      kind: 'drop_slot',
+      gapIndex: rows.length,
+      targetIndex: slotAtTableEnd.targetIndex,
+      preview: slotAtTableEnd.preview,
+      key: `drop-slot-${rows.length}`,
+    })
+  }
+
+  return items
+}
+
 /**
  * buildPlannerTableItems flattens an expedition plan's rows and any expanded
- * waypoint telemetry drawers into a single renderable sequence.
+ * waypoint telemetry drawers into a single renderable sequence. When a waypoint
+ * is grabbed in an active expedition, invalid visited stretches are collapsed
+ * and dashed drop-slot rows are inserted at valid or FC-blocked historical gaps.
  */
 export function buildPlannerTableItems(
   plan: expedition.PlanView | null,
   expandedRowIds: Record<number, boolean>,
   isPlanning: boolean,
+  heldOrDraggedIndex: number | null = null,
+  lastVisitedIndex = -1,
 ): PlannerTableItem[] {
   if (!plan || !plan.rows) return []
+  const rows = plan.rows ?? []
+  if (
+    !isPlanning &&
+    heldOrDraggedIndex !== null &&
+    heldOrDraggedIndex >= 0 &&
+    heldOrDraggedIndex < rows.length &&
+    rows[heldOrDraggedIndex]?.row?.rowType === 'waypoint' &&
+    lastVisitedIndex >= 0
+  ) {
+    return buildGrabbedWaypointTableItems(rows, heldOrDraggedIndex, lastVisitedIndex)
+  }
+
   const items: PlannerTableItem[] = []
-  ;(plan.rows ?? []).forEach((rowView, index) => {
+  rows.forEach((rowView, index) => {
     if (!rowView?.row) return
     const row = rowView.row
     if (row.rowType === 'region') {

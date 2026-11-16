@@ -43,10 +43,6 @@ type SidebarStats struct {
 	Adjustments            stats.Metrics              `json:"adjustments"` // manual
 	Expedition             stats.Metrics              `json:"expedition"`  // live + adjustments
 	AllJournals            stats.Metrics              `json:"allJournals"` // all ingested journal events (unfiltered)
-	BaselineEnabled        bool                       `json:"baselineEnabled"`
-	BaselineSource         string                     `json:"baselineSource"`
-	Baseline               stats.Metrics              `json:"baseline"`
-	Lifetime               stats.Metrics              `json:"lifetime"`               // baseline + expedition
 	Realization            stats.RealizationBreakdown `json:"realization"`            // expedition realized earnings and losses (mode-filtered)
 	AllJournalsRealization stats.RealizationBreakdown `json:"allJournalsRealization"` // all-time realized earnings and losses across all journals (unfiltered)
 	CarrierCost            CarrierCostBreakdown       `json:"carrierCost"`
@@ -212,16 +208,13 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		return SidebarStats{}, getExpeditionError
 	}
 	sidebar := SidebarStats{
-		ExpeditionID:    expeditionRecord.ID,
-		Status:          expeditionRecord.Status,
-		Started:         expeditionRecord.StartTimestamp != "",
-		Start:           expeditionRecord.StartTimestamp,
-		End:             expeditionRecord.EndTimestamp,
-		FilterActive:    filter.Enabled,
-		Adjustments:     expeditionRecord.Adjustments,
-		BaselineEnabled: expeditionRecord.BaselineEnabled,
-		BaselineSource:  expeditionRecord.BaselineSource,
-		Baseline:        expeditionRecord.Baseline,
+		ExpeditionID: expeditionRecord.ID,
+		Status:       expeditionRecord.Status,
+		Started:      expeditionRecord.StartTimestamp != "",
+		Start:        expeditionRecord.StartTimestamp,
+		End:          expeditionRecord.EndTimestamp,
+		FilterActive: filter.Enabled,
+		Adjustments:  expeditionRecord.Adjustments,
 	}
 	statsEngine := stats.NewEngine(app.db)
 	// Mode filters apply only to the current expedition, never to All Time.

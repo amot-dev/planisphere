@@ -8,8 +8,8 @@ import { HoverOpenInLinks } from './widgets/HoverOpenInLinks'
 import { RowManipulationButtons } from './widgets/RowManipulationButtons'
 
 /**
- * WaypointRowItemProps defines the row data, interaction flags, and event
- * callbacks for a single waypoint row in the flight planner table.
+ * WaypointRowItemProps defines the row data, interaction flags, drop-slot preview,
+ * and event callbacks for a single waypoint row in the flight planner table.
  */
 export interface WaypointRowItemProps {
   rowView: expedition.RowView
@@ -17,8 +17,12 @@ export interface WaypointRowItemProps {
   isPlanning: boolean
   isLocked: boolean
   isFcStopLocked?: boolean
+  isActivelyRoutedFcStop?: boolean
+  lastFcArrivedIndex?: number
   isBeingDragged: boolean
-  isDragTarget: boolean
+  isDragTarget?: boolean
+  topGapHighlight?: boolean
+  bottomGapHighlight?: boolean
   isExpanded: boolean
   isNextFcStop: boolean
   hasActiveCarrierRoute: boolean
@@ -27,7 +31,7 @@ export interface WaypointRowItemProps {
   copiedSystemRowId: number | null
   insertMenuOpen: boolean
   lastVisitedIndex: number
-  totalRows: number
+  totalRows?: number
   rowStyle: CSSProperties
   dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
@@ -37,11 +41,14 @@ export interface WaypointRowItemProps {
   onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
   onCopySystem: (id: number, name: string) => void
   onToggleFcStop: (row: expedition.Row) => void
+  onOverrideFcArrived?: (rowView: expedition.RowView) => void
   onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void
   onToggleInsertMenu: (id: number) => void
   onInsert: (afterId: number, type: 'waypoint' | 'region') => void
-  onMove: (id: number, targetIndex: number) => void
+  onMove?: (id: number, targetIndex: number) => void
   onDelete: (id: number) => void
+  onHoldStart?: (index: number) => void
+  onHoldEnd?: () => void
   onDragStart: (index: number, id: number, event: React.DragEvent) => void
   onDragEnd: () => void
 }
@@ -119,6 +126,31 @@ function renderDistanceValue(
   )
 }
 
+function renderTelemetryCellContent(
+  isVisited: boolean,
+  isNext: boolean,
+  rowView: expedition.RowView,
+  row: expedition.Row,
+  playerSystem?: string,
+) {
+  if (isVisited) {
+    return (
+      <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
+        <span className="font-extrabold uppercase tracking-wider text-[#FF7100] shrink-0">
+          LOGGED VISIT
+        </span>
+        <span className="text-[#a6907c] shrink-0">{rowView.visitedAtGalactic}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-[#a6907c] leading-5">
+      {renderDistanceValue(isNext, rowView, row, playerSystem)}
+    </div>
+  )
+}
+
 /**
  * WaypointRowItem renders a single waypoint row inside the expedition flight
  * planner table, supporting inline editing, Fleet Carrier stop badges, and drag-reorder.
@@ -129,8 +161,12 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   isPlanning,
   isLocked,
   isFcStopLocked = false,
+  isActivelyRoutedFcStop = false,
+  lastFcArrivedIndex = -1,
   isBeingDragged,
-  isDragTarget,
+  isDragTarget = false,
+  topGapHighlight = false,
+  bottomGapHighlight = false,
   isExpanded,
   isNextFcStop,
   hasActiveCarrierRoute,
@@ -139,7 +175,6 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   copiedSystemRowId,
   insertMenuOpen,
   lastVisitedIndex,
-  totalRows,
   rowStyle,
   dropProps,
   showNotes = true,
@@ -149,16 +184,37 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   onFieldBlur,
   onCopySystem,
   onToggleFcStop,
+  onOverrideFcArrived,
   onOpenCarrierRoutePrompt,
   onToggleInsertMenu,
   onInsert,
-  onMove,
   onDelete,
+  onHoldStart,
+  onHoldEnd,
   onDragStart,
   onDragEnd,
 }: WaypointRowItemProps) {
   const row = rowView.row
   const isVisited = rowView.visitState === 'visited'
+  const isOriginRow = !isPlanning && rowView.number === 1
+  const isFcArrivedStop = !isPlanning && Boolean(row.fcStop && row.fcArrived)
+  const isSystemLocked =
+    isLocked || isVisited || isOriginRow || isActivelyRoutedFcStop || isFcArrivedStop
+  const allowInsertWaypoint = isPlanning || index >= lastVisitedIndex
+  const allowDelete = !isOriginRow
+  const canReorder = !isLocked && !isOriginRow && !isActivelyRoutedFcStop
+  const activeRouteLockReason = isActivelyRoutedFcStop
+    ? 'Locked while Fleet Carrier route to this waypoint is active'
+    : undefined
+  const systemLockTitle =
+    activeRouteLockReason ||
+    (isFcArrivedStop && !isVisited && !isOriginRow
+      ? 'Locked while Fleet Carrier is marked arrived at this waypoint'
+      : row.systemName)
+  const canAddFcStop = !isLocked && !isFcStopLocked && (isPlanning || index > lastFcArrivedIndex)
+  const canRemoveFcStop = !isLocked && !isFcStopLocked && (isPlanning || !row.fcArrived)
+  const canOverrideFcBadge = !isPlanning && !isLocked && !isFcStopLocked && Boolean(onOverrideFcArrived)
+
   const hasDrawer = !isPlanning && rowView.visitState !== 'future'
   const isNext =
     Boolean(isNextWaypoint ?? (rowView.visitState === 'current' || rowView.isNextWaypoint)) &&
@@ -184,28 +240,39 @@ export const WaypointRowItem = memo(function WaypointRowItem({
     onFieldBlur(row, fieldName, fieldValue)
   }
 
+  const rowDropHighlightClass = isBeingDragged
+    ? 'bg-[#261608] *:bg-[#261608] *:shadow-[inset_0_2px_0_0_#FF7100,inset_0_-2px_0_0_#FF7100]'
+    : topGapHighlight
+      ? '*:shadow-[inset_0_2px_0_0_#00D2FF]'
+      : bottomGapHighlight
+        ? '*:shadow-[inset_0_-2px_0_0_#00D2FF]'
+        : isDragTarget
+          ? 'outline-2 outline-[#00D2FF]'
+          : ''
+
   return (
     <tr
       style={rowStyle}
       {...dropProps}
       data-row-id={row.id}
       data-row-index={index}
+      data-being-dragged={isBeingDragged ? 'true' : undefined}
       data-last-visited={!isPlanning && index === lastVisitedIndex ? 'true' : undefined}
       className={`group align-top ${
-        isBeingDragged ? 'opacity-40' : ''
-      } ${isDragTarget ? 'outline-2 outline-[#00D2FF]' : ''} ${
         isVisited
           ? 'bg-[#120e09] hover:bg-[#1b140d] text-[#F4ECE4]'
           : 'bg-[#090705] hover:bg-[#16100b] text-[#F4ECE4]'
-      }`}
+      } ${rowDropHighlightClass}`}
     >
       {/* Expand Chevron */}
       {!isPlanning && (
         <td
           className={`px-1 py-1.5 text-center align-top ${
-            isVisited
-              ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
-              : 'border-b border-[#24180e]'
+            isBeingDragged
+              ? 'border-l-2 border-l-[#FF7100] border-b border-[#24180e]'
+              : isVisited
+                ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
+                : 'border-b border-[#24180e]'
           }`}
         >
           <div className="h-7 flex items-center justify-center">
@@ -240,9 +307,11 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* Sequential Waypoint # */}
       <td
         className={`px-1.5 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top ${
-          isPlanning && isVisited
-            ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
-            : 'border-b border-[#24180e]'
+          isPlanning && isBeingDragged
+            ? 'border-l-2 border-l-[#FF7100] border-b border-[#24180e]'
+            : isPlanning && isVisited
+              ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
+              : 'border-b border-[#24180e]'
         }`}
       >
         <div className="h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5">
@@ -255,9 +324,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
         <div className="h-7 flex items-center gap-2 min-w-0">
           <CoordStatusIndicator rowView={rowView} />
           <div className="flex-1 min-w-0 flex items-center gap-1 h-7">
-            {isLocked ? (
+            {isSystemLocked ? (
               <span
-                title={row.systemName}
+                title={systemLockTitle}
                 className="w-full h-7 flex items-center font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5"
               >
                 {row.systemName || '—'}
@@ -286,6 +355,11 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 }}
                 className="w-full h-7 bg-transparent px-1.5 py-[3px] border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none font-mono-tabular font-bold text-[#F4ECE4] placeholder:text-[#6e5b4b] select-text text-xs leading-5"
               />
+            )}
+            {isBeingDragged && (
+              <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-extrabold uppercase tracking-wider bg-[#FF7100] text-[#050506] shrink-0 select-none">
+                MOVING
+              </span>
             )}
             {row.systemName && (
               <button
@@ -360,6 +434,23 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   >
                     FC STOP
                   </span>
+                ) : canOverrideFcBadge ? (
+                  <button
+                    type="button"
+                    onClick={() => onOverrideFcArrived?.(rowView)}
+                    title={
+                      row.fcArrived
+                        ? 'Carrier has arrived at this waypoint (click to override)'
+                        : 'Carrier arrival pending (click to override)'
+                    }
+                    className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border cursor-pointer transition-colors ${
+                      row.fcArrived
+                        ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70 hover:border-[#FF7100]'
+                        : 'bg-[#120d09] text-[#a6907c] border-[#3d2816] hover:border-[#FF7100] hover:text-[#F4ECE4]'
+                    }`}
+                  >
+                    {row.fcArrived ? 'ARRIVED' : 'PENDING'}
+                  </button>
                 ) : (
                   <span
                     title={
@@ -404,7 +495,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   )
                 )}
 
-                {!isLocked && !isFcStopLocked && (
+                {canRemoveFcStop && (
                   <button
                     type="button"
                     onClick={() => onToggleFcStop(row)}
@@ -415,7 +506,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   </button>
                 )}
               </>
-            ) : !isLocked && !isFcStopLocked ? (
+            ) : canAddFcStop ? (
               <button
                 type="button"
                 onClick={() => onToggleFcStop(row)}
@@ -425,7 +516,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 + FC STOP
               </button>
             ) : (
-              <span className="h-5 inline-flex items-center justify-center text-[#6e5b4b] font-mono-tabular text-[10px]">—</span>
+              <span className="h-5 inline-flex items-center justify-center text-[#6e5b4b] font-mono-tabular text-[10px]">
+                —
+              </span>
             )}
           </div>
         </td>
@@ -433,49 +526,51 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
       {/* Visit Status / Galactic Timestamp */}
       <td className="px-3 py-1.5 align-top border-b border-[#24180e] whitespace-nowrap">
-        {isVisited ? (
-          <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
-            <span className="font-extrabold uppercase tracking-wider text-[#FF7100] shrink-0">
-              LOGGED VISIT
-            </span>
-            <span className="text-[#a6907c] shrink-0">
-              {rowView.visitedAtGalactic}
-            </span>
-          </div>
-        ) : (
-          <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-[#a6907c] leading-5">
-            {renderDistanceValue(isNext, rowView, row, playerSystem)}
-          </div>
-        )}
+        {renderTelemetryCellContent(isVisited, isNext, rowView, row, playerSystem)}
       </td>
 
       {/* External Links + Row Manipulation + Drag Handle */}
-      <td className="w-[380px] px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
+      <td className="w-[320px] px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
         <div className="h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap">
           <HoverOpenInLinks rowView={rowView} />
           {!isLocked && (
             <>
               <RowManipulationButtons
-                index={index}
-                minIndex={lastVisitedIndex + 1}
-                total={totalRows}
                 rowId={row.id}
                 insertMenuOpen={insertMenuOpen}
+                allowInsertWaypoint={allowInsertWaypoint}
+                allowDelete={allowDelete}
+                deleteDisabledReason={activeRouteLockReason}
                 onToggleInsertMenu={() => onToggleInsertMenu(row.id)}
                 onInsert={(type) => onInsert(row.id, type)}
-                onMove={(targetIndex) => onMove(row.id, targetIndex)}
                 onDelete={() => onDelete(row.id)}
               />
-              <button
-                type="button"
-                draggable={true}
-                onDragStart={(event) => onDragStart(index, row.id, event)}
-                onDragEnd={onDragEnd}
-                title="Drag to reorder waypoint"
-                className="h-5 px-1.5 inline-flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] cursor-grab active:cursor-grabbing font-mono-tabular select-none border border-[#2e1f12] bg-[#140e09] hover:bg-[#24180e] text-xs shrink-0"
-              >
-                ⋮⋮
-              </button>
+              {!isOriginRow && (
+                <button
+                  type="button"
+                  disabled={!canReorder}
+                  draggable={canReorder}
+                  onPointerDown={() => {
+                    if (canReorder) onHoldStart?.(index)
+                  }}
+                  onPointerUp={() => onHoldEnd?.()}
+                  onDragStart={(event) => {
+                    if (canReorder) onDragStart(index, row.id, event)
+                  }}
+                  onDragEnd={onDragEnd}
+                  title={
+                    activeRouteLockReason ||
+                    'Hold to preview valid drop positions, drag to reorder waypoint'
+                  }
+                  className={`h-5 px-1.5 inline-flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed cursor-grab active:cursor-grabbing font-mono-tabular select-none border text-xs shrink-0 ${
+                    isBeingDragged
+                      ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] font-bold'
+                      : 'text-[#a6907c] hover:text-[#FF7100] border-[#2e1f12] bg-[#140e09] hover:bg-[#24180e]'
+                  }`}
+                >
+                  ⋮⋮
+                </button>
+              )}
             </>
           )}
         </div>
@@ -483,4 +578,3 @@ export const WaypointRowItem = memo(function WaypointRowItem({
     </tr>
   )
 })
-

@@ -18,15 +18,12 @@ const (
 	VisitFuture  = "future"
 )
 
-// Transition is a ship or mode switch that happened during a leg.
+// Transition is a ship switch that happened during a leg.
 type Transition struct {
-	Kind       string `json:"kind"` // "mode" | "ship"
+	Kind       string `json:"kind"` // "ship"
 	At         string `json:"at"`
 	AtGalactic string `json:"atGalactic"`
-	From       string `json:"from"`
 	To         string `json:"to"`
-	FromColor  string `json:"fromColor"`
-	ToColor    string `json:"toColor"`
 }
 
 // GECRef links a system to an EDAstro Galactic Exploration Catalog entry.
@@ -40,22 +37,23 @@ type GECRef struct {
 
 // RowView is a row enriched for display.
 type RowView struct {
-	Row               Row          `json:"row"`
-	Number            int          `json:"number"` // waypoint # (0 for region headers)
-	RegionName        string       `json:"regionName"`
-	DetectedRegionID  int          `json:"detectedRegionId"` // region containing the coordinates
-	DetectedRegion    string       `json:"detectedRegion"`
-	VisitCount        int          `json:"visitCount"`
-	VisitState        string       `json:"visitState"`
-	VisitedAtGalactic string       `json:"visitedAtGalactic"`
-	DistFromPrevLy    *float64     `json:"distFromPrevLy,omitempty"`
-	DistFromCurrentLy *float64     `json:"distFromCurrentLy,omitempty"`
-	IsNextWaypoint    bool         `json:"isNextWaypoint,omitempty"`
-	Transitions       []Transition `json:"transitions"` // ships flown during the leg arriving at this waypoint
-	LegModeID         int64        `json:"legModeId"`
-	LegModeName       string       `json:"legModeName"`
-	LegModeColor      string       `json:"legModeColor"`
-	GEC               *GECRef      `json:"gec,omitempty"`
+	Row               Row               `json:"row"`
+	Number            int               `json:"number"` // waypoint # (0 for region headers)
+	RegionName        string            `json:"regionName"`
+	DetectedRegionID  int               `json:"detectedRegionId"` // region containing the coordinates
+	DetectedRegion    string            `json:"detectedRegion"`
+	VisitCount        int               `json:"visitCount"`
+	VisitState        string            `json:"visitState"`
+	VisitedAtGalactic string            `json:"visitedAtGalactic"`
+	DistFromPrevLy    *float64          `json:"distFromPrevLy,omitempty"`
+	DistFromCurrentLy *float64          `json:"distFromCurrentLy,omitempty"`
+	IsNextWaypoint    bool              `json:"isNextWaypoint,omitempty"`
+	Transitions       []Transition      `json:"transitions"` // ships flown during the leg arriving at this waypoint
+	LegModeID         int64             `json:"legModeId"`
+	LegModeName       string            `json:"legModeName"`
+	LegModeColor      string            `json:"legModeColor"`
+	GEC               *GECRef           `json:"gec,omitempty"`
+	DropPreviews      []DropSlotPreview `json:"dropPreviews,omitempty"`
 }
 
 // PlanView is the full planner sheet.
@@ -92,6 +90,7 @@ type planBuildContext struct {
 	defaultModeID      int64
 	previousVisitByID  map[int64]string
 	visitCountBySystem map[string]int
+	dropPreviewsByRow  [][]DropSlotPreview
 	gecLookup          GECLookup
 }
 
@@ -193,6 +192,13 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		}
 		if buildCtx.jumpTimestamps, jumpError = loadJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); jumpError != nil {
 			return nil, jumpError
+		}
+		if expeditionRecord.Status == StatusActive {
+			arrivals, arrivalsError := loadCachedExpeditionArrivals(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+			if arrivalsError != nil {
+				return nil, arrivalsError
+			}
+			buildCtx.dropPreviewsByRow = computePlanDropPreviews(rows, expeditionRecord.StartTimestamp, arrivals)
 		}
 	}
 
@@ -358,6 +364,9 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 		waypointNumber++
 		planView.WaypointCount++
 		rowViewItem := buildWaypointRowView(buildCtx, rowItem, waypointNumber, previousWaypoint, &planView)
+		if i < len(buildCtx.dropPreviewsByRow) {
+			rowViewItem.DropPreviews = buildCtx.dropPreviewsByRow[i]
+		}
 		rowCopy := rowItem
 		previousWaypoint = &rowCopy
 		planView.Rows = append(planView.Rows, rowViewItem)

@@ -62,6 +62,15 @@ func firstWaypoint(rows []Row) int {
 	return -1
 }
 
+func nextWaypointAfter(rows []Row, afterIndex int) int {
+	for i := afterIndex + 1; i < len(rows); i++ {
+		if rows[i].IsWaypoint() {
+			return i
+		}
+	}
+	return -1
+}
+
 // StartCandidates lists every recorded visit to Waypoint #1's system, newest first.
 func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, candidates []Arrival, loadError error) {
 	rows, listError := ListRows(queryer, expeditionID)
@@ -119,9 +128,6 @@ func Arm(transaction *sql.Tx, expeditionID int64) error {
 	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, nil, nil, ed.NowISO()); lifecycleError != nil {
 		return lifecycleError
 	}
-	if clearError := clearVisits(transaction, expeditionID); clearError != nil {
-		return clearError
-	}
 	if initError := initCarrierStops(transaction, expeditionID); initError != nil {
 		return initError
 	}
@@ -139,7 +145,7 @@ func initCarrierStops(queryer db.Queryer, expeditionID int64) error {
 	_, execError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 1
 		WHERE id = (
 			SELECT id FROM expedition_rows
-			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1
+			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1 AND TRIM(system_name) != ''
 			ORDER BY position ASC LIMIT 1
 		)`, expeditionID)
 	return execError
@@ -190,14 +196,6 @@ func Reopen(transaction *sql.Tx, expeditionID int64) error {
 	return reevalError
 }
 
-// ResetToPlanning clears the start timestamp and all visit state.
-func ResetToPlanning(transaction *sql.Tx, expeditionID int64) error {
-	if lifecycleError := setLifecycle(transaction, expeditionID, StatusPlanning, nil, nil, nil); lifecycleError != nil {
-		return lifecycleError
-	}
-	return clearVisits(transaction, expeditionID)
-}
-
 func resolveArmedExpeditionStart(queryer db.Queryer, expeditionRecord *Expedition, rows *[]Row, firstWaypointIndex int) (bool, error) {
 	if expeditionRecord.ArmedAt == "" {
 		return false, nil
@@ -241,13 +239,102 @@ func matchesNormalizedWaypoint(rowItem *Row, normalizedRowSystem string, arrival
 	return normalizedRowSystem == normalizedArrivalSystem
 }
 
-func findMatchingUnvisitedWaypoint(rows []Row, normalizedSystemNames []string, arrivalSystemAddress int64, normalizedArrivalSystem string) int {
-	for i := range rows {
-		if rows[i].VisitedAt == "" && matchesNormalizedWaypoint(&rows[i], normalizedSystemNames[i], arrivalSystemAddress, normalizedArrivalSystem) {
-			return i
+func loadExpeditionArrivals(queryer db.Queryer, startTimestamp, endTimestamp string) ([]Arrival, error) {
+	if endTimestamp != "" {
+		return loadArrivals(queryer, `timestamp >= ? AND timestamp <= ?`, startTimestamp, endTimestamp)
+	}
+	return loadArrivals(queryer, `timestamp >= ?`, startTimestamp)
+}
+
+func loadCachedExpeditionArrivals(queryer db.Queryer, startTimestamp, endTimestamp string) ([]Arrival, error) {
+	cacheKey := fmt.Sprintf("%s|%s", startTimestamp, endTimestamp)
+	shipCacheMu.Lock()
+	if lastMaxJournalID >= 0 {
+		if cachedArrivals, ok := arrivalsCacheMap[cacheKey]; ok {
+			shipCacheMu.Unlock()
+			return cachedArrivals, nil
 		}
 	}
-	return -1
+	capturedMaxID := lastMaxJournalID
+	shipCacheMu.Unlock()
+
+	arrivals, loadError := loadExpeditionArrivals(queryer, startTimestamp, endTimestamp)
+	if loadError != nil {
+		return nil, loadError
+	}
+
+	shipCacheMu.Lock()
+	if capturedMaxID >= 0 && lastMaxJournalID == capturedMaxID {
+		arrivalsCacheMap[cacheKey] = arrivals
+	}
+	shipCacheMu.Unlock()
+	return arrivals, nil
+}
+
+// prepareNormalizedTransitions extracts the origin visit event UID and filters
+// arrivals into chronological system-change transitions with normalized names.
+func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startTimestamp string, arrivals []Arrival) (string, []Arrival) {
+	originVisitUID := ""
+	lastSystemName := normalizedOriginSystem
+	for _, arrival := range arrivals {
+		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
+		if arrival.Timestamp == startTimestamp && matchesNormalizedWaypoint(originRow, normalizedOriginSystem, arrival.SystemAddress, normalizedArrivalSystem) {
+			originVisitUID = arrival.UID
+			if normalizedArrivalSystem != "" {
+				lastSystemName = normalizedArrivalSystem
+			}
+			break
+		}
+	}
+
+	transitions := make([]Arrival, 0, len(arrivals))
+	for _, arrival := range arrivals {
+		if arrival.Timestamp == startTimestamp && arrival.UID == originVisitUID {
+			continue
+		}
+		if arrival.Timestamp <= startTimestamp {
+			continue
+		}
+		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
+		if normalizedArrivalSystem == "" || normalizedArrivalSystem == lastSystemName {
+			continue // not an actual change of system
+		}
+		lastSystemName = normalizedArrivalSystem
+		transitionItem := arrival
+		transitionItem.SystemName = normalizedArrivalSystem
+		transitions = append(transitions, transitionItem)
+	}
+	return originVisitUID, transitions
+}
+
+func replayNormalizedTransitions(
+	rows []Row,
+	normalizedSystemNames []string,
+	firstWaypointIndex int,
+	startTimestamp string,
+	originVisitUID string,
+	transitions []Arrival,
+	modeTimeline *modes.Timeline,
+) []Row {
+	rows[firstWaypointIndex].VisitedAt = startTimestamp
+	rows[firstWaypointIndex].VisitEventUID = originVisitUID
+	nextWaypointIndex := nextWaypointAfter(rows, firstWaypointIndex)
+
+	for i := range transitions {
+		if nextWaypointIndex < 0 {
+			break
+		}
+		arrival := &transitions[i]
+		if !matchesNormalizedWaypoint(&rows[nextWaypointIndex], normalizedSystemNames[nextWaypointIndex], arrival.SystemAddress, arrival.SystemName) {
+			continue
+		}
+		rows[nextWaypointIndex].VisitedAt, rows[nextWaypointIndex].VisitEventUID = arrival.Timestamp, arrival.UID
+		if rows[nextWaypointIndex].LegModeID == 0 && modeTimeline != nil {
+			rows[nextWaypointIndex].LegModeID = modeTimeline.ModeAt(arrival.Timestamp)
+		}
+		nextWaypointIndex = nextWaypointAfter(rows, nextWaypointIndex)
+	}
+	return rows
 }
 
 func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp string, arrivals []Arrival, modeTimeline *modes.Timeline) []Row {
@@ -257,58 +344,29 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 			normalizedSystemNames[i] = strings.ToLower(strings.TrimSpace(rows[i].SystemName))
 		}
 	}
+	originVisitUID, transitions := prepareNormalizedTransitions(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], startTimestamp, arrivals)
+	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, transitions, modeTimeline)
+}
 
-	// Waypoint #1 is visited at the start timestamp.
-	rows[firstWaypointIndex].VisitedAt = startTimestamp
-	lastSystemName := normalizedSystemNames[firstWaypointIndex]
-	for _, arrival := range arrivals {
-		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
-		if arrival.Timestamp == startTimestamp && matchesNormalizedWaypoint(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], arrival.SystemAddress, normalizedArrivalSystem) {
-			rows[firstWaypointIndex].VisitEventUID = arrival.UID
-			if normalizedArrivalSystem != "" {
-				lastSystemName = normalizedArrivalSystem
-			}
-			break
-		}
-	}
-	currentIndex := firstWaypointIndex
-
-	for _, arrival := range arrivals {
-		if arrival.Timestamp == startTimestamp && arrival.UID == rows[firstWaypointIndex].VisitEventUID {
+func reconcileEvaluatedRowState(rows []Row, originalRowsByID map[int64]Row) {
+	seenPendingFCStop := false
+	for i := range rows {
+		if !rows[i].IsWaypoint() {
 			continue
 		}
-		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
-		if normalizedArrivalSystem == "" || normalizedArrivalSystem == lastSystemName {
-			continue // not an actual change of system
+		originalRow := originalRowsByID[rows[i].ID]
+		if rows[i].VisitedAt == "" && originalRow.VisitedAt != "" {
+			rows[i].LegModeID = 0
 		}
-		lastSystemName = normalizedArrivalSystem
-		targetIndex := findMatchingUnvisitedWaypoint(rows, normalizedSystemNames, arrival.SystemAddress, normalizedArrivalSystem)
-		if targetIndex < 0 {
-			continue
-		}
-		rows[targetIndex].VisitedAt, rows[targetIndex].VisitEventUID = arrival.Timestamp, arrival.UID
-		if rows[targetIndex].LegModeID == 0 && modeTimeline != nil {
-			rows[targetIndex].LegModeID = modeTimeline.ModeAt(arrival.Timestamp)
-		}
-		nextUnvisitedWaypoint := -1
-		for i := currentIndex + 1; i < len(rows); i++ {
-			if i == targetIndex || (rows[i].IsWaypoint() && rows[i].VisitedAt == "") {
-				nextUnvisitedWaypoint = i
-				break
+		if rows[i].FCStop {
+			if seenPendingFCStop && rows[i].FCArrived {
+				rows[i].FCArrived = false
+			}
+			if !rows[i].FCArrived {
+				seenPendingFCStop = true
 			}
 		}
-		if targetIndex != nextUnvisitedWaypoint {
-			destinationIndex := currentIndex + 1
-			if targetIndex < currentIndex {
-				destinationIndex = currentIndex // removing target shifts current up by one
-			}
-			rows = moveTo(rows, targetIndex, destinationIndex)
-			normalizedSystemNames = moveTo(normalizedSystemNames, targetIndex, destinationIndex)
-			targetIndex = destinationIndex
-		}
-		currentIndex = targetIndex
 	}
-	return rows
 }
 
 func persistEvaluatedRowChanges(queryer db.Queryer, rows []Row, originalRowsByID map[int64]Row) (bool, error) {
@@ -350,20 +408,15 @@ func persistEvaluatedRowChanges(queryer db.Queryer, rows []Row, originalRowsByID
 	return changed, nil
 }
 
-// Reevaluate replays journal arrivals from the expedition start (in
-// chronological order) and recomputes which waypoints were visited, applying
-// the out-of-order auto-reordering rule:
+// Reevaluate replays journal arrivals from the expedition start in
+// chronological order and recomputes which waypoints were visited sequentially:
 //
 //   - Waypoint #1 is visited at the start timestamp.
-//   - Arrivals before the start timestamp are ignored entirely.
+//   - Arrivals at or before the start timestamp are ignored.
 //   - An arrival only counts when the system differs from the previous
 //     arrival's system (logging in where you already are is not a visit).
-//   - The first unvisited waypoint matching the arrival is marked visited; if
-//     it is not directly after the current (last visited) waypoint it is moved
-//     there, shifting the skipped waypoints down.
-//
-// The replay is deterministic and idempotent: running it again over the
-// reordered plan yields the same result. It returns whether anything changed.
+//   - Only the immediate next unvisited waypoint can be completed by an arrival;
+//     subsequent waypoints wait until all preceding waypoints have been visited.
 func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	expeditionRecord, getError := Get(queryer, expeditionID)
 	if getError != nil {
@@ -401,18 +454,13 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		return false, fmt.Errorf("load mode timeline: %w", timelineError)
 	}
 
-	var arrivals []Arrival
-	var arrivalsError error
-	if expeditionRecord.EndTimestamp != "" {
-		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ? AND timestamp <= ?`, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-	} else {
-		arrivals, arrivalsError = loadArrivals(queryer, `timestamp >= ?`, expeditionRecord.StartTimestamp)
-	}
+	arrivals, arrivalsError := loadExpeditionArrivals(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
 	if arrivalsError != nil {
 		return false, arrivalsError
 	}
 
 	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals, modeTimeline)
+	reconcileEvaluatedRowState(rows, originalRowsByID)
 	changed, persistError := persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
 	if changed {
 		InvalidateVisitCache()

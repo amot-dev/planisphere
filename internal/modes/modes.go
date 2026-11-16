@@ -247,12 +247,6 @@ func Switch(transaction *sql.Tx, modeID int64, atTimestamp string) error {
 	return SetWindow(transaction, 0, modeID, atTimestamp, "")
 }
 
-// DeleteWindow removes a window.
-func DeleteWindow(queryer db.Queryer, windowID int64) error {
-	_, execError := queryer.Exec(`DELETE FROM mode_windows WHERE id = ?`, windowID)
-	return execError
-}
-
 // DefaultFallbackModeID returns the mode ID used whenever no explicit mode
 // window covers a timestamp (prefers the default "Travel" mode).
 func DefaultFallbackModeID(queryer db.Queryer) int64 {

@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { WaypointRowItem } from './WaypointRowItem'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
+import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
 import { expedition } from '../../../wailsjs/go/models'
 
 describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () => {
@@ -501,6 +502,273 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     })
     expect(journalRowHtml).toContain('title="Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)"')
+  })
+
+  it('locks star system on visited rows while keeping manipulation controls on N > 1 and locking Origin #1', () => {
+    const visitedSecondHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 41,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Alpha Centauri',
+          visitedAt: '3312-01-10T10:00:00Z',
+        },
+        number: 2,
+        visitState: 'visited',
+        visitedAtGalactic: '3312-01-10 10:00 UTC',
+      }),
+      index: 1,
+      isLocked: false,
+      lastVisitedIndex: 2,
+      insertMenuOpen: true,
+    })
+
+    // System name is locked (rendered as span, not input)
+    expect(visitedSecondHtml).not.toContain('placeholder="Star System"')
+    // Row manipulation buttons (+, drag handle, delete) are present, while up/down buttons are absent
+    expect(visitedSecondHtml).toContain('title="Insert row below"')
+    expect(visitedSecondHtml).toContain('title="Hold to preview valid drop positions, drag to reorder waypoint"')
+    expect(visitedSecondHtml).toContain('title="Delete row"')
+    expect(visitedSecondHtml).not.toContain('↑')
+    expect(visitedSecondHtml).not.toContain('↓')
+    // Insert menu before lastVisitedIndex allows region headers and shows waypoint hint
+    expect(visitedSecondHtml).toContain('+ Insert Region Header Below')
+    expect(visitedSecondHtml).toContain('Add new waypoints in the unvisited section and drag them into valid past slots.')
+
+    const originHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 40,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Sol',
+          visitedAt: '3312-01-01T00:00:00Z',
+        },
+        number: 1,
+        visitState: 'visited',
+        visitedAtGalactic: '3312-01-01 00:00 UTC',
+      }),
+      index: 0,
+      isLocked: false,
+      lastVisitedIndex: 2,
+    })
+
+    // Origin #1 hides drag and delete controls
+    expect(originHtml).toContain('title="Insert row below"')
+    expect(originHtml).not.toContain('title="Hold to preview valid drop positions, drag to reorder waypoint"')
+    expect(originHtml).not.toContain('title="Delete row"')
+  })
+
+  it('renders dashed drop-slot rows, collapsed visited summary rows, and unvisited gap line highlights during hold/drag', () => {
+    const baseRow = expedition.RowView.createFrom({
+      row: {
+        id: 50,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Rohini',
+      },
+      number: 3,
+      visitState: 'future',
+      distFromPrevLy: 120.0,
+    })
+
+    // Unvisited row preserves normal distance telemetry and shows top/bottom gap lines when hovered
+    const topGapRowHtml = renderRowItem({
+      rowView: baseRow,
+      topGapHighlight: true,
+    })
+    expect(topGapRowHtml).toContain('*:shadow-[inset_0_2px_0_0_#00D2FF]')
+    expect(topGapRowHtml).toContain('120.0 Ly')
+    expect(topGapRowHtml).not.toContain('UNVISITED SLOT')
+
+    const bottomGapRowHtml = renderRowItem({
+      rowView: baseRow,
+      bottomGapHighlight: true,
+    })
+    expect(bottomGapRowHtml).toContain('*:shadow-[inset_0_-2px_0_0_#00D2FF]')
+
+    const grabbedRowHtml = renderRowItem({
+      rowView: baseRow,
+      isBeingDragged: true,
+    })
+    expect(grabbedRowHtml).toContain('data-being-dragged="true"')
+    expect(grabbedRowHtml).toContain('MOVING')
+    expect(grabbedRowHtml).toContain('*:shadow-[inset_0_2px_0_0_#FF7100,inset_0_-2px_0_0_#FF7100]')
+
+    // Dashed valid historical drop-slot row
+    const historicalSlotHtml = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(PlannerDropSlotRow, {
+            gapIndex: 2,
+            visibleColumnCount: 8,
+            grabbedSystemName: 'LP 355-65',
+            preview: expedition.DropSlotPreview.createFrom({
+              targetIndex: 2,
+              status: 'valid_visited',
+              visitedAt: '2026-01-18T20:10:00Z',
+              visitedAtGalactic: '3312-01-18 20:10 UTC',
+            }),
+            isDragTarget: false,
+            onDragOver: () => {},
+            onDrop: () => {},
+          }),
+        ),
+      ),
+    )
+    expect(historicalSlotHtml).toContain('border-dashed border-[#00D2FF]/80')
+    expect(historicalSlotHtml).toContain('+ DROP LP 355-65 HERE')
+    expect(historicalSlotHtml).toContain('LOG VISIT')
+    expect(historicalSlotHtml).toContain('3312-01-18 20:10 UTC')
+
+    // Dashed orange FC-blocked drop-slot row
+    const fcBlockedSlotHtml = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(PlannerDropSlotRow, {
+            gapIndex: 1,
+            visibleColumnCount: 8,
+            grabbedSystemName: 'LP 355-65',
+            preview: expedition.DropSlotPreview.createFrom({
+              targetIndex: 1,
+              status: 'blocked_fc',
+            }),
+            isDragTarget: false,
+            onDragOver: () => {},
+            onDrop: () => {},
+          }),
+        ),
+      ),
+    )
+    expect(fcBlockedSlotHtml).toContain('border-dashed border-[#FF7100]')
+    expect(fcBlockedSlotHtml).toContain('FC STOP ORDER BLOCKED')
+
+    // Collapsed visited summary row
+    const collapsedRowHtml = renderToString(
+      createElement('table', null,
+        createElement('tbody', null,
+          createElement(PlannerCollapsedVisitedRow, {
+            visibleColumnCount: 8,
+            waypointCount: 6,
+            regionCount: 0,
+            firstWaypointNumber: 1,
+            firstSystemName: 'HR 839',
+            lastWaypointNumber: 6,
+            lastSystemName: 'BD+41 4773',
+          }),
+        ),
+      ),
+    )
+    expect(collapsedRowHtml).toContain('⋯ #01 HR 839 → #06 BD+41 4773')
+    expect(collapsedRowHtml).toContain('(6 visited waypoints collapsed) ⋯')
+  })
+
+  it('enforces Fleet Carrier stop rules: + FC STOP after lastFcArrivedIndex, remove only on PENDING, and lock active route target', () => {
+    const visitedAfterFcFrontierHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 61,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Gandharvi',
+          visitedAt: '3312-01-12T00:00:00Z',
+          fcStop: false,
+        },
+        number: 3,
+        visitState: 'visited',
+      }),
+      index: 2,
+      lastFcArrivedIndex: 1,
+      lastVisitedIndex: 2,
+    })
+    expect(visitedAfterFcFrontierHtml).toContain('+ FC STOP')
+
+    const visitedBeforeFcFrontierHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 60,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Rohini',
+          visitedAt: '3312-01-10T00:00:00Z',
+          fcStop: false,
+        },
+        number: 2,
+        visitState: 'visited',
+      }),
+      index: 1,
+      lastFcArrivedIndex: 2,
+      lastVisitedIndex: 2,
+    })
+    expect(visitedBeforeFcFrontierHtml).not.toContain('+ FC STOP')
+
+    const arrivedStopHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 62,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Colonia',
+          fcStop: true,
+          fcArrived: true,
+        },
+        number: 4,
+        visitState: 'future',
+      }),
+      index: 3,
+      lastFcArrivedIndex: 3,
+      lastVisitedIndex: 2,
+      onOverrideFcArrived: () => {},
+    })
+    expect(arrivedStopHtml).not.toContain('placeholder="Star System"')
+    expect(arrivedStopHtml).toContain('title="Locked while Fleet Carrier is marked arrived at this waypoint"')
+    expect(arrivedStopHtml).toContain('ARRIVED')
+    expect(arrivedStopHtml).toContain('Carrier has arrived at this waypoint (click to override)')
+    expect(arrivedStopHtml).not.toContain('Remove Fleet Carrier stop designation')
+
+    const pendingStopHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 63,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Sagittarius A*',
+          fcStop: true,
+          fcArrived: false,
+        },
+        number: 5,
+        visitState: 'future',
+      }),
+      index: 4,
+      lastFcArrivedIndex: 3,
+      lastVisitedIndex: 3,
+    })
+    expect(pendingStopHtml).toContain('PENDING')
+    expect(pendingStopHtml).toContain('Remove Fleet Carrier stop designation')
+
+    const activelyRoutedStopHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 64,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Beagle Point',
+          fcStop: true,
+          fcArrived: false,
+        },
+        number: 6,
+        visitState: 'future',
+      }),
+      index: 5,
+      isNextFcStop: true,
+      hasActiveCarrierRoute: true,
+      isActivelyRoutedFcStop: true,
+      lastFcArrivedIndex: 3,
+      lastVisitedIndex: 3,
+    })
+    expect(activelyRoutedStopHtml).toContain('ROUTING')
+    expect(activelyRoutedStopHtml).toContain('title="Locked while Fleet Carrier route to this waypoint is active"')
   })
 })
 

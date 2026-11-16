@@ -34,6 +34,7 @@ export function ExpeditionManageModal({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
@@ -77,6 +78,7 @@ export function ExpeditionManageModal({
   function handleDelete(expeditionId: number) {
     return runExpeditionAction(async () => {
       await DeleteExpedition(expeditionId)
+      setConfirmDeleteId(null)
       onRefresh()
     })
   }
@@ -175,33 +177,61 @@ export function ExpeditionManageModal({
                   )}
                 </button>
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleClone(expeditionItem.id)}
-                    title="Clone this expedition into a new expedition in the Planning phase"
-                    className="ed-btn-cyan"
-                  >
-                    CLONE
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(expeditionItem.id)
-                      setEditName(expeditionItem.name)
-                      setEditDescription(expeditionItem.description)
-                    }}
-                    className="ed-btn"
-                  >
-                    RENAME
-                  </button>
-                  {expeditions.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(expeditionItem.id)}
-                      className="ed-btn-danger"
-                    >
-                      DELETE
-                    </button>
+                  {confirmDeleteId === expeditionItem.id ? (
+                    <>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#ff4d3d] mr-1">
+                        Delete expedition?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="ed-btn"
+                      >
+                        CANCEL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(expeditionItem.id)}
+                        className="ed-btn-danger"
+                      >
+                        CONFIRM DELETE
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleClone(expeditionItem.id)}
+                        title="Clone this expedition into a new expedition in the Planning phase"
+                        className="ed-btn-cyan"
+                      >
+                        CLONE
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDeleteId(null)
+                          setEditingId(expeditionItem.id)
+                          setEditName(expeditionItem.name)
+                          setEditDescription(expeditionItem.description)
+                        }}
+                        className="ed-btn"
+                      >
+                        RENAME
+                      </button>
+                      {expeditions.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(null)
+                            setConfirmDeleteId(expeditionItem.id)
+                          }}
+                          className="ed-btn-danger"
+                        >
+                          DELETE
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </>

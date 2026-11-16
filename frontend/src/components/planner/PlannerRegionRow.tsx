@@ -12,91 +12,118 @@ export interface PlannerRegionRowProps {
   rowView: expedition.RowView
   index: number
   visibleColumnCount: number
+  isPlanning: boolean
   isLocked: boolean
   isBeingDragged: boolean
-  isDragTarget: boolean
+  isDragTarget?: boolean
+  topGapHighlight?: boolean
+  bottomGapHighlight?: boolean
   lastVisitedIndex: number
-  totalRows: number
   insertMenuOpen: boolean
   rowStyle: CSSProperties
   dropProps: HTMLAttributes<HTMLTableRowElement>
   onChangeRegion: (rowId: number, selectedRegionId: number) => void
   onToggleInsertMenu: () => void
   onInsert: (insertType: 'waypoint' | 'region') => void
-  onMove: (targetIndex: number) => void
   onDelete: () => void
+  onHoldStart: () => void
+  onHoldEnd: () => void
   onDragStart: (event: DragEvent<HTMLButtonElement>) => void
   onDragEnd: () => void
 }
 
 /**
  * PlannerRegionRow renders a full-width Galactic Region header row inside the
- * flight planner table with region selection and unvisited row controls.
+ * flight planner table with region selection and row controls.
  */
 export function PlannerRegionRow({
   expeditionId,
   rowView,
   index,
   visibleColumnCount,
+  isPlanning,
   isLocked,
   isBeingDragged,
-  isDragTarget,
+  isDragTarget = false,
+  topGapHighlight = false,
+  bottomGapHighlight = false,
   lastVisitedIndex,
-  totalRows,
   insertMenuOpen,
   rowStyle,
   dropProps,
   onChangeRegion,
   onToggleInsertMenu,
   onInsert,
-  onMove,
   onDelete,
+  onHoldStart,
+  onHoldEnd,
   onDragStart,
   onDragEnd,
 }: PlannerRegionRowProps) {
   const row = rowView.row
+  const allowInsertWaypoint = isPlanning || index >= lastVisitedIndex
+  const gapHighlightClass = isBeingDragged
+    ? 'bg-[#261608] *:bg-[#261608] *:shadow-[inset_0_2px_0_0_#FF7100,inset_0_-2px_0_0_#FF7100]'
+    : topGapHighlight
+      ? '*:shadow-[inset_0_2px_0_0_#00D2FF]'
+      : bottomGapHighlight
+        ? '*:shadow-[inset_0_-2px_0_0_#00D2FF]'
+        : isDragTarget
+          ? 'outline-2 outline-[#00D2FF]'
+          : ''
 
   return (
     <tr
       style={rowStyle}
       {...dropProps}
-      className={`group ed-header-bar ${
-        isBeingDragged ? 'opacity-40' : ''
-      } ${isDragTarget ? 'outline-2 outline-[#00D2FF]' : ''}`}
+      data-row-id={row.id}
+      data-row-index={index}
+      data-being-dragged={isBeingDragged ? 'true' : undefined}
+      className={`group ed-header-bar ${gapHighlightClass}`}
     >
-      {/* Just the Region Name and nothing else */}
+      {/* Region Name and optional MOVING badge */}
       <td colSpan={visibleColumnCount - 1} className="px-3 py-2 border-b border-[#3a2615]">
-        <RegionHeaderDropdown
-          expeditionId={expeditionId}
-          rowId={row.id}
-          currentRegionId={row.regionId}
-          regionName={rowView.regionName}
-          locked={isLocked}
-          onSelect={(selectedRegionId) => onChangeRegion(row.id, selectedRegionId)}
-        />
+        <div className="inline-flex items-center gap-2">
+          <RegionHeaderDropdown
+            expeditionId={expeditionId}
+            rowId={row.id}
+            currentRegionId={row.regionId}
+            regionName={rowView.regionName}
+            locked={isLocked}
+            onSelect={(selectedRegionId) => onChangeRegion(row.id, selectedRegionId)}
+          />
+          {isBeingDragged && (
+            <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-extrabold uppercase tracking-wider bg-[#FF7100] text-[#050506] shrink-0 select-none">
+              MOVING
+            </span>
+          )}
+        </div>
       </td>
 
-      <td className="w-[380px] px-3 py-2 text-right whitespace-nowrap border-b border-[#3a2615]">
+      <td className="w-[320px] px-3 py-2 text-right whitespace-nowrap border-b border-[#3a2615]">
         {!isLocked && (
           <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
             <RowManipulationButtons
-              index={index}
-              minIndex={lastVisitedIndex + 1}
-              total={totalRows}
               rowId={row.id}
               insertMenuOpen={insertMenuOpen}
+              allowInsertWaypoint={allowInsertWaypoint}
               onToggleInsertMenu={onToggleInsertMenu}
               onInsert={onInsert}
-              onMove={onMove}
               onDelete={onDelete}
             />
             <button
               type="button"
               draggable={true}
+              onPointerDown={onHoldStart}
+              onPointerUp={onHoldEnd}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               title="Drag to reposition Region Header"
-              className="h-5 px-1.5 inline-flex items-center justify-center text-[#FF7100] hover:text-[#ff9436] cursor-grab active:cursor-grabbing font-mono-tabular select-none border border-[#472e19] bg-[#16100b] hover:bg-[#24180e] text-xs shrink-0"
+              className={`h-5 px-1.5 inline-flex items-center justify-center cursor-grab active:cursor-grabbing font-mono-tabular select-none border text-xs shrink-0 ${
+                isBeingDragged
+                  ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] font-bold'
+                  : 'text-[#FF7100] hover:text-[#ff9436] border-[#472e19] bg-[#16100b] hover:bg-[#24180e]'
+              }`}
             >
               ⋮⋮
             </button>

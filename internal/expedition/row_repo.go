@@ -243,6 +243,15 @@ func UpdateRow(queryer db.Queryer, patch RowPatch) (systemChanged bool, updateEr
 	if patch.SystemName != nil && currentRow.RowType == RowWaypoint {
 		normalizedSystemName := strings.Join(strings.Fields(*patch.SystemName), " ")
 		if normalizedSystemName != currentRow.SystemName {
+			if currentRow.FCStop && currentRow.FCArrived {
+				expeditionRecord, expError := Get(queryer, currentRow.ExpeditionID)
+				if expError != nil {
+					return false, expError
+				}
+				if expeditionRecord.Status != StatusPlanning {
+					return false, errors.New("star system cannot be changed while fleet carrier is marked arrived")
+				}
+			}
 			systemChanged = true
 			if _, execError := queryer.Exec(`UPDATE expedition_rows SET system_name = ?, system_address = NULL, edsm_id = NULL,
 				x = NULL, y = NULL, z = NULL, coords_source = '', visited_at = NULL, visit_event_uid = NULL, updated_at = ?
@@ -279,6 +288,22 @@ func DeleteRow(transaction *sql.Tx, rowID int64) (int64, error) {
 	rowItem, getError := GetRow(transaction, rowID)
 	if getError != nil {
 		return 0, getError
+	}
+	expeditionRecord, expError := Get(transaction, rowItem.ExpeditionID)
+	if expError != nil {
+		return 0, expError
+	}
+	if expeditionRecord.Status == StatusCompleted {
+		return 0, errors.New("completed expedition rows cannot be deleted")
+	}
+	if expeditionRecord.Status != StatusPlanning && rowItem.IsWaypoint() {
+		existingRows, listExistingError := ListRows(transaction, rowItem.ExpeditionID)
+		if listExistingError != nil {
+			return 0, listExistingError
+		}
+		if firstIdx := firstWaypoint(existingRows); firstIdx >= 0 && existingRows[firstIdx].ID == rowID {
+			return 0, errors.New("waypoint #1 cannot be deleted after the expedition has started")
+		}
 	}
 	if _, deleteError := transaction.Exec(`DELETE FROM expedition_rows WHERE id = ?`, rowID); deleteError != nil {
 		return 0, deleteError
@@ -370,11 +395,46 @@ func MoveRow(transaction *sql.Tx, rowID int64, toIndex int) (int64, error) {
 	if getError != nil {
 		return 0, getError
 	}
+	expeditionRecord, expError := Get(transaction, rowItem.ExpeditionID)
+	if expError != nil {
+		return 0, expError
+	}
+	if expeditionRecord.Status == StatusCompleted {
+		return 0, errors.New("completed expedition rows cannot be reordered")
+	}
 	rows, listError := ListRows(transaction, rowItem.ExpeditionID)
 	if listError != nil {
 		return 0, listError
 	}
-	rows = moveTo(rows, indexOf(rows, rowID), toIndex)
+	fromIndex := indexOf(rows, rowID)
+	if fromIndex < 0 {
+		return 0, fmt.Errorf("row %d not found", rowID)
+	}
+	if toIndex < 0 {
+		toIndex = 0
+	}
+	if toIndex >= len(rows) {
+		toIndex = len(rows) - 1
+	}
+	if fromIndex == toIndex {
+		return rowItem.ExpeditionID, nil
+	}
+	if expeditionRecord.Status != StatusPlanning && rowItem.IsWaypoint() {
+		if expeditionRecord.StartTimestamp != "" {
+			preview, validateError := validateWaypointMove(transaction, expeditionRecord, rows, fromIndex, toIndex)
+			if validateError != nil {
+				return 0, validateError
+			}
+			if preview.ResetsFCArrived {
+				if _, resetError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE id = ?`, rowID); resetError != nil {
+					return 0, resetError
+				}
+			}
+		} else if firstIdx := firstWaypoint(rows); firstIdx >= 0 && (fromIndex == firstIdx || toIndex <= firstIdx) {
+			return 0, errors.New("waypoint #1 cannot be moved after the expedition has started")
+		}
+	}
+	rows = moveTo(rows, fromIndex, toIndex)
 	if touchError := touch(transaction, rowItem.ExpeditionID); touchError != nil {
 		return 0, touchError
 	}
