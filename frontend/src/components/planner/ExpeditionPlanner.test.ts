@@ -24,7 +24,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
   it('renders safely when plan is null without throwing hook mismatch or null access', () => {
     const html = renderPlanner(null)
 
-    expect(html).toContain('LOADING EXPEDITION FLIGHT PLAN')
+    expect(html).toContain('LOADING EXPEDITION...')
   })
 
   it('renders active expedition rows, expansion chevrons, consecutive legs without dividers, and last-visited centering marker', () => {
@@ -143,7 +143,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const html = renderPlanner(mockPlan)
 
     expect(html).toContain('Empty Survey')
-    expect(html).toContain('Add Waypoint')
+    expect(html).toContain('ADD WAYPOINT')
   })
 
   it('renders safely when plan.rows is null or missing', () => {
@@ -217,7 +217,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const html = renderPlanner(completedPlan)
 
     expect(html).toContain('Completed Voyage')
-    expect(html).toContain('Reopen Expedition')
+    expect(html).toContain('REOPEN')
     expect(html).toContain('COMPLETED ROUTE:')
     expect(html).toContain('10.3 Ly')
     expect(html).not.toContain('PLANNED ROUTE:')
@@ -296,8 +296,8 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const planningChevrons = html.match(/title="Toggle per-waypoint leg telemetry \/ distance drawer"/g)
     expect(planningChevrons).toBeNull()
     expect(html).not.toContain('data-last-visited="true"')
-    expect(html).toContain('Add Waypoint')
-    expect(html).toContain('Add Galactic Region Header')
+    expect(html).toContain('ADD WAYPOINT')
+    expect(html).toContain('ADD REGION HEADER')
     expect(html).toContain('h-48 shrink-0 pointer-events-none')
 
     // Header summary shows only Planned Route in planning mode
@@ -370,7 +370,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     // With only Waypoint #1 visited (visitedWaypointCount: 1), Complete button is disabled until Waypoint #2 is visited:
     expect(html).toContain(
-      'disabled="" title="Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete flight plan in Plans)"',
+      'disabled="" title="Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete expedition in Expeditions)"',
     )
 
     // Once Waypoint #2 is visited, Covered and Remaining update, Complete button becomes enabled,
@@ -389,7 +389,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(midflightHtml).toContain('4.3 Ly')
     expect(midflightHtml).toContain('REMAINING:')
     expect(midflightHtml).toContain('5.0 Ly')
-    expect(midflightHtml).toContain('title="Complete this expedition and finalize flight logs"')
+    expect(midflightHtml).toContain('>COMPLETE</button>')
     expect(midflightHtml).toMatch(/data-row-id="2"[^>]*data-last-visited="true"/)
     expect(midflightHtml).not.toMatch(/data-row-id="1"[^>]*data-last-visited="true"/)
   })
@@ -560,18 +560,18 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     })
 
     expect(manualWithStop).not.toContain('Cancel Remaining Route')
-    expect(manualWithStop).toContain('Close')
+    expect(manualWithStop).toContain('CLOSE')
     expect(manualWithStop).toContain('Existing jumps remain logged in your expedition statistics.')
     expect(manualWithStop).toContain('Sol')
     expect(manualWithStop).toContain('Colonia')
     expect(manualWithStop).toContain('value="412.5"')
     expect(manualWithStop).toContain('value="59"')
-    expect(manualWithStop).toContain('Mark FC Stop Arrival')
+    expect(manualWithStop).toContain('MARK FC STOP ARRIVAL')
     expect(manualWithStop).toContain(
       'Mark Fleet Carrier arrival at Colonia and close the carrier plotter',
     )
     expect(manualWithStop).not.toContain('ARRIVE AT WAYPOINT')
-    expect(manualWithStop).not.toMatch(/disabled=""[^>]*>Mark FC Stop Arrival/)
+    expect(manualWithStop).not.toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
 
     const manualWithoutStop = renderCarrierPanel({
       route: app.CarrierRouteResult.createFrom({
@@ -585,11 +585,11 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     expect(manualWithoutStop).toContain('Sol')
     expect(manualWithoutStop).toContain('???')
-    expect(manualWithoutStop).toContain('Mark FC Stop Arrival')
+    expect(manualWithoutStop).toContain('MARK FC STOP ARRIVAL')
     expect(manualWithoutStop).toContain(
       'No next Fleet Carrier stop designated in the expedition plan',
     )
-    expect(manualWithoutStop).toMatch(/disabled=""[^>]*>Mark FC Stop Arrival/)
+    expect(manualWithoutStop).toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
 
     const plottedSpanshRoute = app.CarrierRouteResult.createFrom({
       origin: 'Sol',

@@ -27,14 +27,14 @@ When an expedition spans months, you don't always fly the same way. Flight Modes
 
 - **Separate Travel Profiles:** Switch modes when you take a high-speed detour back to the Bubble so neutron highway jumps don't skew your expedition's average jump range or distance totals.
 - **Partial Filtering:** Toggle any mode in the sidebar between full inclusion, scan-only inclusion, or complete exclusion. Scan-only mode lets cartography and exobiology discoveries count toward your wallet while keeping travel mileage isolated.
-- **Per-Leg Tracking:** Assign flight modes to individual expedition legs to record how you traveled between each stop. Leg modes can always be changed later, even after a waypoint has been visited.
-- **Custom Modes:** Create your own flight modes in Settings with custom names, descriptions, and color tags.
+- **Per-Leg Tracking:** Assign flight modes to individual expedition legs to record how you travelled between each stop. Leg flight modes can always be changed later, even after a waypoint has been visited.
+- **Custom Flight Modes:** Create your own flight modes in Config with custom names, descriptions, and colour tags.
 
 ### Expedition Planning
 Plan your route stop by stop without juggling external spreadsheets.
 
-- **Multiple Plans and Cloning:** Create and switch between multiple expedition plans, or clone an existing expedition (preserving its waypoints and region headers) into a fresh plan.
-- **Waypoints and Galactic Regions:** Build your flight plan with system names, coordinates, and personal notes, and organize stops with Galactic Region headers that automatically suggest the region matching your next waypoint and prioritize adjacent regions.
+- **Multiple Expeditions and Cloning:** Create and switch between multiple expeditions, or clone an existing expedition (preserving its waypoints and region headers) into a fresh expedition.
+- **Waypoints and Region Headers:** Build your expedition with system names, coordinates, and personal notes, and organize stops with Region Headers that automatically suggest the region matching your next waypoint and prioritize adjacent regions.
 - **Coordinate Resolution and Visit History:** Waypoint coordinates resolve from your local journal history first and fall back to EDSM for unvisited systems. The status indicator shows the system's galactic region, coordinates, and how many times you have visited it (`Never Visited` via EDSM or visit count via Journal), automatically switching from EDSM to Journal and incrementing your visit count when you jump into the system.
 - **Built-in POI Catalog:** Systems matching EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP) are flagged automatically with one-click links to EDAstro, Inara, and EDSM.
 - **Flexible Expedition Start:** Engage an expedition from a recorded historical visit to Waypoint #1 (retroactively replaying all subsequent journal events across your route), arm it to start automatically when your ship or carrier arrives at Waypoint #1, or enter a custom Galactic Standard Time timestamp. Complete an expedition to lock its end timestamp, or reopen it if you closed it early by mistake.
@@ -44,7 +44,7 @@ Plan your route stop by stop without juggling external spreadsheets.
 ### Fleet Carrier Routing
 Whether you're taking your own carrier into the black, flying with a squadron, or hitching a ride, carrier jumps are built into the planner.
 
-- **Interactive Spansh Plotter:** Flag any waypoint as a Carrier Stop to plot 500 Ly hops with per-jump and total tritium calculations, `[ICY RING]` mining indicators on intermediate systems, live tritium depot tracking, and a one-click depot refill button that recalculates remaining fuel costs.
+- **Interactive Spansh Router:** Flag any waypoint as a Carrier Stop to plot 500 Ly hops with per-jump and total tritium calculations, `[ICY RING]` mining indicators on intermediate systems, live fuel depot tracking, and a one-click depot refill button that recalculates remaining fuel costs.
 - **Personal and Squadron Carriers:** Supports both Personal Carriers (`25,000 t` capacity) and Squadron Carriers (`60,000 t` capacity) when plotting routes and calculating tritium burn.
 - **Manual Jump Logging:** Switch to manual mode or log unscheduled carrier jumps straight from the telemetry sidebar even without a scheduled Carrier Stop waypoint.
 - **Expedition Carrier Cost Breakdown:** Track overall Fleet Carrier operating costs for an expedition under **Carrier Cost** (`Tritium Cost`, `Jump Maintenance`, and `Weekly Upkeep`), with estimated values prefixed by `~` and per-expedition vessel classification and weekly upkeep settings.
@@ -116,15 +116,15 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 
 Everything in Planisphere is stored in a local SQLite database on your machine: your journals, route waypoints, and cached coordinates stay local and work offline. Planisphere never modifies your game files.
 
-- **Journal Directory:** Point Planisphere to your Elite Dangerous journal folder on first launch. Planisphere ingests your existing `Journal.*.log` files and watches the folder for live events while you fly.
-- **Optional EDDiscovery Backfill:** If your older raw journal files have been purged or archived, Planisphere can optionally recover past flight history directly from an existing EDDiscovery database (`EDDUser.sqlite`) during setup or later through Settings.
+- **Journal Directory:** Point Planisphere to your Elite Dangerous journal directory on first launch. Planisphere ingests your existing `Journal.*.log` files and watches the directory for live events while you fly.
+- **Optional EDDiscovery Backfill:** If your older raw journal files have been purged or archived, Planisphere can optionally recover past flight history directly from an existing EDDiscovery database (`EDDUser.sqlite`) during setup or later through Config.
 
 > [!WARNING]
-> The Elite Dangerous journal folder must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent directories do not emit kernel filesystem notifications and are not supported for live telemetry.
+> The Elite Dangerous journal directory must reside on a local drive and exist prior to starting Planisphere. Remote network shares (NFS, SMB/CIFS) and non-existent directories do not emit kernel filesystem notifications and are not supported for live telemetry.
 
 ### Updates
 
-Planisphere checks GitHub Releases for newer versions on startup, even when **Online Services** is turned off in Settings.
+Planisphere checks GitHub Releases for newer versions on startup, even when **Online Services** is turned off in Config.
 
 
 ## Design Choices

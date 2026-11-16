@@ -83,12 +83,12 @@ export function ModeFilterPanel({
       {/* Live Mode Quick Switcher */}
       <div className="flex items-center gap-2 text-xs">
         <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c] shrink-0">
-          Active Mode
+          Flight Mode
         </span>
         <select
           value={activeModeId}
           onChange={(event) => onQuickSwitchMode(Number(event.target.value))}
-          title="Current gameplay mode (logs newly recorded jumps and scans to this mode)"
+          title="Current flight mode (logs newly recorded jumps and scans to this flight mode)"
           className="flex-1 bg-[#050506] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer"
         >
           {modeList.map((mode) => (
@@ -112,7 +112,7 @@ export function ModeFilterPanel({
       {/* Mode Filter Checkboxes (Tri-state: All -> Scans Only -> Off) */}
       <div className="space-y-1.5 pt-1.5 border-t border-[#2e1f12]">
         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c]">
-          <span title="Filter sidebar metrics by which mode was active when events were logged">
+          <span title="Filter sidebar metrics by which flight mode was active when events were logged">
             Telemetry Filter
           </span>
           {filter.enabled && (
@@ -120,7 +120,7 @@ export function ModeFilterPanel({
               type="button"
               onClick={resetAllModes}
               className="text-[#FF7100] hover:underline cursor-pointer"
-              title="Include all modes in sidebar metrics"
+              title="Include all flight modes in sidebar metrics"
             >
               [Reset]
             </button>
@@ -133,18 +133,11 @@ export function ModeFilterPanel({
             const isFull = selection.travel && selection.discovery
             const isPartial = !selection.travel && selection.discovery
 
-            const titleText = isFull
-              ? `${mode.name}: All telemetry included. Click to switch to Scans and Exobio only.`
-              : isPartial
-                ? `${mode.name}: Scans and Exobio only (jumps/Ly hidden). Click to exclude.`
-                : `${mode.name}: Excluded from metrics. Click to include all.`
-
             return (
               <button
                 key={mode.id}
                 type="button"
                 onClick={() => cycleModeSelection(mode.id)}
-                title={titleText}
                 className={`flex items-center gap-2 px-2 py-1 border text-xs cursor-pointer transition select-none text-left ${
                   isFull
                     ? 'bg-[#18110b] border-[#472e19] border-l-2 border-l-[#FF7100] text-[#F4ECE4]'
@@ -172,7 +165,7 @@ export function ModeFilterPanel({
         </div>
 
         {/* Tri-state explanation */}
-        <div className="pt-1.5 border-t border-[#24180e] text-[10px] text-[#a6907c] leading-tight space-y-1">
+        <div className="pt-1.5 border-t border-[#24180e] text-[10px] text-[#a6907c] leading-tight">
           <div className="flex items-center gap-2 font-mono-tabular text-[9px]">
             <span className="inline-flex items-center gap-1 text-[#FF7100] font-bold">
               <SquareCheckbox checked={true} size="xs" /> ALL DATA
@@ -186,11 +179,6 @@ export function ModeFilterPanel({
               <SquareCheckbox checked={false} size="xs" /> OFF
             </span>
           </div>
-          <p className="text-[9px] text-[#6e5b4b] flex items-center gap-1 flex-wrap">
-            <span>Partial</span>
-            <SquareCheckbox checked="partial" size="xs" />
-            <span>includes scans, mapping and exobio, excluding travel distance/jumps.</span>
-          </p>
         </div>
       </div>
     </div>

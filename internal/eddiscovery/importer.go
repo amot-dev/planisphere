@@ -213,7 +213,7 @@ func (accumulator *archiveImportAccumulator) finalizeMetadata(
 		}
 	}
 
-	reportProgress(totalEntries, totalEntries, result.FilesScanned, "Finalizing journal archive metadata…")
+	reportProgress(totalEntries, totalEntries, result.FilesScanned, "Finalizing journal archive metadata...")
 	for fileName, eventCount := range accumulator.fileEventCounts {
 		if _, execError := transaction.Exec(`INSERT OR IGNORE INTO ingested_journals
 			(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at)
@@ -263,7 +263,7 @@ func importEntriesTx(
 			}
 
 			if entryIndex%1500 == 0 {
-				reportProgress(entryIndex, totalEntries, result.FilesScanned, "Ingesting historical journal events into SQLite archive…")
+				reportProgress(entryIndex, totalEntries, result.FilesScanned, "Ingesting historical journal events into SQLite archive...")
 			}
 			entryIndex++
 		}
@@ -299,7 +299,7 @@ func Import(ctx context.Context, ingester *journal.Ingester, databasePath string
 			return result, fmt.Errorf("EDDiscovery database not found: %s", databasePath)
 		}
 
-		reportProgress(0, 0, 0, "Opening EDDiscovery database and reading journal entries…")
+		reportProgress(0, 0, 0, "Opening EDDiscovery database and reading journal entries...")
 		eddConn, openError := sql.Open("sqlite", "file:"+databasePath+"?mode=ro&_pragma=busy_timeout(5000)")
 		if openError != nil {
 			return result, fmt.Errorf("open EDDiscovery DB: %w", openError)
@@ -324,7 +324,7 @@ func Import(ctx context.Context, ingester *journal.Ingester, databasePath string
 		}
 		defer rows.Close()
 
-		reportProgress(0, totalEntries, 0, "Ingesting historical journal events into SQLite archive…")
+		reportProgress(0, totalEntries, 0, "Ingesting historical journal events into SQLite archive...")
 		txError := importEntriesTx(ctx, destConn, rows, totalEntries, reportProgress, &result)
 		if txError == nil {
 			journal.InvalidateCommanderCountsCache()

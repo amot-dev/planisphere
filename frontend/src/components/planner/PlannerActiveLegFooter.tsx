@@ -29,7 +29,7 @@ export function PlannerActiveLegFooter({
               className="ed-btn-cyan"
             >
               <span className="font-extrabold">+</span>
-              <span>Add Waypoint</span>
+              <span>ADD WAYPOINT</span>
             </button>
             <button
               type="button"
@@ -37,14 +37,14 @@ export function PlannerActiveLegFooter({
               className="ed-btn"
             >
               <span className="font-extrabold text-[#FF7100]">+</span>
-              <span>Add Galactic Region Header</span>
+              <span>ADD REGION HEADER</span>
             </button>
           </div>
 
           <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-[#a6907c]">
             {isPlanning
-              ? 'DRAG (⋮⋮) OR USE ARROWS TO REORDER WAYPOINTS AND SECTORS'
-              : 'UNVISITED WAYPOINTS DRAGGABLE · CLONE IN PLANS MENU TO RE-PLAN'}
+              ? 'DRAG (⋮⋮) OR USE ARROWS TO REORDER WAYPOINTS AND REGION HEADERS'
+              : 'UNVISITED WAYPOINTS DRAGGABLE · CLONE IN EXPEDITIONS MENU TO RE-PLAN'}
           </div>
         </div>
       )}

@@ -33,7 +33,7 @@ export function JournalFolderStep({
     <div className="space-y-4">
       <div className="space-y-1">
         <div className="text-sm font-bold uppercase tracking-wider text-[#F4ECE4]">
-          Journal Folder
+          Journal Directory
         </div>
         <p className="text-[11px] text-[#c7b3a1] leading-relaxed">
           Select your Elite Dangerous journal directory to track flights, scans, and exobiology.
@@ -43,7 +43,7 @@ export function JournalFolderStep({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="font-bold uppercase tracking-wider text-[#FF7100]">
-            Journal Path
+            Journal Directory
           </label>
           <span
             className={
@@ -67,7 +67,7 @@ export function JournalFolderStep({
             disabled={isBusy}
             className="ed-btn"
           >
-            Browse…
+            BROWSE...
           </button>
         </div>
         {localSettings?.defaultJournalDir &&
@@ -78,7 +78,7 @@ export function JournalFolderStep({
                 onClick={onResetDefaultJournals}
                 className="text-[11px] text-[#FF7100] hover:underline cursor-pointer"
               >
-                Reset Default Path
+                Reset to Default
               </button>
             </div>
           )}

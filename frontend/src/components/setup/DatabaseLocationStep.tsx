@@ -32,7 +32,7 @@ export function DatabaseLocationStep({
           Database Location
         </div>
         <p className="text-[11px] text-[#c7b3a1] leading-relaxed">
-          {APP_PRODUCT_NAME} stores your flight plans, flight mode timelines, star coordinates, and
+          {APP_PRODUCT_NAME} stores your expeditions, flight mode timelines, star coordinates, and
           journal history in a local SQLite database.
         </p>
       </div>
@@ -70,7 +70,7 @@ export function DatabaseLocationStep({
             disabled={isBusy}
             className="ed-btn"
           >
-            Browse…
+            BROWSE...
           </button>
         </div>
         {defaultDbPath && dbPath !== defaultDbPath && (
@@ -80,7 +80,7 @@ export function DatabaseLocationStep({
               onClick={onResetDefaultDb}
               className="text-[11px] text-[#FF7100] hover:underline cursor-pointer"
             >
-              Reset Default Path
+              Reset to Default
             </button>
           </div>
         )}

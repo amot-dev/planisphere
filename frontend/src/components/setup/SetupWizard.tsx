@@ -37,7 +37,7 @@ const TOTAL_STEPS = 4
 
 const STEP_TITLES = [
   'Step 1 of 4 — Database Location',
-  'Step 2 of 4 — Journal Folder',
+  'Step 2 of 4 — Journal Directory',
   'Step 3 of 4 — Historical Import',
   'Step 4 of 4 — Commanders and Online Sync',
 ]
@@ -235,7 +235,7 @@ export function SetupWizardModal({
           }
           setStep(1)
         },
-        { busyText: 'INITIALIZING DATABASE…' },
+        { busyText: 'INITIALIZING DATABASE...' },
       )
     }
 
@@ -248,7 +248,7 @@ export function SetupWizardModal({
           setLocalSettings(currentSettings)
           setStep(2)
         },
-        { busyText: 'SCANNING PLAYER JOURNALS…' },
+        { busyText: 'SCANNING PLAYER JOURNALS...' },
       )
     }
 
@@ -264,7 +264,7 @@ export function SetupWizardModal({
           await CompleteSetup()
           onComplete()
         },
-        { busyText: 'FINALIZING SETUP…' },
+        { busyText: 'FINALIZING SETUP...' },
       )
     }
   }
@@ -424,7 +424,7 @@ function SetupWizardFooter({
             disabled={isBusy}
             className="ed-btn"
           >
-            ← Back
+            ← BACK
           </button>
         )}
       </div>
@@ -464,10 +464,10 @@ function SetupWizardFooter({
           className="ed-btn-primary"
         >
           {busyMessage
-            ? 'Working…'
+            ? 'WORKING...'
             : step === TOTAL_STEPS - 1
-              ? 'Finish Setup'
-              : 'Next →'}
+              ? 'FINISH SETUP'
+              : 'NEXT →'}
         </button>
       </div>
     </div>

@@ -115,7 +115,7 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 			if !errors.Is(queryError, testCase.expectedErr) {
 				testingContext.Errorf("expected %v error, got: %v", testCase.expectedErr, queryError)
 			}
-			if !strings.Contains(queryError.Error(), "Spansh route calculation canceled or timed out") {
+			if !strings.Contains(queryError.Error(), "Spansh route calculation cancelled or timed out") {
 				testingContext.Errorf("expected error message to contain cancellation text, got: %v", queryError)
 			}
 		})

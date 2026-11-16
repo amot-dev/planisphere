@@ -83,8 +83,8 @@ export function ExpeditionManageModal({
 
   return (
     <ModalShell
-      title="Expedition Flight Plans"
-      subtitle="Create a new expedition or switch between saved expedition plans"
+      title="Expeditions"
+      subtitle="Create a new expedition or switch between saved expeditions"
       onClose={onClose}
     >
       {errorMessage && (
@@ -94,7 +94,7 @@ export function ExpeditionManageModal({
       )}
       <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
         <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
-          + Create New Expedition Plan
+          + Create New Expedition
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input
@@ -118,7 +118,7 @@ export function ExpeditionManageModal({
             onClick={handleCreate}
             className="ed-btn-primary"
           >
-            Create Expedition
+            CREATE EXPEDITION
           </button>
         </div>
       </div>
@@ -145,7 +145,7 @@ export function ExpeditionManageModal({
                   onClick={() => handleSaveEdit(expeditionItem.id)}
                   className="ed-btn-cyan"
                 >
-                  Save
+                  SAVE
                 </button>
               </div>
             ) : (
@@ -181,7 +181,7 @@ export function ExpeditionManageModal({
                     title="Clone this expedition into a new expedition in the Planning phase"
                     className="ed-btn-cyan"
                   >
-                    Clone
+                    CLONE
                   </button>
                   <button
                     type="button"
@@ -192,7 +192,7 @@ export function ExpeditionManageModal({
                     }}
                     className="ed-btn"
                   >
-                    Rename
+                    RENAME
                   </button>
                   {expeditions.length > 1 && (
                     <button
@@ -200,7 +200,7 @@ export function ExpeditionManageModal({
                       onClick={() => handleDelete(expeditionItem.id)}
                       className="ed-btn-danger"
                     >
-                      Delete
+                      DELETE
                     </button>
                   )}
                 </div>

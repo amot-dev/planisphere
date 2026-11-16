@@ -99,8 +99,8 @@ export function CarrierConfigModal({
               </button>
             </div>
             <p className="text-[10px] text-[#a6907c] mt-1">
-              Sets the default vessel classification when opening the Spansh Fleet Carrier Route
-              Plotter for this expedition.
+              Sets the default vessel classification when opening the Spansh Fleet Carrier Router
+              for this expedition.
             </p>
           </div>
 

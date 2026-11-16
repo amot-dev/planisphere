@@ -222,9 +222,9 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).not.toContain('border-l-3')
     expect(html).toContain('[VESSEL FLOWN]:')
     expect(html).toContain('Anaconda')
-    expect(html).toContain('[MODE]:')
+    expect(html).toContain('[FLIGHT MODE]:')
     expect(html).toContain('Exploration')
-    expect(html).toContain('Active mode for this leg (click to change)')
+    expect(html).toContain('Flight mode for this leg (click to change)')
   })
 
   it('omits Vessel Flown and Mode toggle in WaypointDetailsDrawer for origin baseline waypoint #1', () => {
@@ -253,9 +253,9 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
 
-    expect(html).toContain('WAYPOINT #1 // HISTORICAL BASELINE')
+    expect(html).toContain('HISTORICAL BASELINE')
     expect(html).not.toContain('[VESSEL FLOWN]:')
-    expect(html).not.toContain('[MODE]:')
+    expect(html).not.toContain('[FLIGHT MODE]:')
   })
 
   it('renders Realized Value card with combined total sold and 5 orange negative lines without emojis', () => {
@@ -301,22 +301,22 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('120,000,000 Cr')
 
     // Check the six orange negative deduction lines
-    expect(html).toContain('Cartographics Lost (Death):')
+    expect(html).toContain('Cartographics Lost (Death)')
     expect(html).toContain('-5,000,000 Cr')
 
-    expect(html).toContain('Exobiology Lost (Death):')
+    expect(html).toContain('Exobiology Lost (Death)')
     expect(html).toContain('-10,000,000 Cr')
 
-    expect(html).toContain('Cartographics Stolen:')
+    expect(html).toContain('Cartographics Stolen')
     expect(html).toContain('-2,000,000 Cr')
 
-    expect(html).toContain('Exobiology Stolen:')
+    expect(html).toContain('Exobiology Stolen')
     expect(html).toContain('-8,000,000 Cr')
 
-    expect(html).toContain('Carrier Tariffs:')
+    expect(html).toContain('Carrier Tariffs')
     expect(html).toContain('-3,500,000 Cr')
 
-    expect(html).toContain('NPC Crew Payouts:')
+    expect(html).toContain('NPC Crew Payouts')
     expect(html).toContain('-1,200,000 Cr')
 
     // Ensure the header and all six deduction values have orange text-[#FF7100] styling

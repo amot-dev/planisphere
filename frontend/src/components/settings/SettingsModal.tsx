@@ -102,7 +102,7 @@ export function SettingsModal({
             onClick={onOpenSetupWizard}
             className="ed-btn"
           >
-            Run Setup Wizard…
+            RUN SETUP WIZARD...
           </button>
         </div>
       )}

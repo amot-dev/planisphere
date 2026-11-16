@@ -3,7 +3,7 @@
 Type=Application
 Name=Planisphere
 GenericName=Expedition Planner and Astrometric Telemetry Terminal
-Comment=Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal
+Comment=Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal
 Exec=planisphere %u
 Icon=planisphere
 Terminal=false

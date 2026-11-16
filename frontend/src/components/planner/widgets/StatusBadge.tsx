@@ -11,11 +11,11 @@ export interface StatusBadgeProps {
  * StatusBadge renders the high-level expedition lifecycle state (Planning / Active / Completed).
  */
 export function StatusBadge({ status, armedAt }: StatusBadgeProps) {
-  if (status === 'active') {
+  if (status === 'armed' || status === 'active') {
     return (
       <span className="inline-flex items-center gap-2 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.14em] bg-[#211307] text-[#FF7100] border border-[#FF7100] border-l-3">
         <span className="w-2 h-2 bg-[#FF7100] animate-pulse" />
-        {armedAt ? 'ARMED // AWAITING WAYPOINT #1' : 'ACTIVE EXPEDITION'}
+        {status === 'armed' || armedAt ? 'ARMED // AWAITING WAYPOINT #1' : 'ACTIVE EXPEDITION'}
       </span>
     )
   }

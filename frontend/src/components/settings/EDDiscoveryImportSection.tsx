@@ -63,7 +63,7 @@ export function EDDiscoveryImportSection({
     try {
       const importedCount = await ImportEDDiscoveryHistory(eddPath)
       setEddStatus(
-        `Imported ${importedCount.toLocaleString()} historical journal events into local database.`,
+        `Imported ${importedCount.toLocaleString()} historical journal events from EDDiscovery.`,
       )
       onRefresh()
     } catch (importError) {
@@ -96,7 +96,7 @@ export function EDDiscoveryImportSection({
           onClick={handleBrowseEdd}
           className="ed-btn"
         >
-          Browse…
+          BROWSE...
         </button>
         <button
           type="button"
@@ -104,19 +104,19 @@ export function EDDiscoveryImportSection({
           onClick={handleImportEdd}
           className="ed-btn-cyan"
         >
-          {eddBusy || eddProgress?.active ? 'Importing…' : 'Import'}
+          {eddBusy || eddProgress?.active ? 'IMPORTING...' : 'IMPORT'}
         </button>
       </div>
       {(eddBusy || eddProgress?.active) && (
         <div className="space-y-1.5 pt-1">
           <div className="flex items-center justify-between text-[11px] font-mono-tabular">
             <span className="text-[#00D2FF]">
-              {eddProgress?.stage || 'Reading database…'}
+              {eddProgress?.stage || 'Reading database...'}
             </span>
             <span className="text-[#F4ECE4] font-bold">
               {eddProgress && eddProgress.total > 0
                 ? `${eddProgress.percent}% (${eddProgress.current.toLocaleString()} / ${eddProgress.total.toLocaleString()} events)`
-                : 'Preparing…'}
+                : 'Preparing...'}
             </span>
           </div>
           <div className="w-full h-2 bg-[#050506] border border-[#3d2816] overflow-hidden">

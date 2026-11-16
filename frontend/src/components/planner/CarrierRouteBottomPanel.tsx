@@ -180,7 +180,7 @@ function CarrierPlotterHeaderBar({
             onClick={onToggleManualMode}
             className="ed-btn"
           >
-            Switch to Manual Mode
+            SWITCH TO MANUAL MODE
           </button>
         )}
         {onCancelRoute && (
@@ -190,7 +190,7 @@ function CarrierPlotterHeaderBar({
             title="Close the carrier plotter. Existing jumps remain logged in your expedition statistics."
             className="ed-btn"
           >
-            Close
+            CLOSE
           </button>
         )}
       </div>
@@ -336,7 +336,7 @@ function SpanshCarrierStepView({
           onClick={onCompleteSpanshJump}
           title={
             isDepotInsufficient
-              ? `Refill required: Tritium depot (${formatInt(currentDepot)} t) is insufficient for this jump (${formatInt(hopTritiumRequired)} t)`
+              ? `Refill required: Fuel depot (${formatInt(currentDepot)} t) is insufficient for this jump (${formatInt(hopTritiumRequired)} t)`
               : isFinalJump
                 ? `Complete final carrier jump to ${destinationDisplay} and mark waypoint arrival`
                 : undefined
@@ -467,7 +467,7 @@ function ManualCarrierLoggerView({
         }
         className="ed-btn-cyan"
       >
-        Mark FC Stop Arrival
+        MARK FC STOP ARRIVAL
       </button>
     </div>
   )

@@ -120,7 +120,7 @@ export function CommandersOnlineStep({
             onClick={onSyncGecNow}
             className="ed-btn"
           >
-            {gecBusy ? 'Syncing…' : 'Sync Catalog Now'}
+            {gecBusy ? 'SYNCING...' : 'SYNC CATALOG NOW'}
           </button>
         </div>
       </div>

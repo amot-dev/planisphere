@@ -184,7 +184,7 @@ export function StartExpeditionModal({
           onClick={onClose}
           className="ed-btn"
         >
-          Cancel
+          CANCEL
         </button>
         <button
           type="button"
@@ -192,7 +192,7 @@ export function StartExpeditionModal({
           onClick={handleConfirm}
           className="ed-btn-primary"
         >
-          {busy ? 'ENGAGING...' : 'Confirm and Engage'}
+          {busy ? 'ENGAGING...' : 'CONFIRM AND ENGAGE'}
         </button>
       </div>
     </ModalShell>

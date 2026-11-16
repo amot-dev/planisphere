@@ -3,7 +3,7 @@
 pkgname=planisphere-bin
 pkgver=0.5.0
 pkgrel=1
-pkgdesc="Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal"
+pkgdesc="Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal"
 arch=('x86_64')
 url="https://github.com/amot-dev/planisphere"
 license=('GPL3')

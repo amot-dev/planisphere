@@ -15,12 +15,12 @@ export function TerminalBootScreen() {
             {APP_PRODUCT_NAME}
           </span>
           <span className="font-mono-tabular text-[11px] text-[#00D2FF]">
-            TERMINAL v{APP_VERSION}
+            PLANISPHERE TERMINAL v{APP_VERSION}
           </span>
         </div>
         <div className="space-y-1">
           <div className="text-sm font-bold uppercase tracking-wider text-[#F4ECE4]">
-            Initializing Exploration Terminal…
+            Initializing Planisphere Terminal...
           </div>
           <div className="text-xs text-[#a6907c]">
             Mounting journal archive and stellar coordinate index

@@ -30,10 +30,10 @@ export function LegModeDropdown({
       <button
         type="button"
         onClick={() => setOpen((previousOpen) => !previousOpen)}
-        title="Active mode for this leg (click to change)"
+        title="Flight mode for this leg (click to change)"
         className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular uppercase tracking-wider border border-[#472e19] border-l-2 border-l-[#FF7100] bg-[#16100b] text-[#FF7100] hover:bg-[#24180e] transition cursor-pointer"
       >
-        <span className="font-bold">[MODE]:</span>
+        <span className="font-bold">[FLIGHT MODE]:</span>
         <span
           className="w-1.5 h-2.5 shrink-0"
           style={{ backgroundColor: modeColor || currentMode?.color || '#FF7100' }}
@@ -57,7 +57,7 @@ export function LegModeDropdown({
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute left-0 mt-1 w-48 border border-[#FF7100] bg-[#1c140d] shadow-2xl shadow-black z-40 py-1 text-xs">
             <div className="px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider text-[#a6907c] bg-[#241a10] border-b border-[#3d2816]">
-              Select Leg Mode
+              Select Flight Mode
             </div>
             {modesList.map((mode) => {
               const isSelected = mode.id === modeId

@@ -67,12 +67,12 @@ export function CockpitTopBar({
             className="ed-btn shrink-0 h-[30px]"
             title="Create, clone, rename, or manage expeditions"
           >
-            Expeditions
+            EXPEDITIONS
           </button>
           <select
             value={activeExpeditionId}
             onChange={(event) => onSelectExpedition(Number(event.target.value))}
-            title="Select active expedition flight plan"
+            title="Select active expedition"
             className="h-[30px] bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
           >
             {expeditions.map((expeditionItem) => (
@@ -99,7 +99,7 @@ export function CockpitTopBar({
             title={
               activeStatusMessage
                 ? `Background task: ${activeStatusMessage}`
-                : 'Terminal idle and ready for input'
+                : 'Planisphere idle and ready for input'
             }
           >
             <span
@@ -142,7 +142,6 @@ export function CockpitTopBar({
             type="button"
             onClick={onOpenSettingsModal}
             className="ed-btn h-[30px]"
-            title="Open terminal settings, environment modes, and journal configuration"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
               <path
@@ -151,7 +150,7 @@ export function CockpitTopBar({
                 clipRule="evenodd"
               />
             </svg>
-            <span>Config</span>
+            <span>CONFIG</span>
           </button>
         </div>
       </div>

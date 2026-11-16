@@ -63,7 +63,7 @@ export function HistoricalImportStep({
         {firstEventIso ? (
           <div className="space-y-0.5">
             <div className="text-[11px] text-[#a6907c]">
-              Oldest journal entry found in folder:
+              Oldest journal entry found in directory:
             </div>
             <div className="font-mono-tabular text-xs font-bold text-[#F4ECE4]">
               {firstEventUtcDisplay}
@@ -77,7 +77,7 @@ export function HistoricalImportStep({
         ) : (
           <div className="text-[11px] text-[#ffb000]">
             No local <span className="font-mono-tabular">.log</span> events were found in the
-            selected journal folder yet.
+            selected journal directory yet.
           </div>
         )}
       </div>
@@ -148,7 +148,7 @@ export function HistoricalImportStep({
                 disabled={isBusy}
                 className="ed-btn"
               >
-                Browse…
+                BROWSE...
               </button>
               <button
                 type="button"
@@ -156,7 +156,7 @@ export function HistoricalImportStep({
                 disabled={isBusy || !eddPath.trim()}
                 className="ed-btn-primary"
               >
-                {eddBusy ? 'Importing…' : 'Import'}
+                {eddBusy ? 'IMPORTING...' : 'IMPORT'}
               </button>
             </div>
             {localSettings?.defaultEdDiscoveryDbPath &&
@@ -167,7 +167,7 @@ export function HistoricalImportStep({
                     onClick={onResetDefaultEdd}
                     className="text-[10px] text-[#FF7100] hover:underline cursor-pointer"
                   >
-                    Reset Default Path
+                    Reset to Default
                   </button>
                 </div>
               )}

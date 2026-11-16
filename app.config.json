@@ -4,7 +4,7 @@
   "tagline": "Expedition Planner and Astrometric Telemetry Terminal",
   "version": "0.5.0",
   "author": "Alexander Mot",
-  "description": "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal",
+  "description": "Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal",
   "binaryName": "planisphere",
   "repository": "https://github.com/amot-dev/planisphere"
 }

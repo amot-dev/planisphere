@@ -63,7 +63,7 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
         type="button"
         onClick={() => setOpen((previousOpen) => !previousOpen)}
         className="inline-flex items-center gap-1.5 text-sm font-extrabold tracking-[0.12em] uppercase text-[#FF7100] hover:text-[#ff9436] cursor-pointer"
-        title="Click to switch Galactic Region"
+        title="Click to switch Region"
       >
         <span>{regionName || 'SELECT REGION'}</span>
         <svg
@@ -178,7 +178,7 @@ function RegionDropdownMenu({
 
         <div>
           <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#a6907c] bg-[#241a10] border-y border-[#3d2816]">
-            All Other Galactic Regions ({otherList.length})
+            All Other Regions ({otherList.length})
           </div>
           {otherList.map((region) => (
             <button

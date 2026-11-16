@@ -507,7 +507,7 @@ export function useCarrierRoute({
       persistManualInputsTimerRef.current = null
     }
     setLoggingJump(true)
-    onBusyChange('LOGGING MANUAL CARRIER JUMP')
+    onBusyChange('LOGGING CARRIER JUMP')
     try {
       await RecordCarrierJump(plan.expedition.id, jumpDistance, tritiumAmount)
       const nextJumps = manualLegJumps + 1

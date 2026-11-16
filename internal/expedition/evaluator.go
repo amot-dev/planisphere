@@ -218,6 +218,8 @@ func resolveArmedExpeditionStart(queryer db.Queryer, expeditionRecord *Expeditio
 	if lifecycleError := setLifecycle(queryer, expeditionRecord.ID, StatusActive, expeditionRecord.StartTimestamp, nil, nil); lifecycleError != nil {
 		return false, lifecycleError
 	}
+	expeditionRecord.Status = StatusActive
+	expeditionRecord.ArmedAt = ""
 	if initError := initCarrierStops(queryer, expeditionRecord.ID); initError != nil {
 		return false, initError
 	}

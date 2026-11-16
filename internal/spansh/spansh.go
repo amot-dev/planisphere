@@ -151,7 +151,7 @@ func pollRouteJob(ctx context.Context, httpClient *http.Client, jobID string, ca
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", ctx.Err())
+			return nil, fmt.Errorf("Spansh route calculation cancelled or timed out: %w", ctx.Err())
 		case <-pollTicker.C:
 			pollRequest, pollRequestError := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
 			if pollRequestError != nil {
@@ -161,10 +161,10 @@ func pollRouteJob(ctx context.Context, httpClient *http.Client, jobID string, ca
 			pollResponse, pollResponseError := httpClient.Do(pollRequest)
 			if pollResponseError != nil {
 				if ctx.Err() != nil {
-					return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", ctx.Err())
+					return nil, fmt.Errorf("Spansh route calculation cancelled or timed out: %w", ctx.Err())
 				}
 				if errors.Is(pollResponseError, context.Canceled) || errors.Is(pollResponseError, context.DeadlineExceeded) {
-					return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", pollResponseError)
+					return nil, fmt.Errorf("Spansh route calculation cancelled or timed out: %w", pollResponseError)
 				}
 				continue
 			}
@@ -173,7 +173,7 @@ func pollRouteJob(ctx context.Context, httpClient *http.Client, jobID string, ca
 			pollResponse.Body.Close()
 			if decodePollError != nil {
 				if ctx.Err() != nil {
-					return nil, fmt.Errorf("Spansh route calculation canceled or timed out: %w", ctx.Err())
+					return nil, fmt.Errorf("Spansh route calculation cancelled or timed out: %w", ctx.Err())
 				}
 				continue
 			}

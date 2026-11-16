@@ -26,7 +26,7 @@ export function PlannerHeaderBar({
 }: PlannerHeaderBarProps) {
   const currentExpedition = plan.expedition
   const isPlanning = currentExpedition.status === 'planning'
-  const isActive = currentExpedition.status === 'active'
+  const isActive = currentExpedition.status === 'active' || currentExpedition.status === 'armed'
   const isCompleted = currentExpedition.status === 'completed'
   const canComplete = (plan.visitedWaypointCount ?? 0) >= 2
 
@@ -118,7 +118,7 @@ export function PlannerHeaderBar({
               !hasOriginWaypointSystem ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
             }`}
           >
-            <span>ENGAGE EXPEDITION</span>
+            <span>ENGAGE</span>
           </button>
         )}
 
@@ -134,14 +134,14 @@ export function PlannerHeaderBar({
               }
               title={
                 canComplete
-                  ? 'Complete this expedition and finalize flight logs'
-                  : 'Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete flight plan in Plans)'
+                  ? undefined
+                  : 'Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete expedition in Expeditions)'
               }
               className={`ed-btn-primary ${
                 !canComplete ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
               }`}
             >
-              Complete
+              COMPLETE
             </button>
           </div>
         )}
@@ -157,7 +157,7 @@ export function PlannerHeaderBar({
               }
               className="ed-btn-cyan"
             >
-              Reopen Expedition
+              REOPEN
             </button>
           </div>
         )}

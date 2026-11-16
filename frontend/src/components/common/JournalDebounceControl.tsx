@@ -127,7 +127,7 @@ export function JournalDebounceControl({
           onClick={() => applyAndCommitMilliseconds(normalizedDefaultMilliseconds)}
           className="ed-btn"
         >
-          Reset ({formatDebounceSeconds(normalizedDefaultMilliseconds)})
+          RESET ({formatDebounceSeconds(normalizedDefaultMilliseconds)})
         </button>
       </div>
     </div>

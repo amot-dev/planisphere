@@ -215,7 +215,7 @@ export function ExpeditionPlanner({
   async function handleLegModeChange(rowId: number, modeId: number) {
     if (!plan) return
     await runPlanMutation(
-      'UPDATING LEG MODE',
+      'UPDATING FLIGHT MODE',
       'Failed to update leg flight mode',
       () => SetLegMode(rowId, modeId),
       { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId), onSuccess: onRefreshAll },
@@ -224,7 +224,7 @@ export function ExpeditionPlanner({
 
   async function changeRegion(rowId: number, regionId: number) {
     await runPlanMutation(
-      'UPDATING GALACTIC REGION',
+      'UPDATING REGION',
       'Failed to update galactic region',
       () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, regionId })),
       { onSuccess: onRefreshPlan, rollbackOnError: true },
@@ -244,8 +244,9 @@ export function ExpeditionPlanner({
 
   async function handleDeleteRow(rowId: number) {
     if (!plan) return
+    const targetRow = plan.rows?.find((rowView) => rowView?.row?.id === rowId)?.row
     await runPlanMutation(
-      'REMOVING ROW',
+      targetRow?.rowType === 'region' ? 'REMOVING REGION HEADER' : 'REMOVING WAYPOINT',
       'Failed to delete row',
       () => DeleteRow(rowId),
       { optimisticPlan: buildOptimisticDeletedRowPlan(plan, rowId), onSuccess: onRefreshPlan },
@@ -322,7 +323,7 @@ export function ExpeditionPlanner({
   if (!plan) {
     return (
       <div className="flex-1 flex items-center justify-center p-12 text-[#a6907c] font-mono-tabular uppercase tracking-widest text-xs">
-        [ LOADING EXPEDITION FLIGHT PLAN... ]
+        [ LOADING EXPEDITION... ]
       </div>
     )
   }

@@ -9,7 +9,7 @@
   "frontend:dev:serverUrl": "auto",
   "frontend:dev:watcher": "npm run dev",
   "info": {
-    "comments": "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal",
+    "comments": "Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal",
     "productName": "Planisphere",
     "productVersion": "0.5.0"
   },

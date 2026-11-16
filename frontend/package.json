@@ -4,7 +4,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "description": "Elite Dangerous expedition flight planner, fleet carrier router, and astrometric telemetry terminal",
+  "description": "Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal",
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.0",

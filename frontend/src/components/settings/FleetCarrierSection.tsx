@@ -86,7 +86,7 @@ export function FleetCarrierSection({
           onClick={handleSavePrice}
           className="ed-btn-primary"
         >
-          Apply
+          APPLY
         </button>
         <button
           type="button"
@@ -95,7 +95,7 @@ export function FleetCarrierSection({
           title="Reset Tritium price to the default 50,000 Cr per tonne"
           className="ed-btn"
         >
-          Reset to Default
+          RESET TO DEFAULT
         </button>
       </div>
     </div>

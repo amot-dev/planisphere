@@ -18,6 +18,7 @@ import (
 // Expedition statuses.
 const (
 	StatusPlanning  = "planning"
+	StatusArmed     = "armed"
 	StatusActive    = "active"
 	StatusCompleted = "completed"
 )
@@ -52,6 +53,9 @@ func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error)
 		&expeditionRecord.BaselineEnabled, &expeditionRecord.BaselineSource, &baselineJSON, &adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
 	if scanError != nil {
 		return expeditionRecord, scanError
+	}
+	if expeditionRecord.Status == StatusActive && expeditionRecord.ArmedAt != "" && expeditionRecord.StartTimestamp == "" {
+		expeditionRecord.Status = StatusArmed
 	}
 	if expeditionRecord.CarrierType == "" {
 		expeditionRecord.CarrierType = "player"

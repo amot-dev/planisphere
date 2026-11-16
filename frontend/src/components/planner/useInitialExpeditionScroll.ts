@@ -32,7 +32,7 @@ export function useInitialExpeditionScroll(
         return true
       }
 
-      if (status === 'active') {
+      if (status === 'active' || status === 'armed') {
         const targetRow =
           scrollContainer.querySelector<HTMLElement>('[data-last-visited="true"]') ??
           scrollContainer.querySelector<HTMLElement>('tr[data-row-index="0"]')

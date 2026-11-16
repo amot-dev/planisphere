@@ -66,10 +66,10 @@ export function OnlineServicesSection({
       <label className="flex items-center justify-between cursor-pointer">
         <div>
           <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-            Enable Online EDSM Coordinates and EDAstro GEC Sync
+            EDSM and EDAstro GEC Online Sync
           </div>
           <div className="text-[11px] text-[#a6907c]">
-            Fetches coordinates for unvisited systems and downloads catalog POIs
+            Resolves coordinates for unvisited waypoint systems and downloads the galactic POI catalog.
           </div>
         </div>
         <SquareCheckbox
@@ -80,10 +80,11 @@ export function OnlineServicesSection({
 
       <div className="flex items-center justify-between pt-2 border-t border-[#2e1f12]">
         <div className="text-[11px] text-[#a6907c]">
-          Cached POIs:{' '}
+          POI Catalog:{' '}
           <span className="font-mono-tabular text-[#F4ECE4] font-bold">
-            {settings?.gecCount ?? 0}
-          </span>
+            {(settings?.gecCount ?? 0).toLocaleString()}
+          </span>{' '}
+          entries
         </div>
         <button
           type="button"
@@ -91,7 +92,7 @@ export function OnlineServicesSection({
           onClick={handleRefreshGec}
           className="ed-btn-cyan"
         >
-          {gecBusy ? 'Syncing…' : 'Sync GEC Catalog'}
+          {gecBusy ? 'SYNCING...' : 'SYNC CATALOG NOW'}
         </button>
       </div>
     </div>

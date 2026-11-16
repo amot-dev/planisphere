@@ -62,7 +62,7 @@ export function JournalDirectorySection({
     <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
-          Player Journal Directory
+          Journal Directory
         </span>
         <span
           className={`text-[10px] font-mono-tabular font-bold uppercase px-2 py-0.5 border ${
@@ -87,14 +87,14 @@ export function JournalDirectorySection({
           onClick={handleBrowse}
           className="ed-btn"
         >
-          Browse…
+          BROWSE...
         </button>
         <button
           type="button"
           onClick={handleSaveDirectory}
           className="ed-btn-primary"
         >
-          Apply
+          APPLY
         </button>
         <button
           type="button"
@@ -102,7 +102,7 @@ export function JournalDirectorySection({
           title="Reset journal directory to the game default"
           className="ed-btn"
         >
-          Reset to Default
+          RESET TO DEFAULT
         </button>
       </div>
     </div>

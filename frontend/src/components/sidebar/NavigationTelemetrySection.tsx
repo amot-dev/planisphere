@@ -63,13 +63,11 @@ export function NavigationTelemetrySection({
           <>
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c]">
               <span>Career Duration</span>
-              {sidebarStats?.careerDuration && (
-                <span className="font-mono-tabular text-[#F4ECE4] font-bold">
-                  {sidebarStats.careerDuration}
-                </span>
-              )}
+              <span className="font-mono-tabular text-[#F4ECE4] font-bold">
+                {sidebarStats?.careerStart ? sidebarStats.careerDuration : 'UNKNOWN'}
+              </span>
             </div>
-            {sidebarStats?.careerStart ? (
+            {sidebarStats?.careerStart && (
               <div className="mt-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] space-y-0.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[#a6907c]">START:</span>
@@ -78,23 +76,17 @@ export function NavigationTelemetrySection({
                   </span>
                 </div>
               </div>
-            ) : (
-              <div className="mt-1 text-xs text-[#6e5b4b] uppercase font-mono-tabular text-right">
-                STANDBY — AWAITING JOURNALS
-              </div>
             )}
           </>
         ) : (
           <>
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c]">
               <span>Expedition Duration</span>
-              {sidebarStats?.duration && (
-                <span className="font-mono-tabular text-[#F4ECE4] font-bold">
-                  {sidebarStats.duration}
-                </span>
-              )}
+              <span className="font-mono-tabular text-[#F4ECE4] font-bold">
+                {sidebarStats?.started ? sidebarStats.duration : 'NOT STARTED'}
+              </span>
             </div>
-            {sidebarStats?.started ? (
+            {sidebarStats?.started && (
               <div className="mt-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] space-y-0.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[#a6907c]">START:</span>
@@ -110,10 +102,6 @@ export function NavigationTelemetrySection({
                     {sidebarStats.endIsNow ? currentGalacticTime : sidebarStats.endGalactic}
                   </span>
                 </div>
-              </div>
-            ) : (
-              <div className="mt-1 text-xs text-[#6e5b4b] uppercase font-mono-tabular text-right">
-                STANDBY — ENGAGE EXPEDITION TO START
               </div>
             )}
           </>

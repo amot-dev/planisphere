@@ -396,7 +396,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                           expedition.Row.createFrom({ ...row, systemName: draft.systemName }),
                         )
                       }
-                      title="Plot Fleet Carrier route to this next carrier waypoint"
+                      title="Plot Fleet Carrier route to this next carrier stop"
                       className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
                     >
                       ROUTE

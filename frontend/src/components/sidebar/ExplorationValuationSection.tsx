@@ -112,7 +112,7 @@ export function ExplorationValuationSection({
             value={formatInt(displayedMetrics.bodiesScanned)}
             sub={
               displayedMetrics.firstDiscoveries > 0
-                ? `${formatInt(displayedMetrics.firstDiscoveries)} undiscovered`
+                ? `${formatInt(displayedMetrics.firstDiscoveries)} first discovered`
                 : undefined
             }
             subClass="text-[#00D2FF]"

@@ -121,7 +121,7 @@ func Delete(queryer db.Queryer, modeID int64) error {
 		return fmt.Errorf("mode %d not found", modeID)
 	}
 	if isDefault {
-		return errors.New("default modes cannot be deleted (you can rename or recolour them)")
+		return errors.New("default modes cannot be deleted (you can recolour them)")
 	}
 	_, deleteError := queryer.Exec(`DELETE FROM modes WHERE id = ?`, modeID)
 	return deleteError

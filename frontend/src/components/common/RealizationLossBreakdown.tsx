@@ -2,13 +2,12 @@ import { stats } from '../../../wailsjs/go/models'
 import { formatLoss } from '../../utils/galacticTime'
 
 /**
- * RealizationLossBreakdownProps defines the realization loss payload, container
- * styling classes, and optional label colon formatting for breakdown lists.
+ * RealizationLossBreakdownProps defines the realization loss payload and container
+ * styling classes for breakdown lists.
  */
 export interface RealizationLossBreakdownProps {
   realization?: stats.RealizationBreakdown | null
   className?: string
-  withColons?: boolean
 }
 
 const LOSS_ROWS: Array<{
@@ -30,13 +29,12 @@ const LOSS_ROWS: Array<{
 export function RealizationLossBreakdown({
   realization,
   className = '',
-  withColons = false,
 }: RealizationLossBreakdownProps) {
   return (
     <div className={className}>
       {LOSS_ROWS.map((lossRow) => (
         <div key={lossRow.label} className="flex items-center justify-between gap-2 text-[#a6907c]">
-          <span className="truncate">{withColons ? `${lossRow.label}:` : lossRow.label}</span>
+          <span className="truncate">{lossRow.label}</span>
           <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
             {formatLoss(lossRow.getValue(realization))}
           </span>

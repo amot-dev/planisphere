@@ -98,7 +98,7 @@ export function FlightModesSection({
                 type="color"
                 value={colorDraftsById[modeItem.id] ?? modeItem.color}
                 onChange={(event) => handleColorChange(modeItem, event.target.value)}
-                title={`Change color for ${modeItem.name}`}
+                title={`Change colour for ${modeItem.name}`}
                 className="w-5 h-5 ed-color-picker shrink-0 transition-colors"
               />
               <div className="min-w-0">
@@ -123,7 +123,7 @@ export function FlightModesSection({
                 onClick={() => handleDeleteMode(modeItem.id)}
                 className="ed-btn-danger"
               >
-                Delete
+                DELETE
               </button>
             )}
           </div>
@@ -136,7 +136,7 @@ export function FlightModesSection({
           type="text"
           value={newModeName}
           onChange={(event) => setNewModeName(event.target.value)}
-          placeholder="New mode name..."
+          placeholder="New flight mode name..."
           className="bg-[#050506] border border-[#3d2816] px-2.5 py-1 text-[#F4ECE4]"
         />
         <input
@@ -151,7 +151,7 @@ export function FlightModesSection({
             type="color"
             value={newModeColor}
             onChange={(event) => setNewModeColor(event.target.value)}
-            title="Select mode color"
+            title="Select flight mode colour"
             className="w-7 h-7 ed-color-picker shrink-0 transition-colors"
           />
           <button
@@ -159,7 +159,7 @@ export function FlightModesSection({
             onClick={handleCreateMode}
             className="flex-1 ed-btn-primary"
           >
-            Add Mode
+            ADD FLIGHT MODE
           </button>
         </div>
       </div>

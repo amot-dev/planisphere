@@ -41,15 +41,12 @@ export function PlannerTableHeader({
           #
         </th>
         <th className="w-60 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Star System</th>
-        <th className="w-48 px-3 py-2.5 align-top border-b border-[#FF7100]/70">POI / Body</th>
+        <th className="w-48 px-3 py-2.5 align-top border-b border-[#FF7100]/70">POI</th>
         {showNotes && (
           <th className="w-56 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Flight Notes</th>
         )}
         {showCarrierStop && (
-          <th
-            className="w-40 px-2 py-2.5 text-center align-top border-b border-[#FF7100]/70"
-            title="Fleet Carrier Stop, Arrival Status and Spansh Router"
-          >
+          <th className="w-40 px-2 py-2.5 text-center align-top border-b border-[#FF7100]/70">
             Carrier Stop
           </th>
         )}

@@ -307,7 +307,7 @@ func (app *App) BrowseJournalDir() (string, error) {
 	defaultDir := app.journalDir()
 	app.dbMu.RUnlock()
 	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
-		Title:            "Select Elite Dangerous journal folder",
+		Title:            "Select Elite Dangerous journal directory",
 		DefaultDirectory: defaultDir,
 	})
 }
@@ -478,7 +478,7 @@ func (app *App) RefreshGEC() (int, error) {
 	}
 	refreshCount, refreshError := gecCatalog.Refresh(app.ctx)
 	if refreshError != nil {
-		return 0, fmt.Errorf("refresh GEC catalog: %w", refreshError)
+		return 0, refreshError
 	}
 	app.populateMissingPOIs()
 	app.changed("plan", 0)

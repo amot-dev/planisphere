@@ -62,7 +62,7 @@ const (
 	gecRefreshInterval          = 7 * 24 * time.Hour
 )
 
-var errorNotReady = errors.New("database is not available — check the startup error in Settings")
+var errorNotReady = errors.New("database is not available — check the startup error in Config")
 
 // App is the Wails-bound application service.
 type App struct {

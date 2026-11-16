@@ -65,7 +65,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
                 {this.props.fallbackTitle || 'Subsystem Failure Detected'}
               </div>
               <div className="text-xs text-[#a6907c]">
-                The terminal encountered an unexpected runtime exception during rendering.
+                Planisphere encountered an unexpected runtime exception during rendering.
               </div>
             </div>
 
@@ -86,14 +86,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
                 onClick={this.handleReset}
                 className="ed-btn"
               >
-                Dismiss and Retry
+                DISMISS AND RETRY
               </button>
               <button
                 type="button"
                 onClick={this.handleReload}
                 className="ed-btn-primary"
               >
-                Reboot Terminal
+                REBOOT PLANISPHERE
               </button>
             </div>
           </div>

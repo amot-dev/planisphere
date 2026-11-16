@@ -38,7 +38,7 @@ export function CarrierRouteModal({
       <div className="w-full max-w-md border border-[#3d2816] border-t-2 border-t-[#00D2FF] bg-[#0b0907] shadow-2xl overflow-hidden text-xs">
         <div className="px-4 py-3 bg-[#140e09] border-b border-[#3d2816] flex items-center justify-between">
           <h3 className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#00D2FF]">
-            Fleet Carrier Navigation Plotter
+            Spansh Fleet Carrier Router
           </h3>
           <button
             type="button"
@@ -137,7 +137,7 @@ export function CarrierRouteModal({
             </div>
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
-                Depot Tritium (Tonnes, 0 – 1,000)
+                Fuel Depot (Tonnes, 0 – 1,000)
               </label>
               <input
                 type="number"
@@ -150,7 +150,7 @@ export function CarrierRouteModal({
                 className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
               />
               <p className="text-[10px] text-[#a6907c] mt-1">
-                Found in Carrier Management under Navigation.
+                Found in Carrier Management under Navigation Tritium Reserves.
               </p>
             </div>
           </div>

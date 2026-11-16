@@ -67,7 +67,7 @@ export function DatabaseArchiveSection({
           onClick={handleRescanJournals}
           className="ed-btn-cyan"
         >
-          <span>{isScanning ? 'Rescanning…' : 'Rescan Journals'}</span>
+          <span>{isScanning ? 'RESCANNING...' : 'RESCAN JOURNALS'}</span>
         </button>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono-tabular text-xs">

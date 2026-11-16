@@ -11,7 +11,7 @@ const root = document.getElementById('root')
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <ErrorBoundary fallbackTitle="Terminal Core Failure">
+      <ErrorBoundary fallbackTitle="Planisphere Core Failure">
         <App />
       </ErrorBoundary>
     </StrictMode>,

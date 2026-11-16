@@ -95,7 +95,7 @@ export function PlannerRegionRow({
               draggable={true}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
-              title="Drag to reposition Galactic Region Header"
+              title="Drag to reposition Region Header"
               className="h-5 px-1.5 inline-flex items-center justify-center text-[#FF7100] hover:text-[#ff9436] cursor-grab active:cursor-grabbing font-mono-tabular select-none border border-[#472e19] bg-[#16100b] hover:bg-[#24180e] text-xs shrink-0"
             >
               ⋮⋮
