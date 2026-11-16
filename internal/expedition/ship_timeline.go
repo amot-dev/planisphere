@@ -314,7 +314,7 @@ func queryUncachedSystemVisits(queryer db.Queryer, missingNames []string) (map[s
 	return counts, nil
 }
 
-func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
+func loadSystemVisitCounts(queryer db.Queryer, rows []Row) (map[string]int, error) {
 	uniqueNames := make([]string, 0, len(rows))
 	seenNames := make(map[string]bool, len(rows))
 	for _, rowItem := range rows {
@@ -328,16 +328,12 @@ func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
 		}
 	}
 	if len(uniqueNames) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	sqlDB, isSQLDB := queryer.(*sql.DB)
 	if !isSQLDB {
-		queriedCounts, queryError := queryUncachedSystemVisits(queryer, uniqueNames)
-		if queryError != nil {
-			return make(map[string]int, len(uniqueNames))
-		}
-		return queriedCounts
+		return queryUncachedSystemVisits(queryer, uniqueNames)
 	}
 
 	visitCacheMu.Lock()
@@ -359,12 +355,12 @@ func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
 	visitCacheMu.Unlock()
 
 	if len(missingNames) == 0 {
-		return visitCounts
+		return visitCounts, nil
 	}
 
 	queriedCounts, queryError := queryUncachedSystemVisits(queryer, missingNames)
 	if queryError != nil {
-		return visitCounts
+		return nil, queryError
 	}
 
 	visitCacheMu.Lock()
@@ -379,6 +375,6 @@ func loadSystemVisitCounts(queryer db.Queryer, rows []Row) map[string]int {
 	for normalizedName, visitCount := range queriedCounts {
 		visitCounts[normalizedName] = visitCount
 	}
-	return visitCounts
+	return visitCounts, nil
 }
 

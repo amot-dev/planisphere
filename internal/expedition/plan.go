@@ -80,7 +80,6 @@ type PlanView struct {
 type GECLookup func(systemName string, systemAddress int64) *GECRef
 
 type planBuildContext struct {
-	queryer            db.Queryer
 	expeditionRecord   Expedition
 	currentWaypoint    *Row
 	playerPosition     *ed.Vec3
@@ -128,12 +127,15 @@ func buildPreviousVisitMap(rows []Row) map[int64]string {
 }
 
 func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView) (*planBuildContext, error) {
+	visitCountBySystem, visitCountsError := loadSystemVisitCounts(queryer, rows)
+	if visitCountsError != nil {
+		return nil, visitCountsError
+	}
 	buildCtx := &planBuildContext{
-		queryer:            queryer,
 		expeditionRecord:   expeditionRecord,
 		modeByID:           map[int64]modes.Mode{},
 		previousVisitByID:  buildPreviousVisitMap(rows),
-		visitCountBySystem: loadSystemVisitCounts(queryer, rows),
+		visitCountBySystem: visitCountBySystem,
 		gecLookup:          gecLookup,
 	}
 
@@ -273,9 +275,6 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 		rowViewItem.VisitCount = visitCount
 		if visitCount > 0 && rowViewItem.Row.CoordsSource != "journal" {
 			rowViewItem.Row.CoordsSource = "journal"
-			if rowItem.CoordsSource == "edsm" && buildCtx.queryer != nil {
-				_, _ = buildCtx.queryer.Exec(`UPDATE expedition_rows SET coords_source = 'journal' WHERE id = ? AND coords_source = 'edsm'`, rowItem.ID)
-			}
 		} else if visitCount == 0 && rowViewItem.Row.CoordsSource == "journal" {
 			rowViewItem.Row.CoordsSource = "edsm"
 		}
