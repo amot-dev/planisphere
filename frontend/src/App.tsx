@@ -37,6 +37,7 @@ export default function App() {
     refreshAll,
     refreshPlanAndStats,
     handleRefreshPlan,
+    refreshSettings,
   } = useBackendSync()
 
   const [activeModal, setActiveModal] = useState<
@@ -60,6 +61,11 @@ export default function App() {
   }, [])
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
+
+  const handleOpenSettingsModal = useCallback(() => {
+    void refreshSettings()
+    setActiveModal('settings')
+  }, [refreshSettings])
 
   const archiveRevision = ingest
     ? `${ingest.eventsStored}:${ingest.firstEventAt}:${ingest.lastEventAt}`
@@ -94,7 +100,7 @@ export default function App() {
         settings={settings}
         onSelectExpedition={handleSelectExpedition}
         onOpenExpeditionsModal={() => setActiveModal('expeditions')}
-        onOpenSettingsModal={() => setActiveModal('settings')}
+        onOpenSettingsModal={handleOpenSettingsModal}
       />
 
       {/* Main Split Workspace: Persistent Stats Sidebar + Expedition Planner */}

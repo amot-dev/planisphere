@@ -11,10 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"planisphere/internal/expedition"
-	"planisphere/internal/journal"
-	"planisphere/internal/stats"
 )
 
 type buildingNode struct {
@@ -365,12 +361,6 @@ func hashResultValue(value any) string {
 	return hex.EncodeToString(digest[:8])
 }
 
-func invalidateAllBackendCaches() {
-	stats.InvalidateLedgerCache()
-	expedition.InvalidateShipCache()
-	journal.InvalidateCommanderCountsCache()
-}
-
 func runColdWarmProbe(
 	database *sql.DB,
 	recorder *treeRecorder,
@@ -381,6 +371,7 @@ func runColdWarmProbe(
 	itemUnit string,
 	secondaryUnit string,
 	iterations int,
+	invalidateBeforeCold func(),
 	invoke func() (singleExecOutcome, error),
 ) (ProbeResult, error) {
 	coldRun, items, secondary, coldError := executeMeasuredRun(
@@ -390,7 +381,7 @@ func runColdWarmProbe(
 		rootSpanName,
 		itemUnit,
 		iterations,
-		invalidateAllBackendCaches,
+		invalidateBeforeCold,
 		invoke,
 	)
 	if coldError != nil {

@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,13 +12,12 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"planisphere/internal/db"
-	"planisphere/internal/ed"
-	"planisphere/internal/eddiscovery"
-	"planisphere/internal/expedition"
-	"planisphere/internal/gec"
-	"planisphere/internal/journal"
-	"planisphere/internal/stats"
+	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
+	"planisphere/internal/reference"
+	"planisphere/internal/sources/eddiscovery"
+	"planisphere/internal/sources/gec"
+	"planisphere/internal/sources/journal"
 	"planisphere/internal/version"
 )
 
@@ -59,7 +56,10 @@ func (app *App) GetSettings() (Settings, error) {
 		return Settings{}, readyError
 	}
 	dir := app.journalDir()
-	commanders, _ := journal.ListCommanders(app.db)
+	var commanders []journal.Commander
+	if app.commanderRoster != nil {
+		commanders, _ = app.commanderRoster.Commanders()
+	}
 	if commanders == nil {
 		commanders = []journal.Commander{}
 	}
@@ -82,7 +82,7 @@ func (app *App) GetSettings() (Settings, error) {
 		JournalDebounceMs:           app.journalDebounceMs(),
 		DefaultJournalDebounceMs:    int(journal.DefaultDebounceDelay / time.Millisecond),
 		TritiumPricePerTonne:        app.tritiumPricePerTonne(),
-		DefaultTritiumPricePerTonne: ed.DefaultTritiumPricePerTonne,
+		DefaultTritiumPricePerTonne: reference.DefaultTritiumPricePerTonne,
 		OnlineLookups:               app.onlineEnabled(),
 		ExternalLinkInara:           externalLinkInara,
 		ExternalLinkEDSM:            externalLinkEDSM,
@@ -160,7 +160,7 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 			return Settings{}, saveError
 		}
 	}
-	app.changed("settings", 0)
+	app.publishApp("settings", 0, events.AppDatabaseSwitched)
 	return app.GetSettings()
 }
 
@@ -186,8 +186,11 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 	if err := app.saveJournalDirSetting(dir); err != nil {
 		return IngestStatus{}, err
 	}
-	app.scanAndStartWatcher()
-	app.changed("journal", 0)
+	hasNewEvents := app.runScan()
+	app.startConfiguredWatcher()
+	if !hasNewEvents {
+		app.emitDataChanged("journal", 0, events.NewUITargetSet(events.UITargetIngest))
+	}
 	return app.GetIngestStatus()
 }
 
@@ -220,7 +223,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 	if shouldRefresh {
 		app.spawnBackground(app.maybeRefreshGEC)
 	}
-	app.changed("settings", 0)
+	app.publishApp("settings", 0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -231,11 +234,7 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 	}); toggleError != nil {
 		return Settings{}, toggleError
 	}
-	stats.InvalidateLedgerCache()
-	expedition.InvalidateVisitCache()
-	app.invalidateAllTimeCache()
-	app.reevaluateActive()
-	app.changed("journal", 0)
+	app.publishApp("journal", 0, events.AppCommanderFilterChanged)
 	return app.GetSettings()
 }
 
@@ -289,11 +288,11 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	}
 	app.dbMu.RUnlock()
 
-	stats.InvalidateLedgerCache()
-	expedition.InvalidateVisitCache()
-	app.invalidateAllTimeCache()
-	app.reevaluateActive()
-	app.changed("journal", 0)
+	affectedTargets := app.publishJournalEvents(importResult.Events)
+	if affectedTargets.IsEmpty() {
+		affectedTargets = events.NewUITargetSet(events.UITargetIngest)
+	}
+	app.emitDataChanged("journal", 0, affectedTargets)
 	return importResult.LinesRead, nil
 }
 
@@ -354,7 +353,7 @@ func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
 	if runningWatcher != nil {
 		runningWatcher.SetDebounceDelay(clampedDuration)
 	}
-	app.changed("settings", 0)
+	app.publishApp("settings", 0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -369,7 +368,7 @@ func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist tritium price setting: %w", saveError)
 	}
-	app.changed("settings", 0)
+	app.publishApp("settings", 0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -409,28 +408,16 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	}
 	status.FilesTracked, status.EventsStored = archiveStatus.FilesTracked, archiveStatus.EventsStored
 	status.FirstEventAt, status.LastEventAt = archiveStatus.FirstEventAt, archiveStatus.LastEventAt
-	status.FirstEventGalactic = ed.ToGalactic(archiveStatus.FirstEventAt)
-	status.LastEventGalactic = ed.ToGalactic(archiveStatus.LastEventAt)
-	var currentSystemName sql.NullString
-	_ = app.db.QueryRow(`SELECT system_name FROM journal_events WHERE event IN ('FSDJump','Location','CarrierJump') AND ` + journal.CmdrFilterSQL + `
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&currentSystemName)
-	status.CurrentSystem = currentSystemName.String
-	var rawJSON, eventName string
-	if app.db.QueryRow(`SELECT event, raw_json FROM journal_events WHERE event IN ('LoadGame','ShipyardSwap') AND `+journal.CmdrFilterSQL+`
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&eventName, &rawJSON) == nil {
-		if eventName == "LoadGame" {
-			var loadGame journal.LoadGameEvent
-			if json.Unmarshal([]byte(rawJSON), &loadGame) == nil {
-				status.CurrentShip = ed.ShipDisplayName(loadGame.Ship, loadGame.ShipLocalised)
-				if loadGame.ShipName != "" {
-					status.CurrentShip += " \u201c" + loadGame.ShipName + "\u201d"
-				}
-			}
-		} else {
-			var shipyardSwap journal.ShipyardSwapEvent
-			if json.Unmarshal([]byte(rawJSON), &shipyardSwap) == nil {
-				status.CurrentShip = ed.ShipDisplayName(shipyardSwap.ShipType, shipyardSwap.ShipTypeLocalised)
-			}
+	status.FirstEventGalactic = reference.ToGalactic(archiveStatus.FirstEventAt)
+	status.LastEventGalactic = reference.ToGalactic(archiveStatus.LastEventAt)
+	if app.systemArrivals != nil {
+		if _, currentSystemName, locationError := app.systemArrivals.LatestPlayerLocation(); locationError == nil {
+			status.CurrentSystem = currentSystemName
+		}
+	}
+	if app.shipHistory != nil {
+		if currentShipName, shipError := app.shipHistory.CurrentShip(); shipError == nil {
+			status.CurrentShip = currentShipName
 		}
 	}
 	status.Scanning = app.scanning.Load()
@@ -488,7 +475,7 @@ func (app *App) RefreshGEC() (int, error) {
 		return 0, refreshError
 	}
 	app.populateMissingPOIs()
-	app.changed("plan", 0)
+	app.publishApp("plan", 0, events.AppExpeditionPlanChanged)
 	return refreshCount, nil
 }
 

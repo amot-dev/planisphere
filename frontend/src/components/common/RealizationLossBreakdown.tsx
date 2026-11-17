@@ -1,4 +1,4 @@
-import { stats } from '../../../wailsjs/go/models'
+import { realization as realizationModel } from '../../../wailsjs/go/models'
 import { formatLoss } from '../../utils/galacticTime'
 
 /**
@@ -6,13 +6,13 @@ import { formatLoss } from '../../utils/galacticTime'
  * styling classes for breakdown lists.
  */
 export interface RealizationLossBreakdownProps {
-  realization?: stats.RealizationBreakdown | null
+  realization?: realizationModel.Breakdown | null
   className?: string
 }
 
 const LOSS_ROWS: Array<{
   label: string
-  getValue: (realization?: stats.RealizationBreakdown | null) => number | null | undefined
+  getValue: (realization?: realizationModel.Breakdown | null) => number | null | undefined
 }> = [
   { label: 'Cartographics Lost (Death)', getValue: (realization) => realization?.cartoLostDeath },
   { label: 'Exobiology Lost (Death)', getValue: (realization) => realization?.organicLostDeath },

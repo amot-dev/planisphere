@@ -11,10 +11,67 @@ import (
 	"strings"
 	"time"
 
-	"planisphere/internal/db"
-	"planisphere/internal/expedition"
-	"planisphere/internal/journal"
+	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
+	"planisphere/internal/core/projection"
+	"planisphere/internal/projections"
+	"planisphere/internal/projections/realization"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/expedition"
 )
+
+type profileProjections struct {
+	database        *sql.DB
+	bus             *projection.Bus
+	commanderRoster *projections.CommanderRoster
+	recoveredJumps  *projections.RecoveredJumps
+	systemArrivals  *projections.SystemArrivals
+	visitCounts     *projections.SystemVisitCounts
+	shipHistory     *projections.ShipHistory
+	salesLedger     *realization.SalesLedger
+	careerStats     *stats.CareerStats
+	timeRangeStats  *stats.TimeRangeStats
+}
+
+func newProfileProjections(database *sql.DB) *profileProjections {
+	bus := projection.NewBus()
+	recoveredJumps := projections.NewRecoveredJumps(database, bus)
+	salesLedger := realization.NewSalesLedger(database, bus)
+	return &profileProjections{
+		database:        database,
+		bus:             bus,
+		commanderRoster: projections.NewCommanderRoster(database, bus),
+		recoveredJumps:  recoveredJumps,
+		systemArrivals:  projections.NewSystemArrivals(database, bus),
+		visitCounts:     projections.NewSystemVisitCounts(database, bus, recoveredJumps),
+		shipHistory:     projections.NewShipHistory(database, bus, recoveredJumps),
+		salesLedger:     salesLedger,
+		careerStats:     stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
+		timeRangeStats:  stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps),
+	}
+}
+
+func (proj *profileProjections) statsEngine() *stats.Engine {
+	return stats.NewEngineWithProjections(proj.database, proj.salesLedger, proj.recoveredJumps)
+}
+
+func (proj *profileProjections) expeditionProjections() *expedition.Projections {
+	return &expedition.Projections{
+		Arrivals:       proj.systemArrivals,
+		VisitCounts:    proj.visitCounts,
+		ShipHistory:    proj.shipHistory,
+		TimeRangeStats: proj.timeRangeStats,
+		SalesLedger:    proj.salesLedger,
+		RecoveredJumps: proj.recoveredJumps,
+	}
+}
+
+func (proj *profileProjections) invalidate() {
+	if proj != nil && proj.bus != nil {
+		proj.bus.PublishApp(events.AppDatabaseSwitched)
+	}
+}
 
 // RunSnapshotSuite creates a temporary read-only snapshot of the configured
 // database, executes the live-data profiler suite against the snapshot, and
@@ -54,26 +111,28 @@ func RunSnapshotSuite(ctx context.Context, options Options) (Report, error) {
 		Dataset:     dataset,
 	}
 
-	statsProbes, scalingModels, statsError := runStatsProbes(database, recorder, dataset, options)
+	proj := newProfileProjections(database)
+
+	statsProbes, scalingModels, statsError := runStatsProbes(database, proj, recorder, dataset, options)
 	if statsError != nil {
 		return report, statsError
 	}
 	report.Probes = append(report.Probes, statsProbes...)
 	report.ScalingModels = append(report.ScalingModels, scalingModels...)
 
-	expProbes, expError := runExpeditionProbes(database, recorder, dataset, options)
+	expProbes, expError := runExpeditionProbes(database, proj, recorder, dataset, options)
 	if expError != nil {
 		return report, expError
 	}
 	report.Probes = append(report.Probes, expProbes...)
 
-	archiveProbes, archiveError := runArchiveProbes(database, recorder, dataset, options)
+	archiveProbes, archiveError := runArchiveProbes(database, proj, recorder, dataset, options)
 	if archiveError != nil {
 		return report, archiveError
 	}
 	report.Probes = append(report.Probes, archiveProbes...)
 
-	frontendProbes, frontendError := runFrontendProbes(ctx, database, dataset, options)
+	frontendProbes, frontendError := runFrontendProbes(ctx, database, proj, dataset, options)
 	if frontendError != nil {
 		return report, frontendError
 	}

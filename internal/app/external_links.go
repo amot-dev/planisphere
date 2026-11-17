@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"planisphere/internal/db"
+	"planisphere/internal/core/db"
 )
 
 // External link setting keys and visibility modes.

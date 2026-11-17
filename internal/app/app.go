@@ -18,13 +18,15 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"planisphere/internal/db"
-	"planisphere/internal/ed"
-	"planisphere/internal/expedition"
-	"planisphere/internal/gec"
-	"planisphere/internal/journal"
-	"planisphere/internal/stats"
-	"planisphere/internal/systems"
+	"planisphere/internal/core/db"
+	"planisphere/internal/core/projection"
+	"planisphere/internal/projections"
+	"planisphere/internal/projections/realization"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/reference"
+	"planisphere/internal/sources/edsm"
+	"planisphere/internal/sources/gec"
+	"planisphere/internal/sources/journal"
 	"planisphere/internal/version"
 )
 
@@ -37,8 +39,9 @@ const (
 
 // DataChanged tells the frontend which data to refresh.
 type DataChanged struct {
-	Scope        string `json:"scope"` // journal | plan | modes | settings | adjustments
-	ExpeditionID int64  `json:"expeditionId"`
+	Scope        string   `json:"scope"` // journal | plan | modes | settings | adjustments
+	Domains      []string `json:"domains,omitempty"`
+	ExpeditionID int64    `json:"expeditionId"`
 }
 
 // EDDImportProgress reports live progress while importing historical events from EDDiscovery.
@@ -80,7 +83,7 @@ type App struct {
 	startupOnce     sync.Once
 	ingester        *journal.Ingester
 	watcher         *journal.Watcher
-	resolver        *systems.Resolver
+	resolver        *edsm.Resolver
 	gec             *gec.Catalog
 	gecRefreshing   atomic.Bool
 
@@ -96,30 +99,16 @@ type App struct {
 	resolvingExpeditions map[int64]bool
 	resolutionSemaphore  chan struct{}
 
-	allTimeMu               sync.Mutex
-	allTimeValid            bool
-	allTimeMetrics          stats.Metrics
-	allTimeRealizationValid bool
-	allTimeRealization      stats.RealizationBreakdown
-
-	liveStatsMu    sync.Mutex
-	liveStatsCache map[string]cachedLiveStats
-	liveStatsGen   uint64
-
-	// Career start timestamp caching fields protected by careerStartMu.
-	careerStartMu        sync.Mutex
-	careerStartTimestamp string
-	careerStartGalactic  string
-	careerStartValid     bool
-	careerStartGen       uint64
-
-	// Latest CarrierStats caching fields protected by carrierStatsMu.
-	carrierStatsMu        sync.Mutex
-	carrierStatsEvent     journal.CarrierStatsEvent
-	carrierStatsTimestamp string
-	carrierStatsFound     bool
-	carrierStatsValid     bool
-	carrierStatsGen       uint64
+	bus               *projection.Bus
+	commanderRoster   *projections.CommanderRoster
+	recoveredJumps    *projections.RecoveredJumps
+	systemArrivals    *projections.SystemArrivals
+	systemVisitCounts *projections.SystemVisitCounts
+	shipHistory       *projections.ShipHistory
+	carrierState      *projections.CarrierState
+	salesLedger       *realization.SalesLedger
+	careerStats       *stats.CareerStats
+	timeRangeStats    *stats.TimeRangeStats
 
 	// Latest GitHub release version check fields protected by versionCheckMu.
 	versionCheckMu     sync.Mutex
@@ -131,11 +120,6 @@ type App struct {
 	emit func(event string, data ...any)
 }
 
-type cachedLiveStats struct {
-	metrics     stats.Metrics
-	realization stats.RealizationBreakdown
-}
-
 // New creates the application service.
 func New() *App {
 	return &App{
@@ -143,7 +127,6 @@ func New() *App {
 		resolving:            map[int64]bool{},
 		resolvingExpeditions: map[int64]bool{},
 		resolutionSemaphore:  make(chan struct{}, 1),
-		liveStatsCache:       map[string]cachedLiveStats{},
 	}
 }
 
@@ -306,11 +289,9 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
 	app.watcher.SetDebounceDelay(time.Duration(app.journalDebounceMs()) * time.Millisecond)
-	app.resolver = systems.NewResolver(dbConn, app.onlineEnabled)
+	app.resolver = edsm.NewResolver(dbConn, app.onlineEnabled)
 	app.gec = gec.NewCatalog(dbConn)
-	stats.InvalidateLedgerCache()
-	expedition.InvalidateVisitCache()
-	app.invalidateAllTimeCache()
+	app.wireProjections(dbConn)
 	app.dbMu.Unlock()
 
 	if remainingWatcher != nil && remainingWatcher != previousWatcher {
@@ -427,13 +408,6 @@ func (app *App) getError() string {
 	return app.lastError
 }
 
-func (app *App) changed(scope string, expeditionID int64) {
-	if scope == "modes" || scope == "journal" {
-		app.invalidateLiveStatsCache()
-	}
-	app.emit(EventDataChanged, DataChanged{Scope: scope, ExpeditionID: expeditionID})
-}
-
 func (app *App) emitEDDProgress(active bool, current, total, files int, stage string) {
 	percentageProgress := 0
 	if total > 0 {
@@ -516,9 +490,9 @@ func (app *App) journalDebounceMs() int {
 // tritiumPricePerTonne returns the configured or default Tritium cost in credits
 // per tonne. Caller must hold app.dbMu.RLock or app.dbMu.Lock.
 func (app *App) tritiumPricePerTonne() int64 {
-	configuredPrice := app.settingInt64(settingTritiumPricePerTonne, ed.DefaultTritiumPricePerTonne)
+	configuredPrice := app.settingInt64(settingTritiumPricePerTonne, reference.DefaultTritiumPricePerTonne)
 	if configuredPrice < 0 {
-		return ed.DefaultTritiumPricePerTonne
+		return reference.DefaultTritiumPricePerTonne
 	}
 	return configuredPrice
 }

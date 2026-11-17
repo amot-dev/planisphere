@@ -7,32 +7,33 @@ import (
 	"log"
 	"time"
 
-	"planisphere/internal/db"
-	"planisphere/internal/ed"
-	"planisphere/internal/eddiscovery"
-	"planisphere/internal/expedition"
-	"planisphere/internal/journal"
-	"planisphere/internal/stats"
+	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/reference"
+	"planisphere/internal/sources/eddiscovery"
+	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/expedition"
 )
 
 // runScan performs the idempotent catch-up scan of the journal directory,
 // re-evaluates active expeditions when new events are ingested, and returns
 // whether any new events were stored.
 func (app *App) runScan() bool {
-	hasNewEvents, didStartScan := app.executeJournalScan()
+	hasNewEvents, didStartScan, affectedTargets := app.executeJournalScan()
 	if !didStartScan {
 		return false
 	}
 	app.emit(EventIngest, nil)
 	if hasNewEvents {
-		app.changed("journal", 0)
+		app.emitDataChanged("journal", 0, affectedTargets)
 	}
 	return hasNewEvents
 }
 
-func (app *App) executeJournalScan() (bool, bool) {
+func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 	if !app.scanning.CompareAndSwap(false, true) {
-		return false, false
+		return false, false, 0
 	}
 	defer app.scanning.Store(false)
 	app.emit(EventIngest, nil)
@@ -44,7 +45,7 @@ func (app *App) executeJournalScan() (bool, bool) {
 	database := app.db
 	app.dbMu.RUnlock()
 	if ingester == nil || database == nil {
-		return false, true
+		return false, true, 0
 	}
 	scanResult, scanError := ingester.ScanDir(app.ctx, dir)
 	if scanError != nil {
@@ -56,29 +57,17 @@ func (app *App) executeJournalScan() (bool, bool) {
 	}
 	app.dbMu.RLock()
 	if app.db == database {
-		if settingError := db.SetSetting(database, settingLastScanAt, ed.NowISO()); settingError != nil {
+		if settingError := db.SetSetting(database, settingLastScanAt, reference.NowISO()); settingError != nil {
 			log.Printf("persist last scan timestamp: %v", settingError)
 		}
 	}
 	app.dbMu.RUnlock()
 	hasNewEvents := scanResult.NewEvents > 0
-	if scanResult.HasRealizationEvents {
-		stats.InvalidateLedgerCache()
-	}
-	if scanResult.HasArrivalEvents {
-		expedition.InvalidateVisitCache()
-	}
+	var affectedTargets events.UITargetSet
 	if hasNewEvents {
-		app.invalidateAllTimeCache()
-		app.reevaluateActive()
-		if scanResult.HasArrivalEvents {
-			app.dbMu.RLock()
-			currentActiveID := app.activeExpeditionID()
-			app.dbMu.RUnlock()
-			app.kickResolution(currentActiveID, false)
-		}
+		affectedTargets = app.publishJournalEvents(scanResult.Events)
 	}
-	return hasNewEvents, true
+	return hasNewEvents, true, affectedTargets
 }
 
 // warmInitialStats pre-populates the all-time and active expedition statistics
@@ -89,13 +78,16 @@ func (app *App) warmInitialStats() {
 	if app.db == nil {
 		return
 	}
-	if _, metricsError := app.getAllTimeMetrics(); metricsError != nil {
-		log.Printf("warm initial all-time metrics: %v", metricsError)
+	if app.careerStats != nil {
+		if _, metricsError := app.careerStats.Get(); metricsError != nil {
+			log.Printf("warm initial career stats: %v", metricsError)
+		}
 	}
-	if _, realizationError := app.getAllTimeRealization(); realizationError != nil {
-		log.Printf("warm initial all-time realization: %v", realizationError)
+	if app.commanderRoster != nil {
+		if _, rosterError := app.commanderRoster.Snapshot(); rosterError != nil {
+			log.Printf("warm initial commander roster: %v", rosterError)
+		}
 	}
-	app.resolveCareerStart()
 	activeID := app.activeExpeditionID()
 	if activeID == 0 {
 		expeditionsList, listError := expedition.List(app.db)
@@ -105,14 +97,15 @@ func (app *App) warmInitialStats() {
 			activeID = expeditionsList[0].ID
 		}
 	}
-	if activeID > 0 {
+	if activeID > 0 && app.timeRangeStats != nil {
 		expeditionRecord, getError := expedition.Get(app.db, activeID)
 		if getError != nil {
 			if !errors.Is(getError, sql.ErrNoRows) {
 				log.Printf("warm initial stats load expedition %d: %v", activeID, getError)
 			}
 		} else if expeditionRecord.StartTimestamp != "" {
-			if _, _, statsError := app.computeExpeditionLiveStats(expeditionRecord, stats.Filter{}, stats.NewEngine(app.db)); statsError != nil {
+			expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
+			if _, statsError := app.timeRangeStats.Compute(expeditionRange, &stats.Filter{}); statsError != nil {
 				log.Printf("warm initial stats compute expedition %d: %v", activeID, statsError)
 			}
 		}
@@ -121,100 +114,8 @@ func (app *App) warmInitialStats() {
 
 // onJournalBatch runs after the live tailer stored new events.
 func (app *App) onJournalBatch(scanResult journal.Result) {
-	if scanResult.HasRealizationEvents {
-		stats.InvalidateLedgerCache()
-	}
-	if scanResult.HasArrivalEvents {
-		expedition.InvalidateVisitCache()
-	}
-	app.invalidateAllTimeCache()
-	app.reevaluateActive()
-	if scanResult.HasArrivalEvents {
-		app.dbMu.RLock()
-		currentActiveID := app.activeExpeditionID()
-		app.dbMu.RUnlock()
-		app.kickResolution(currentActiveID, false)
-	}
-	app.changed("journal", 0)
-}
-
-func (app *App) invalidateLiveStatsCache() {
-	app.liveStatsMu.Lock()
-	clear(app.liveStatsCache)
-	app.liveStatsGen++
-	app.liveStatsMu.Unlock()
-}
-
-func (app *App) invalidateAllTimeCache() {
-	app.allTimeMu.Lock()
-	app.allTimeValid = false
-	app.allTimeRealizationValid = false
-	app.allTimeMu.Unlock()
-	app.careerStartMu.Lock()
-	app.careerStartTimestamp = ""
-	app.careerStartGalactic = ""
-	app.careerStartValid = false
-	app.careerStartGen++
-	app.careerStartMu.Unlock()
-	app.carrierStatsMu.Lock()
-	app.carrierStatsEvent = journal.CarrierStatsEvent{}
-	app.carrierStatsTimestamp = ""
-	app.carrierStatsFound = false
-	app.carrierStatsValid = false
-	app.carrierStatsGen++
-	app.carrierStatsMu.Unlock()
-	app.invalidateLiveStatsCache()
-	expedition.InvalidateShipCache()
-	journal.InvalidateRecoveredJumpsCache()
-}
-
-// getAllTimeMetrics computes or retrieves cached lifetime statistics across all journals. Caller must hold app.dbMu.RLock.
-func (app *App) getAllTimeMetrics() (stats.Metrics, error) {
-	app.allTimeMu.Lock()
-	defer app.allTimeMu.Unlock()
-	if app.allTimeValid {
-		return app.allTimeMetrics, nil
-	}
-	if app.db == nil {
-		return stats.Metrics{}, errorNotReady
-	}
-	statsEngine := stats.NewEngine(app.db)
-	allMetrics, computeError := statsEngine.Compute(stats.Range{}, nil)
-	if computeError != nil {
-		return stats.Metrics{}, computeError
-	}
-	var totalJumps sql.NullInt64
-	var distanceTravelled sql.NullFloat64
-	_ = app.db.QueryRow(`SELECT json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_TOTAL_JUMPS'), json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_DISTANCE_TRAVELLED')
-		FROM journal_events WHERE event = 'Statistics' AND json_extract(raw_json, '$.FLEETCARRIER.FLEETCARRIER_TOTAL_JUMPS') IS NOT NULL AND `+journal.CmdrFilterSQL+`
-		ORDER BY timestamp DESC LIMIT 1`).Scan(&totalJumps, &distanceTravelled)
-	if totalJumps.Valid && totalJumps.Int64 > 0 {
-		allMetrics.CarrierJumps = int(totalJumps.Int64)
-		allMetrics.CarrierDistanceLy = distanceTravelled.Float64
-	}
-	app.allTimeMetrics = allMetrics
-	app.allTimeValid = true
-	return allMetrics, nil
-}
-
-// getAllTimeRealization computes or retrieves cached lifetime realization across all journals. Caller must hold app.dbMu.RLock.
-func (app *App) getAllTimeRealization() (stats.RealizationBreakdown, error) {
-	app.allTimeMu.Lock()
-	defer app.allTimeMu.Unlock()
-	if app.allTimeRealizationValid {
-		return app.allTimeRealization, nil
-	}
-	if app.db == nil {
-		return stats.RealizationBreakdown{}, errorNotReady
-	}
-	statsEngine := stats.NewEngine(app.db)
-	allRealization, computeError := statsEngine.ComputeRealization(stats.Range{}, nil)
-	if computeError != nil {
-		return stats.RealizationBreakdown{}, computeError
-	}
-	app.allTimeRealization = allRealization
-	app.allTimeRealizationValid = true
-	return allRealization, nil
+	affectedTargets := app.publishJournalEvents(scanResult.Events)
+	app.emitDataChanged("journal", 0, affectedTargets)
 }
 
 func (app *App) reevaluateActive() {
@@ -265,7 +166,7 @@ func (app *App) maybeRefreshGEC() {
 	}
 	lastFetched := gecCatalog.LastFetched()
 	if lastFetched != "" {
-		if parsedTime, parseError := ed.ParseISO(lastFetched); parseError == nil && time.Since(parsedTime) < gecRefreshInterval && gecCatalog.Count() > 0 {
+		if parsedTime, parseError := reference.ParseISO(lastFetched); parseError == nil && time.Since(parsedTime) < gecRefreshInterval && gecCatalog.Count() > 0 {
 			return
 		}
 	}
@@ -274,7 +175,7 @@ func (app *App) maybeRefreshGEC() {
 		return
 	}
 	app.populateMissingPOIs()
-	app.changed("plan", 0)
+	app.publishApp("plan", 0, events.AppExpeditionPlanChanged)
 }
 
 func (app *App) maybeCatchUpEDD() {
@@ -306,18 +207,18 @@ func (app *App) maybeCatchUpEDD() {
 		return
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
-	_, importError := eddiscovery.Import(app.ctx, ingester, eddPath, func(current, total, files int, stage string) {
+	importResult, importError := eddiscovery.Import(app.ctx, ingester, eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError == nil {
-		stats.InvalidateLedgerCache()
-		expedition.InvalidateVisitCache()
 		if settingError := db.SetSetting(database, "edd_history_disconnects_v7", "1"); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}
-		app.invalidateAllTimeCache()
-		app.reevaluateActive()
-		app.changed("journal", 0)
+		affectedTargets := app.publishJournalEvents(importResult.Events)
+		if affectedTargets.IsEmpty() {
+			affectedTargets = events.NewUITargetSet(events.UITargetIngest)
+		}
+		app.emitDataChanged("journal", 0, affectedTargets)
 	}
 }
 

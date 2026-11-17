@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"planisphere/internal/expedition"
-	"planisphere/internal/journal"
-	"planisphere/internal/stats"
+	"planisphere/internal/core/events"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/expedition"
 )
 
 func setupTestApp(testingContext *testing.T) *App {
@@ -30,7 +31,6 @@ func setupTestApp(testingContext *testing.T) *App {
 	testingContext.Cleanup(func() {
 		cancelFunction()
 		testApp.shutdown(applicationContext)
-		stats.InvalidateLedgerCache()
 	})
 	return testApp
 }
@@ -55,7 +55,9 @@ func insertTestJournalEvent(testingContext *testing.T, testApp *App, timestamp, 
 	if insertError != nil {
 		testingContext.Fatalf("insert %s journal event: %v", eventName, insertError)
 	}
-	testApp.invalidateAllTimeCache()
+	if parsedEvent, ok := journal.ParseEventType(eventName); ok {
+		testApp.publishJournalEvents(journal.NewEventSet(parsedEvent))
+	}
 }
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
@@ -258,14 +260,13 @@ func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
 	}
 	waitGroup.Wait()
 
-	testApp.careerStartMu.Lock()
-	if !testApp.careerStartValid {
-		testingContext.Errorf("expected careerStartValid to be true")
+	if !testApp.commanderRoster.IsValid() {
+		testingContext.Errorf("expected commanderRoster snapshot to be valid")
 	}
-	if testApp.careerStartTimestamp != expectedCareerStart {
-		testingContext.Errorf("expected careerStartTimestamp %s, got %s", expectedCareerStart, testApp.careerStartTimestamp)
+	careerStart, _, careerErr := testApp.commanderRoster.CareerStart()
+	if careerErr != nil || careerStart != expectedCareerStart {
+		testingContext.Errorf("expected commanderRoster CareerStart %s, got %s (err=%v)", expectedCareerStart, careerStart, careerErr)
 	}
-	testApp.careerStartMu.Unlock()
 }
 
 func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T) {
@@ -305,8 +306,6 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":222,"Body":1}`)
 	insertTestJournalEvent(testingContext, testApp, "2026-03-01T12:00:00Z", "SellOrganicData", "2",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
-	stats.InvalidateLedgerCache()
-	testApp.invalidateAllTimeCache()
 
 	sidebarStats, statsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
 	if statsError != nil {
@@ -459,92 +458,64 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 
 func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
+	expeditionID := createAndStartExpedition(testingContext, testApp, "Generation Test", "Sol")
 
-	testApp.liveStatsMu.Lock()
-	initialLiveStatsGeneration := testApp.liveStatsGen
-	testApp.liveStatsCache["sample-key"] = cachedLiveStats{}
-	testApp.liveStatsMu.Unlock()
-
-	testApp.invalidateLiveStatsCache()
-
-	testApp.liveStatsMu.Lock()
-	afterLiveInvalidationGeneration := testApp.liveStatsGen
-	liveCacheSizeAfterLiveInvalidation := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
-
-	if afterLiveInvalidationGeneration != initialLiveStatsGeneration+1 {
-		testingContext.Errorf("expected liveStatsGen to increment from %d to %d, got %d", initialLiveStatsGeneration, initialLiveStatsGeneration+1, afterLiveInvalidationGeneration)
+	if _, statsErr := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsErr != nil {
+		testingContext.Fatalf("GetSidebarStats: %v", statsErr)
 	}
-	if liveCacheSizeAfterLiveInvalidation != 0 {
-		testingContext.Errorf("expected liveStatsCache to be empty after invalidateLiveStatsCache, got %d entries", liveCacheSizeAfterLiveInvalidation)
+	if _, carrierErr := testApp.carrierState.LatestStats(); carrierErr != nil {
+		testingContext.Fatalf("LatestStats: %v", carrierErr)
 	}
 
-	testApp.careerStartMu.Lock()
-	initialCareerStartGeneration := testApp.careerStartGen
-	testApp.careerStartTimestamp = "2025-01-01T00:00:00Z"
-	testApp.careerStartGalactic = "01 JAN 3311"
-	testApp.careerStartValid = true
-	testApp.careerStartMu.Unlock()
+	initialTimeRangeGen := testApp.timeRangeStats.Generation()
+	initialRosterGen := testApp.commanderRoster.Generation()
+	initialCarrierGen := testApp.carrierState.Generation()
+	initialCareerGen := testApp.careerStats.Generation()
 
-	testApp.carrierStatsMu.Lock()
-	initialCarrierStatsGeneration := testApp.carrierStatsGen
-	testApp.carrierStatsEvent = journal.CarrierStatsEvent{CarrierID: 98765, Callsign: "ABC-123", FuelLevel: 850}
-	testApp.carrierStatsTimestamp = "2025-01-01T00:00:00Z"
-	testApp.carrierStatsFound = true
-	testApp.carrierStatsValid = true
-	testApp.carrierStatsMu.Unlock()
-
-	testApp.liveStatsMu.Lock()
-	testApp.liveStatsCache["another-key"] = cachedLiveStats{}
-	testApp.liveStatsMu.Unlock()
-
-	testApp.invalidateAllTimeCache()
-
-	testApp.careerStartMu.Lock()
-	afterAllTimeCareerGeneration := testApp.careerStartGen
-	careerStartValidAfterInvalidation := testApp.careerStartValid
-	careerStartTimestampAfterInvalidation := testApp.careerStartTimestamp
-	careerStartGalacticAfterInvalidation := testApp.careerStartGalactic
-	testApp.careerStartMu.Unlock()
-
-	if afterAllTimeCareerGeneration != initialCareerStartGeneration+1 {
-		testingContext.Errorf("expected careerStartGen to increment from %d to %d, got %d", initialCareerStartGeneration, initialCareerStartGeneration+1, afterAllTimeCareerGeneration)
+	if testApp.timeRangeStats.CachedCount() == 0 {
+		testingContext.Fatal("expected timeRangeStats to cache an entry after GetSidebarStats")
 	}
-	if careerStartValidAfterInvalidation {
-		testingContext.Errorf("expected careerStartValid to be false after invalidateAllTimeCache")
-	}
-	if careerStartTimestampAfterInvalidation != "" || careerStartGalacticAfterInvalidation != "" {
-		testingContext.Errorf("expected careerStart cached strings to be cleared, got timestamp=%q galactic=%q", careerStartTimestampAfterInvalidation, careerStartGalacticAfterInvalidation)
+	if !testApp.commanderRoster.IsValid() || !testApp.carrierState.IsValid() || !testApp.careerStats.IsValid() {
+		testingContext.Fatalf("expected all single-value projections to be valid after warmup")
 	}
 
-	testApp.carrierStatsMu.Lock()
-	afterAllTimeCarrierGeneration := testApp.carrierStatsGen
-	carrierStatsValidAfterInvalidation := testApp.carrierStatsValid
-	carrierStatsFoundAfterInvalidation := testApp.carrierStatsFound
-	carrierStatsTimestampAfterInvalidation := testApp.carrierStatsTimestamp
-	carrierStatsIDAfterInvalidation := testApp.carrierStatsEvent.CarrierID
-	testApp.carrierStatsMu.Unlock()
+	// AppExpeditionBoundsChanged selectively clears TimeRangeStats while preserving lifetime and carrier projections.
+	testApp.publishApp("plan", expeditionID, events.AppExpeditionBoundsChanged)
 
-	if afterAllTimeCarrierGeneration != initialCarrierStatsGeneration+1 {
-		testingContext.Errorf("expected carrierStatsGen to increment from %d to %d, got %d", initialCarrierStatsGeneration, initialCarrierStatsGeneration+1, afterAllTimeCarrierGeneration)
+	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+1 {
+		testingContext.Errorf("expected timeRangeStats generation %d, got %d", initialTimeRangeGen+1, testApp.timeRangeStats.Generation())
 	}
-	if carrierStatsValidAfterInvalidation || carrierStatsFoundAfterInvalidation {
-		testingContext.Errorf("expected carrierStatsValid and carrierStatsFound to be false after invalidateAllTimeCache")
+	if testApp.timeRangeStats.CachedCount() != 0 {
+		testingContext.Errorf("expected timeRangeStats cache to be empty after AppExpeditionBoundsChanged, got %d", testApp.timeRangeStats.CachedCount())
 	}
-	if carrierStatsTimestampAfterInvalidation != "" || carrierStatsIDAfterInvalidation != 0 {
-		testingContext.Errorf("expected carrierStats cached fields to be cleared, got timestamp=%q carrierID=%d", carrierStatsTimestampAfterInvalidation, carrierStatsIDAfterInvalidation)
+	if testApp.commanderRoster.Generation() != initialRosterGen || !testApp.commanderRoster.IsValid() {
+		testingContext.Errorf("expected commanderRoster to remain valid across AppExpeditionBoundsChanged")
+	}
+	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
+		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionBoundsChanged")
+	}
+	if testApp.careerStats.Generation() != initialCareerGen || !testApp.careerStats.IsValid() {
+		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionBoundsChanged")
 	}
 
-	testApp.liveStatsMu.Lock()
-	afterAllTimeLiveGeneration := testApp.liveStatsGen
-	liveCacheSizeAfterAllTimeInvalidation := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
-
-	if afterAllTimeLiveGeneration != afterLiveInvalidationGeneration+1 {
-		testingContext.Errorf("expected liveStatsGen to increment from %d to %d on invalidateAllTimeCache, got %d", afterLiveInvalidationGeneration, afterLiveInvalidationGeneration+1, afterAllTimeLiveGeneration)
+	// Re-warm timeRangeStats, then publish AppDatabaseSwitched to invalidate every projection.
+	if _, statsErr := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsErr != nil {
+		testingContext.Fatalf("second GetSidebarStats: %v", statsErr)
 	}
-	if liveCacheSizeAfterAllTimeInvalidation != 0 {
-		testingContext.Errorf("expected liveStatsCache to be empty after invalidateAllTimeCache, got %d entries", liveCacheSizeAfterAllTimeInvalidation)
+	testApp.publishApp("settings", 0, events.AppDatabaseSwitched)
+
+	if testApp.commanderRoster.Generation() != initialRosterGen+1 || testApp.commanderRoster.IsValid() {
+		testingContext.Errorf("expected commanderRoster to invalidate on AppDatabaseSwitched")
+	}
+	if testApp.carrierState.Generation() != initialCarrierGen+1 || testApp.carrierState.IsValid() {
+		testingContext.Errorf("expected carrierState to invalidate on AppDatabaseSwitched")
+	}
+	if testApp.careerStats.Generation() != initialCareerGen+1 || testApp.careerStats.IsValid() {
+		testingContext.Errorf("expected careerStats to invalidate on AppDatabaseSwitched")
+	}
+	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+2 || testApp.timeRangeStats.CachedCount() != 0 {
+		testingContext.Errorf("expected timeRangeStats generation %d and empty cache after AppDatabaseSwitched, got gen=%d count=%d",
+			initialTimeRangeGen+2, testApp.timeRangeStats.Generation(), testApp.timeRangeStats.CachedCount())
 	}
 }
 

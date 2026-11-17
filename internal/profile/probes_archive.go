@@ -4,13 +4,14 @@ import (
 	"database/sql"
 	"fmt"
 
-	"planisphere/internal/expedition"
-	"planisphere/internal/gec"
-	"planisphere/internal/journal"
+	"planisphere/internal/sources/gec"
+	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/expedition"
 )
 
 func runArchiveProbes(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	options Options,
@@ -18,7 +19,7 @@ func runArchiveProbes(
 	var results []ProbeResult
 
 	if matchesFilter("Journal/ArchiveStatus", options.FilterPattern) {
-		archiveProbe, err := profileArchiveStatus(database, recorder, dataset, options.Iterations)
+		archiveProbe, err := profileArchiveStatus(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -26,7 +27,7 @@ func runArchiveProbes(
 	}
 
 	if matchesFilter("Journal/ListCommanders", options.FilterPattern) {
-		cmdrProbe, err := profileListCommanders(database, recorder, dataset, options.Iterations)
+		cmdrProbe, err := profileListCommanders(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -34,7 +35,7 @@ func runArchiveProbes(
 	}
 
 	if dataset.GECPOICount > 0 && matchesFilter("GEC/Reload", options.FilterPattern) {
-		gecProbe, err := profileGECReload(database, recorder, dataset, options.Iterations)
+		gecProbe, err := profileGECReload(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -42,7 +43,7 @@ func runArchiveProbes(
 	}
 
 	if dataset.PrimaryExpeditionID > 0 && matchesFilter("Expedition/Clone", options.FilterPattern) {
-		cloneProbe, err := profileExpeditionClone(database, recorder, dataset, options.Iterations)
+		cloneProbe, err := profileExpeditionClone(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -54,6 +55,7 @@ func runArchiveProbes(
 
 func profileArchiveStatus(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -68,6 +70,7 @@ func profileArchiveStatus(
 		"events",
 		"files",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
 			status, statusError := journal.ArchiveStatus(database)
 			if statusError != nil {
@@ -86,6 +89,7 @@ func profileArchiveStatus(
 
 func profileListCommanders(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -100,8 +104,9 @@ func profileListCommanders(
 		"events",
 		"commanders",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			commanders, listError := journal.ListCommanders(database)
+			commanders, listError := proj.commanderRoster.Commanders()
 			if listError != nil {
 				return singleExecOutcome{}, listError
 			}
@@ -122,6 +127,7 @@ func profileListCommanders(
 
 func profileGECReload(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -137,6 +143,7 @@ func profileGECReload(
 		"gec_pois",
 		"pois",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
 			if reloadError := catalog.Reload(); reloadError != nil {
 				return singleExecOutcome{}, reloadError
@@ -154,6 +161,7 @@ func profileGECReload(
 
 func profileExpeditionClone(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -168,6 +176,7 @@ func profileExpeditionClone(
 		"rows",
 		"waypoints",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
 			cloned, cloneError := expedition.Clone(database, dataset.PrimaryExpeditionID)
 			if cloneError != nil {

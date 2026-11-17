@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"strings"
 
-	"planisphere/internal/db"
-	"planisphere/internal/ed"
-	"planisphere/internal/expedition"
+	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
+	"planisphere/internal/reference"
+	"planisphere/internal/store/expedition"
 )
 
 // ListExpeditions returns all expeditions (newest first).
@@ -26,17 +27,19 @@ func (app *App) ListExpeditions() ([]expedition.Expedition, error) {
 
 // CreateExpedition adds an expedition and makes it the active one.
 func (app *App) CreateExpedition(name, description string) (expedition.Expedition, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return expedition.Expedition{}, readyError
+	var createdExpedition expedition.Expedition
+	if err := app.withReadyReadLock(func() error {
+		var createError error
+		createdExpedition, createError = expedition.Create(app.db, name, description)
+		if createError != nil {
+			return createError
+		}
+		_ = db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(createdExpedition.ID, 10))
+		return nil
+	}); err != nil {
+		return createdExpedition, err
 	}
-	createdExpedition, createError := expedition.Create(app.db, name, description)
-	if createError != nil {
-		return createdExpedition, createError
-	}
-	_ = db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(createdExpedition.ID, 10))
-	app.changed("plan", createdExpedition.ID)
+	app.publishApp("plan", createdExpedition.ID, events.AppExpeditionPlanChanged)
 	return createdExpedition, nil
 }
 
@@ -44,71 +47,58 @@ func (app *App) CreateExpedition(name, description string) (expedition.Expeditio
 // into a new expedition in the planning state, and makes the clone active.
 func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 	var clonedExpedition expedition.Expedition
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	if err := app.withReadyReadLock(func() error {
 		var cloneError error
 		clonedExpedition, cloneError = expedition.Clone(app.db, id)
 		if cloneError != nil {
 			return cloneError
 		}
 		return db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(clonedExpedition.ID, 10))
-	}(); err != nil {
+	}); err != nil {
 		return clonedExpedition, err
 	}
 	app.kickResolution(clonedExpedition.ID, false)
-	app.changed("plan", clonedExpedition.ID)
+	app.publishApp("plan", clonedExpedition.ID, events.AppExpeditionPlanChanged)
 	return clonedExpedition, nil
 }
 
 // UpdateExpedition renames an expedition.
 func (app *App) UpdateExpedition(id int64, name, description string) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
+	if updateError := app.withReadyReadLock(func() error {
+		return expedition.UpdateMeta(app.db, id, name, description)
+	}); updateError != nil {
+		return updateError
 	}
-	updateError := expedition.UpdateMeta(app.db, id, name, description)
-	if updateError == nil {
-		app.changed("plan", id)
-	}
-	return updateError
+	app.publishApp("plan", id, events.AppExpeditionPlanChanged)
+	return nil
 }
 
 // UpdateExpeditionCarrierConfig updates the expedition's Fleet Carrier vessel
 // classification ("player" or "squadron") and weekly upkeep cost in credits.
 func (app *App) UpdateExpeditionCarrierConfig(id int64, carrierType string, weeklyUpkeep int64) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
+	if updateError := app.withReadyReadLock(func() error {
+		return expedition.UpdateCarrierConfig(app.db, id, carrierType, weeklyUpkeep)
+	}); updateError != nil {
+		return updateError
 	}
-	updateError := expedition.UpdateCarrierConfig(app.db, id, carrierType, weeklyUpkeep)
-	if updateError == nil {
-		app.changed("plan", id)
-		app.changed("adjustments", id)
-	}
-	return updateError
+	app.publishApp("plan", id, events.AppExpeditionPlanChanged, events.AppAdjustmentsChanged)
+	return nil
 }
 
 // DeleteExpedition deletes an expedition plan (journal history is kept).
 func (app *App) DeleteExpedition(id int64) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	if deleteError := expedition.Delete(app.db, id); deleteError != nil {
+	if deleteError := app.withReadyReadLock(func() error {
+		if err := expedition.Delete(app.db, id); err != nil {
+			return err
+		}
+		if app.activeExpeditionID() == id {
+			_ = db.SetSetting(app.db, settingActiveExpedition, "")
+		}
+		return nil
+	}); deleteError != nil {
 		return deleteError
 	}
-	if app.activeExpeditionID() == id {
-		_ = db.SetSetting(app.db, settingActiveExpedition, "")
-	}
-	app.invalidateLiveStatsCache()
-	app.changed("plan", id)
+	app.publishApp("plan", id, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
 	return nil
 }
 
@@ -135,7 +125,7 @@ func (app *App) GetPlan(id int64) (expedition.PlanView, error) {
 	if readyError := app.ready(); readyError != nil {
 		return expedition.PlanView{}, readyError
 	}
-	return expedition.BuildPlan(app.db, id, app.gecLookup)
+	return expedition.BuildPlan(app.db, id, app.gecLookup, app.expeditionProjections())
 }
 
 // GetRowDropPreviews computes valid historical and unvisited drop-slot previews
@@ -146,7 +136,7 @@ func (app *App) GetRowDropPreviews(rowID int64) ([]expedition.DropSlotPreview, e
 	if readyError := app.ready(); readyError != nil {
 		return nil, readyError
 	}
-	previews, previewError := expedition.ComputeRowDropPreviews(app.db, rowID)
+	previews, previewError := expedition.ComputeRowDropPreviews(app.db, rowID, app.expeditionProjections())
 	if previews == nil {
 		previews = []expedition.DropSlotPreview{}
 	}
@@ -191,7 +181,7 @@ func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID 
 	}(); err != nil {
 		return newRow, err
 	}
-	app.changed("plan", expeditionID)
+	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 	return newRow, nil
 }
 
@@ -232,8 +222,10 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 		if rowItem.SystemName != "" {
 			app.resolveRowAsync(rowItem, true)
 		}
+		app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+		return nil
 	}
-	app.changed("plan", rowItem.ExpeditionID)
+	app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -255,7 +247,7 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 	}(); err != nil {
 		return err
 	}
-	app.changed("modes", expeditionID)
+	app.publishApp("modes", expeditionID, events.AppModesChanged)
 	return nil
 }
 
@@ -278,7 +270,7 @@ func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
 	}(); err != nil {
 		return err
 	}
-	app.changed("plan", expeditionID)
+	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -300,8 +292,7 @@ func (app *App) DeleteRow(rowID int64) error {
 		return err
 	}
 	app.reevaluate(expeditionID)
-	app.invalidateLiveStatsCache()
-	app.changed("plan", expeditionID)
+	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
 	return nil
 }
 
@@ -330,8 +321,10 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 	}
 	if rowItem.RowType == expedition.RowWaypoint {
 		app.reevaluate(expeditionID)
+		app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+		return nil
 	}
-	app.changed("plan", expeditionID)
+	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -341,7 +334,7 @@ type RegionOptions struct {
 	AnchorName        string            `json:"anchorName"`
 	AnchorIsDefault   bool              `json:"anchorIsDefault"`
 	SuggestedRegionID int               `json:"suggestedRegionId"` // region of the next waypoint's coordinates
-	Options           []ed.RegionOption `json:"options"`
+	Options           []reference.RegionOption `json:"options"`
 }
 
 // GetRegionOptions returns regions ordered for a Region Header dropdown.
@@ -382,11 +375,11 @@ func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (Regio
 	}
 	regionOptionsResult := RegionOptions{AnchorIsDefault: anchor == 0}
 	if anchor == 0 {
-		anchor = ed.InnerOrionSpurID
+		anchor = reference.InnerOrionSpurID
 	}
-	regionRecord, _ := ed.RegionByID(anchor)
+	regionRecord, _ := reference.RegionByID(anchor)
 	regionOptionsResult.AnchorID, regionOptionsResult.AnchorName = anchor, regionRecord.Name
-	regionOptionsResult.Options = ed.PrioritizedRegions(anchor)
+	regionOptionsResult.Options = reference.PrioritizedRegions(anchor)
 	// Inserting before cutoffIndex checks the row currently at cutoffIndex as the first
 	// downstream waypoint; editing an existing region header at cutoffIndex skips that header.
 	startIndex := cutoffIndex
@@ -395,7 +388,7 @@ func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (Regio
 	}
 	for rowIndex := startIndex; rowIndex < len(rows); rowIndex++ {
 		if rows[rowIndex].IsWaypoint() && rows[rowIndex].HasCoords {
-			if foundRegion, ok := ed.RegionAt(rows[rowIndex].X, rows[rowIndex].Y, rows[rowIndex].Z); ok {
+			if foundRegion, ok := reference.RegionAt(rows[rowIndex].X, rows[rowIndex].Y, rows[rowIndex].Z); ok {
 				regionOptionsResult.SuggestedRegionID = foundRegion.ID
 			}
 			break
@@ -417,7 +410,7 @@ func (app *App) GetStartCandidates(expeditionID int64) (StartCandidates, error) 
 	if readyError := app.ready(); readyError != nil {
 		return StartCandidates{}, readyError
 	}
-	systemName, visits, startCandidatesError := expedition.StartCandidates(app.db, expeditionID)
+	systemName, visits, startCandidatesError := expedition.StartCandidates(app.db, expeditionID, app.expeditionProjections())
 	if visits == nil {
 		visits = []expedition.Arrival{}
 	}
@@ -436,8 +429,7 @@ func (app *App) lifecycle(expeditionID int64, action func(transaction *sql.Tx) e
 		return err
 	}
 	app.reevaluate(expeditionID)
-	app.invalidateLiveStatsCache()
-	app.changed("plan", expeditionID)
+	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
 	return nil
 }
 
@@ -464,6 +456,6 @@ func (app *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, err
 	if readyError := app.ready(); readyError != nil {
 		return expedition.WaypointDetails{}, readyError
 	}
-	return expedition.Details(app.db, rowID)
+	return expedition.Details(app.db, rowID, app.expeditionProjections())
 }
 

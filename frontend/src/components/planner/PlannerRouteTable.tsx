@@ -1,5 +1,5 @@
 import type { CSSProperties, DragEvent } from 'react'
-import { app, expedition, modes } from '../../../wailsjs/go/models'
+import { expedition, modes } from '../../../wailsjs/go/models'
 import type { NextCarrierStopEntry } from './carrierRouteHelpers'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
 import type { PlannerTableItem } from './plannerPlanHelpers'
@@ -42,7 +42,7 @@ export interface PlannerRouteTableProps {
   heldOrDraggedIndex: number | null
   draggedIndex: number | null
   dragOverGapIndex: number | null
-  activeCarrierRoute: app.CarrierRouteResult | null
+  activeCarrierRoute: expedition.CarrierRouteResult | null
   activeCarrierTargetRowId: number
   isManualCarrierRoute: boolean
   nextFcStopEntry: NextCarrierStopEntry | null

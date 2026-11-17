@@ -3,6 +3,7 @@
 import {expedition} from '../models';
 import {app} from '../models';
 import {modes} from '../models';
+import {projections} from '../models';
 import {stats} from '../models';
 
 export function AddRow(arg1:number,arg2:number,arg3:string,arg4:number):Promise<expedition.Row>;
@@ -31,9 +32,9 @@ export function DeleteMode(arg1:number):Promise<void>;
 
 export function DeleteRow(arg1:number):Promise<void>;
 
-export function GetActiveCarrierRoute(arg1:number):Promise<app.ActiveCarrierRouteState>;
+export function GetActiveCarrierRoute(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
-export function GetCarrierDepotInfo():Promise<app.CarrierDepotInfo>;
+export function GetCarrierDepotInfo():Promise<projections.CarrierDepotInfo>;
 
 export function GetCarrierLastLocation():Promise<string>;
 
@@ -65,7 +66,7 @@ export function OpenURL(arg1:string):Promise<void>;
 
 export function OverrideCarrierStopArrival(arg1:number,arg2:boolean):Promise<void>;
 
-export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string,arg5:number):Promise<app.CarrierRouteResult>;
+export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string,arg5:number):Promise<expedition.CarrierRouteResult>;
 
 export function RecordCarrierJump(arg1:number,arg2:number,arg3:number):Promise<void>;
 
@@ -75,7 +76,7 @@ export function ReopenExpedition(arg1:number):Promise<void>;
 
 export function RescanJournals():Promise<void>;
 
-export function SaveActiveCarrierRoute(arg1:app.ActiveCarrierRouteState):Promise<void>;
+export function SaveActiveCarrierRoute(arg1:expedition.ActiveCarrierRouteState):Promise<void>;
 
 export function SetActiveExpedition(arg1:number):Promise<void>;
 

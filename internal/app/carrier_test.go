@@ -5,9 +5,9 @@ import (
 	"sync"
 	"testing"
 
-	"planisphere/internal/db"
-	"planisphere/internal/expedition"
-	"planisphere/internal/stats"
+	"planisphere/internal/core/db"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/store/expedition"
 )
 
 func TestGetCarrierLastLocation(testingContext *testing.T) {
@@ -142,11 +142,10 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 		testingContext.Errorf("expected 0 carrier jumps, got %d", sidebar1.Expedition.CarrierJumps)
 	}
 
-	testApp.liveStatsMu.Lock()
-	initialCacheEntryCount := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
+	initialCacheEntryCount := testApp.timeRangeStats.CachedCount()
+	initialGeneration := testApp.timeRangeStats.Generation()
 	if initialCacheEntryCount == 0 {
-		testingContext.Fatal("expected liveStatsCache to have at least 1 entry")
+		testingContext.Fatal("expected timeRangeStats to have at least 1 cached entry")
 	}
 
 	// Record carrier jump
@@ -154,12 +153,10 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
 	}
 
-	// liveStatsCache should NOT have been cleared because no raw journal events or modes changed
-	testApp.liveStatsMu.Lock()
-	cacheEntryCountAfterJump := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
-	if cacheEntryCountAfterJump != initialCacheEntryCount {
-		testingContext.Errorf("expected liveStatsCache length %d to be preserved, got %d", initialCacheEntryCount, cacheEntryCountAfterJump)
+	// timeRangeStats should NOT have been cleared because AppAdjustmentsChanged preserves cached journal telemetry
+	if testApp.timeRangeStats.CachedCount() != initialCacheEntryCount || testApp.timeRangeStats.Generation() != initialGeneration {
+		testingContext.Errorf("expected timeRangeStats count %d (gen %d) to be preserved, got %d (gen %d)",
+			initialCacheEntryCount, initialGeneration, testApp.timeRangeStats.CachedCount(), testApp.timeRangeStats.Generation())
 	}
 
 	// Second call to GetSidebarStats uses the cached live metrics and combines with new adjustments

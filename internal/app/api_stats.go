@@ -1,15 +1,9 @@
 package app
 
 import (
-	"database/sql"
-	"slices"
-	"strconv"
-	"strings"
-
-	"planisphere/internal/ed"
-	"planisphere/internal/expedition"
-	"planisphere/internal/journal"
-	"planisphere/internal/stats"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/reference"
+	"planisphere/internal/store/expedition"
 )
 
 // CarrierCostBreakdown holds the expedition Fleet Carrier cost breakdown in credits.
@@ -48,154 +42,6 @@ type SidebarStats struct {
 	CarrierCost            CarrierCostBreakdown       `json:"carrierCost"`
 }
 
-// resolveCareerStart queries or returns the cached earliest timestamp across
-// active commanders. Caller must hold app.dbMu.RLock.
-func (app *App) resolveCareerStart() (string, string) {
-	app.careerStartMu.Lock()
-	if app.careerStartValid {
-		cachedStart := app.careerStartTimestamp
-		cachedGalactic := app.careerStartGalactic
-		app.careerStartMu.Unlock()
-		return cachedStart, cachedGalactic
-	}
-	careerStartGeneration := app.careerStartGen
-	app.careerStartMu.Unlock()
-
-	var earliestSeenTimestamp sql.NullString
-	_ = app.db.QueryRow(`SELECT MIN(commanders.first_seen) FROM commanders WHERE commanders.enabled = 1 AND commanders.first_seen IS NOT NULL AND commanders.first_seen != ''`).Scan(&earliestSeenTimestamp)
-	if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
-		_ = app.db.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&earliestSeenTimestamp)
-	}
-
-	var computedCareerStart string
-	var computedCareerStartGalactic string
-	if earliestSeenTimestamp.Valid && earliestSeenTimestamp.String != "" {
-		computedCareerStart = earliestSeenTimestamp.String
-		computedCareerStartGalactic = ed.ToGalactic(earliestSeenTimestamp.String)
-	}
-
-	// Guard cache write-back with careerStartGen so an invalidation via invalidateAllTimeCache
-	// that ran while careerStartMu was unlocked during the database query cannot be overwritten by stale results.
-	app.careerStartMu.Lock()
-	if !app.careerStartValid && app.careerStartGen == careerStartGeneration {
-		app.careerStartTimestamp = computedCareerStart
-		app.careerStartGalactic = computedCareerStartGalactic
-		app.careerStartValid = true
-	} else if app.careerStartValid {
-		computedCareerStart = app.careerStartTimestamp
-		computedCareerStartGalactic = app.careerStartGalactic
-	}
-	app.careerStartMu.Unlock()
-	return computedCareerStart, computedCareerStartGalactic
-}
-
-func buildLiveStatsCacheKey(expeditionRecord expedition.Expedition, filter stats.Filter) string {
-	var keyBuilder strings.Builder
-	keyBuilder.Grow(64)
-	keyBuilder.WriteString(strconv.FormatInt(expeditionRecord.ID, 10))
-	keyBuilder.WriteByte('|')
-	keyBuilder.WriteString(expeditionRecord.StartTimestamp)
-	keyBuilder.WriteByte('|')
-	keyBuilder.WriteString(expeditionRecord.EndTimestamp)
-	keyBuilder.WriteByte('|')
-	if !filter.Enabled {
-		keyBuilder.WriteString("unfiltered")
-		return keyBuilder.String()
-	}
-	keyBuilder.WriteString("filtered:")
-	activeSelections := make([]stats.ModeSelection, 0, len(filter.Modes))
-	for _, selection := range filter.Modes {
-		if selection.Travel || selection.Discovery {
-			activeSelections = append(activeSelections, selection)
-		}
-	}
-	slices.SortFunc(activeSelections, func(left, right stats.ModeSelection) int {
-		if left.ModeID < right.ModeID {
-			return -1
-		}
-		if left.ModeID > right.ModeID {
-			return 1
-		}
-		return 0
-	})
-	wroteFirst := false
-	for index := 0; index < len(activeSelections); index++ {
-		merged := activeSelections[index]
-		for index+1 < len(activeSelections) && activeSelections[index+1].ModeID == merged.ModeID {
-			index++
-			merged.Travel = merged.Travel || activeSelections[index].Travel
-			merged.Discovery = merged.Discovery || activeSelections[index].Discovery
-		}
-		if wroteFirst {
-			keyBuilder.WriteByte(',')
-		}
-		wroteFirst = true
-		keyBuilder.WriteString(strconv.FormatInt(merged.ModeID, 10))
-		keyBuilder.WriteByte(':')
-		if merged.Travel {
-			keyBuilder.WriteByte('t')
-		} else {
-			keyBuilder.WriteByte('-')
-		}
-		if merged.Discovery {
-			keyBuilder.WriteByte('d')
-		} else {
-			keyBuilder.WriteByte('-')
-		}
-	}
-	return keyBuilder.String()
-}
-
-// computeExpeditionLiveStats returns mode-filtered live metrics and realization
-// for a started expedition, utilizing liveStatsCache when valid. Caller must
-// hold app.dbMu.RLock.
-func (app *App) computeExpeditionLiveStats(
-	expeditionRecord expedition.Expedition,
-	filter stats.Filter,
-	statsEngine *stats.Engine,
-) (stats.Metrics, stats.RealizationBreakdown, error) {
-	cacheKey := buildLiveStatsCacheKey(expeditionRecord, filter)
-
-	app.liveStatsMu.Lock()
-	cachedEntry, isCached := app.liveStatsCache[cacheKey]
-	liveStatsGeneration := app.liveStatsGen
-	app.liveStatsMu.Unlock()
-
-	if isCached {
-		return cachedEntry.metrics, cachedEntry.realization, nil
-	}
-
-	expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
-	liveMetrics, computeError := statsEngine.Compute(expeditionRange, &filter)
-	if computeError != nil {
-		return stats.Metrics{}, stats.RealizationBreakdown{}, computeError
-	}
-	// Carrier operations metrics (carrier jumps, carrier distance, and tritium) for the expedition
-	// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments) to prevent duplication.
-	// Non-operation personal navigation metrics (CarrierPassengerLy and total DistanceLy)
-	// are preserved directly from journal events when the commander is aboard.
-	liveMetrics.CarrierJumps = 0
-	liveMetrics.CarrierDistanceLy = 0
-	liveMetrics.TritiumUsed = nil
-
-	liveRealization, realizationError := statsEngine.ComputeRealization(expeditionRange, &filter)
-	if realizationError != nil {
-		return stats.Metrics{}, stats.RealizationBreakdown{}, realizationError
-	}
-
-	// Guard cache write-back with liveStatsGen so an invalidation that ran while
-	// liveStatsMu was unlocked during computation cannot be overwritten by stale results.
-	app.liveStatsMu.Lock()
-	if app.liveStatsGen == liveStatsGeneration {
-		app.liveStatsCache[cacheKey] = cachedLiveStats{
-			metrics:     liveMetrics,
-			realization: liveRealization,
-		}
-	}
-	app.liveStatsMu.Unlock()
-	return liveMetrics, liveRealization, nil
-}
-
 // GetSidebarStats computes the sidebar for an expedition with mode filters.
 func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (SidebarStats, error) {
 	app.dbMu.RLock()
@@ -216,41 +62,52 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		FilterActive: filter.Enabled,
 		Adjustments:  expeditionRecord.Adjustments,
 	}
-	statsEngine := stats.NewEngine(app.db)
+
 	// Mode filters apply only to the current expedition, never to All Time.
 	// All-time personal carrier data comes directly from Frontier's lifetime Statistics.
-	if allTimeMetrics, allTimeMetricsError := app.getAllTimeMetrics(); allTimeMetricsError == nil {
-		sidebar.AllJournals = allTimeMetrics
-	}
-	if allRealization, allRealizationError := app.getAllTimeRealization(); allRealizationError == nil {
-		sidebar.AllJournalsRealization = allRealization
+	if app.careerStats != nil {
+		if allTimeSummary, careerError := app.careerStats.Get(); careerError == nil {
+			sidebar.AllJournals = allTimeSummary.Metrics
+			sidebar.AllJournalsRealization = allTimeSummary.Realization
+		}
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
-	careerStart, careerStartGalactic := app.resolveCareerStart()
-	if careerStart != "" {
-		sidebar.CareerStart = careerStart
-		sidebar.CareerStartGalactic = careerStartGalactic
-		sidebar.CareerDuration = expedition.Elapsed(careerStart, "")
+	if app.commanderRoster != nil {
+		if careerStart, careerStartGalactic, careerError := app.commanderRoster.CareerStart(); careerError == nil && careerStart != "" {
+			sidebar.CareerStart = careerStart
+			sidebar.CareerStartGalactic = careerStartGalactic
+			sidebar.CareerDuration = expedition.Elapsed(careerStart, "")
+		}
 	}
 
 	if sidebar.Started {
 		if sidebar.End == "" {
 			sidebar.EndIsNow = true
-			sidebar.EndGalactic = ed.TimeToGalactic(timeNow())
+			sidebar.EndGalactic = reference.TimeToGalactic(timeNow())
 		} else {
-			sidebar.EndGalactic = ed.ToGalactic(sidebar.End)
+			sidebar.EndGalactic = reference.ToGalactic(sidebar.End)
 		}
-		sidebar.StartGalactic = ed.ToGalactic(sidebar.Start)
+		sidebar.StartGalactic = reference.ToGalactic(sidebar.Start)
 		sidebar.Duration = expedition.Elapsed(sidebar.Start, sidebar.End)
 
-		liveMetrics, liveRealization, computeError := app.computeExpeditionLiveStats(expeditionRecord, filter, statsEngine)
+		expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
+		expeditionSummary, computeError := app.timeRangeStats.Compute(expeditionRange, &filter)
 		if computeError != nil {
 			return sidebar, computeError
 		}
+		liveMetrics := expeditionSummary.Metrics
+		// Carrier operations metrics (carrier jumps, carrier distance, and tritium) for the expedition
+		// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments) to prevent duplication.
+		// Non-operation personal navigation metrics (CarrierPassengerLy and total DistanceLy)
+		// are preserved directly from journal events when the commander is aboard.
+		liveMetrics.CarrierJumps = 0
+		liveMetrics.CarrierDistanceLy = 0
+		liveMetrics.TritiumUsed = nil
+
 		sidebar.Live = liveMetrics
 		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
-		sidebar.Realization = liveRealization
+		sidebar.Realization = expeditionSummary.Realization
 	} else {
 		sidebar.Expedition = expeditionRecord.Adjustments
 	}
@@ -269,10 +126,10 @@ func (app *App) computeExpeditionCarrierCost(
 		tritiumTonnes = int64(*expeditionMetrics.TritiumUsed)
 	}
 	tritiumCost := tritiumTonnes * tritiumPrice
-	jumpCost := int64(expeditionMetrics.CarrierJumps) * ed.CarrierJumpMaintenanceCost
+	jumpCost := int64(expeditionMetrics.CarrierJumps) * reference.CarrierJumpMaintenanceCost
 	var upkeepCost int64
 	if expeditionStarted && expeditionRecord.CarrierWeeklyUpkeep > 0 {
-		upkeepCost = ed.CarrierProratedUpkeep(
+		upkeepCost = reference.CarrierProratedUpkeep(
 			expeditionRecord.StartTimestamp,
 			expeditionRecord.EndTimestamp,
 			expeditionRecord.CarrierWeeklyUpkeep,

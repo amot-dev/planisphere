@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"planisphere/internal/db"
-	"planisphere/internal/expedition"
-	"planisphere/internal/journal"
+	"planisphere/internal/core/db"
 	"planisphere/internal/profile"
+	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/expedition"
 )
 
 func seedProfileTestDatabase(t *testing.T) string {

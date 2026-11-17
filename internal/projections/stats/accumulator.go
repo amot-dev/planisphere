@@ -1,0 +1,283 @@
+package stats
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"planisphere/internal/projections"
+	"planisphere/internal/projections/realization"
+	"planisphere/internal/reference"
+	"planisphere/internal/reference/exceptions"
+	"planisphere/internal/sources/journal"
+)
+
+// prepareComputeScans identifies mapped or organically sampled bodies that have
+// no Scan event in loadedEvents and preloads their latest prior Scan at or before
+// afterTimestamp. Two passes ensure same-second mappings ordered before their
+// matching Scan in loadedEvents are not marked missing.
+func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []journal.Row) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
+	scans := make(map[bodyKey]*journal.ScanEvent)
+	missingScans := make(map[bodyKey]bool)
+	scannedInEvents := make(map[bodyKey]bool, len(loadedEvents)/2)
+	for _, rowItem := range loadedEvents {
+		if rowItem.Type == journal.EventScan && rowItem.SystemAddress.Valid && rowItem.BodyID.Valid {
+			scannedInEvents[bodyKey{rowItem.SystemAddress.Int64, rowItem.BodyID.Int64}] = true
+		}
+	}
+	neededSet := make(map[bodyKey]bool)
+	var neededKeys []bodyKey
+	for _, rowItem := range loadedEvents {
+		if (rowItem.Type == journal.EventSAAScanComplete || rowItem.Type == journal.EventScanOrganic) &&
+			rowItem.SystemAddress.Valid && rowItem.BodyID.Valid {
+			key := bodyKey{rowItem.SystemAddress.Int64, rowItem.BodyID.Int64}
+			if !scannedInEvents[key] && !neededSet[key] {
+				neededSet[key] = true
+				neededKeys = append(neededKeys, key)
+			}
+		}
+	}
+	if len(neededKeys) == 0 {
+		return scans, missingScans, nil
+	}
+	if afterTimestamp == "" {
+		for _, key := range neededKeys {
+			missingScans[key] = true
+		}
+		return scans, missingScans, nil
+	}
+	preloaded, preloadError := engine.preloadScans(neededKeys, afterTimestamp)
+	if preloadError != nil {
+		return nil, nil, fmt.Errorf("preload compute scans before %s: %w", afterTimestamp, preloadError)
+	}
+	for key, scanEvent := range preloaded {
+		scans[key] = scanEvent
+	}
+	for _, key := range neededKeys {
+		if scans[key] == nil {
+			missingScans[key] = true
+		}
+	}
+	return scans, missingScans, nil
+}
+
+type computeAccumulator struct {
+	engine                  *Engine
+	after                   string
+	until                   string
+	filterSet               *filterSets
+	session                 *projections.SessionState
+	carrierLegs             map[string]projections.CarrierLeg
+	realizationLedger       *realization.Ledger
+	realizationLedgerLoaded bool
+	scans                   map[bodyKey]*journal.ScanEvent
+	missingScans            map[bodyKey]bool
+	scannedBodies           map[bodyKey]bool
+	mappedBodies            map[bodyKey]bool
+}
+
+func (accumulator *computeAccumulator) processEvent(rowItem journal.Row, metrics *Metrics) error {
+	switch rowItem.Type {
+	case journal.EventLoadGame:
+		accumulator.session.ApplyLoadGame(rowItem.RawJSON)
+	case journal.EventLocation:
+		accumulator.session.ApplyLocation(rowItem.RawJSON)
+	case journal.EventFSDJump:
+		accumulator.processFSDJump(rowItem, metrics)
+	case journal.EventCarrierJump:
+		return accumulator.processCarrierJump(rowItem, metrics)
+	case journal.EventScan:
+		accumulator.processScan(rowItem, metrics)
+	case journal.EventSAAScanComplete:
+		return accumulator.processMapping(rowItem, metrics)
+	case journal.EventScanOrganic:
+		return accumulator.processOrganic(rowItem, metrics)
+	}
+	return nil
+}
+
+func creditJump(timestamp string, distanceLy float64, boostUsed int, filterSet *filterSets, metrics *Metrics) {
+	if !filterSet.allow(timestamp, false) {
+		return
+	}
+	metrics.Jumps++
+	metrics.ShipDistanceLy += distanceLy
+	metrics.DistanceLy += distanceLy
+	switch boostUsed {
+	case 4:
+		metrics.JetConeBoosts++
+	case 3:
+		metrics.PremiumBoosts++
+	case 2:
+		metrics.StandardBoosts++
+	case 1:
+		metrics.BasicBoosts++
+	}
+}
+
+func (accumulator *computeAccumulator) processFSDJump(rowItem journal.Row, metrics *Metrics) {
+	var jumpEvent journal.FSDJumpEvent
+	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
+		return
+	}
+	accumulator.session.ApplyFSDJumpEvent(&jumpEvent)
+	creditJump(rowItem.Timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)
+}
+
+func (accumulator *computeAccumulator) processCarrierJump(rowItem journal.Row, metrics *Metrics) error {
+	accumulator.session.ApplyCarrierJump(rowItem.RawJSON)
+	if accumulator.carrierLegs == nil {
+		var legError error
+		if accumulator.carrierLegs, legError = accumulator.engine.CarrierLegsRange(accumulator.after, accumulator.until); legError != nil {
+			return legError
+		}
+	}
+	leg := accumulator.carrierLegs[rowItem.UID]
+	if accumulator.filterSet.allow(rowItem.Timestamp, false) {
+		metrics.CarrierPassengerLy += leg.DistanceLy
+		metrics.DistanceLy += leg.DistanceLy
+	}
+	metrics.CarrierJumps++
+	metrics.CarrierDistanceLy += leg.DistanceLy
+	if leg.Tritium > 0 {
+		currentTritium := 0
+		if metrics.TritiumUsed != nil {
+			currentTritium = *metrics.TritiumUsed
+		}
+		nextTritium := currentTritium + leg.Tritium
+		metrics.TritiumUsed = &nextTritium
+	}
+	return nil
+}
+
+func (accumulator *computeAccumulator) processScan(rowItem journal.Row, metrics *Metrics) {
+	var scanEvent journal.ScanEvent
+	if json.Unmarshal([]byte(rowItem.RawJSON), &scanEvent) != nil || scanEvent.IsBeltCluster() {
+		return
+	}
+	key := bodyKey{scanEvent.SystemAddress, scanEvent.BodyID}
+	scanCopy := scanEvent
+	accumulator.scans[key] = &scanCopy
+	if !accumulator.filterSet.allow(rowItem.Timestamp, true) {
+		return
+	}
+	metrics.BodiesScanned++
+	if scanEvent.ScanType == "NavBeaconDetail" || accumulator.scannedBodies[key] {
+		return
+	}
+	accumulator.scannedBodies[key] = true
+	systemPopulation := accumulator.session.SystemPopulation(scanEvent.SystemAddress)
+	if reference.CanExpectFirstDiscovered(systemPopulation, scanEvent.WasDiscovered, scanEvent.WasMapped) {
+		metrics.FirstDiscoveries++
+	}
+	odysseyEnabled := accumulator.session.OdysseyAt(rowItem.Timestamp)
+	metrics.addScan(reference.EstimateBodyValue(
+		projections.ToBodyScanWithPopulation(&scanEvent, systemPopulation), reference.MappingInfo{}, odysseyEnabled,
+	))
+}
+
+func (accumulator *computeAccumulator) processMapping(rowItem journal.Row, metrics *Metrics) error {
+	var saaEvent journal.SAAScanCompleteEvent
+	if json.Unmarshal([]byte(rowItem.RawJSON), &saaEvent) != nil {
+		return nil
+	}
+	key := bodyKey{saaEvent.SystemAddress, saaEvent.BodyID}
+	if accumulator.mappedBodies[key] || !accumulator.filterSet.allow(rowItem.Timestamp, true) {
+		return nil
+	}
+	accumulator.mappedBodies[key] = true
+	metrics.BodiesMapped++
+	parentScan, lookupError := accumulator.resolveParentScan(key, rowItem.Timestamp)
+	if lookupError != nil || parentScan == nil {
+		return lookupError
+	}
+	systemPopulation := accumulator.session.SystemPopulation(saaEvent.SystemAddress)
+	if reference.CanExpectFirstMapped(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped) {
+		metrics.FirstMapped++
+	}
+	odysseyEnabled := accumulator.session.OdysseyAt(rowItem.Timestamp)
+	mappingInfo := reference.MappingInfo{Mapped: true, ProbesUsed: saaEvent.ProbesUsed, EfficiencyTarget: saaEvent.EfficiencyTarget}
+	metrics.addScan(reference.EstimateMappingIncrement(
+		projections.ToBodyScanWithPopulation(parentScan, systemPopulation), mappingInfo, odysseyEnabled,
+	))
+	return nil
+}
+
+func (accumulator *computeAccumulator) processOrganic(rowItem journal.Row, metrics *Metrics) error {
+	var organicEvent journal.ScanOrganicEvent
+	if json.Unmarshal([]byte(rowItem.RawJSON), &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
+		return nil
+	}
+	if !accumulator.filterSet.allow(rowItem.Timestamp, true) {
+		return nil
+	}
+	metrics.OrganicSamples++
+	systemPopulation := accumulator.session.SystemPopulation(organicEvent.SystemAddress)
+	firstLoggedBonus, checkError := accumulator.firstLogged(&organicEvent, systemPopulation, rowItem.Timestamp)
+	if checkError != nil {
+		return checkError
+	}
+
+	var saleOutcome realization.OrganicSaleOutcome
+	if rowItem.UID != "" {
+		if !accumulator.realizationLedgerLoaded {
+			var ledgerError error
+			accumulator.realizationLedger, ledgerError = accumulator.engine.loadLedger()
+			if ledgerError != nil {
+				return ledgerError
+			}
+			accumulator.realizationLedgerLoaded = true
+		}
+		saleOutcome, _ = accumulator.realizationLedger.OrganicSaleDetails(rowItem.UID)
+		if saleOutcome.BonusRealized {
+			firstLoggedBonus = true
+		}
+	}
+	if firstLoggedBonus {
+		metrics.FirstLogged++
+	}
+	organicValuation := exceptions.EvaluateOrganic(exceptions.OrganicContext{
+		ScanTimestamp:    rowItem.Timestamp,
+		SaleTimestamp:    saleOutcome.SaleTimestamp,
+		SystemAddress:    organicEvent.SystemAddress,
+		SaleMarketID:     saleOutcome.SaleMarketID,
+		SpeciesCodex:     organicEvent.Species,
+		SpeciesLocalised: organicEvent.SpeciesLocalised,
+		GenusCodex:       organicEvent.Genus,
+		FirstLogged:      firstLoggedBonus,
+	})
+	metrics.addOrganic(organicValuation)
+	return nil
+}
+
+func (accumulator *computeAccumulator) resolveParentScan(key bodyKey, timestamp string) (*journal.ScanEvent, error) {
+	parentScan := accumulator.scans[key]
+	if parentScan != nil || accumulator.missingScans[key] {
+		return parentScan, nil
+	}
+	lookedUpScan, lookupError := accumulator.engine.lookupScan(key, timestamp)
+	if lookupError != nil {
+		return nil, lookupError
+	}
+	if lookedUpScan != nil {
+		accumulator.scans[key] = lookedUpScan
+	} else {
+		accumulator.missingScans[key] = true
+	}
+	return lookedUpScan, nil
+}
+
+// firstLogged decides whether the first-logged bonus applies at scan time using
+// the composite eligibility rule (unpopulated system, non-tag-locked body, and
+// WasFootfalled == false with pre-2025 fallback). ScanOrganic.WasLogged is
+// intentionally ignored because Frontier journals do not reliably populate it:
+// https://issues.frontierstore.net/issue-detail/81891
+func (accumulator *computeAccumulator) firstLogged(organicEvent *journal.ScanOrganicEvent, systemPopulation int64, timestamp string) (bool, error) {
+	key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}
+	parentScan, lookupError := accumulator.resolveParentScan(key, timestamp)
+	if lookupError != nil || parentScan == nil {
+		return false, lookupError
+	}
+	return reference.CanExpectFirstLogged(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped, parentScan.WasFootfalled), nil
+}
+

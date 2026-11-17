@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"planisphere/internal/db"
-	"planisphere/internal/expedition"
-	"planisphere/internal/stats"
+	"planisphere/internal/core/db"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/store/expedition"
 )
 
 func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testingContext *testing.T) {
@@ -50,13 +50,11 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		testingContext.Fatalf("expected 1 journal data:changed emission on initial scan, got %d", journalChangedCount)
 	}
 
-	testApp.allTimeMu.Lock()
-	warmedAllTimeMetrics := testApp.allTimeValid
-	warmedAllTimeRealization := testApp.allTimeRealizationValid
-	testApp.allTimeMu.Unlock()
-	if !warmedAllTimeMetrics || !warmedAllTimeRealization {
-		testingContext.Fatalf("expected prepareInitialState to warm allTime caches, got metrics=%v realization=%v", warmedAllTimeMetrics, warmedAllTimeRealization)
+	if !testApp.careerStats.IsValid() || !testApp.salesLedger.IsValid() {
+		testingContext.Fatalf("expected prepareInitialState to warm careerStats and salesLedger caches, got career=%v ledger=%v",
+			testApp.careerStats.IsValid(), testApp.salesLedger.IsValid())
 	}
+	careerGenerationBeforeNoOp := testApp.careerStats.Generation()
 
 	// Append a non-relevant journal line (Music) so LinesRead > 0 while NewEvents == 0.
 	nonRelevantLine := `{"timestamp":"2026-01-01T00:02:00Z","event":"Music","MusicTrack":"Exploration"}` + "\n"
@@ -77,11 +75,8 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		testingContext.Fatalf("expected 0 journal data:changed emissions when NewEvents == 0, got %d", journalChangedCount)
 	}
 
-	testApp.allTimeMu.Lock()
-	stillValidAfterNoOpRescan := testApp.allTimeValid && testApp.allTimeRealizationValid
-	testApp.allTimeMu.Unlock()
-	if !stillValidAfterNoOpRescan {
-		testingContext.Fatalf("expected all-time caches to remain valid when RescanJournals finds no new relevant events")
+	if !testApp.careerStats.IsValid() || !testApp.salesLedger.IsValid() || testApp.careerStats.Generation() != careerGenerationBeforeNoOp {
+		testingContext.Fatalf("expected lifetime projection caches to remain valid when RescanJournals finds no new relevant events")
 	}
 
 	ingestStatus, statusError := testApp.GetIngestStatus()
@@ -119,9 +114,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 
 	testApp.warmInitialStats()
 
-	testApp.liveStatsMu.Lock()
-	warmedCacheSize := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
+	warmedCacheSize := testApp.timeRangeStats.CachedCount()
 	if warmedCacheSize != 1 {
 		testingContext.Fatalf("expected 1 cached entry after warmInitialStats, got %d", warmedCacheSize)
 	}
@@ -134,9 +127,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 			testingContext.Fatalf("GetSidebarStats unfiltered: %v", statsError)
 		}
 	}
-	testApp.liveStatsMu.Lock()
-	afterUnfilteredSize := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
+	afterUnfilteredSize := testApp.timeRangeStats.CachedCount()
 	if afterUnfilteredSize != 1 {
 		testingContext.Fatalf("expected unfiltered variants to reuse warmed cache entry, got %d entries", afterUnfilteredSize)
 	}
@@ -149,10 +140,8 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 			testingContext.Fatalf("GetSidebarStats filtered: %v", statsError)
 		}
 	}
-	testApp.liveStatsMu.Lock()
-	afterFilteredSize := len(testApp.liveStatsCache)
-	generationBeforeCosmetic := testApp.liveStatsGen
-	testApp.liveStatsMu.Unlock()
+	afterFilteredSize := testApp.timeRangeStats.CachedCount()
+	generationBeforeCosmetic := testApp.timeRangeStats.Generation()
 	if afterFilteredSize != 2 {
 		testingContext.Fatalf("expected canonical filtered variants to share 1 entry (total 2), got %d entries", afterFilteredSize)
 	}
@@ -166,10 +155,8 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: planView.Rows[0].Row.ID, Notes: &noteText, POIName: &poiText}); updateError != nil {
 		testingContext.Fatalf("UpdateRow cosmetic: %v", updateError)
 	}
-	testApp.liveStatsMu.Lock()
-	sizeAfterCosmetic := len(testApp.liveStatsCache)
-	generationAfterCosmetic := testApp.liveStatsGen
-	testApp.liveStatsMu.Unlock()
+	sizeAfterCosmetic := testApp.timeRangeStats.CachedCount()
+	generationAfterCosmetic := testApp.timeRangeStats.Generation()
 	if sizeAfterCosmetic != 2 || generationAfterCosmetic != generationBeforeCosmetic {
 		testingContext.Fatalf("expected cosmetic plan edit to preserve cache (size=%d gen=%d vs %d)", sizeAfterCosmetic, generationAfterCosmetic, generationBeforeCosmetic)
 	}
@@ -177,11 +164,9 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	if completeError := testApp.CompleteExpedition(expeditionID); completeError != nil {
 		testingContext.Fatalf("CompleteExpedition: %v", completeError)
 	}
-	testApp.liveStatsMu.Lock()
-	sizeAfterComplete := len(testApp.liveStatsCache)
-	testApp.liveStatsMu.Unlock()
+	sizeAfterComplete := testApp.timeRangeStats.CachedCount()
 	if sizeAfterComplete != 0 {
-		testingContext.Fatalf("expected CompleteExpedition to invalidate liveStatsCache, got %d entries", sizeAfterComplete)
+		testingContext.Fatalf("expected CompleteExpedition to invalidate timeRangeStats, got %d entries", sizeAfterComplete)
 	}
 }
 

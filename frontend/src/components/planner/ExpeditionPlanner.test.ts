@@ -513,7 +513,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
   })
 
   it('CarrierRouteBottomPanel renders Close button with tooltip, start/end indicator with ??? fallback, and Mark FC Stop Arrival button', () => {
-    const renderCarrierPanel = (overrides: Partial<Parameters<typeof CarrierRouteBottomPanel>[0]> & { route: app.CarrierRouteResult }) =>
+    const renderCarrierPanel = (overrides: Partial<Parameters<typeof CarrierRouteBottomPanel>[0]> & { route: expedition.CarrierRouteResult }) =>
       renderToString(
         createElement(CarrierRouteBottomPanel, {
           jumpIndex: 0,
@@ -540,7 +540,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       )
 
     const manualWithStop = renderCarrierPanel({
-      route: app.CarrierRouteResult.createFrom({
+      route: expedition.CarrierRouteResult.createFrom({
         origin: 'Sol',
         destination: 'Colonia',
         carrierType: 'player',
@@ -571,7 +571,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(manualWithStop).not.toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
 
     const manualWithoutStop = renderCarrierPanel({
-      route: app.CarrierRouteResult.createFrom({
+      route: expedition.CarrierRouteResult.createFrom({
         origin: 'Sol',
         destination: '',
         carrierType: 'player',
@@ -588,7 +588,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     )
     expect(manualWithoutStop).toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
 
-    const plottedSpanshRoute = app.CarrierRouteResult.createFrom({
+    const plottedSpanshRoute = expedition.CarrierRouteResult.createFrom({
       origin: 'Sol',
       destination: 'Colonia',
       carrierType: 'player',
@@ -773,7 +773,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       heldOrDraggedIndex: null,
       draggedIndex: null,
       dragOverGapIndex: null,
-      activeCarrierRoute: app.CarrierRouteResult.createFrom({ origin: 'Sol', destination: 'Colonia', jumps: [] }),
+      activeCarrierRoute: expedition.CarrierRouteResult.createFrom({ origin: 'Sol', destination: 'Colonia', jumps: [] }),
       activeCarrierTargetRowId: 11,
       nextFcStopEntry: { row: routePlan.rows[1].row, index: 1 },
       routedCarrierStopIndex: 1,

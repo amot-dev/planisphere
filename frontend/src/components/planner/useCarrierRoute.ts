@@ -6,7 +6,7 @@ import {
   RecordCarrierJump,
   SaveActiveCarrierRoute,
 } from '../../../wailsjs/go/app/App'
-import { app, expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../../wailsjs/go/models'
 import type { CarrierRoutePromptState } from './CarrierRouteModal'
 import {
   computeRoutedCarrierStopIndex,
@@ -46,7 +46,7 @@ export function useCarrierRoute({
   onCarrierRouteOpenChange,
 }: UseCarrierRouteOptions) {
   const [routePrompt, setRoutePrompt] = useState<CarrierRoutePromptState | null>(null)
-  const [activeCarrierRoute, setActiveCarrierRoute] = useState<app.CarrierRouteResult | null>(null)
+  const [activeCarrierRoute, setActiveCarrierRoute] = useState<expedition.CarrierRouteResult | null>(null)
   const [activeCarrierTargetRowId, setActiveCarrierTargetRowId] = useState<number>(0)
   const [carrierJumpIndex, setCarrierJumpIndex] = useState(0)
   const [manualModeOverride, setManualModeOverride] = useState(false)
@@ -141,7 +141,7 @@ export function useCarrierRoute({
   )
 
   function persistRouteState(updates: {
-    route?: app.CarrierRouteResult | null
+    route?: expedition.CarrierRouteResult | null
     targetRowId?: number
     jumpIdx?: number
     manualMode?: boolean
@@ -164,7 +164,7 @@ export function useCarrierRoute({
       ClearActiveCarrierRoute(expeditionId).catch(console.error)
       return
     }
-    const state = app.ActiveCarrierRouteState.createFrom({
+    const state = expedition.ActiveCarrierRouteState.createFrom({
       expeditionId,
       targetRowId,
       route,
@@ -211,7 +211,7 @@ export function useCarrierRoute({
 
   // Resets per-leg counters and inputs and persists a newly started Spansh or manual carrier route.
   function activateCarrierRoute(
-    route: app.CarrierRouteResult,
+    route: expedition.CarrierRouteResult,
     targetRowId: number,
     manualMode: boolean,
   ) {
@@ -335,7 +335,7 @@ export function useCarrierRoute({
 
     const defaultCarrierType: 'player' | 'squadron' =
       plan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
-    const manualRoute = app.CarrierRouteResult.createFrom({
+    const manualRoute = expedition.CarrierRouteResult.createFrom({
       origin: startSystem,
       destination: nextFcStopSystem,
       carrierType: defaultCarrierType,
@@ -408,7 +408,7 @@ export function useCarrierRoute({
       setRoutePrompt(null)
       activateCarrierRoute(routeResult, targetWaypointRowId, Boolean(routeResult.manualMode))
     } catch (routeError: unknown) {
-      const errorRoute = app.CarrierRouteResult.createFrom({
+      const errorRoute = expedition.CarrierRouteResult.createFrom({
         origin: routePrompt.origin.trim(),
         destination: routePrompt.destination.trim(),
         carrierType: routePrompt.carrierType,

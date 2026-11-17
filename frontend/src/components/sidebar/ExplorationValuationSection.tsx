@@ -1,4 +1,4 @@
-import { stats } from '../../../wailsjs/go/models'
+import { realization, stats } from '../../../wailsjs/go/models'
 import { formatCredits, formatInt } from '../../utils/galacticTime'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
 import { StatRow } from './StatRow'
@@ -9,7 +9,7 @@ import { StatRow } from './StatRow'
  */
 export interface ExplorationValuationSectionProps {
   displayedMetrics: stats.Metrics
-  displayedRealization: stats.RealizationBreakdown
+  displayedRealization: realization.Breakdown
   scienceOpsExpanded?: boolean
   scanExpanded: boolean
   organicExpanded: boolean

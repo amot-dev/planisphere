@@ -4,12 +4,13 @@ import (
 	"database/sql"
 	"fmt"
 
-	"planisphere/internal/expedition"
-	"planisphere/internal/gec"
+	"planisphere/internal/sources/gec"
+	"planisphere/internal/store/expedition"
 )
 
 func runExpeditionProbes(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	options Options,
@@ -34,7 +35,7 @@ func runExpeditionProbes(
 	}
 
 	if matchesFilter("Expedition/BuildPlan", options.FilterPattern) {
-		planProbe, err := profileBuildPlan(database, recorder, dataset, gecLookup, options.Iterations)
+		planProbe, err := profileBuildPlan(database, proj, recorder, dataset, gecLookup, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -44,6 +45,7 @@ func runExpeditionProbes(
 	if dataset.OriginRowID > 0 && matchesFilter("Expedition/Details/OriginWaypoint", options.FilterPattern) {
 		originProbe, err := profileWaypointDetails(
 			database,
+			proj,
 			recorder,
 			"Expedition/Details/OriginWaypoint",
 			"Compute Waypoint #1 (origin baseline) drawer telemetry",
@@ -59,6 +61,7 @@ func runExpeditionProbes(
 	if dataset.SampleVisitedLegRowID > 0 && matchesFilter("Expedition/Details/SingleVisitedLeg", options.FilterPattern) {
 		legProbe, err := profileWaypointDetails(
 			database,
+			proj,
 			recorder,
 			"Expedition/Details/SingleVisitedLeg",
 			fmt.Sprintf("Compute visited leg #%d drawer telemetry", dataset.SampleVisitedLegNumber),
@@ -72,7 +75,7 @@ func runExpeditionProbes(
 	}
 
 	if dataset.PrimaryVisitedCount > 1 && matchesFilter("Expedition/Details/VisitedLegsBatch", options.FilterPattern) {
-		batchProbe, ok, err := profileVisitedLegsBatch(database, recorder, dataset, options.Iterations)
+		batchProbe, ok, err := profileVisitedLegsBatch(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +85,7 @@ func runExpeditionProbes(
 	}
 
 	if matchesFilter("Expedition/Reevaluate", options.FilterPattern) {
-		reevalProbe, err := profileExpeditionReevaluate(database, recorder, dataset, options.Iterations)
+		reevalProbe, err := profileExpeditionReevaluate(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -90,7 +93,7 @@ func runExpeditionProbes(
 	}
 
 	if dataset.SampleVisitedLegRowID > 0 && matchesFilter("Expedition/RowDropPreviews", options.FilterPattern) {
-		dropProbe, ok, err := profileRowDropPreviews(database, recorder, dataset, options.Iterations)
+		dropProbe, ok, err := profileRowDropPreviews(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +103,7 @@ func runExpeditionProbes(
 	}
 
 	if matchesFilter("Expedition/StartCandidates", options.FilterPattern) {
-		candidatesProbe, ok, err := profileStartCandidates(database, recorder, dataset, options.Iterations)
+		candidatesProbe, ok, err := profileStartCandidates(database, proj, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -114,6 +117,7 @@ func runExpeditionProbes(
 
 func profileBuildPlan(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	gecLookup expedition.GECLookup,
@@ -129,8 +133,9 @@ func profileBuildPlan(
 		"rows",
 		"visited",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			planView, buildError := expedition.BuildPlan(database, dataset.PrimaryExpeditionID, gecLookup)
+			planView, buildError := expedition.BuildPlan(database, dataset.PrimaryExpeditionID, gecLookup, proj.expeditionProjections())
 			if buildError != nil {
 				return singleExecOutcome{}, buildError
 			}
@@ -155,6 +160,7 @@ func profileBuildPlan(
 
 func profileWaypointDetails(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	probeName string,
 	description string,
@@ -171,8 +177,9 @@ func profileWaypointDetails(
 		"jumps",
 		"scans",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			details, detailsError := expedition.Details(database, rowID)
+			details, detailsError := expedition.Details(database, rowID, proj.expeditionProjections())
 			if detailsError != nil {
 				return singleExecOutcome{}, detailsError
 			}
@@ -198,6 +205,7 @@ func profileWaypointDetails(
 
 func profileVisitedLegsBatch(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -229,6 +237,7 @@ func profileVisitedLegsBatch(
 		"drawers",
 		"jumps",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
 			var totalJumps int
 			var totalCarto int64
@@ -236,8 +245,8 @@ func profileVisitedLegsBatch(
 			for idx, targetRowID := range visitedRowIDs {
 				label := fmt.Sprintf("expedition.Details[Leg #%d]", idx+1)
 				var callErr error
-				_ = recorder.withSubSpan(label, "internal/expedition/details.go:137", 1, "drawer", func() error {
-					lastDetails, callErr = expedition.Details(database, targetRowID)
+				_ = recorder.withSubSpan(label, "internal/store/expedition/details.go:111", 1, "drawer", func() error {
+					lastDetails, callErr = expedition.Details(database, targetRowID, proj.expeditionProjections())
 					return callErr
 				})
 				if callErr != nil {
@@ -260,6 +269,7 @@ func profileVisitedLegsBatch(
 
 func profileExpeditionReevaluate(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -274,6 +284,7 @@ func profileExpeditionReevaluate(
 		"waypoints",
 		"visited",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
 			tx, beginError := database.Begin()
 			if beginError != nil {
@@ -298,6 +309,7 @@ func profileExpeditionReevaluate(
 
 func profileStartCandidates(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -327,8 +339,9 @@ func profileStartCandidates(
 		"arrivals",
 		"candidates",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			systemName, candidates, candError := expedition.StartCandidates(database, dataset.PrimaryExpeditionID)
+			systemName, candidates, candError := expedition.StartCandidates(database, dataset.PrimaryExpeditionID, proj.expeditionProjections())
 			if candError != nil {
 				return singleExecOutcome{}, candError
 			}
@@ -346,11 +359,12 @@ func profileStartCandidates(
 
 func profileRowDropPreviews(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
 ) (ProbeResult, bool, error) {
-	initialPreviews, initialError := expedition.ComputeRowDropPreviews(database, dataset.SampleVisitedLegRowID)
+	initialPreviews, initialError := expedition.ComputeRowDropPreviews(database, dataset.SampleVisitedLegRowID, proj.expeditionProjections())
 	if initialError != nil || len(initialPreviews) == 0 {
 		return ProbeResult{}, false, initialError
 	}
@@ -365,8 +379,9 @@ func profileRowDropPreviews(
 		"slots",
 		"valid",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			previews, computeError := expedition.ComputeRowDropPreviews(database, dataset.SampleVisitedLegRowID)
+			previews, computeError := expedition.ComputeRowDropPreviews(database, dataset.SampleVisitedLegRowID, proj.expeditionProjections())
 			if computeError != nil {
 				return singleExecOutcome{}, computeError
 			}

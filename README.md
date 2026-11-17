@@ -205,6 +205,7 @@ Several journal edge cases cannot be reconstructed deterministically from Fronti
 
 ### Architecture
 
+- **Event-Subscribed Projection Caches**: Derived read caches register declarative triggers against typed Elite journal events and internal domain mutations on a shared invalidation bus. Journal ingestion, importer commits, and user actions compute typed event sets and invalidate only matching projections and UI domains instead of issuing database-wide refreshes.
 - **Debounced Filesystem Watcher**: The journal ingester watches the active journal directory via `fsnotify` with a configurable debounce window (`0.3s` to `30s`, `2s` default) to coalesce rapid write bursts such as FSS body scans and handle out-of-order writes safely.
 - **Single Source of Truth Config**: Versioning, product name, repository, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, the Linux `.desktop` entry, and package manifests in sync.
 

@@ -1,4 +1,4 @@
-import { expedition, modes, stats } from '../../../wailsjs/go/models'
+import { expedition, modes, realization as realizationModel, stats } from '../../../wailsjs/go/models'
 import {
   formatCredits,
   formatInt,
@@ -143,7 +143,7 @@ function WaypointValuationCards({
   realization,
 }: {
   metrics: stats.Metrics
-  realization?: stats.RealizationBreakdown
+  realization?: realizationModel.Breakdown
 }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 pt-1">

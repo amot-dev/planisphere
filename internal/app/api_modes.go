@@ -3,10 +3,11 @@ package app
 import (
 	"database/sql"
 
-	"planisphere/internal/db"
-	"planisphere/internal/ed"
-	"planisphere/internal/expedition"
-	"planisphere/internal/modes"
+	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
+	"planisphere/internal/reference"
+	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/modes"
 )
 
 // ModeWindowView is a mode window for display.
@@ -56,7 +57,7 @@ func (app *App) GetModesState() (ModesState, error) {
 		return modeState, activeError
 	}
 	if activeWindow != nil {
-		modeState.ActiveModeID, modeState.ActiveSince, modeState.ActiveSinceGalactic = activeWindow.ModeID, activeWindow.Start, ed.ToGalactic(activeWindow.Start)
+		modeState.ActiveModeID, modeState.ActiveSince, modeState.ActiveSinceGalactic = activeWindow.ModeID, activeWindow.Start, reference.ToGalactic(activeWindow.Start)
 	} else {
 		modeState.ActiveModeID = modes.DefaultFallbackModeID(app.db)
 	}
@@ -70,7 +71,7 @@ func (app *App) GetModesState() (ModesState, error) {
 		modeItem := modesByID[windowItem.ModeID]
 		modeState.Windows = append(modeState.Windows, ModeWindowView{
 			ID: windowItem.ID, ModeID: windowItem.ModeID, ModeName: modeItem.Name, Color: modeItem.Color, Start: windowItem.Start, End: windowItem.End,
-			StartGalactic: ed.ToGalactic(windowItem.Start), EndGalactic: ed.ToGalactic(windowItem.End),
+			StartGalactic: reference.ToGalactic(windowItem.Start), EndGalactic: reference.ToGalactic(windowItem.End),
 			Duration: expedition.Elapsed(windowItem.Start, windowItem.End),
 		})
 	}
@@ -79,16 +80,16 @@ func (app *App) GetModesState() (ModesState, error) {
 
 // CreateMode adds a custom mode.
 func (app *App) CreateMode(name, description, color string) (modes.Mode, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return modes.Mode{}, readyError
+	var createdMode modes.Mode
+	if createError := app.withReadyReadLock(func() error {
+		var err error
+		createdMode, err = modes.Create(app.db, name, description, color)
+		return err
+	}); createError != nil {
+		return modes.Mode{}, createError
 	}
-	createdMode, createError := modes.Create(app.db, name, description, color)
-	if createError == nil {
-		app.changed("modes", 0)
-	}
-	return createdMode, createError
+	app.publishApp("modes", 0, events.AppModesChanged)
+	return createdMode, nil
 }
 
 // UpdateMode edits a mode.
@@ -98,7 +99,7 @@ func (app *App) UpdateMode(id int64, name, description, color string) error {
 	}); updateError != nil {
 		return updateError
 	}
-	app.changed("modes", 0)
+	app.publishApp("modes", 0, events.AppModesChanged)
 	return nil
 }
 
@@ -109,7 +110,7 @@ func (app *App) DeleteMode(id int64) error {
 	}); deleteError != nil {
 		return deleteError
 	}
-	app.changed("modes", 0)
+	app.publishApp("modes", 0, events.AppModesChanged)
 	return nil
 }
 
@@ -120,7 +121,7 @@ func (app *App) SwitchMode(modeID int64) (ModesState, error) {
 	}); switchError != nil {
 		return ModesState{}, switchError
 	}
-	app.changed("modes", 0)
+	app.publishApp("modes", 0, events.AppModesChanged)
 	return app.GetModesState()
 }
 

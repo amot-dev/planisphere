@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"planisphere/internal/ed"
-	"planisphere/internal/expedition"
-	"planisphere/internal/systems"
+	"planisphere/internal/core/events"
+	"planisphere/internal/reference"
+	"planisphere/internal/sources/edsm"
+	"planisphere/internal/store/expedition"
 )
 
 func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry bool) {
@@ -62,7 +63,7 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 				if anyCoords {
 					app.reevaluate(expeditionID)
 				}
-				app.changed("plan", expeditionID)
+				app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 				lastEmit = time.Now()
 			}
 		}
@@ -71,7 +72,7 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 		if anyCoords {
 			app.reevaluate(expeditionID)
 		}
-		app.changed("plan", expeditionID)
+		app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 	}
 }
 
@@ -101,7 +102,7 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	}
 }
 
-func (app *App) lookupRowSystemInfo(systemName string, online bool) (*systems.Info, error, bool) {
+func (app *App) lookupRowSystemInfo(systemName string, online bool) (*edsm.Info, error, bool) {
 	if online {
 		if app.ctx != nil {
 			select {
@@ -125,12 +126,12 @@ func (app *App) lookupRowSystemInfo(systemName string, online bool) (*systems.In
 		return resolvedInfo, lookupError, true
 	}
 
-	var resolvedInfo *systems.Info
+	var resolvedInfo *edsm.Info
 	var lookupError error
 	app.dbMu.RLock()
 	database := app.db
 	if database != nil {
-		resolvedInfo, lookupError = systems.FromJournal(database, systemName)
+		resolvedInfo, lookupError = edsm.FromJournal(database, systemName)
 	}
 	app.dbMu.RUnlock()
 	if resolvedInfo == nil && lookupError == nil {
@@ -161,13 +162,13 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 
 	source := "error"
 	var systemAddress, edsmID int64
-	var positionCoords *ed.Vec3
+	var positionCoords *reference.Vec3
 	switch {
 	case resolvedInfo != nil && resolvedInfo.Pos != nil:
 		source, systemAddress, edsmID, positionCoords = resolvedInfo.Source, resolvedInfo.SystemAddress, resolvedInfo.EDSMID, resolvedInfo.Pos
 	case resolvedInfo != nil:
 		source = "notfound"
-	case lookupError != nil && strings.Contains(lookupError.Error(), systems.ErrorNotFound.Error()):
+	case lookupError != nil && strings.Contains(lookupError.Error(), edsm.ErrorNotFound.Error()):
 		source = "notfound"
 	}
 
@@ -192,38 +193,9 @@ func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 			if resolvedCoords {
 				app.reevaluate(rowItem.ExpeditionID)
 			}
-			app.changed("plan", rowItem.ExpeditionID)
+			app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 		}
 	})
-}
-
-type missingPOIItem struct {
-	id            int64
-	systemName    string
-	systemAddress int64
-}
-
-func (app *App) loadMissingPOIItems() []missingPOIItem {
-	rows, queryError := app.db.Query(`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`)
-	if queryError != nil {
-		log.Printf("query missing poi rows: %v", queryError)
-		return nil
-	}
-	defer rows.Close()
-	var items []missingPOIItem
-	for rows.Next() {
-		var item missingPOIItem
-		if scanError := rows.Scan(&item.id, &item.systemName, &item.systemAddress); scanError != nil {
-			log.Printf("scan missing poi row: %v", scanError)
-			return nil
-		}
-		items = append(items, item)
-	}
-	if iterationError := rows.Err(); iterationError != nil {
-		log.Printf("iterate missing poi rows: %v", iterationError)
-		return nil
-	}
-	return items
 }
 
 // applyMissingPOIFromGEC looks up systemName and systemAddress in the GEC catalog,
@@ -239,7 +211,7 @@ func (app *App) applyMissingPOIFromGEC(rowID int64, systemName string, systemAdd
 		return ""
 	}
 	poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
-	if _, execError := app.db.Exec(`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`, poiName, rowID); execError != nil {
+	if execError := expedition.SetRowPOIIfBlank(app.db, rowID, poiName); execError != nil {
 		log.Printf("update poi name for row %d: %v", rowID, execError)
 		return ""
 	}
@@ -252,8 +224,13 @@ func (app *App) populateMissingPOIs() {
 	if app.db == nil || app.gec == nil {
 		return
 	}
-	for _, item := range app.loadMissingPOIItems() {
-		app.applyMissingPOIFromGEC(item.id, item.systemName, item.systemAddress)
+	missingRows, queryError := expedition.ListMissingPOIRows(app.db)
+	if queryError != nil {
+		log.Printf("query missing poi rows: %v", queryError)
+		return
+	}
+	for _, rowItem := range missingRows {
+		app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress)
 	}
 }
 

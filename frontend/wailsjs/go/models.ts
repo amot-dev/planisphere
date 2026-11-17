@@ -1,5 +1,350 @@
 export namespace app {
 	
+	export class CarrierCostBreakdown {
+	    carrierType: string;
+	    weeklyUpkeep: number;
+	    tritiumPrice: number;
+	    tritiumCost: number;
+	    jumpCost: number;
+	    upkeepCost: number;
+	    totalCost: number;
+	    totalEstimated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierCostBreakdown(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.carrierType = source["carrierType"];
+	        this.weeklyUpkeep = source["weeklyUpkeep"];
+	        this.tritiumPrice = source["tritiumPrice"];
+	        this.tritiumCost = source["tritiumCost"];
+	        this.jumpCost = source["jumpCost"];
+	        this.upkeepCost = source["upkeepCost"];
+	        this.totalCost = source["totalCost"];
+	        this.totalEstimated = source["totalEstimated"];
+	    }
+	}
+	export class IngestStatus {
+	    scanning: boolean;
+	    watcherActive: boolean;
+	    watcherError: string;
+	    lastError: string;
+	    lastScanAt: string;
+	    filesTracked: number;
+	    eventsStored: number;
+	    firstEventAt: string;
+	    firstEventGalactic: string;
+	    lastEventAt: string;
+	    lastEventGalactic: string;
+	    currentSystem: string;
+	    currentShip: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IngestStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scanning = source["scanning"];
+	        this.watcherActive = source["watcherActive"];
+	        this.watcherError = source["watcherError"];
+	        this.lastError = source["lastError"];
+	        this.lastScanAt = source["lastScanAt"];
+	        this.filesTracked = source["filesTracked"];
+	        this.eventsStored = source["eventsStored"];
+	        this.firstEventAt = source["firstEventAt"];
+	        this.firstEventGalactic = source["firstEventGalactic"];
+	        this.lastEventAt = source["lastEventAt"];
+	        this.lastEventGalactic = source["lastEventGalactic"];
+	        this.currentSystem = source["currentSystem"];
+	        this.currentShip = source["currentShip"];
+	    }
+	}
+	export class ModeWindowView {
+	    id: number;
+	    modeId: number;
+	    modeName: string;
+	    color: string;
+	    start: string;
+	    end: string;
+	    startGalactic: string;
+	    endGalactic: string;
+	    duration: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModeWindowView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.modeId = source["modeId"];
+	        this.modeName = source["modeName"];
+	        this.color = source["color"];
+	        this.start = source["start"];
+	        this.end = source["end"];
+	        this.startGalactic = source["startGalactic"];
+	        this.endGalactic = source["endGalactic"];
+	        this.duration = source["duration"];
+	    }
+	}
+	export class ModesState {
+	    modes: modes.Mode[];
+	    activeModeId: number;
+	    activeSince: string;
+	    activeSinceGalactic: string;
+	    windows: ModeWindowView[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ModesState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.modes = this.convertValues(source["modes"], modes.Mode);
+	        this.activeModeId = source["activeModeId"];
+	        this.activeSince = source["activeSince"];
+	        this.activeSinceGalactic = source["activeSinceGalactic"];
+	        this.windows = this.convertValues(source["windows"], ModeWindowView);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RegionOptions {
+	    anchorId: number;
+	    anchorName: string;
+	    anchorIsDefault: boolean;
+	    suggestedRegionId: number;
+	    options: reference.RegionOption[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RegionOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.anchorId = source["anchorId"];
+	        this.anchorName = source["anchorName"];
+	        this.anchorIsDefault = source["anchorIsDefault"];
+	        this.suggestedRegionId = source["suggestedRegionId"];
+	        this.options = this.convertValues(source["options"], reference.RegionOption);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Settings {
+	    setupCompleted: boolean;
+	    journalDir: string;
+	    defaultJournalDir: string;
+	    journalDirExists: boolean;
+	    journalDebounceMs: number;
+	    defaultJournalDebounceMs: number;
+	    tritiumPricePerTonne: number;
+	    defaultTritiumPricePerTonne: number;
+	    onlineLookups: boolean;
+	    externalLinkInara: string;
+	    externalLinkEdsm: string;
+	    externalLinkGec: string;
+	    dbPath: string;
+	    defaultDbPath: string;
+	    activeExpeditionId: number;
+	    gecCount: number;
+	    gecFetchedAt: string;
+	    commanders: journal.Commander[];
+	    edDiscoveryDbPath: string;
+	    defaultEdDiscoveryDbPath: string;
+	    edDiscoveryDbExists: boolean;
+	    latestVersion: string;
+	    versionCheckFailed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.setupCompleted = source["setupCompleted"];
+	        this.journalDir = source["journalDir"];
+	        this.defaultJournalDir = source["defaultJournalDir"];
+	        this.journalDirExists = source["journalDirExists"];
+	        this.journalDebounceMs = source["journalDebounceMs"];
+	        this.defaultJournalDebounceMs = source["defaultJournalDebounceMs"];
+	        this.tritiumPricePerTonne = source["tritiumPricePerTonne"];
+	        this.defaultTritiumPricePerTonne = source["defaultTritiumPricePerTonne"];
+	        this.onlineLookups = source["onlineLookups"];
+	        this.externalLinkInara = source["externalLinkInara"];
+	        this.externalLinkEdsm = source["externalLinkEdsm"];
+	        this.externalLinkGec = source["externalLinkGec"];
+	        this.dbPath = source["dbPath"];
+	        this.defaultDbPath = source["defaultDbPath"];
+	        this.activeExpeditionId = source["activeExpeditionId"];
+	        this.gecCount = source["gecCount"];
+	        this.gecFetchedAt = source["gecFetchedAt"];
+	        this.commanders = this.convertValues(source["commanders"], journal.Commander);
+	        this.edDiscoveryDbPath = source["edDiscoveryDbPath"];
+	        this.defaultEdDiscoveryDbPath = source["defaultEdDiscoveryDbPath"];
+	        this.edDiscoveryDbExists = source["edDiscoveryDbExists"];
+	        this.latestVersion = source["latestVersion"];
+	        this.versionCheckFailed = source["versionCheckFailed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SidebarStats {
+	    expeditionId: number;
+	    status: string;
+	    started: boolean;
+	    start: string;
+	    end: string;
+	    startGalactic: string;
+	    endGalactic: string;
+	    endIsNow: boolean;
+	    duration: string;
+	    careerStart: string;
+	    careerStartGalactic: string;
+	    careerDuration: string;
+	    filterActive: boolean;
+	    live: stats.Metrics;
+	    adjustments: stats.Metrics;
+	    expedition: stats.Metrics;
+	    allJournals: stats.Metrics;
+	    realization: realization.Breakdown;
+	    allJournalsRealization: realization.Breakdown;
+	    carrierCost: CarrierCostBreakdown;
+	
+	    static createFrom(source: any = {}) {
+	        return new SidebarStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.expeditionId = source["expeditionId"];
+	        this.status = source["status"];
+	        this.started = source["started"];
+	        this.start = source["start"];
+	        this.end = source["end"];
+	        this.startGalactic = source["startGalactic"];
+	        this.endGalactic = source["endGalactic"];
+	        this.endIsNow = source["endIsNow"];
+	        this.duration = source["duration"];
+	        this.careerStart = source["careerStart"];
+	        this.careerStartGalactic = source["careerStartGalactic"];
+	        this.careerDuration = source["careerDuration"];
+	        this.filterActive = source["filterActive"];
+	        this.live = this.convertValues(source["live"], stats.Metrics);
+	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
+	        this.expedition = this.convertValues(source["expedition"], stats.Metrics);
+	        this.allJournals = this.convertValues(source["allJournals"], stats.Metrics);
+	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	        this.allJournalsRealization = this.convertValues(source["allJournalsRealization"], realization.Breakdown);
+	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCostBreakdown);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class StartCandidates {
+	    systemName: string;
+	    visits: projections.Arrival[];
+	
+	    static createFrom(source: any = {}) {
+	        return new StartCandidates(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.systemName = source["systemName"];
+	        this.visits = this.convertValues(source["visits"], projections.Arrival);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace expedition {
+	
 	export class CarrierRouteJump {
 	    systemName: string;
 	    distanceLy: number;
@@ -120,414 +465,8 @@ export namespace app {
 		    return a;
 		}
 	}
-	export class CarrierCostBreakdown {
-	    carrierType: string;
-	    weeklyUpkeep: number;
-	    tritiumPrice: number;
-	    tritiumCost: number;
-	    jumpCost: number;
-	    upkeepCost: number;
-	    totalCost: number;
-	    totalEstimated: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierCostBreakdown(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.carrierType = source["carrierType"];
-	        this.weeklyUpkeep = source["weeklyUpkeep"];
-	        this.tritiumPrice = source["tritiumPrice"];
-	        this.tritiumCost = source["tritiumCost"];
-	        this.jumpCost = source["jumpCost"];
-	        this.upkeepCost = source["upkeepCost"];
-	        this.totalCost = source["totalCost"];
-	        this.totalEstimated = source["totalEstimated"];
-	    }
-	}
-	export class CarrierDepotInfo {
-	    usedCapacity: number;
-	    depotTritium: number;
-	    cargo: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierDepotInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.usedCapacity = source["usedCapacity"];
-	        this.depotTritium = source["depotTritium"];
-	        this.cargo = source["cargo"];
-	    }
-	}
 	
 	
-	export class IngestStatus {
-	    scanning: boolean;
-	    watcherActive: boolean;
-	    watcherError: string;
-	    lastError: string;
-	    lastScanAt: string;
-	    filesTracked: number;
-	    eventsStored: number;
-	    firstEventAt: string;
-	    firstEventGalactic: string;
-	    lastEventAt: string;
-	    lastEventGalactic: string;
-	    currentSystem: string;
-	    currentShip: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new IngestStatus(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.scanning = source["scanning"];
-	        this.watcherActive = source["watcherActive"];
-	        this.watcherError = source["watcherError"];
-	        this.lastError = source["lastError"];
-	        this.lastScanAt = source["lastScanAt"];
-	        this.filesTracked = source["filesTracked"];
-	        this.eventsStored = source["eventsStored"];
-	        this.firstEventAt = source["firstEventAt"];
-	        this.firstEventGalactic = source["firstEventGalactic"];
-	        this.lastEventAt = source["lastEventAt"];
-	        this.lastEventGalactic = source["lastEventGalactic"];
-	        this.currentSystem = source["currentSystem"];
-	        this.currentShip = source["currentShip"];
-	    }
-	}
-	export class ModeWindowView {
-	    id: number;
-	    modeId: number;
-	    modeName: string;
-	    color: string;
-	    start: string;
-	    end: string;
-	    startGalactic: string;
-	    endGalactic: string;
-	    duration: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ModeWindowView(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.modeId = source["modeId"];
-	        this.modeName = source["modeName"];
-	        this.color = source["color"];
-	        this.start = source["start"];
-	        this.end = source["end"];
-	        this.startGalactic = source["startGalactic"];
-	        this.endGalactic = source["endGalactic"];
-	        this.duration = source["duration"];
-	    }
-	}
-	export class ModesState {
-	    modes: modes.Mode[];
-	    activeModeId: number;
-	    activeSince: string;
-	    activeSinceGalactic: string;
-	    windows: ModeWindowView[];
-	
-	    static createFrom(source: any = {}) {
-	        return new ModesState(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.modes = this.convertValues(source["modes"], modes.Mode);
-	        this.activeModeId = source["activeModeId"];
-	        this.activeSince = source["activeSince"];
-	        this.activeSinceGalactic = source["activeSinceGalactic"];
-	        this.windows = this.convertValues(source["windows"], ModeWindowView);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class RegionOptions {
-	    anchorId: number;
-	    anchorName: string;
-	    anchorIsDefault: boolean;
-	    suggestedRegionId: number;
-	    options: ed.RegionOption[];
-	
-	    static createFrom(source: any = {}) {
-	        return new RegionOptions(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.anchorId = source["anchorId"];
-	        this.anchorName = source["anchorName"];
-	        this.anchorIsDefault = source["anchorIsDefault"];
-	        this.suggestedRegionId = source["suggestedRegionId"];
-	        this.options = this.convertValues(source["options"], ed.RegionOption);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class Settings {
-	    setupCompleted: boolean;
-	    journalDir: string;
-	    defaultJournalDir: string;
-	    journalDirExists: boolean;
-	    journalDebounceMs: number;
-	    defaultJournalDebounceMs: number;
-	    tritiumPricePerTonne: number;
-	    defaultTritiumPricePerTonne: number;
-	    onlineLookups: boolean;
-	    externalLinkInara: string;
-	    externalLinkEdsm: string;
-	    externalLinkGec: string;
-	    dbPath: string;
-	    defaultDbPath: string;
-	    activeExpeditionId: number;
-	    gecCount: number;
-	    gecFetchedAt: string;
-	    commanders: journal.Commander[];
-	    edDiscoveryDbPath: string;
-	    defaultEdDiscoveryDbPath: string;
-	    edDiscoveryDbExists: boolean;
-	    latestVersion: string;
-	    versionCheckFailed: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new Settings(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.setupCompleted = source["setupCompleted"];
-	        this.journalDir = source["journalDir"];
-	        this.defaultJournalDir = source["defaultJournalDir"];
-	        this.journalDirExists = source["journalDirExists"];
-	        this.journalDebounceMs = source["journalDebounceMs"];
-	        this.defaultJournalDebounceMs = source["defaultJournalDebounceMs"];
-	        this.tritiumPricePerTonne = source["tritiumPricePerTonne"];
-	        this.defaultTritiumPricePerTonne = source["defaultTritiumPricePerTonne"];
-	        this.onlineLookups = source["onlineLookups"];
-	        this.externalLinkInara = source["externalLinkInara"];
-	        this.externalLinkEdsm = source["externalLinkEdsm"];
-	        this.externalLinkGec = source["externalLinkGec"];
-	        this.dbPath = source["dbPath"];
-	        this.defaultDbPath = source["defaultDbPath"];
-	        this.activeExpeditionId = source["activeExpeditionId"];
-	        this.gecCount = source["gecCount"];
-	        this.gecFetchedAt = source["gecFetchedAt"];
-	        this.commanders = this.convertValues(source["commanders"], journal.Commander);
-	        this.edDiscoveryDbPath = source["edDiscoveryDbPath"];
-	        this.defaultEdDiscoveryDbPath = source["defaultEdDiscoveryDbPath"];
-	        this.edDiscoveryDbExists = source["edDiscoveryDbExists"];
-	        this.latestVersion = source["latestVersion"];
-	        this.versionCheckFailed = source["versionCheckFailed"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class SidebarStats {
-	    expeditionId: number;
-	    status: string;
-	    started: boolean;
-	    start: string;
-	    end: string;
-	    startGalactic: string;
-	    endGalactic: string;
-	    endIsNow: boolean;
-	    duration: string;
-	    careerStart: string;
-	    careerStartGalactic: string;
-	    careerDuration: string;
-	    filterActive: boolean;
-	    live: stats.Metrics;
-	    adjustments: stats.Metrics;
-	    expedition: stats.Metrics;
-	    allJournals: stats.Metrics;
-	    realization: stats.RealizationBreakdown;
-	    allJournalsRealization: stats.RealizationBreakdown;
-	    carrierCost: CarrierCostBreakdown;
-	
-	    static createFrom(source: any = {}) {
-	        return new SidebarStats(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.expeditionId = source["expeditionId"];
-	        this.status = source["status"];
-	        this.started = source["started"];
-	        this.start = source["start"];
-	        this.end = source["end"];
-	        this.startGalactic = source["startGalactic"];
-	        this.endGalactic = source["endGalactic"];
-	        this.endIsNow = source["endIsNow"];
-	        this.duration = source["duration"];
-	        this.careerStart = source["careerStart"];
-	        this.careerStartGalactic = source["careerStartGalactic"];
-	        this.careerDuration = source["careerDuration"];
-	        this.filterActive = source["filterActive"];
-	        this.live = this.convertValues(source["live"], stats.Metrics);
-	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
-	        this.expedition = this.convertValues(source["expedition"], stats.Metrics);
-	        this.allJournals = this.convertValues(source["allJournals"], stats.Metrics);
-	        this.realization = this.convertValues(source["realization"], stats.RealizationBreakdown);
-	        this.allJournalsRealization = this.convertValues(source["allJournalsRealization"], stats.RealizationBreakdown);
-	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCostBreakdown);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class StartCandidates {
-	    systemName: string;
-	    visits: expedition.Arrival[];
-	
-	    static createFrom(source: any = {}) {
-	        return new StartCandidates(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.systemName = source["systemName"];
-	        this.visits = this.convertValues(source["visits"], expedition.Arrival);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-}
-
-export namespace ed {
-	
-	export class RegionOption {
-	    id: number;
-	    name: string;
-	    adjacent: boolean;
-	    anchor: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new RegionOption(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.adjacent = source["adjacent"];
-	        this.anchor = source["anchor"];
-	    }
-	}
-
-}
-
-export namespace expedition {
-	
-	export class Arrival {
-	    uid: string;
-	    timestamp: string;
-	    galactic: string;
-	    event: string;
-	    systemName: string;
-	    systemAddress: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Arrival(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.uid = source["uid"];
-	        this.timestamp = source["timestamp"];
-	        this.galactic = source["galactic"];
-	        this.event = source["event"];
-	        this.systemName = source["systemName"];
-	        this.systemAddress = source["systemAddress"];
-	    }
-	}
 	export class DropSlotPreview {
 	    targetIndex: number;
 	    status: string;
@@ -616,24 +555,6 @@ export namespace expedition {
 	        this.count = source["count"];
 	    }
 	}
-	export class Transition {
-	    kind: string;
-	    at: string;
-	    atGalactic: string;
-	    to: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Transition(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.kind = source["kind"];
-	        this.at = source["at"];
-	        this.atGalactic = source["atGalactic"];
-	        this.to = source["to"];
-	    }
-	}
 	export class Row {
 	    id: number;
 	    expeditionId: number;
@@ -696,7 +617,7 @@ export namespace expedition {
 	    distFromPrevLy?: number;
 	    distFromCurrentLy?: number;
 	    isNextWaypoint?: boolean;
-	    transitions: Transition[];
+	    transitions: projections.ShipTransition[];
 	    legModeId: number;
 	    legModeName: string;
 	    legModeColor: string;
@@ -719,7 +640,7 @@ export namespace expedition {
 	        this.distFromPrevLy = source["distFromPrevLy"];
 	        this.distFromCurrentLy = source["distFromCurrentLy"];
 	        this.isNextWaypoint = source["isNextWaypoint"];
-	        this.transitions = this.convertValues(source["transitions"], Transition);
+	        this.transitions = this.convertValues(source["transitions"], projections.ShipTransition);
 	        this.legModeId = source["legModeId"];
 	        this.legModeName = source["legModeName"];
 	        this.legModeColor = source["legModeColor"];
@@ -828,7 +749,6 @@ export namespace expedition {
 	    }
 	}
 	
-	
 	export class WaypointDetails {
 	    rowId: number;
 	    kind: string;
@@ -840,7 +760,7 @@ export namespace expedition {
 	    elapsed: string;
 	    prevSystem: string;
 	    metrics: stats.Metrics;
-	    realization: stats.RealizationBreakdown;
+	    realization: realization.Breakdown;
 	
 	    static createFrom(source: any = {}) {
 	        return new WaypointDetails(source);
@@ -858,7 +778,7 @@ export namespace expedition {
 	        this.elapsed = source["elapsed"];
 	        this.prevSystem = source["prevSystem"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
-	        this.realization = this.convertValues(source["realization"], stats.RealizationBreakdown);
+	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -935,6 +855,121 @@ export namespace modes {
 	        this.color = source["color"];
 	        this.isDefault = source["isDefault"];
 	        this.sortOrder = source["sortOrder"];
+	    }
+	}
+
+}
+
+export namespace projections {
+	
+	export class Arrival {
+	    uid: string;
+	    timestamp: string;
+	    galactic: string;
+	    event: string;
+	    systemName: string;
+	    systemAddress: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Arrival(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
+	        this.timestamp = source["timestamp"];
+	        this.galactic = source["galactic"];
+	        this.event = source["event"];
+	        this.systemName = source["systemName"];
+	        this.systemAddress = source["systemAddress"];
+	    }
+	}
+	export class CarrierDepotInfo {
+	    usedCapacity: number;
+	    depotTritium: number;
+	    cargo: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierDepotInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.usedCapacity = source["usedCapacity"];
+	        this.depotTritium = source["depotTritium"];
+	        this.cargo = source["cargo"];
+	    }
+	}
+	export class ShipTransition {
+	    kind: string;
+	    at: string;
+	    atGalactic: string;
+	    to: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShipTransition(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.at = source["at"];
+	        this.atGalactic = source["atGalactic"];
+	        this.to = source["to"];
+	    }
+	}
+
+}
+
+export namespace realization {
+	
+	export class Breakdown {
+	    totalRealized: number;
+	    cartoLostDeath: number;
+	    organicLostDeath: number;
+	    cartoStolen: number;
+	    organicStolen: number;
+	    carrierTariffLoss: number;
+	    npcCrewLoss: number;
+	    pendingValue: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Breakdown(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.totalRealized = source["totalRealized"];
+	        this.cartoLostDeath = source["cartoLostDeath"];
+	        this.organicLostDeath = source["organicLostDeath"];
+	        this.cartoStolen = source["cartoStolen"];
+	        this.organicStolen = source["organicStolen"];
+	        this.carrierTariffLoss = source["carrierTariffLoss"];
+	        this.npcCrewLoss = source["npcCrewLoss"];
+	        this.pendingValue = source["pendingValue"];
+	    }
+	}
+
+}
+
+export namespace reference {
+	
+	export class RegionOption {
+	    id: number;
+	    name: string;
+	    adjacent: boolean;
+	    anchor: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RegionOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.adjacent = source["adjacent"];
+	        this.anchor = source["anchor"];
 	    }
 	}
 
@@ -1044,33 +1079,6 @@ export namespace stats {
 	        this.organicValueBase = source["organicValueBase"];
 	        this.organicValueBonus = source["organicValueBonus"];
 	        this.firstLogged = source["firstLogged"];
-	    }
-	}
-	
-	export class RealizationBreakdown {
-	    totalRealized: number;
-	    cartoLostDeath: number;
-	    organicLostDeath: number;
-	    cartoStolen: number;
-	    organicStolen: number;
-	    carrierTariffLoss: number;
-	    npcCrewLoss: number;
-	    pendingValue: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new RealizationBreakdown(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.totalRealized = source["totalRealized"];
-	        this.cartoLostDeath = source["cartoLostDeath"];
-	        this.organicLostDeath = source["organicLostDeath"];
-	        this.cartoStolen = source["cartoStolen"];
-	        this.organicStolen = source["organicStolen"];
-	        this.carrierTariffLoss = source["carrierTariffLoss"];
-	        this.npcCrewLoss = source["npcCrewLoss"];
-	        this.pendingValue = source["pendingValue"];
 	    }
 	}
 

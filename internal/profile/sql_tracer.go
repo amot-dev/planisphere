@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"planisphere/internal/db"
+	"planisphere/internal/core/db"
 )
 
 type rawSQLEvent struct {
@@ -348,7 +348,7 @@ func resolveInternalStackFrames(programCounters []uintptr) []stackFrame {
 		frame, hasMore := framesIterator.Next()
 		if strings.Contains(frame.Function, "planisphere/internal/") &&
 			!strings.Contains(frame.Function, "planisphere/internal/profile") &&
-			!strings.Contains(frame.Function, "planisphere/internal/db.WithTx") {
+			!strings.Contains(frame.Function, "planisphere/internal/core/db.WithTx") {
 			shortFunc := strings.TrimPrefix(frame.Function, "planisphere/internal/")
 			shortFile := extractInternalRelativePath(frame.File)
 			location := fmt.Sprintf("%s:%d", shortFile, frame.Line)

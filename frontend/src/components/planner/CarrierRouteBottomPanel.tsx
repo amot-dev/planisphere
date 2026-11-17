@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { app } from '../../../wailsjs/go/models'
+import { expedition } from '../../../wailsjs/go/models'
 import { formatInt, formatLy } from '../../utils/galacticTime'
 
 /**
@@ -7,7 +7,7 @@ import { formatInt, formatLy } from '../../utils/galacticTime'
  * manual override inputs, and action callbacks for the bottom carrier navigation drawer.
  */
 export interface CarrierRouteBottomPanelProps {
-  route: app.CarrierRouteResult
+  route: expedition.CarrierRouteResult
   jumpIndex: number
   manualMode: boolean
   hasNextFcStop?: boolean
@@ -133,7 +133,7 @@ function CarrierPlotterHeaderBar({
   onToggleManualMode,
   onCancelRoute,
 }: {
-  route: app.CarrierRouteResult
+  route: expedition.CarrierRouteResult
   destinationDisplay: string
   manualMode: boolean
   hasSpanshJumps: boolean
@@ -210,8 +210,8 @@ function SpanshCarrierStepView({
   onRefillDepot,
   onCompleteSpanshJump,
 }: {
-  route: app.CarrierRouteResult
-  jumps: app.CarrierRouteJump[]
+  route: expedition.CarrierRouteResult
+  jumps: expedition.CarrierRouteJump[]
   jumpIndex: number
   destinationDisplay: string
   currentDepot: number

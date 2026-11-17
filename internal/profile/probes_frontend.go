@@ -12,10 +12,10 @@ import (
 	"strconv"
 
 	"planisphere/internal/app"
-	"planisphere/internal/expedition"
-	"planisphere/internal/gec"
-	"planisphere/internal/modes"
-	"planisphere/internal/stats"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/sources/gec"
+	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/modes"
 )
 
 type frontendLiveFixture struct {
@@ -28,6 +28,7 @@ type frontendLiveFixture struct {
 func runFrontendProbes(
 	ctx context.Context,
 	database *sql.DB,
+	proj *profileProjections,
 	dataset DatasetSummary,
 	options Options,
 ) ([]ProbeResult, error) {
@@ -39,7 +40,7 @@ func runFrontendProbes(
 		return nil, nil
 	}
 
-	fixture, buildError := buildFrontendFixture(database, dataset)
+	fixture, buildError := buildFrontendFixture(database, proj, dataset)
 	if buildError != nil {
 		return nil, buildError
 	}
@@ -104,7 +105,7 @@ func runFrontendProbes(
 	return filtered, nil
 }
 
-func buildFrontendFixture(database *sql.DB, dataset DatasetSummary) (frontendLiveFixture, error) {
+func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset DatasetSummary) (frontendLiveFixture, error) {
 	gecCatalog := gec.NewCatalog(database)
 	gecLookup := func(systemName string, systemAddress int64) *expedition.GECRef {
 		matched := gecCatalog.Lookup(systemName, systemAddress)
@@ -120,12 +121,13 @@ func buildFrontendFixture(database *sql.DB, dataset DatasetSummary) (frontendLiv
 		}
 	}
 
-	planView, planError := expedition.BuildPlan(database, dataset.PrimaryExpeditionID, gecLookup)
+	expProj := proj.expeditionProjections()
+	planView, planError := expedition.BuildPlan(database, dataset.PrimaryExpeditionID, gecLookup, expProj)
 	if planError != nil {
 		return frontendLiveFixture{}, planError
 	}
 
-	statsEngine := stats.NewEngine(database)
+	statsEngine := proj.statsEngine()
 	allMetrics, _ := statsEngine.Compute(stats.Range{}, nil)
 	allRealization, _ := statsEngine.ComputeRealization(stats.Range{}, nil)
 	expRange := stats.Range{After: planView.Expedition.StartTimestamp, Until: planView.Expedition.EndTimestamp}
@@ -155,7 +157,7 @@ func buildFrontendFixture(database *sql.DB, dataset DatasetSummary) (frontendLiv
 	visitedDetails := []expedition.WaypointDetails{}
 	for _, rowView := range planView.Rows {
 		if rowView.Row.IsWaypoint() && rowView.Row.VisitedAt != "" {
-			if detail, err := expedition.Details(database, rowView.Row.ID); err == nil {
+			if detail, err := expedition.Details(database, rowView.Row.ID, expProj); err == nil {
 				visitedDetails = append(visitedDetails, detail)
 			}
 			if len(visitedDetails) >= 6 {

@@ -32,6 +32,9 @@ export interface DataChangedDispatchContext {
   currentActiveExpeditionId: number
   currentFilter: stats.Filter
   refreshExpeditionListOnly: () => void
+  loadIngestStatusOnly: () => Promise<unknown>
+  loadSettingsOnly: () => Promise<unknown>
+  loadModesOnly: () => Promise<unknown>
   loadCoreState: () => Promise<{
     settingsData: app.Settings | null
     chosenId: number
@@ -47,6 +50,7 @@ export interface DataChangedDispatchContext {
  */
 export interface DataChangedPayload {
   scope?: string
+  domains?: string[]
   expeditionId?: number
 }
 
@@ -65,7 +69,6 @@ export function routeDataChangedEvent(
     return
   }
 
-  const scope = payload?.scope ?? ''
   const currentActive = dispatchContext.currentActiveExpeditionId
   const eventExpeditionId = payload?.expeditionId
 
@@ -74,6 +77,35 @@ export function routeDataChangedEvent(
     return
   }
 
+  const domains = payload?.domains
+  if (domains && domains.length > 0) {
+    const domainSet = new Set(domains)
+    if (domainSet.has('settings') && domainSet.has('expeditions') && domainSet.has('modes')) {
+      dispatchContext.refreshAll()
+      return
+    }
+    if (domainSet.has('ingest')) {
+      void dispatchContext.loadIngestStatusOnly()
+    }
+    if (domainSet.has('settings')) {
+      void dispatchContext.loadSettingsOnly()
+    }
+    if (domainSet.has('modes')) {
+      void dispatchContext.loadModesOnly()
+    }
+    if (domainSet.has('expeditions')) {
+      dispatchContext.refreshExpeditionListOnly()
+    }
+    if (domainSet.has('plan') && currentActive > 0) {
+      void dispatchContext.loadPlanOnly(currentActive)
+    }
+    if (domainSet.has('stats') && currentActive > 0) {
+      void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
+    }
+    return
+  }
+
+  const scope = payload?.scope ?? ''
   if (scope === 'plan') {
     if (currentActive > 0) {
       void dispatchContext.loadPlanOnly(currentActive)
@@ -135,6 +167,8 @@ export function useBackendSync() {
     filter: stats.Filter
   } | null>(null)
   const ingestRequestSequenceRef = useRef(0)
+  const settingsRequestSequenceRef = useRef(0)
+  const modesRequestSequenceRef = useRef(0)
   const planRequestSequenceRef = useRef(0)
   const statsRequestSequenceRef = useRef(0)
   const filterRef = useRef(filter)
@@ -161,12 +195,43 @@ export function useBackendSync() {
     }
   }, [])
 
+  const loadSettingsOnly = useCallback(async () => {
+    const requestSequence = ++settingsRequestSequenceRef.current
+    try {
+      const settingsData = await GetSettings()
+      if (requestSequence === settingsRequestSequenceRef.current && settingsData) {
+        setupCompletedRef.current = Boolean(settingsData.setupCompleted)
+        setSettings(settingsData)
+      }
+      return settingsData ?? null
+    } catch (settingsError) {
+      console.error('Failed to load settings:', settingsError)
+      return null
+    }
+  }, [])
+
+  const loadModesOnly = useCallback(async () => {
+    const requestSequence = ++modesRequestSequenceRef.current
+    try {
+      const modesStateData = await GetModesState()
+      if (requestSequence === modesRequestSequenceRef.current && modesStateData) {
+        setModesState(modesStateData)
+      }
+      return modesStateData ?? null
+    } catch (modesError) {
+      console.error('Failed to load modes state:', modesError)
+      return null
+    }
+  }, [])
+
   const loadCoreState = useCallback(async (): Promise<{
     settingsData: app.Settings | null
     chosenId: number
   }> => {
     const coreRequestSequence = ++coreStateRequestSequenceRef.current
     const ingestRequestSequence = ++ingestRequestSequenceRef.current
+    const settingsRequestSequence = ++settingsRequestSequenceRef.current
+    const modesRequestSequence = ++modesRequestSequenceRef.current
     try {
       const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
         GetSettings(),
@@ -177,12 +242,16 @@ export function useBackendSync() {
       if (coreRequestSequence !== coreStateRequestSequenceRef.current) {
         return { settingsData: null, chosenId: 0 }
       }
-      setupCompletedRef.current = Boolean(settingsData.setupCompleted)
-      setSettings(settingsData)
+      if (settingsRequestSequence === settingsRequestSequenceRef.current) {
+        setupCompletedRef.current = Boolean(settingsData.setupCompleted)
+        setSettings(settingsData)
+      }
       if (ingestRequestSequence === ingestRequestSequenceRef.current) {
         setIngest(ingestStatus)
       }
-      setModesState(modesStateData)
+      if (modesRequestSequence === modesRequestSequenceRef.current) {
+        setModesState(modesStateData)
+      }
 
       const loadedExpeditions = expeditionList || []
       setExpeditions(loadedExpeditions)
@@ -372,6 +441,9 @@ export function useBackendSync() {
               .then((expeditionList) => expeditionList && setExpeditions(expeditionList))
               .catch(console.error)
           },
+          loadIngestStatusOnly,
+          loadSettingsOnly,
+          loadModesOnly,
           loadCoreState,
           loadPlanOnly,
           loadStatsOnly,
@@ -389,7 +461,15 @@ export function useBackendSync() {
       offIngest()
       offEdd()
     }
-  }, [loadCoreState, loadIngestStatusOnly, loadPlanOnly, loadStatsOnly, refreshAll])
+  }, [
+    loadCoreState,
+    loadIngestStatusOnly,
+    loadModesOnly,
+    loadPlanOnly,
+    loadSettingsOnly,
+    loadStatsOnly,
+    refreshAll,
+  ])
 
   const handleSelectExpedition = useCallback(async (selectedExpeditionId: number) => {
     if (!selectedExpeditionId) return
@@ -463,6 +543,7 @@ export function useBackendSync() {
     refreshAll,
     refreshPlanAndStats,
     handleRefreshPlan,
+    refreshSettings: loadSettingsOnly,
   }
 }
 

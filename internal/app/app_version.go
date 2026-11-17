@@ -3,6 +3,7 @@ package app
 import (
 	"log"
 
+	"planisphere/internal/core/events"
 	"planisphere/internal/version"
 )
 
@@ -36,7 +37,7 @@ func (app *App) checkLatestVersionOnStartup() {
 		app.versionCheckMu.Lock()
 		app.versionCheckFailed = true
 		app.versionCheckMu.Unlock()
-		app.changed("settings", 0)
+		app.publishApp("settings", 0, events.AppSettingsChanged)
 		return
 	}
 
@@ -46,6 +47,6 @@ func (app *App) checkLatestVersionOnStartup() {
 	app.versionCheckMu.Unlock()
 
 	if latestReleaseVersion != "" && latestReleaseVersion != version.Version {
-		app.changed("settings", 0)
+		app.publishApp("settings", 0, events.AppSettingsChanged)
 	}
 }

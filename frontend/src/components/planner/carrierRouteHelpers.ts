@@ -1,5 +1,5 @@
 import { GetCarrierDepotInfo, GetCarrierLastLocation } from '../../../wailsjs/go/app/App'
-import { app, expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../../wailsjs/go/models'
 import { calculateCarrierJumpFuel } from '../../utils/carrierRouting'
 
 /**
@@ -120,7 +120,7 @@ export function findNextCarrierStopEntry(
  * Spansh or manual carrier route, or -1 when no carrier route is active.
  */
 export function computeRoutedCarrierStopIndex(
-  activeCarrierRoute: app.CarrierRouteResult | null,
+  activeCarrierRoute: expedition.CarrierRouteResult | null,
   activeCarrierTargetRowId: number,
   isManualCarrierRoute: boolean,
   nextCarrierStopEntry: NextCarrierStopEntry | null,
@@ -146,11 +146,11 @@ export function computeRoutedCarrierStopIndex(
  * cargo mass, recalculating tritium burn for all remaining jumps in the route.
  */
 export function recalculateCarrierRouteDepotFuel(
-  activeCarrierRoute: app.CarrierRouteResult,
+  activeCarrierRoute: expedition.CarrierRouteResult,
   carrierJumpIndex: number,
   newDepot: number,
   newCapacityUsed?: number,
-): app.CarrierRouteResult {
+): expedition.CarrierRouteResult {
   const clampedDepot = Math.max(0, Math.min(1000, newDepot))
   const maxCarrierCapacityTonnes = activeCarrierRoute.carrierType === 'squadron' ? 60000 : 25000
   const updatedCapacity =
@@ -181,7 +181,7 @@ export function recalculateCarrierRouteDepotFuel(
     0,
   )
 
-  return app.CarrierRouteResult.createFrom({
+  return expedition.CarrierRouteResult.createFrom({
     ...activeCarrierRoute,
     depotTritium: clampedDepot,
     capacityUsed: updatedCapacity,

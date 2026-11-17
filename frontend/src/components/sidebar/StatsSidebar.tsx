@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { app, stats } from '../../../wailsjs/go/models'
+import { app, realization, stats } from '../../../wailsjs/go/models'
 import { CarrierConfigModal } from './CarrierConfigModal'
 import { ExplorationValuationSection } from './ExplorationValuationSection'
 import { ModeFilterPanel } from './ModeFilterPanel'
@@ -56,12 +56,12 @@ export const StatsSidebar = memo(function StatsSidebar({
     return sidebarStats.expedition ?? new stats.Metrics()
   })()
 
-  const displayedRealization: stats.RealizationBreakdown = (() => {
-    if (!sidebarStats) return new stats.RealizationBreakdown()
+  const displayedRealization: realization.Breakdown = (() => {
+    if (!sidebarStats) return new realization.Breakdown()
     if (viewScope === 'allTime') {
-      return sidebarStats.allJournalsRealization ?? new stats.RealizationBreakdown()
+      return sidebarStats.allJournalsRealization ?? new realization.Breakdown()
     }
-    return sidebarStats.realization ?? new stats.RealizationBreakdown()
+    return sidebarStats.realization ?? new realization.Breakdown()
   })()
 
   if (collapsed) {

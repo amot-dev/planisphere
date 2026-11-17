@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"planisphere/internal/modes"
-	"planisphere/internal/stats"
+	"planisphere/internal/projections/stats"
+	"planisphere/internal/store/modes"
 )
 
 func runStatsProbes(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	options Options,
@@ -23,7 +24,7 @@ func runStatsProbes(
 	for _, window := range dataset.Windows {
 		probeName := "Stats/Compute/" + window.Label
 		if matchesFilter(probeName, options.FilterPattern) {
-			computeProbe, err := profileStatsComputeWindow(database, recorder, window, nil, probeName, options.Iterations)
+			computeProbe, err := profileStatsComputeWindow(database, proj, recorder, window, nil, probeName, options.Iterations)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -42,7 +43,7 @@ func runStatsProbes(
 
 		realProbeName := "Stats/ComputeRealization/" + window.Label
 		if matchesFilter(realProbeName, options.FilterPattern) {
-			realProbe, err := profileStatsRealizationWindow(database, recorder, window, realProbeName, options.Iterations)
+			realProbe, err := profileStatsRealizationWindow(database, proj, recorder, window, realProbeName, options.Iterations)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -50,13 +51,13 @@ func runStatsProbes(
 		}
 	}
 
-	if filteredProbe, ok, err := profileModeFilteredCompute(database, recorder, dataset, options); err != nil {
+	if filteredProbe, ok, err := profileModeFilteredCompute(database, proj, recorder, dataset, options); err != nil {
 		return nil, nil, err
 	} else if ok {
 		results = append(results, filteredProbe)
 	}
 
-	if carrierProbe, ok, err := profileCarrierLegs(database, recorder, options); err != nil {
+	if carrierProbe, ok, err := profileCarrierLegs(database, proj, recorder, options); err != nil {
 		return nil, nil, err
 	} else if ok {
 		results = append(results, carrierProbe)
@@ -71,6 +72,7 @@ func runStatsProbes(
 
 func profileStatsComputeWindow(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	window RepresentativeWindow,
 	filter *stats.Filter,
@@ -90,8 +92,9 @@ func profileStatsComputeWindow(
 		"metric_events",
 		"discoveries",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			statsEngine := stats.NewEngine(database)
+			statsEngine := proj.statsEngine()
 			var filterCopy *stats.Filter
 			if filter != nil {
 				copied := *filter
@@ -124,6 +127,7 @@ func profileStatsComputeWindow(
 
 func profileStatsRealizationWindow(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	window RepresentativeWindow,
 	probeName string,
@@ -142,8 +146,9 @@ func profileStatsRealizationWindow(
 		"real_events",
 		"credits",
 		iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			statsEngine := stats.NewEngine(database)
+			statsEngine := proj.statsEngine()
 			breakdown, realError := statsEngine.ComputeRealization(timeRange, nil)
 			if realError != nil {
 				return singleExecOutcome{}, realError
@@ -170,6 +175,7 @@ func profileStatsRealizationWindow(
 
 func profileModeFilteredCompute(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	options Options,
@@ -195,12 +201,13 @@ func profileModeFilteredCompute(
 			{ModeID: modeList[0].ID, Travel: true, Discovery: true},
 		},
 	}
-	result, err := profileStatsComputeWindow(database, recorder, targetWindow, modeFilter, probeName, options.Iterations)
+	result, err := profileStatsComputeWindow(database, proj, recorder, targetWindow, modeFilter, probeName, options.Iterations)
 	return result, true, err
 }
 
 func profileCarrierLegs(
 	database *sql.DB,
+	proj *profileProjections,
 	recorder *treeRecorder,
 	options Options,
 ) (ProbeResult, bool, error) {
@@ -221,8 +228,9 @@ func profileCarrierLegs(
 		"nav_events",
 		"carrier_jumps",
 		options.Iterations,
+		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			statsEngine := stats.NewEngine(database)
+			statsEngine := proj.statsEngine()
 			legs, legsError := statsEngine.CarrierLegsRange("", "9999-12-31T23:59:59Z")
 			if legsError != nil {
 				return singleExecOutcome{}, legsError
