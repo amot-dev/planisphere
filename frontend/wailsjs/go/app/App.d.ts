@@ -83,6 +83,8 @@ export function SetCommanderEnabled(arg1:string,arg2:boolean):Promise<app.Settin
 
 export function SetDatabasePath(arg1:string):Promise<app.Settings>;
 
+export function SetExternalLinks(arg1:string,arg2:string,arg3:string):Promise<app.Settings>;
+
 export function SetJournalDebounceMs(arg1:number):Promise<app.Settings>;
 
 export function SetJournalDir(arg1:string):Promise<app.Settings>;

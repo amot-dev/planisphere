@@ -31,6 +31,9 @@ export interface PlannerRouteTableProps {
   tableMinWidthPixels: number
   showNotes: boolean
   showCarrierStop: boolean
+  externalLinkInara?: string
+  externalLinkEdsm?: string
+  externalLinkGec?: string
   expandedRowIds: Record<number, boolean>
   detailsById: Record<number, expedition.WaypointDetails>
   loadingDetails: Record<number, boolean>
@@ -99,6 +102,9 @@ export function PlannerRouteTable({
   tableMinWidthPixels,
   showNotes,
   showCarrierStop,
+  externalLinkInara,
+  externalLinkEdsm,
+  externalLinkGec,
   expandedRowIds,
   detailsById,
   loadingDetails,
@@ -299,6 +305,9 @@ export function PlannerRouteTable({
               dropProps={getRowDropProps(index)}
               showNotes={showNotes}
               showCarrierStop={showCarrierStop}
+              externalLinkInara={externalLinkInara}
+              externalLinkEdsm={externalLinkEdsm}
+              externalLinkGec={externalLinkGec}
               onOriginSystemFilledChange={
                 rowView.number === 1 ? onOriginSystemFilledChange : undefined
               }

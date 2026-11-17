@@ -35,6 +35,9 @@ type Settings struct {
 	TritiumPricePerTonne        int64               `json:"tritiumPricePerTonne"`
 	DefaultTritiumPricePerTonne int64               `json:"defaultTritiumPricePerTonne"`
 	OnlineLookups               bool                `json:"onlineLookups"`
+	ExternalLinkInara           string              `json:"externalLinkInara"`
+	ExternalLinkEDSM            string              `json:"externalLinkEdsm"`
+	ExternalLinkGEC             string              `json:"externalLinkGec"`
 	DBPath                      string              `json:"dbPath"`
 	DefaultDBPath               string              `json:"defaultDbPath"`
 	ActiveExpeditionID          int64               `json:"activeExpeditionId"`
@@ -70,6 +73,7 @@ func (app *App) GetSettings() (Settings, error) {
 		gecFetched = app.gec.LastFetched()
 	}
 	latestVersion, versionCheckFailed := app.getVersionStatus()
+	externalLinkInara, externalLinkEDSM, externalLinkGEC := app.externalLinkModes()
 	return Settings{
 		SetupCompleted:              app.setupCompleted(),
 		JournalDir:                  dir,
@@ -80,6 +84,9 @@ func (app *App) GetSettings() (Settings, error) {
 		TritiumPricePerTonne:        app.tritiumPricePerTonne(),
 		DefaultTritiumPricePerTonne: ed.DefaultTritiumPricePerTonne,
 		OnlineLookups:               app.onlineEnabled(),
+		ExternalLinkInara:           externalLinkInara,
+		ExternalLinkEDSM:            externalLinkEDSM,
+		ExternalLinkGEC:             externalLinkGEC,
 		DBPath:                      app.dbPath,
 		DefaultDBPath:               defaultDBPath,
 		ActiveExpeditionID:          app.activeExpeditionID(),

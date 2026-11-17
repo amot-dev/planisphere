@@ -4,6 +4,7 @@ import { ModalShell } from '../common/ModalShell'
 import { CommandersSection } from './CommandersSection'
 import { DatabaseArchiveSection } from './DatabaseArchiveSection'
 import { EDDiscoveryImportSection, type EddImportProgress } from './EDDiscoveryImportSection'
+import { ExternalLinksSection } from './ExternalLinksSection'
 import { FleetCarrierSection } from './FleetCarrierSection'
 import { FlightModesSection } from './FlightModesSection'
 import { JournalDirectorySection } from './JournalDirectorySection'
@@ -25,7 +26,8 @@ export interface SettingsModalProps {
 
 /**
  * SettingsModal renders the Terminal Configuration dialog organizing journal
- * paths, archive telemetry, flight modes, commanders, EDDiscovery import, and online sync.
+ * paths, archive telemetry, flight modes, commanders, EDDiscovery import,
+ * online sync, and external links.
  */
 export function SettingsModal({
   settings,
@@ -87,6 +89,12 @@ export function SettingsModal({
       />
 
       <OnlineServicesSection
+        settings={settings}
+        onRefresh={onRefresh}
+        onSetError={setError}
+      />
+
+      <ExternalLinksSection
         settings={settings}
         onRefresh={onRefresh}
         onSetError={setError}

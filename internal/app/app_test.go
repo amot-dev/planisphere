@@ -841,3 +841,52 @@ func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *
 		}
 	}
 }
+
+func TestExternalLinksSettings(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+
+	initialSettings, initialError := testApp.GetSettings()
+	if initialError != nil {
+		testingContext.Fatalf("GetSettings initial: %v", initialError)
+	}
+	if initialSettings.ExternalLinkInara != ExternalLinkOn ||
+		initialSettings.ExternalLinkEDSM != ExternalLinkIfNoGEC ||
+		initialSettings.ExternalLinkGEC != ExternalLinkOn {
+		testingContext.Fatalf(
+			"unexpected default external link settings: inara=%q edsm=%q gec=%q",
+			initialSettings.ExternalLinkInara,
+			initialSettings.ExternalLinkEDSM,
+			initialSettings.ExternalLinkGEC,
+		)
+	}
+
+	updatedSettings, updateError := testApp.SetExternalLinks("off", "on", "off")
+	if updateError != nil {
+		testingContext.Fatalf("SetExternalLinks: %v", updateError)
+	}
+	if updatedSettings.ExternalLinkInara != ExternalLinkOff ||
+		updatedSettings.ExternalLinkEDSM != ExternalLinkOn ||
+		updatedSettings.ExternalLinkGEC != ExternalLinkOff {
+		testingContext.Fatalf(
+			"unexpected persisted external link settings: inara=%q edsm=%q gec=%q",
+			updatedSettings.ExternalLinkInara,
+			updatedSettings.ExternalLinkEDSM,
+			updatedSettings.ExternalLinkGEC,
+		)
+	}
+
+	normalizedSettings, normalizeError := testApp.SetExternalLinks("invalid", "unknown", "OFF")
+	if normalizeError != nil {
+		testingContext.Fatalf("SetExternalLinks normalize: %v", normalizeError)
+	}
+	if normalizedSettings.ExternalLinkInara != ExternalLinkOn ||
+		normalizedSettings.ExternalLinkEDSM != ExternalLinkIfNoGEC ||
+		normalizedSettings.ExternalLinkGEC != ExternalLinkOff {
+		testingContext.Fatalf(
+			"unexpected normalized external link settings: inara=%q edsm=%q gec=%q",
+			normalizedSettings.ExternalLinkInara,
+			normalizedSettings.ExternalLinkEDSM,
+			normalizedSettings.ExternalLinkGEC,
+		)
+	}
+}

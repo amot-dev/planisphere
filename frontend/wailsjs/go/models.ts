@@ -314,6 +314,9 @@ export namespace app {
 	    tritiumPricePerTonne: number;
 	    defaultTritiumPricePerTonne: number;
 	    onlineLookups: boolean;
+	    externalLinkInara: string;
+	    externalLinkEdsm: string;
+	    externalLinkGec: string;
 	    dbPath: string;
 	    defaultDbPath: string;
 	    activeExpeditionId: number;
@@ -341,6 +344,9 @@ export namespace app {
 	        this.tritiumPricePerTonne = source["tritiumPricePerTonne"];
 	        this.defaultTritiumPricePerTonne = source["defaultTritiumPricePerTonne"];
 	        this.onlineLookups = source["onlineLookups"];
+	        this.externalLinkInara = source["externalLinkInara"];
+	        this.externalLinkEdsm = source["externalLinkEdsm"];
+	        this.externalLinkGec = source["externalLinkGec"];
 	        this.dbPath = source["dbPath"];
 	        this.defaultDbPath = source["defaultDbPath"];
 	        this.activeExpeditionId = source["activeExpeditionId"];

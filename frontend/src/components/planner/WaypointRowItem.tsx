@@ -34,6 +34,9 @@ export interface WaypointRowItemProps {
   dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
   showCarrierStop?: boolean
+  externalLinkInara?: string
+  externalLinkEdsm?: string
+  externalLinkGec?: string
   onOriginSystemFilledChange?: (hasSystem: boolean) => void
   onToggleExpand: (id: number) => void
   onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
@@ -175,6 +178,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   dropProps,
   showNotes = true,
   showCarrierStop = true,
+  externalLinkInara,
+  externalLinkEdsm,
+  externalLinkGec,
   onOriginSystemFilledChange,
   onToggleExpand,
   onFieldBlur,
@@ -524,7 +530,12 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* External Links + Row Manipulation + Drag Handle */}
       <td className="w-[320px] px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
         <div className="h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap">
-          <HoverOpenInLinks rowView={rowView} />
+          <HoverOpenInLinks
+            rowView={rowView}
+            externalLinkInara={externalLinkInara}
+            externalLinkEdsm={externalLinkEdsm}
+            externalLinkGec={externalLinkGec}
+          />
           {!isLocked && (
             <>
               <RowManipulationButtons

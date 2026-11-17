@@ -118,6 +118,9 @@ export default function App() {
           <ExpeditionPlanner
             plan={plan}
             archiveRevision={archiveRevision}
+            externalLinkInara={settings?.externalLinkInara}
+            externalLinkEdsm={settings?.externalLinkEdsm}
+            externalLinkGec={settings?.externalLinkGec}
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
             onRefreshPlan={handleRefreshPlan}

@@ -40,6 +40,9 @@ const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
   archiveRevision?: string
+  externalLinkInara?: string
+  externalLinkEdsm?: string
+  externalLinkGec?: string
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
   onOpenStartModal: () => void
   onRefreshPlan: () => void
@@ -56,6 +59,9 @@ export interface ExpeditionPlannerProps {
 export function ExpeditionPlanner({
   plan,
   archiveRevision = '',
+  externalLinkInara,
+  externalLinkEdsm,
+  externalLinkGec,
   onPlanOptimisticUpdate,
   onOpenStartModal,
   onRefreshPlan,
@@ -464,6 +470,9 @@ export function ExpeditionPlanner({
           tableMinWidthPixels={tableMinWidthPixels}
           showNotes={showNotes}
           showCarrierStop={showCarrierStop}
+          externalLinkInara={externalLinkInara}
+          externalLinkEdsm={externalLinkEdsm}
+          externalLinkGec={externalLinkGec}
           expandedRowIds={expandedRowIds}
           detailsById={detailsById}
           loadingDetails={loadingDetails}

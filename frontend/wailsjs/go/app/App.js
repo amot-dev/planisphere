@@ -158,6 +158,10 @@ export function SetDatabasePath(arg1) {
   return window['go']['app']['App']['SetDatabasePath'](arg1);
 }
 
+export function SetExternalLinks(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SetExternalLinks'](arg1, arg2, arg3);
+}
+
 export function SetJournalDebounceMs(arg1) {
   return window['go']['app']['App']['SetJournalDebounceMs'](arg1);
 }
