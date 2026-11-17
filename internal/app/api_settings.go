@@ -285,7 +285,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	if app.db == database {
 		_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
 		_ = db.SetSetting(app.db, "edd_db_path", eddPath)
-		_ = db.SetSetting(app.db, "edd_history_realization_v6", "1")
+		_ = db.SetSetting(app.db, "edd_history_disconnects_v7", "1")
 	}
 	app.dbMu.RUnlock()
 

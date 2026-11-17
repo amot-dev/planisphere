@@ -86,6 +86,7 @@ var (
 // InvalidateCommanderCountsCache clears the cached per-commander journal event
 // counts so backfills or imports without an increase in MAX(id) are observed immediately.
 func InvalidateCommanderCountsCache() {
+	InvalidateRecoveredJumpsCache()
 	commanderCountsMu.Lock()
 	defer commanderCountsMu.Unlock()
 	cachedCommanderCounts = nil
@@ -222,6 +223,9 @@ func SetCommanderEnabled(queryer db.Queryer, name string, enabled bool) error {
 		enabledFlag = 1
 	}
 	_, execError := queryer.Exec(`UPDATE commanders SET enabled = ? WHERE name = ? COLLATE NOCASE`, enabledFlag, strings.TrimSpace(name))
+	if execError == nil {
+		InvalidateRecoveredJumpsCache()
+	}
 	return execError
 }
 

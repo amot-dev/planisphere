@@ -353,6 +353,13 @@ func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) 
 			return metrics, stepError
 		}
 	}
+	recoveredJumps, recoverError := journal.RecoveredJumpsInRange(engine.DB, after, until)
+	if recoverError != nil {
+		return metrics, fmt.Errorf("recover disconnected jumps: %w", recoverError)
+	}
+	for _, recoveredJump := range recoveredJumps {
+		creditJump(recoveredJump.Timestamp, recoveredJump.JumpDist, recoveredJump.BoostUsed, filterSet, &metrics)
+	}
 	return metrics, nil
 }
 

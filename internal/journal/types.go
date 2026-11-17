@@ -33,9 +33,34 @@ type LocationEvent struct {
 	Population    int64     `json:"Population"`
 	Docked        bool      `json:"Docked"`
 	OnFoot        bool      `json:"OnFoot"`
+	InSRV         bool      `json:"InSRV"`
+	Taxi          bool      `json:"Taxi"`
+	Multicrew     bool      `json:"Multicrew"`
 	BodyType      string    `json:"BodyType"`
 	StationType   string    `json:"StationType"`
 	MarketID      int64     `json:"MarketID"`
+}
+
+// StartJumpEvent is written at the start of a Hyperspace or Supercruise jump countdown.
+type StartJumpEvent struct {
+	Timestamp     string `json:"timestamp"`
+	JumpType      string `json:"JumpType"`
+	StarSystem    string `json:"StarSystem"`
+	SystemAddress int64  `json:"SystemAddress"`
+	Taxi          bool   `json:"Taxi"`
+	Multicrew     bool   `json:"Multicrew"`
+}
+
+// JetConeBoostEvent is written when the ship completes a solar jet cone supercharge.
+type JetConeBoostEvent struct {
+	Timestamp  string  `json:"timestamp"`
+	BoostValue float64 `json:"BoostValue"`
+}
+
+// SynthesisEvent is written when crafting consumables or FSD injections from materials.
+type SynthesisEvent struct {
+	Timestamp string `json:"timestamp"`
+	Name      string `json:"Name"`
 }
 
 // DockedEvent is written when landing at a station, settlement, or fleet carrier.
@@ -319,4 +344,34 @@ func Vec(positionCoords []float64) (coordX, coordY, coordZ float64, hasCoords bo
 		return 0, 0, 0, false
 	}
 	return positionCoords[0], positionCoords[1], positionCoords[2], true
+}
+
+// IsPlayerShip reports whether internalShipName represents a jump-capable player
+// vessel rather than an on-foot suit, SRV, fighter, or ship-launched lander.
+func IsPlayerShip(internalShipName string) bool {
+	trimmedName := strings.TrimSpace(internalShipName)
+	if trimmedName == "" {
+		return false
+	}
+	lowercaseName := strings.ToLower(trimmedName)
+	return !strings.Contains(lowercaseName, "suit") &&
+		!strings.Contains(lowercaseName, "buggy") &&
+		!strings.Contains(lowercaseName, "srv") &&
+		!strings.Contains(lowercaseName, "fighter") &&
+		!strings.Contains(lowercaseName, "lander")
+}
+
+// FSDSynthesisBoostTier maps an FSD injection synthesis recipe name to its
+// FSDJump BoostUsed code (1 basic, 2 standard, 3 premium), or 0 for non-FSD recipes.
+func FSDSynthesisBoostTier(recipeName string) int {
+	switch strings.ToLower(strings.TrimSpace(recipeName)) {
+	case "fsd basic":
+		return 1
+	case "fsd standard":
+		return 2
+	case "fsd premium":
+		return 3
+	default:
+		return 0
+	}
 }

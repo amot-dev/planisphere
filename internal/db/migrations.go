@@ -88,6 +88,11 @@ var migrations = []migration{
 		description: "Convert legacy armed expeditions lacking a start timestamp back to planning",
 		apply:       migrateUnarmExpeditionsV9,
 	},
+	{
+		key:         "disconnect_events_v10",
+		description: "Reset ingested_journals byte offsets for StartJump, JetConeBoost, and FSD Synthesis",
+		apply:       migrateDisconnectEventsV10,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -237,6 +242,13 @@ func migrateRealizationEventsV6(dbConn *sql.DB) error {
 func migrateSourceFileIndexV7(dbConn *sql.DB) error {
 	if _, createIndexError := dbConn.Exec(`CREATE INDEX IF NOT EXISTS idx_journal_events_source ON journal_events(source_file)`); createIndexError != nil {
 		return fmt.Errorf("create idx_journal_events_source: %w", createIndexError)
+	}
+	return nil
+}
+
+func migrateDisconnectEventsV10(dbConn *sql.DB) error {
+	if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
+		return fmt.Errorf("reset ingested_journals offsets (v10): %w", updateError)
 	}
 	return nil
 }

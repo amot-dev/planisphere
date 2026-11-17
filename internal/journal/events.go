@@ -29,6 +29,9 @@ var RelevantEvents = map[string]bool{
 	"Docked":                   true,
 	"Undocked":                 true,
 	"FSDTarget":                true,
+	"StartJump":                true,
+	"JetConeBoost":             true,
+	"Synthesis":                true,
 	"Scan":                     true,
 	"SAAScanComplete":          true,
 	"FSSDiscoveryScan":         true,
@@ -74,6 +77,8 @@ type commonFields struct {
 	Body          json.RawMessage `json:"Body"`
 	BodyName      string          `json:"BodyName"`
 	StarPos       []float64       `json:"StarPos"`
+	JumpType      string          `json:"JumpType"`
+	BoostValue    *float64        `json:"BoostValue"`
 	ScanType      string          `json:"ScanType"`
 	Species       string          `json:"Species"`
 	ShipID        *int64          `json:"ShipID"`
@@ -163,6 +168,12 @@ func keyIdentifiers(fields *commonFields, raw []byte) []string {
 	switch fields.Event {
 	case "FSDJump", "Location", "CarrierJump", "FSSDiscoveryScan", "FSDTarget":
 		return []string{optInt(fields.SystemAddress)}
+	case "StartJump":
+		return []string{strings.ToLower(strings.TrimSpace(fields.JumpType)), optInt(fields.SystemAddress)}
+	case "JetConeBoost":
+		return []string{optFloat(fields.BoostValue)}
+	case "Synthesis":
+		return []string{strings.ToLower(strings.TrimSpace(fields.Name))}
 	case "Scan":
 		return []string{optInt(fields.SystemAddress), optInt(fields.BodyID), fields.ScanType}
 	case "SAAScanComplete":
@@ -212,6 +223,20 @@ func keyIdentifiers(fields *commonFields, raw []byte) []string {
 	}
 }
 
+func shouldPersistRelevantEvent(fields *commonFields) bool {
+	if !RelevantEvents[fields.Event] || fields.Timestamp == "" {
+		return false
+	}
+	switch fields.Event {
+	case "StartJump":
+		return strings.EqualFold(strings.TrimSpace(fields.JumpType), "Hyperspace")
+	case "Synthesis":
+		return FSDSynthesisBoostTier(fields.Name) > 0
+	default:
+		return true
+	}
+}
+
 // ParseLine parses a journal line. ok is false when the line is not a relevant
 // event (or is not valid JSON).
 func ParseLine(line []byte, sourceFile string) (parsedEvent Event, ok bool, parseError error) {
@@ -227,7 +252,7 @@ func ParseLine(line []byte, sourceFile string) (parsedEvent Event, ok bool, pars
 	if unmarshalError := json.Unmarshal(line, &fields); unmarshalError != nil {
 		return Event{}, false, fmt.Errorf("decode %s: %w", name, unmarshalError)
 	}
-	if !RelevantEvents[fields.Event] || fields.Timestamp == "" {
+	if !shouldPersistRelevantEvent(&fields) {
 		return Event{}, false, nil
 	}
 	normalizedTimestamp, normalizeError := ed.NormalizeISO(fields.Timestamp)

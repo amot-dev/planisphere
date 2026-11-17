@@ -165,6 +165,7 @@ func (app *App) invalidateAllTimeCache() {
 	app.carrierStatsMu.Unlock()
 	app.invalidateLiveStatsCache()
 	expedition.InvalidateShipCache()
+	journal.InvalidateRecoveredJumpsCache()
 }
 
 // getAllTimeMetrics computes or retrieves cached lifetime statistics across all journals. Caller must hold app.dbMu.RLock.
@@ -290,7 +291,7 @@ func (app *App) maybeCatchUpEDD() {
 	if recovered != "1" {
 		return
 	}
-	alreadyDone, _ := db.GetSetting(database, "edd_history_realization_v6")
+	alreadyDone, _ := db.GetSetting(database, "edd_history_disconnects_v7")
 	if alreadyDone == "1" {
 		return
 	}
@@ -311,7 +312,7 @@ func (app *App) maybeCatchUpEDD() {
 	if importError == nil {
 		stats.InvalidateLedgerCache()
 		expedition.InvalidateVisitCache()
-		if settingError := db.SetSetting(database, "edd_history_realization_v6", "1"); settingError != nil {
+		if settingError := db.SetSetting(database, "edd_history_disconnects_v7", "1"); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}
 		app.invalidateAllTimeCache()

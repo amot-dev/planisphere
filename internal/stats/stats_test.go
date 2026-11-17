@@ -343,3 +343,50 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 			expectedScanOnly.Total, futureScanMetrics.FirstMapped, futureScanMetrics.ScanValueTotal)
 	}
 }
+
+func TestComputeRecoversDisconnectedJumpsAcrossRangeAndFilter(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-11-17T01:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Odyssey":true}`,
+		`{"timestamp":"2026-11-17T01:05:00Z","event":"FSDJump","StarSystem":"Hypo Aeb ST-B b54-0","SystemAddress":538078878161,"StarPos":[-9894.84375,-5.5625,-7569.25],"JumpDist":81.096}`,
+		`{"timestamp":"2026-11-17T01:40:30Z","event":"JetConeBoost","BoostValue":4.0}`,
+		`{"timestamp":"2026-11-17T01:40:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321}`,
+		`{"timestamp":"2026-11-17T01:41:42Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Odyssey":true}`,
+		`{"timestamp":"2026-11-17T01:41:53Z","event":"Location","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321,"StarPos":[-9962.1875,-1.3125,-7604.875],"Docked":false}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, lines)
+
+	modeList, listError := modes.List(databaseConnection)
+	if listError != nil || len(modeList) == 0 {
+		testingContext.Fatalf("expected default modes, got %v (%v)", modeList, listError)
+	}
+	explorationModeID := modeList[0].ID
+	if windowError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		return modes.SetWindow(transaction, 0, explorationModeID, "2026-11-17T01:10:00Z", "2026-11-17T02:00:00Z")
+	}); windowError != nil {
+		testingContext.Fatal(windowError)
+	}
+
+	engineInstance := stats.NewEngine(databaseConnection)
+
+	// Bounded leg window starting at the preceding waypoint arrival (01:05:00Z) must recover the disconnect on hop 1.
+	legMetrics, legError := engineInstance.Compute(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, nil)
+	if legError != nil {
+		testingContext.Fatal(legError)
+	}
+	expectedLegDistance := ed.Distance(ed.Vec3{X: -9894.84375, Y: -5.5625, Z: -7569.25}, ed.Vec3{X: -9962.1875, Y: -1.3125, Z: -7604.875})
+	if legMetrics.Jumps != 1 || legMetrics.JetConeBoosts != 1 || legMetrics.ShipDistanceLy != expectedLegDistance || legMetrics.DistanceLy != expectedLegDistance {
+		testingContext.Fatalf("unexpected bounded-window recovered metrics: %+v (want dist %.6f)", legMetrics, expectedLegDistance)
+	}
+
+	// Travel=false mode filter must exclude recovered jumps identically to FSDJump.
+	travelExcluded, filterError := engineInstance.Compute(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, &stats.Filter{
+		Enabled: true,
+		Modes:   []stats.ModeSelection{{ModeID: explorationModeID, Travel: false, Discovery: true}},
+	})
+	if filterError != nil {
+		testingContext.Fatal(filterError)
+	}
+	if travelExcluded.Jumps != 0 || travelExcluded.ShipDistanceLy != 0 || travelExcluded.JetConeBoosts != 0 {
+		testingContext.Fatalf("expected Travel=false filter to exclude recovered jump, got %+v", travelExcluded)
+	}
+}

@@ -1143,3 +1143,52 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 		testingContext.Fatalf("expected Hub to rebind to 11:00 with exploration mode %d, got visitedAt=%q mode=%d", explorationModeID, reboundHub.VisitedAt, reboundHub.LegModeID)
 	}
 }
+
+func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expedition.InvalidateShipCache()
+	expedition.InvalidateVisitCache()
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-11-17T01:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Ship_Localised":"Caspian Explorer","ShipID":36}`,
+		`{"timestamp":"2026-11-17T01:01:00Z","event":"FSDJump","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321,"StarPos":[-9962.1875,-1.3125,-7604.875],"JumpDist":75.0}`,
+		`{"timestamp":"2026-11-17T01:10:00Z","event":"FSDJump","StarSystem":"Hypo Aeb ST-B b54-0","SystemAddress":538078878161,"StarPos":[-9894.84375,-5.5625,-7569.25],"JumpDist":76.305}`,
+		`{"timestamp":"2026-11-17T01:40:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321}`,
+		`{"timestamp":"2026-11-17T01:41:42Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Ship_Localised":"Caspian Explorer","ShipID":36}`,
+		`{"timestamp":"2026-11-17T01:41:53Z","event":"Location","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321,"StarPos":[-9962.1875,-1.3125,-7604.875],"Docked":false}`,
+	})
+	expedition.InvalidateVisitCache()
+
+	expeditionRecord, wpOrigin := createExpeditionWithOriginRow(testingContext, databaseConnection, "Disconnect Leg Test", "")
+	setRowSystemName(testingContext, databaseConnection, wpOrigin.ID, "Hypo Aeb ST-B b54-0")
+	if originCoordsError := expedition.SetRowCoords(databaseConnection, wpOrigin.ID, "Hypo Aeb ST-B b54-0", 538078878161, 0, &ed.Vec3{X: -9894.84375, Y: -5.5625, Z: -7569.25}, "journal"); originCoordsError != nil {
+		testingContext.Fatal(originCoordsError)
+	}
+
+	wpDest := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpOrigin.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wpDest.ID, "Hypo Aeb JS-D b53-0")
+	if destCoordsError := expedition.SetRowCoords(databaseConnection, wpDest.ID, "Hypo Aeb JS-D b53-0", 537273637321, 0, &ed.Vec3{X: -9962.1875, Y: -1.3125, Z: -7604.875}, "journal"); destCoordsError != nil {
+		testingContext.Fatal(destCoordsError)
+	}
+
+	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-11-17T01:10:00Z")
+	}); startError != nil {
+		testingContext.Fatal(startError)
+	}
+
+	planView, planError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
+	if planError != nil {
+		testingContext.Fatal(planError)
+	}
+	destView := planView.Rows[1]
+	if destView.VisitState != expedition.VisitVisited {
+		testingContext.Fatalf("expected destination waypoint to be visited via Location, got %q", destView.VisitState)
+	}
+	if len(destView.Transitions) != 1 || destView.Transitions[0].To != "Caspian Explorer" {
+		testingContext.Fatalf("expected single disconnected-jump leg to record Caspian Explorer ship transition, got %+v", destView.Transitions)
+	}
+	if destView.VisitCount != 2 {
+		testingContext.Fatalf("expected VisitCount=2 (1 FSDJump + 1 recovered disconnect jump), got %d", destView.VisitCount)
+	}
+}

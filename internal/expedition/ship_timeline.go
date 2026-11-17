@@ -32,6 +32,7 @@ var (
 
 // InvalidateShipCache clears the cached ship timeline states, expedition arrivals, and origin metrics.
 func InvalidateShipCache() {
+	journal.InvalidateRecoveredJumpsCache()
 	shipCacheMu.Lock()
 	shipCacheDB = nil
 	shipCacheGen++
@@ -48,7 +49,7 @@ func parseShipState(timestamp, eventType, rawJSON string) (shipState, bool) {
 	switch eventType {
 	case "LoadGame":
 		var loadGameEvent journal.LoadGameEvent
-		if json.Unmarshal([]byte(rawJSON), &loadGameEvent) != nil || loadGameEvent.Ship == "" || !isShip(loadGameEvent.Ship) {
+		if json.Unmarshal([]byte(rawJSON), &loadGameEvent) != nil || !journal.IsPlayerShip(loadGameEvent.Ship) {
 			return shipState{}, false
 		}
 		state.id, state.name = loadGameEvent.ShipID, ed.ShipDisplayName(loadGameEvent.Ship, loadGameEvent.ShipLocalised)
@@ -150,14 +151,6 @@ func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) (
 	return states, nil
 }
 
-// isShip filters out on-foot suits, SRVs, fighters, and ship-launched landers reported by LoadGame.
-func isShip(internalName string) bool {
-	lowercaseName := strings.ToLower(internalName)
-	return !strings.Contains(lowercaseName, "suit") && !strings.Contains(lowercaseName, "buggy") &&
-		!strings.Contains(lowercaseName, "srv") && !strings.Contains(lowercaseName, "fighter") &&
-		!strings.Contains(lowercaseName, "lander")
-}
-
 func shipAt(timeline []shipState, timestamp string) *shipState {
 	segmentIndex := sort.Search(len(timeline), func(i int) bool { return timeline[i].timestamp > timestamp }) - 1
 	if segmentIndex < 0 {
@@ -187,7 +180,20 @@ func loadJumpTimestamps(queryer db.Queryer, afterTimestamp, untilTimestamp strin
 		}
 		timestamps = append(timestamps, timestamp)
 	}
-	return timestamps, rows.Err()
+	if iterationError := rows.Err(); iterationError != nil {
+		return nil, iterationError
+	}
+	recoveredJumps, recoverError := journal.RecoveredJumpsInRange(queryer, afterTimestamp, untilTimestamp)
+	if recoverError != nil {
+		return nil, recoverError
+	}
+	if len(recoveredJumps) > 0 {
+		for _, recoveredJump := range recoveredJumps {
+			timestamps = append(timestamps, recoveredJump.Timestamp)
+		}
+		sort.Strings(timestamps)
+	}
+	return timestamps, nil
 }
 
 func shipsUsedOnLeg(timeline []shipState, jumpTimestamps []string, afterTimestamp, untilTimestamp string) []Transition {
@@ -267,6 +273,7 @@ var (
 
 // InvalidateVisitCache clears cached per-system journal visit counts and commander-filtered timelines.
 func InvalidateVisitCache() {
+	journal.InvalidateRecoveredJumpsCache()
 	shipCacheMu.Lock()
 	shipCacheGen++
 	shipCacheMap = make(map[string][]shipState)
@@ -315,6 +322,16 @@ func queryUncachedSystemVisits(queryer db.Queryer, missingNames []string) (map[s
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	recoveredJumps, recoverError := journal.RecoveredJumpsInRange(queryer, "", "")
+	if recoverError != nil {
+		return nil, recoverError
+	}
+	for _, recoveredJump := range recoveredJumps {
+		normalizedSystem := normalizeSystemKey(recoveredJump.SystemName)
+		if totalBySystem[normalizedSystem] > 0 {
+			jumpsBySystem[normalizedSystem]++
+		}
 	}
 	counts := make(map[string]int, len(missingNames))
 	for _, name := range missingNames {

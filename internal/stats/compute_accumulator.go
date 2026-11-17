@@ -94,19 +94,14 @@ func (accumulator *computeAccumulator) processEvent(rowItem eventRow, metrics *M
 	return nil
 }
 
-func (accumulator *computeAccumulator) processFSDJump(rowItem eventRow, metrics *Metrics) {
-	var jumpEvent journal.FSDJumpEvent
-	if json.Unmarshal([]byte(rowItem.rawJSON), &jumpEvent) != nil {
-		return
-	}
-	accumulator.session.applyFSDJumpEvent(&jumpEvent)
-	if !accumulator.filterSet.allow(rowItem.timestamp, false) {
+func creditJump(timestamp string, distanceLy float64, boostUsed int, filterSet *filterSets, metrics *Metrics) {
+	if !filterSet.allow(timestamp, false) {
 		return
 	}
 	metrics.Jumps++
-	metrics.ShipDistanceLy += jumpEvent.JumpDist
-	metrics.DistanceLy += jumpEvent.JumpDist
-	switch jumpEvent.BoostUsed {
+	metrics.ShipDistanceLy += distanceLy
+	metrics.DistanceLy += distanceLy
+	switch boostUsed {
 	case 4:
 		metrics.JetConeBoosts++
 	case 3:
@@ -116,6 +111,15 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem eventRow, metrics 
 	case 1:
 		metrics.BasicBoosts++
 	}
+}
+
+func (accumulator *computeAccumulator) processFSDJump(rowItem eventRow, metrics *Metrics) {
+	var jumpEvent journal.FSDJumpEvent
+	if json.Unmarshal([]byte(rowItem.rawJSON), &jumpEvent) != nil {
+		return
+	}
+	accumulator.session.applyFSDJumpEvent(&jumpEvent)
+	creditJump(rowItem.timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)
 }
 
 func (accumulator *computeAccumulator) processCarrierJump(rowItem eventRow, metrics *Metrics) error {
