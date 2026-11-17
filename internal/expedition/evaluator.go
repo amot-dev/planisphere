@@ -103,27 +103,11 @@ func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error
 	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, normalizedStartTimestamp, nil); lifecycleError != nil {
 		return lifecycleError
 	}
-	if initError := initCarrierStops(transaction, expeditionID); initError != nil {
-		return initError
+	if _, resetFCError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE expedition_id = ?`, expeditionID); resetFCError != nil {
+		return resetFCError
 	}
 	_, reevalError := Reevaluate(transaction, expeditionID)
 	return reevalError
-}
-
-// initCarrierStops initializes carrier stops for an active expedition.
-// The first carrier stop serves as the carrier's origin or starting location,
-// so it starts as arrived; subsequent carrier stops start as pending.
-func initCarrierStops(queryer db.Queryer, expeditionID int64) error {
-	if _, updateError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE expedition_id = ?`, expeditionID); updateError != nil {
-		return updateError
-	}
-	_, execError := queryer.Exec(`UPDATE expedition_rows SET fc_arrived = 1
-		WHERE id = (
-			SELECT id FROM expedition_rows
-			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1 AND TRIM(system_name) != ''
-			ORDER BY position ASC LIMIT 1
-		)`, expeditionID)
-	return execError
 }
 
 // Complete ends the expedition at endTimestamp (now when empty).

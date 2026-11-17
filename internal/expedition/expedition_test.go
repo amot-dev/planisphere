@@ -965,6 +965,13 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); startErr != nil {
 		testingContext.Fatal(startErr)
 	}
+	startedOriginRow, startOriginErr := expedition.GetRow(databaseConnection, wp1.ID)
+	if startOriginErr != nil {
+		testingContext.Fatal(startOriginErr)
+	}
+	if startedOriginRow.FCArrived {
+		testingContext.Fatalf("expected FC stops to start as pending (FCArrived=false) on Engage")
+	}
 
 	// Mark wp3 (Sirius) as carrier arrived via SetCarrierArrivalOverride; wp1 and wp3 are now ARRIVED, wp4 is PENDING.
 	if overrideErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
