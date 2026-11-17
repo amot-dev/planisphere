@@ -224,6 +224,18 @@ func PreloadSystemPopulations(
 	if afterTimestamp == "" {
 		return nil
 	}
+	return PreloadSystemPopulationsForRows(queryer, loadedRows, untilTimestamp, state)
+}
+
+// PreloadSystemPopulationsForRows batch-loads the latest known Population up to
+// untilTimestamp for every system scanned, mapped, or sampled in loadedRows that
+// does not have an accompanying arrival row in loadedRows.
+func PreloadSystemPopulationsForRows(
+	queryer db.Queryer,
+	loadedRows []journal.Row,
+	untilTimestamp string,
+	state *SessionState,
+) error {
 	missingAddresses := collectUnseenSystemAddresses(loadedRows)
 	if len(missingAddresses) == 0 {
 		return nil

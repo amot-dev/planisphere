@@ -2,120 +2,147 @@ package stats
 
 import (
 	"database/sql"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 
-	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
-	"planisphere/internal/sources/journal"
 )
 
-var (
-	timeRangeStatsJournalEvents = journal.NewEventSet(
-		journal.EventLocation,
-		journal.EventFSDJump,
-		journal.EventCarrierJump,
-		journal.EventScan,
-		journal.EventSAAScanComplete,
-		journal.EventScanOrganic,
-		journal.EventSellExplorationData,
-		journal.EventMultiSellExplorationData,
-		journal.EventSellOrganicData,
-		journal.EventResurrect,
-		journal.EventNpcCrewPaidWage,
-	)
-	timeRangeStatsAppEvents = events.NewAppSet(
-		events.AppCommanderFilterChanged,
-		events.AppModesChanged,
-		events.AppExpeditionBoundsChanged,
-		events.AppDatabaseSwitched,
-	)
-)
-
-// TimeRangeStats caches travel and exploration telemetry for bounded
-// (after, until] time ranges and optional Flight Mode filters, serving both
-// the active Expedition sidebar and Waypoint #1 pre-expedition baselines.
+// TimeRangeStats coordinates the four time-windowed statistics projections
+// (Travel, Cartographics, Exobiology, and Realization) for bounded (after, until]
+// ranges and optional Flight Mode filters, serving both the active Expedition
+// sidebar and Waypoint #1 pre-expedition baselines.
 type TimeRangeStats struct {
-	database       *sql.DB
-	salesLedger    *realization.SalesLedger
-	recoveredJumps *projections.RecoveredJumps
-	entries        *projection.KeyedCache[string, TelemetrySummary]
+	travel        *TimeRangeTravel
+	cartographics *TimeRangeCartographics
+	exobiology    *TimeRangeExobiology
+	realization   *TimeRangeRealization
 }
 
-// NewTimeRangeStats creates a TimeRangeStats projection and registers it on bus.
+// NewTimeRangeStats creates a TimeRangeStats facade and registers its four
+// section projections on bus.
 func NewTimeRangeStats(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
 	recoveredJumps *projections.RecoveredJumps,
 ) *TimeRangeStats {
-	timeRangeStats := &TimeRangeStats{
-		database:       dbConn,
-		salesLedger:    salesLedger,
-		recoveredJumps: recoveredJumps,
+	return &TimeRangeStats{
+		travel:        NewTimeRangeTravel(dbConn, bus, recoveredJumps),
+		cartographics: NewTimeRangeCartographics(dbConn, bus),
+		exobiology:    NewTimeRangeExobiology(dbConn, bus, salesLedger),
+		realization:   NewTimeRangeRealization(dbConn, bus, salesLedger),
 	}
-	timeRangeStats.entries = projection.NewKeyedCache[string, TelemetrySummary](
-		bus,
-		"time_range_stats",
-		timeRangeStats.Triggers(),
-	)
-	return timeRangeStats
 }
 
-// Triggers declares the journal and application events that invalidate TimeRangeStats.
+// Travel returns the time-windowed Flight Operations travel projection.
+func (timeRangeStats *TimeRangeStats) Travel() *TimeRangeTravel {
+	return timeRangeStats.travel
+}
+
+// Cartographics returns the time-windowed Universal Cartographics valuation projection.
+func (timeRangeStats *TimeRangeStats) Cartographics() *TimeRangeCartographics {
+	return timeRangeStats.cartographics
+}
+
+// Exobiology returns the time-windowed Vista Genomics exobiology valuation projection.
+func (timeRangeStats *TimeRangeStats) Exobiology() *TimeRangeExobiology {
+	return timeRangeStats.exobiology
+}
+
+// Realization returns the time-windowed Realized Value breakdown projection.
+func (timeRangeStats *TimeRangeStats) Realization() *TimeRangeRealization {
+	return timeRangeStats.realization
+}
+
+// Triggers returns the union of journal and application events across all four
+// time-windowed statistics projections.
 func (timeRangeStats *TimeRangeStats) Triggers() projection.Triggers {
-	return projection.Triggers{
-		Journal: timeRangeStatsJournalEvents,
-		App:     timeRangeStatsAppEvents,
-	}
+	return projection.TriggersFrom(
+		timeRangeStats.travel,
+		timeRangeStats.cartographics,
+		timeRangeStats.exobiology,
+		timeRangeStats.realization,
+	)
 }
 
-// CachedCount returns the number of bounded range telemetry entries currently cached.
+// CachedCount returns the maximum number of bounded range entries currently cached
+// across the time-windowed section projections.
 func (timeRangeStats *TimeRangeStats) CachedCount() int {
-	return timeRangeStats.entries.Len()
+	return max(
+		timeRangeStats.travel.CachedCount(),
+		timeRangeStats.cartographics.CachedCount(),
+		timeRangeStats.exobiology.CachedCount(),
+		timeRangeStats.realization.CachedCount(),
+	)
 }
 
-// Generation returns the cache invalidation generation counter.
+// Generation returns the highest cache invalidation generation counter across
+// the time-windowed section projections.
 func (timeRangeStats *TimeRangeStats) Generation() uint64 {
-	return timeRangeStats.entries.Generation()
+	return max(
+		timeRangeStats.travel.Generation(),
+		timeRangeStats.cartographics.Generation(),
+		timeRangeStats.exobiology.Generation(),
+		timeRangeStats.realization.Generation(),
+	)
 }
 
 // Compute returns cached or freshly evaluated metrics and realization breakdown
-// for timeRange and optional mode filter.
+// for timeRange and optional mode filter across all four section projections.
 func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (TelemetrySummary, error) {
-	if timeRangeStats.database == nil {
-		return TelemetrySummary{}, fmt.Errorf("time range stats database is nil")
+	preparedFilter := cloneUnpreparedFilter(filter)
+
+	travelMetrics, travelError := timeRangeStats.travel.computeWithPreparedFilter(timeRange, preparedFilter)
+	if travelError != nil {
+		return TelemetrySummary{}, travelError
 	}
-	cacheKey := buildTimeRangeStatsKey(timeRange, filter)
-	return timeRangeStats.entries.GetOrLoad(cacheKey, func() (TelemetrySummary, error) {
-		engine := NewEngineWithProjections(timeRangeStats.database, timeRangeStats.salesLedger, timeRangeStats.recoveredJumps)
-		var filterCopy *Filter
-		if filter != nil {
-			copied := *filter
-			copied.preparedSets = nil
-			copied.preparedDB = nil
-			filterCopy = &copied
-		}
-		computedMetrics, computeError := engine.Compute(timeRange, filterCopy)
-		if computeError != nil {
-			return TelemetrySummary{}, computeError
-		}
-		computedRealization, realizationError := engine.ComputeRealization(timeRange, filterCopy)
-		if realizationError != nil {
-			return TelemetrySummary{}, realizationError
-		}
-		return TelemetrySummary{
-			Metrics:     computedMetrics,
-			Realization: computedRealization,
-		}, nil
-	})
+	cartoMetrics, cartoError := timeRangeStats.cartographics.computeWithPreparedFilter(timeRange, preparedFilter)
+	if cartoError != nil {
+		return TelemetrySummary{}, cartoError
+	}
+	exoMetrics, exoError := timeRangeStats.exobiology.computeWithPreparedFilter(timeRange, preparedFilter)
+	if exoError != nil {
+		return TelemetrySummary{}, exoError
+	}
+	realizationBreakdown, realizationError := timeRangeStats.realization.computeWithPreparedFilter(timeRange, preparedFilter)
+	if realizationError != nil {
+		return TelemetrySummary{}, realizationError
+	}
+
+	var combinedMetrics Metrics
+	travelMetrics.applyTo(&combinedMetrics)
+	cartoMetrics.applyTo(&combinedMetrics)
+	exoMetrics.applyTo(&combinedMetrics)
+
+	return TelemetrySummary{
+		Metrics:     combinedMetrics,
+		Realization: realizationBreakdown,
+	}, nil
 }
 
-func buildTimeRangeStatsKey(timeRange Range, filter *Filter) string {
+func cloneUnpreparedFilter(filter *Filter) *Filter {
+	if filter == nil {
+		return nil
+	}
+	copied := *filter
+	copied.preparedSets = nil
+	copied.preparedDB = nil
+	return &copied
+}
+
+func buildTravelStatsKey(timeRange Range, filter *Filter) string {
+	return buildModeDomainStatsKey(timeRange, filter, false)
+}
+
+func buildDiscoveryStatsKey(timeRange Range, filter *Filter) string {
+	return buildModeDomainStatsKey(timeRange, filter, true)
+}
+
+func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bool) string {
 	var keyBuilder strings.Builder
 	keyBuilder.Grow(64)
 	keyBuilder.WriteString(timeRange.After)
@@ -127,46 +154,23 @@ func buildTimeRangeStatsKey(timeRange Range, filter *Filter) string {
 		return keyBuilder.String()
 	}
 	keyBuilder.WriteString("filtered:")
-	activeSelections := make([]ModeSelection, 0, len(filter.Modes))
+	activeModeIDs := make([]int64, 0, len(filter.Modes))
 	for _, selection := range filter.Modes {
-		if selection.Travel || selection.Discovery {
-			activeSelections = append(activeSelections, selection)
+		matched := selection.Travel
+		if discoveryDomain {
+			matched = selection.Discovery
+		}
+		if matched {
+			activeModeIDs = append(activeModeIDs, selection.ModeID)
 		}
 	}
-	slices.SortFunc(activeSelections, func(left, right ModeSelection) int {
-		if left.ModeID < right.ModeID {
-			return -1
-		}
-		if left.ModeID > right.ModeID {
-			return 1
-		}
-		return 0
-	})
-	wroteFirst := false
-	for index := 0; index < len(activeSelections); index++ {
-		merged := activeSelections[index]
-		for index+1 < len(activeSelections) && activeSelections[index+1].ModeID == merged.ModeID {
-			index++
-			merged.Travel = merged.Travel || activeSelections[index].Travel
-			merged.Discovery = merged.Discovery || activeSelections[index].Discovery
-		}
-		if wroteFirst {
+	slices.Sort(activeModeIDs)
+	activeModeIDs = slices.Compact(activeModeIDs)
+	for index, modeID := range activeModeIDs {
+		if index > 0 {
 			keyBuilder.WriteByte(',')
 		}
-		wroteFirst = true
-		keyBuilder.WriteString(strconv.FormatInt(merged.ModeID, 10))
-		keyBuilder.WriteByte(':')
-		if merged.Travel {
-			keyBuilder.WriteByte('t')
-		} else {
-			keyBuilder.WriteByte('-')
-		}
-		if merged.Discovery {
-			keyBuilder.WriteByte('d')
-		} else {
-			keyBuilder.WriteByte('-')
-		}
+		keyBuilder.WriteString(strconv.FormatInt(modeID, 10))
 	}
 	return keyBuilder.String()
 }
-

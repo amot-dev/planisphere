@@ -434,13 +434,65 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 		testingContext.Fatalf("expected refreshed BodiesScanned=2 after AppModesChanged, got %d", afterModeInvalidation.Metrics.BodiesScanned)
 	}
 
-	// Insert third scan and publish EventScan.
+	// Insert third scan and publish EventScan: only Cartographics and Realization invalidate; Travel, CarrierOps, and Exobiology stay valid.
 	ingestTestLine(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":3,"BodyName":"RangeSys 3","PlanetClass":"Ammonia world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 	eventBus.PublishJournal(journal.NewEventSet(journal.EventScan))
+	if !careerStats.Travel().IsValid() || !careerStats.CarrierOps().IsValid() || !careerStats.Exobiology().IsValid() {
+		testingContext.Fatalf("expected EventScan to preserve CareerTravel, CareerCarrierOps, and CareerExobiology")
+	}
+	if careerStats.Cartographics().IsValid() || careerStats.Realization().IsValid() {
+		testingContext.Fatalf("expected EventScan to invalidate CareerCartographics and CareerRealization")
+	}
+	if timeRangeStats.Travel().CachedCount() != 1 || timeRangeStats.Exobiology().CachedCount() != 1 ||
+		timeRangeStats.Cartographics().CachedCount() != 0 || timeRangeStats.Realization().CachedCount() != 0 {
+		testingContext.Fatalf("unexpected time-range cache counts after EventScan")
+	}
 	afterScanInvalidation, _ := timeRangeStats.Compute(timeRange, nil)
 	if afterScanInvalidation.Metrics.BodiesScanned != 3 {
 		testingContext.Fatalf("expected refreshed BodiesScanned=3 after EventScan, got %d", afterScanInvalidation.Metrics.BodiesScanned)
+	}
+	_, _ = careerStats.Get()
+
+	// EventFSDJump invalidates only Travel; EventScanOrganic invalidates only Exobiology and Realization;
+	// EventSellExplorationData invalidates only Realization; EventStatistics invalidates only CarrierOps.
+	eventBus.PublishJournal(journal.NewEventSet(journal.EventFSDJump))
+	if careerStats.Travel().IsValid() || timeRangeStats.Travel().CachedCount() != 0 ||
+		!careerStats.Cartographics().IsValid() || !careerStats.Exobiology().IsValid() || !careerStats.CarrierOps().IsValid() || !careerStats.Realization().IsValid() ||
+		timeRangeStats.Cartographics().CachedCount() != 1 || timeRangeStats.Exobiology().CachedCount() != 1 || timeRangeStats.Realization().CachedCount() != 1 {
+		testingContext.Fatalf("expected EventFSDJump to invalidate only Travel caches")
+	}
+	_, _ = careerStats.Get()
+	_, _ = timeRangeStats.Compute(timeRange, nil)
+
+	eventBus.PublishJournal(journal.NewEventSet(journal.EventScanOrganic))
+	if careerStats.Exobiology().IsValid() || careerStats.Realization().IsValid() ||
+		timeRangeStats.Exobiology().CachedCount() != 0 || timeRangeStats.Realization().CachedCount() != 0 ||
+		!careerStats.Travel().IsValid() || !careerStats.CarrierOps().IsValid() || !careerStats.Cartographics().IsValid() ||
+		timeRangeStats.Travel().CachedCount() != 1 || timeRangeStats.Cartographics().CachedCount() != 1 {
+		testingContext.Fatalf("expected EventScanOrganic to invalidate only Exobiology and Realization caches")
+	}
+	_, _ = careerStats.Get()
+	_, _ = timeRangeStats.Compute(timeRange, nil)
+
+	eventBus.PublishJournal(journal.NewEventSet(journal.EventSellExplorationData))
+	if careerStats.Realization().IsValid() || timeRangeStats.Realization().CachedCount() != 0 ||
+		!careerStats.Travel().IsValid() || !careerStats.CarrierOps().IsValid() || !careerStats.Cartographics().IsValid() || !careerStats.Exobiology().IsValid() {
+		testingContext.Fatalf("expected EventSellExplorationData to invalidate only Realization caches")
+	}
+	_, _ = careerStats.Get()
+
+	eventBus.PublishJournal(journal.NewEventSet(journal.EventStatistics))
+	if careerStats.CarrierOps().IsValid() || !careerStats.Travel().IsValid() || !careerStats.Cartographics().IsValid() || !careerStats.Exobiology().IsValid() || !careerStats.Realization().IsValid() {
+		testingContext.Fatalf("expected EventStatistics to invalidate only CareerCarrierOps")
+	}
+
+	// Toggling a Discovery-only mode selection reuses the Travel cache key without adding a new TimeRangeTravel entry.
+	_, _ = timeRangeStats.Compute(timeRange, &stats.Filter{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true, Discovery: false}}})
+	_, _ = timeRangeStats.Compute(timeRange, &stats.Filter{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true, Discovery: true}}})
+	if timeRangeStats.Travel().CachedCount() != 2 || timeRangeStats.Cartographics().CachedCount() != 3 {
+		testingContext.Fatalf("expected Travel cache to reuse key across Discovery toggle (want travel=2, carto=3), got travel=%d carto=%d",
+			timeRangeStats.Travel().CachedCount(), timeRangeStats.Cartographics().CachedCount())
 	}
 }
 

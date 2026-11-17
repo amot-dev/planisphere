@@ -2,35 +2,10 @@ package stats
 
 import (
 	"database/sql"
-	"encoding/json"
-	"fmt"
 
-	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
-	"planisphere/internal/sources/journal"
-)
-
-var (
-	careerStatsJournalEvents = journal.NewEventSet(
-		journal.EventLocation,
-		journal.EventFSDJump,
-		journal.EventCarrierJump,
-		journal.EventScan,
-		journal.EventSAAScanComplete,
-		journal.EventScanOrganic,
-		journal.EventSellExplorationData,
-		journal.EventMultiSellExplorationData,
-		journal.EventSellOrganicData,
-		journal.EventResurrect,
-		journal.EventNpcCrewPaidWage,
-		journal.EventStatistics,
-	)
-	careerStatsAppEvents = events.NewAppSet(
-		events.AppCommanderFilterChanged,
-		events.AppDatabaseSwitched,
-	)
 )
 
 // TelemetrySummary pairs computed navigation/discovery metrics with their
@@ -40,91 +15,125 @@ type TelemetrySummary struct {
 	Realization RealizationBreakdown
 }
 
-// CareerStats caches all-time unfiltered career travel and exploration telemetry
-// across all journals, overlaying lifetime Fleet Carrier jump and distance totals
-// from Frontier Statistics events.
+// CareerStats coordinates the five all-time unfiltered career statistics
+// projections (Travel, CarrierOps, Cartographics, Exobiology, and Realization)
+// so each sidebar section invalidates and recomputes only when its own journal
+// or application triggers fire.
 type CareerStats struct {
-	database       *sql.DB
-	salesLedger    *realization.SalesLedger
-	recoveredJumps *projections.RecoveredJumps
-	summary        *projection.Cache[TelemetrySummary]
+	travel        *CareerTravel
+	carrierOps    *CareerCarrierOps
+	cartographics *CareerCartographics
+	exobiology    *CareerExobiology
+	realization   *CareerRealization
 }
 
-// NewCareerStats creates a CareerStats projection and registers it on bus.
+// NewCareerStats creates a CareerStats facade and registers its five section
+// projections on bus.
 func NewCareerStats(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
 	recoveredJumps *projections.RecoveredJumps,
 ) *CareerStats {
-	careerStats := &CareerStats{
-		database:       dbConn,
-		salesLedger:    salesLedger,
-		recoveredJumps: recoveredJumps,
+	return &CareerStats{
+		travel:        NewCareerTravel(dbConn, bus, recoveredJumps),
+		carrierOps:    NewCareerCarrierOps(dbConn, bus),
+		cartographics: NewCareerCartographics(dbConn, bus),
+		exobiology:    NewCareerExobiology(dbConn, bus, salesLedger),
+		realization:   NewCareerRealization(dbConn, bus, salesLedger),
 	}
-	careerStats.summary = projection.NewCache(
-		bus,
-		"career_stats",
-		careerStats.Triggers(),
-		careerStats.loadSummary,
-	)
-	return careerStats
 }
 
-// Triggers declares the journal and application events that invalidate CareerStats.
+// Travel returns the all-time Flight Operations travel projection.
+func (careerStats *CareerStats) Travel() *CareerTravel {
+	return careerStats.travel
+}
+
+// CarrierOps returns the all-time Personal Carrier Operations projection.
+func (careerStats *CareerStats) CarrierOps() *CareerCarrierOps {
+	return careerStats.carrierOps
+}
+
+// Cartographics returns the all-time Universal Cartographics valuation projection.
+func (careerStats *CareerStats) Cartographics() *CareerCartographics {
+	return careerStats.cartographics
+}
+
+// Exobiology returns the all-time Vista Genomics exobiology valuation projection.
+func (careerStats *CareerStats) Exobiology() *CareerExobiology {
+	return careerStats.exobiology
+}
+
+// Realization returns the all-time Realized Value breakdown projection.
+func (careerStats *CareerStats) Realization() *CareerRealization {
+	return careerStats.realization
+}
+
+// Triggers returns the union of journal and application events across all five
+// career statistics projections.
 func (careerStats *CareerStats) Triggers() projection.Triggers {
-	return projection.Triggers{
-		Journal: careerStatsJournalEvents,
-		App:     careerStatsAppEvents,
-	}
+	return projection.TriggersFrom(
+		careerStats.travel,
+		careerStats.carrierOps,
+		careerStats.cartographics,
+		careerStats.exobiology,
+		careerStats.realization,
+	)
 }
 
-// Get returns the cached lifetime telemetry metrics and realization breakdown.
+// Get assembles the lifetime telemetry metrics and realization breakdown across
+// all five career section projections, recomputing only sections that were invalidated.
 func (careerStats *CareerStats) Get() (TelemetrySummary, error) {
-	return careerStats.summary.Get()
-}
-
-// IsValid reports whether the lifetime telemetry summary is currently cached.
-func (careerStats *CareerStats) IsValid() bool {
-	return careerStats.summary.IsValid()
-}
-
-// Generation returns the cache invalidation generation counter.
-func (careerStats *CareerStats) Generation() uint64 {
-	return careerStats.summary.Generation()
-}
-
-func (careerStats *CareerStats) loadSummary() (TelemetrySummary, error) {
-	if careerStats.database == nil {
-		return TelemetrySummary{}, fmt.Errorf("career stats database is nil")
+	travelMetrics, travelError := careerStats.travel.Get()
+	if travelError != nil {
+		return TelemetrySummary{}, travelError
 	}
-	engine := NewEngineWithProjections(careerStats.database, careerStats.salesLedger, careerStats.recoveredJumps)
-	allMetrics, computeError := engine.Compute(Range{}, nil)
-	if computeError != nil {
-		return TelemetrySummary{}, computeError
+	carrierMetrics, carrierError := careerStats.carrierOps.Get()
+	if carrierError != nil {
+		return TelemetrySummary{}, carrierError
 	}
-
-	// All-time Personal Carrier Operations come strictly from Frontier Statistics
-	// (0 when no owned carrier stats exist) so passenger CarrierJump rides never leak in.
-	var rawStatistics string
-	queryError := careerStats.database.QueryRow(`SELECT raw_json FROM journal_events
-		WHERE event = 'Statistics' AND json_extract(raw_json, '$.FLEETCARRIER') IS NOT NULL AND `+journal.CmdrFilterSQL+`
-		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawStatistics)
-	if queryError == nil && rawStatistics != "" {
-		var statisticsEvent journal.StatisticsEvent
-		if json.Unmarshal([]byte(rawStatistics), &statisticsEvent) == nil {
-			allMetrics.CarrierJumps = int(statisticsEvent.FleetCarrierNumber("FLEETCARRIER_TOTAL_JUMPS"))
-			allMetrics.CarrierDistanceLy = statisticsEvent.FleetCarrierNumber("FLEETCARRIER_DISTANCE_TRAVELLED")
-		}
+	cartoMetrics, cartoError := careerStats.cartographics.Get()
+	if cartoError != nil {
+		return TelemetrySummary{}, cartoError
 	}
-
-	allRealization, realizationError := engine.ComputeRealization(Range{}, nil)
+	exoMetrics, exoError := careerStats.exobiology.Get()
+	if exoError != nil {
+		return TelemetrySummary{}, exoError
+	}
+	realizationBreakdown, realizationError := careerStats.realization.Get()
 	if realizationError != nil {
 		return TelemetrySummary{}, realizationError
 	}
+
+	var combinedMetrics Metrics
+	travelMetrics.applyTo(&combinedMetrics)
+	carrierMetrics.applyTo(&combinedMetrics)
+	cartoMetrics.applyTo(&combinedMetrics)
+	exoMetrics.applyTo(&combinedMetrics)
+
 	return TelemetrySummary{
-		Metrics:     allMetrics,
-		Realization: allRealization,
+		Metrics:     combinedMetrics,
+		Realization: realizationBreakdown,
 	}, nil
 }
 
+// IsValid reports whether all five career statistics section projections are currently cached.
+func (careerStats *CareerStats) IsValid() bool {
+	return careerStats.travel.IsValid() &&
+		careerStats.carrierOps.IsValid() &&
+		careerStats.cartographics.IsValid() &&
+		careerStats.exobiology.IsValid() &&
+		careerStats.realization.IsValid()
+}
+
+// Generation returns the highest cache invalidation generation counter across
+// the career statistics section projections.
+func (careerStats *CareerStats) Generation() uint64 {
+	return max(
+		careerStats.travel.Generation(),
+		careerStats.carrierOps.Generation(),
+		careerStats.cartographics.Generation(),
+		careerStats.exobiology.Generation(),
+		careerStats.realization.Generation(),
+	)
+}

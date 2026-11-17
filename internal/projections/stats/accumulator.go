@@ -82,9 +82,13 @@ type computeAccumulator struct {
 func (accumulator *computeAccumulator) processEvent(rowItem journal.Row, metrics *Metrics) error {
 	switch rowItem.Type {
 	case journal.EventLoadGame:
-		accumulator.session.ApplyLoadGame(rowItem.RawJSON)
+		if accumulator.session != nil {
+			accumulator.session.ApplyLoadGame(rowItem.RawJSON)
+		}
 	case journal.EventLocation:
-		accumulator.session.ApplyLocation(rowItem.RawJSON)
+		if accumulator.session != nil {
+			accumulator.session.ApplyLocation(rowItem.RawJSON)
+		}
 		accumulator.recordStarPosition(rowItem.StarPos)
 	case journal.EventFSDJump:
 		accumulator.processFSDJump(rowItem, metrics)
@@ -155,12 +159,16 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem journal.Row, metri
 	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
 		return
 	}
-	accumulator.session.ApplyFSDJumpEvent(&jumpEvent)
+	if accumulator.session != nil {
+		accumulator.session.ApplyFSDJumpEvent(&jumpEvent)
+	}
 	creditJump(rowItem.Timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)
 }
 
 func (accumulator *computeAccumulator) processCarrierJump(rowItem journal.Row, metrics *Metrics) error {
-	accumulator.session.ApplyCarrierJump(rowItem.RawJSON)
+	if accumulator.session != nil {
+		accumulator.session.ApplyCarrierJump(rowItem.RawJSON)
+	}
 	if seedError := accumulator.ensurePreviousPosition(); seedError != nil {
 		return seedError
 	}
