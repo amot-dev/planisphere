@@ -108,13 +108,25 @@ func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testi
 		testingContext.Fatalf("unexpected visit counts: %+v", counts)
 	}
 
-	// Publishing EventScan must NOT invalidate arrivals or visit counts.
+	// Publishing non-arrival and disconnect-lookback events must NOT invalidate arrivals or visit counts.
 	insertJournalRow(testingContext, databaseConnection, "2026-05-02T10:10:00Z", "FSDJump", "WaySys", "visit2",
 		`{"timestamp":"2026-05-02T10:10:00Z","event":"FSDJump","StarSystem":"WaySys","SystemAddress":3002,"StarPos":[10,0,0],"JumpDist":10.0}`)
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventScan))
+	eventBus.PublishJournal(journal.NewEventSet(
+		journal.EventScan,
+		journal.EventLoadGame,
+		journal.EventStartJump,
+		journal.EventJetConeBoost,
+		journal.EventSynthesis,
+		journal.EventShipyardSwap,
+		journal.EventResurrect,
+	))
 	stillCachedArrivals, _ := systemArrivals.InWindow("2026-05-02T10:00:00Z", "")
 	if len(stillCachedArrivals) != 2 {
-		testingContext.Fatalf("expected Scan event not to invalidate SystemArrivals, got len=%d", len(stillCachedArrivals))
+		testingContext.Fatalf("expected non-arrival events not to invalidate SystemArrivals, got len=%d", len(stillCachedArrivals))
+	}
+	stillCachedCounts, _ := visitCounts.CountsForSystems([]string{"WaySys"})
+	if stillCachedCounts["waysys"] != 1 {
+		testingContext.Fatalf("expected non-arrival events not to invalidate SystemVisitCounts, got %d", stillCachedCounts["waysys"])
 	}
 
 	// Publishing EventFSDJump invalidates both SystemArrivals and SystemVisitCounts.

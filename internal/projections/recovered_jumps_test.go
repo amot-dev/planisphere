@@ -99,6 +99,53 @@ func TestRecoveredJumpsPositiveAndBoostLifecycle(testingContext *testing.T) {
 		}
 	}
 
+	// Appending a fifth recovered jump and publishing lookback-only events must NOT invalidate RecoveredJumps;
+	// only EventLocation completes a candidate and invalidates the projection.
+	hopFiveLines := strings.Join([]string{
+		`{"timestamp":"2026-11-17T01:10:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"HopFive","SystemAddress":105}`,
+		`{"timestamp":"2026-11-17T01:10:30Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-17T01:10:40Z","event":"Location","StarSystem":"HopFive","SystemAddress":105,"StarPos":[30,40,420],"Docked":false}`,
+	}, "\n") + "\n"
+	appendHandle, openAppendError := os.OpenFile(journalPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if openAppendError != nil {
+		testingContext.Fatal(openAppendError)
+	}
+	if _, writeAppendError := appendHandle.WriteString(hopFiveLines); writeAppendError != nil {
+		_ = appendHandle.Close()
+		testingContext.Fatal(writeAppendError)
+	}
+	_ = appendHandle.Close()
+	if _, rescanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); rescanError != nil {
+		testingContext.Fatal(rescanError)
+	}
+
+	eventBus.PublishJournal(journal.NewEventSet(
+		journal.EventLoadGame,
+		journal.EventFSDJump,
+		journal.EventCarrierJump,
+		journal.EventStartJump,
+		journal.EventJetConeBoost,
+		journal.EventSynthesis,
+		journal.EventShipyardSwap,
+		journal.EventResurrect,
+	))
+	cachedRecovered, cachedError := recoveredJumps.InRange("", "")
+	if cachedError != nil {
+		testingContext.Fatal(cachedError)
+	}
+	if len(cachedRecovered) != 4 {
+		testingContext.Fatalf("expected lookback events not to invalidate RecoveredJumps (want 4 cached), got %d", len(cachedRecovered))
+	}
+
+	eventBus.PublishJournal(journal.NewEventSet(journal.EventLocation))
+	refreshedRecovered, refreshError := recoveredJumps.InRange("", "")
+	if refreshError != nil {
+		testingContext.Fatal(refreshError)
+	}
+	if len(refreshedRecovered) != 5 || refreshedRecovered[4].SystemName != "HopFive" {
+		testingContext.Fatalf("expected 5 recovered jumps after EventLocation invalidation, got %+v", refreshedRecovered)
+	}
+
 	// Disabling the commander and publishing AppCommanderFilterChanged must suppress recovered jumps.
 	if disableError := journal.SetCommanderEnabled(databaseConnection, "CmdrTest", false); disableError != nil {
 		testingContext.Fatal(disableError)

@@ -433,7 +433,13 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	eventBus := projection.NewBus()
 	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
 	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	careerStats := stats.NewCareerStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
 	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
+
+	if _, careerWarmError := careerStats.Get(); careerWarmError != nil {
+		testingContext.Fatalf("initial CareerStats.Get: %v", careerWarmError)
+	}
+	initialCareerGeneration := careerStats.Generation()
 
 	timeRange := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
 	initialSummary, initialError := timeRangeStats.Compute(timeRange, nil)
@@ -443,10 +449,21 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	if initialSummary.Metrics.BodiesScanned != 1 {
 		testingContext.Fatalf("expected 1 body scanned, got %d", initialSummary.Metrics.BodiesScanned)
 	}
+	initialRangeGeneration := timeRangeStats.Generation()
 
-	// Insert second scan without invalidating: cached entry remains 1 body.
+	// Insert second scan and publish disconnect-lookback/ship-swap events: neither CareerStats nor TimeRangeStats should invalidate.
 	ingestTestLine(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":2,"BodyName":"RangeSys 2","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	eventBus.PublishJournal(journal.NewEventSet(
+		journal.EventStartJump,
+		journal.EventJetConeBoost,
+		journal.EventSynthesis,
+		journal.EventShipyardSwap,
+	))
+	if careerStats.Generation() != initialCareerGeneration || timeRangeStats.Generation() != initialRangeGeneration {
+		testingContext.Fatalf("expected pre-jump/swap events not to invalidate stats caches (careerGen=%d->%d, rangeGen=%d->%d)",
+			initialCareerGeneration, careerStats.Generation(), initialRangeGeneration, timeRangeStats.Generation())
+	}
 	cachedSummary, _ := timeRangeStats.Compute(timeRange, nil)
 	if cachedSummary.Metrics.BodiesScanned != 1 {
 		testingContext.Fatalf("expected cached BodiesScanned=1 before invalidation, got %d", cachedSummary.Metrics.BodiesScanned)

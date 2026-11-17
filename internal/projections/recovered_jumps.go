@@ -15,16 +15,11 @@ import (
 )
 
 var (
+	// Only a newly ingested Location event can complete a post-disconnect
+	// LoadGame-to-Location transition; preceding StartJump, boost, swap, and
+	// arrival rows are already persisted before reconnect.
 	recoveredJumpsJournalEvents = journal.NewEventSet(
-		journal.EventLoadGame,
 		journal.EventLocation,
-		journal.EventFSDJump,
-		journal.EventCarrierJump,
-		journal.EventStartJump,
-		journal.EventJetConeBoost,
-		journal.EventSynthesis,
-		journal.EventShipyardSwap,
-		journal.EventResurrect,
 	)
 	recoveredJumpsAppEvents = events.NewAppSet(
 		events.AppCommanderFilterChanged,

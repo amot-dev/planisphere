@@ -16,12 +16,6 @@ var (
 		journal.EventFSDJump,
 		journal.EventLocation,
 		journal.EventCarrierJump,
-		journal.EventLoadGame,
-		journal.EventStartJump,
-		journal.EventJetConeBoost,
-		journal.EventSynthesis,
-		journal.EventShipyardSwap,
-		journal.EventResurrect,
 	)
 	systemVisitCountsAppEvents = events.NewAppSet(
 		events.AppCommanderFilterChanged,
