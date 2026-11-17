@@ -52,6 +52,7 @@ function useCachedRowDropPreviews(
   lockedSpanshTargetRowId: number,
 ) {
   const cachedPreviewsByRowIdRef = useRef<Record<number, expedition.DropSlotPreview[]>>({})
+  const inflightByRowIdRef = useRef<Record<number, Promise<expedition.DropSlotPreview[] | null>>>({})
   const planRef = useRef(plan)
   const lockedTargetRef = useRef(lockedSpanshTargetRowId)
 
@@ -59,27 +60,49 @@ function useCachedRowDropPreviews(
     planRef.current = plan
     lockedTargetRef.current = lockedSpanshTargetRowId
     cachedPreviewsByRowIdRef.current = {}
+    inflightByRowIdRef.current = {}
   }
 
-  return useCallback(
-    async (row: expedition.Row | undefined): Promise<expedition.DropSlotPreview[] | null> => {
+  const getImmediatePreviews = useCallback(
+    (row: expedition.Row | undefined): expedition.DropSlotPreview[] | null => {
       if (isPlanning || isCompleted || !row || row.rowType !== 'waypoint') return null
-      const cached = cachedPreviewsByRowIdRef.current[row.id]
-      if (cached) return cached
-      const requestPlan = planRef.current
-      try {
-        const fetched = await GetRowDropPreviews(row.id)
-        if (planRef.current === requestPlan && Array.isArray(fetched)) {
-          cachedPreviewsByRowIdRef.current[row.id] = fetched
-          return fetched
-        }
-      } catch {
-        return null
-      }
-      return null
+      return cachedPreviewsByRowIdRef.current[row.id] ?? null
     },
     [isCompleted, isPlanning],
   )
+
+  const ensureDropPreviews = useCallback(
+    (row: expedition.Row | undefined): Promise<expedition.DropSlotPreview[] | null> => {
+      if (isPlanning || isCompleted || !row || row.rowType !== 'waypoint') {
+        return Promise.resolve(null)
+      }
+      const cached = cachedPreviewsByRowIdRef.current[row.id]
+      if (cached) return Promise.resolve(cached)
+      const existingInflight = inflightByRowIdRef.current[row.id]
+      if (existingInflight) return existingInflight
+
+      const requestPlan = planRef.current
+      const requestPromise = GetRowDropPreviews(row.id)
+        .then((fetched) => {
+          if (planRef.current === requestPlan && Array.isArray(fetched)) {
+            cachedPreviewsByRowIdRef.current[row.id] = fetched
+            return fetched
+          }
+          return null
+        })
+        .catch(() => null)
+        .finally(() => {
+          if (inflightByRowIdRef.current[row.id] === requestPromise) {
+            delete inflightByRowIdRef.current[row.id]
+          }
+        })
+      inflightByRowIdRef.current[row.id] = requestPromise
+      return requestPromise
+    },
+    [isCompleted, isPlanning],
+  )
+
+  return { getImmediatePreviews, ensureDropPreviews }
 }
 
 function useDragScrollAnchors(
@@ -320,7 +343,9 @@ export function usePlannerRowDrag({
 
   useEffect(() => () => clearPendingHoldTimer(holdTimerRef), [])
 
-  const ensureDropPreviews = useCachedRowDropPreviews(plan, isPlanning, isCompleted, lockedSpanshTargetRowId)
+  const { getImmediatePreviews, ensureDropPreviews } = useCachedRowDropPreviews(
+    plan, isPlanning, isCompleted, lockedSpanshTargetRowId,
+  )
 
   const tableItems: PlannerTableItem[] = useMemo(
     () => buildPlannerTableItems(plan, expandedRowIds, isPlanning, heldOrDraggedIndex, lastVisitedIndex, activeDropPreviews),
@@ -392,7 +417,7 @@ export function usePlannerRowDrag({
         holdTimerRef.current = null
         void previewsPromise.then((previews) => {
           if (interactionTokenRef.current !== token) return
-          captureGrabAnchor(holdRowIndex)
+          if (previews && previews.length > 0) captureGrabAnchor(holdRowIndex)
           setActiveDropPreviews(previews)
           setHeldIndex(holdRowIndex)
         })
@@ -415,22 +440,32 @@ export function usePlannerRowDrag({
     (dragRowIndex: number, dragRowId: number, event: DragEvent) => {
       const token = ++interactionTokenRef.current
       clearPendingHoldTimer(holdTimerRef)
-      const previewsPromise = ensureDropPreviews(plan?.rows?.[dragRowIndex]?.row)
+      const targetRow = plan?.rows?.[dragRowIndex]?.row
+      const immediatePreviews = getImmediatePreviews(targetRow)
+      const previewsPromise = immediatePreviews !== null ? null : ensureDropPreviews(targetRow)
       dragStartClientYRef.current = event.clientY
       dragClientYRef.current = null
       event.dataTransfer.effectAllowed = 'move'
       event.dataTransfer.setData('text/plain', String(dragRowId))
       window.requestAnimationFrame(() => {
-        void previewsPromise.then((previews) => {
-          if (interactionTokenRef.current !== token) return
-          if (heldIndex === null) captureGrabAnchor(dragRowIndex)
-          setActiveDropPreviews(previews)
-          setHeldIndex(dragRowIndex)
-          setDraggedIndex(dragRowIndex)
-        })
+        if (interactionTokenRef.current !== token) return
+        const alreadyCollapsed = activeDropPreviews !== null && heldIndex === dragRowIndex
+        if (immediatePreviews !== null && immediatePreviews.length > 0 && !alreadyCollapsed) {
+          captureGrabAnchor(dragRowIndex)
+        }
+        if (immediatePreviews !== null) setActiveDropPreviews(immediatePreviews)
+        setHeldIndex(dragRowIndex)
+        setDraggedIndex(dragRowIndex)
+        if (previewsPromise) {
+          void previewsPromise.then((previews) => {
+            if (interactionTokenRef.current !== token || !previews) return
+            if (previews.length > 0) captureGrabAnchor(dragRowIndex)
+            setActiveDropPreviews(previews)
+          })
+        }
       })
     },
-    [captureGrabAnchor, dragClientYRef, dragStartClientYRef, ensureDropPreviews, heldIndex, plan],
+    [activeDropPreviews, captureGrabAnchor, dragClientYRef, dragStartClientYRef, ensureDropPreviews, getImmediatePreviews, heldIndex, plan],
   )
 
   const handleRowDragEnd = useCallback(() => {
@@ -453,6 +488,7 @@ export function usePlannerRowDrag({
 
   return {
     tableItems,
+    dropSlotGaps,
     hasCollapsedRows,
     heldOrDraggedIndex,
     draggedIndex,

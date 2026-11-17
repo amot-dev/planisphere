@@ -5,7 +5,6 @@ import { memo } from 'react'
  * and action callbacks for inserting and deleting planner rows.
  */
 export interface RowManipulationButtonsProps {
-  rowId?: number
   insertMenuOpen: boolean
   allowInsertWaypoint?: boolean
   allowDelete?: boolean

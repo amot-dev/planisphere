@@ -528,7 +528,6 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           {!isLocked && (
             <>
               <RowManipulationButtons
-                rowId={row.id}
                 insertMenuOpen={insertMenuOpen}
                 allowInsertWaypoint={allowInsertWaypoint}
                 allowDelete={allowDelete}

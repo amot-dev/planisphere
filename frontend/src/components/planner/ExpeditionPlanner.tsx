@@ -66,10 +66,13 @@ export function ExpeditionPlanner({
 }: ExpeditionPlannerProps) {
   const isPlanning = plan?.expedition?.status === 'planning'
   const isCompleted = plan?.expedition?.status === 'completed'
+  const optimisticPlanRef = useRef<expedition.PlanView | null>(null)
+  const isOptimisticPlan = plan !== null && plan === optimisticPlanRef.current
   const { expandedRowIds, detailsById, loadingDetails, toggleExpand } = useWaypointDetails(
     plan,
     Boolean(isPlanning),
     archiveRevision,
+    isOptimisticPlan,
   )
 
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
@@ -113,6 +116,14 @@ export function ExpeditionPlanner({
     return { lastVisitedIndex: maxVisited, lastFcArrivedIndex: maxFcArrived }
   }, [plan, isPlanning])
 
+  const applyOptimisticPlan = useCallback(
+    (nextPlan: expedition.PlanView) => {
+      optimisticPlanRef.current = nextPlan
+      onPlanOptimisticUpdate(nextPlan)
+    },
+    [onPlanOptimisticUpdate],
+  )
+
   const runPlanMutation = useCallback(
     (
       busyMessage: string,
@@ -124,10 +135,10 @@ export function ExpeditionPlanner({
         busyMessage,
         errorContext,
         mutationAction,
-        { onBusyChange, onPlanOptimisticUpdate, onRefreshPlan },
+        { onBusyChange, onPlanOptimisticUpdate: applyOptimisticPlan, onRefreshPlan },
         options,
       ),
-    [onBusyChange, onPlanOptimisticUpdate, onRefreshPlan],
+    [applyOptimisticPlan, onBusyChange, onRefreshPlan],
   )
 
   async function setFcArrived(rowId: number, arrived: boolean) {
@@ -279,22 +290,16 @@ export function ExpeditionPlanner({
 
   function handleRequestDeleteRow(rowView: expedition.RowView) {
     if (!isPlanning && rowView.row.rowType === 'waypoint') {
-      if (rowView.visitState === 'visited') {
+      const isVisited = rowView.visitState === 'visited'
+      const isArrivedFcStop = Boolean(rowView.row.fcStop && rowView.row.fcArrived)
+      if (isVisited || isArrivedFcStop) {
         setConfirmState({
-          kind: 'delete_visited',
+          kind: 'delete_waypoint',
           rowId: rowView.row.id,
           waypointNumber: rowView.number,
           systemName: rowView.row.systemName ?? '',
-          visitedAtGalactic: rowView.visitedAtGalactic,
-        })
-        return
-      }
-      if (rowView.row.fcStop && rowView.row.fcArrived) {
-        setConfirmState({
-          kind: 'delete_arrived_fc',
-          rowId: rowView.row.id,
-          waypointNumber: rowView.number,
-          systemName: rowView.row.systemName ?? '',
+          visitedAtGalactic: isVisited ? rowView.visitedAtGalactic : undefined,
+          isArrivedFcStop,
         })
         return
       }
@@ -351,7 +356,7 @@ export function ExpeditionPlanner({
     if (!confirmState) return
     const activeConfirm = confirmState
     setConfirmState(null)
-    if (activeConfirm.kind === 'delete_visited' || activeConfirm.kind === 'delete_arrived_fc') {
+    if (activeConfirm.kind === 'delete_waypoint') {
       await executeDeleteRow(activeConfirm.rowId)
     } else if (activeConfirm.kind === 'move_reset_fc') {
       await executeMoveRow(activeConfirm.rowId, activeConfirm.fromIndex, activeConfirm.toIndex)
@@ -449,6 +454,7 @@ export function ExpeditionPlanner({
         <PlannerRouteTable
           plan={plan}
           tableItems={rowDrag.tableItems}
+          dropSlotGaps={rowDrag.dropSlotGaps}
           modesList={modesList}
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}

@@ -21,6 +21,7 @@ const rowStyle: CSSProperties = {
 export interface PlannerRouteTableProps {
   plan: expedition.PlanView
   tableItems: PlannerTableItem[]
+  dropSlotGaps: ReadonlySet<number>
   modesList: modes.Mode[]
   isPlanning: boolean
   isCompleted: boolean
@@ -88,6 +89,7 @@ export interface PlannerRouteTableProps {
 export function PlannerRouteTable({
   plan,
   tableItems,
+  dropSlotGaps,
   modesList,
   isPlanning,
   isCompleted,
@@ -136,12 +138,6 @@ export function PlannerRouteTable({
   const totalRows = plan.rows?.length ?? 0
   const heldRowView = heldOrDraggedIndex !== null ? plan.rows?.[heldOrDraggedIndex] : null
   const grabbedSystemName = heldRowView?.row?.systemName ?? ''
-  const dropSlotGaps = new Set<number>()
-  for (const item of tableItems) {
-    if (item.kind === 'drop_slot') {
-      dropSlotGaps.add(item.gapIndex)
-    }
-  }
 
   return (
     <table

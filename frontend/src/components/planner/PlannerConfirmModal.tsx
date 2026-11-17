@@ -7,17 +7,12 @@ import { ModalShell } from '../common/ModalShell'
  */
 export type PlannerConfirmState =
   | {
-      kind: 'delete_visited'
+      kind: 'delete_waypoint'
       rowId: number
       waypointNumber: number
       systemName: string
-      visitedAtGalactic: string
-    }
-  | {
-      kind: 'delete_arrived_fc'
-      rowId: number
-      waypointNumber: number
-      systemName: string
+      visitedAtGalactic?: string
+      isArrivedFcStop: boolean
     }
   | {
       kind: 'move_reset_fc'
@@ -58,57 +53,49 @@ export function PlannerConfirmModal({
   const displaySystem = confirmState.systemName.trim() || 'Unnamed System'
   const subtitle = `Waypoint #${String(confirmState.waypointNumber).padStart(2, '0')} // ${displaySystem}`
 
-  if (confirmState.kind === 'delete_visited') {
-    return (
-      <ModalShell
-        title="Delete Visited Waypoint"
-        subtitle={subtitle}
-        onClose={onCancel}
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-3 text-xs text-[#d6c7b8]">
-          <p>
-            This waypoint has a logged visit at{' '}
-            <span className="font-mono-tabular font-bold text-[#FF7100]">
-              {confirmState.visitedAtGalactic}
-            </span>
-            .
-          </p>
-          <p className="text-[#a6907c]">
-            Deleting this waypoint removes the stop from your expedition plan and merges its leg
-            telemetry into the adjacent leg. Journal events in your archive are never deleted.
-          </p>
-        </div>
+  if (confirmState.kind === 'delete_waypoint') {
+    const hasLoggedVisit = Boolean(confirmState.visitedAtGalactic)
+    const modalTitle =
+      hasLoggedVisit && confirmState.isArrivedFcStop
+        ? 'Delete Visited Carrier Stop'
+        : hasLoggedVisit
+          ? 'Delete Visited Waypoint'
+          : 'Delete Arrived Carrier Stop'
 
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#3d2816]">
-          <button type="button" onClick={onCancel} className="ed-btn">
-            CANCEL
-          </button>
-          <button type="button" onClick={onConfirm} className="ed-btn-danger">
-            DELETE WAYPOINT
-          </button>
-        </div>
-      </ModalShell>
-    )
-  }
-
-  if (confirmState.kind === 'delete_arrived_fc') {
     return (
-      <ModalShell
-        title="Delete Arrived Carrier Stop"
-        subtitle={subtitle}
-        onClose={onCancel}
-        maxWidth="max-w-md"
-      >
+      <ModalShell title={modalTitle} subtitle={subtitle} onClose={onCancel} maxWidth="max-w-md">
         <div className="space-y-3 text-xs text-[#d6c7b8]">
-          <p>
-            This unvisited waypoint is marked as an{' '}
-            <span className="font-mono-tabular font-bold text-[#FF7100]">ARRIVED</span> Fleet
-            Carrier stop.
-          </p>
+          {hasLoggedVisit && confirmState.isArrivedFcStop ? (
+            <p>
+              This waypoint has a logged visit at{' '}
+              <span className="font-mono-tabular font-bold text-[#FF7100]">
+                {confirmState.visitedAtGalactic}
+              </span>{' '}
+              and is marked as an{' '}
+              <span className="font-mono-tabular font-bold text-[#FF7100]">ARRIVED</span> Fleet
+              Carrier stop.
+            </p>
+          ) : hasLoggedVisit ? (
+            <p>
+              This waypoint has a logged visit at{' '}
+              <span className="font-mono-tabular font-bold text-[#FF7100]">
+                {confirmState.visitedAtGalactic}
+              </span>
+              .
+            </p>
+          ) : (
+            <p>
+              This unvisited waypoint is marked as an{' '}
+              <span className="font-mono-tabular font-bold text-[#FF7100]">ARRIVED</span> Fleet
+              Carrier stop.
+            </p>
+          )}
           <p className="text-[#a6907c]">
-            Deleting this waypoint removes the carrier stop from your expedition plan. Logged
-            carrier jump telemetry is never deleted.
+            {hasLoggedVisit && confirmState.isArrivedFcStop
+              ? 'Deleting this waypoint removes the stop from your expedition plan and merges its leg telemetry into the adjacent leg. Journal events and logged carrier jump telemetry are never deleted.'
+              : hasLoggedVisit
+                ? 'Deleting this waypoint removes the stop from your expedition plan and merges its leg telemetry into the adjacent leg. Journal events in your archive are never deleted.'
+                : 'Deleting this waypoint removes the carrier stop from your expedition plan. Logged carrier jump telemetry is never deleted.'}
           </p>
         </div>
 

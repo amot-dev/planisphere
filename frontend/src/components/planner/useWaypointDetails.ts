@@ -38,6 +38,7 @@ export function useWaypointDetails(
   plan: expedition.PlanView | null,
   isPlanning: boolean,
   archiveRevision = '',
+  isOptimisticPlan = false,
 ): WaypointDetailsState {
   const [expandedRowIds, setExpandedRowIds] = useState<Record<number, boolean>>({})
   const expandedRowIdsRef = useRef<Record<number, boolean>>(expandedRowIds)
@@ -118,7 +119,7 @@ export function useWaypointDetails(
 
   // Refresh open drawers when their leg bounds or journal archive revision change.
   useEffect(() => {
-    if (!plan || isPlanning) return
+    if (!plan || isPlanning || isOptimisticPlan) return
     for (const [idString, isOpen] of Object.entries(expandedRowIdsRef.current)) {
       if (!isOpen) continue
       const rowId = Number(idString)
@@ -142,7 +143,7 @@ export function useWaypointDetails(
       }
       loadDetails(rowId)
     }
-  }, [archiveRevision, isPlanning, loadDetails, plan])
+  }, [archiveRevision, isOptimisticPlan, isPlanning, loadDetails, plan])
 
   function toggleExpand(rowId: number) {
     const rowView = plan?.rows?.find((candidate) => candidate.row.id === rowId)

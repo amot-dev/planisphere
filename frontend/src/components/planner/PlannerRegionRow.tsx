@@ -100,7 +100,6 @@ export function PlannerRegionRow({
         {!isLocked && (
           <div className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
             <RowManipulationButtons
-              rowId={row.id}
               insertMenuOpen={insertMenuOpen}
               allowInsertWaypoint={allowInsertWaypoint}
               onToggleInsertMenu={onToggleInsertMenu}

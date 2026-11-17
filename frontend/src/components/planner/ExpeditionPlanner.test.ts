@@ -644,11 +644,12 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const deleteVisitedHtml = renderToString(
       createElement(PlannerConfirmModal, {
         confirmState: {
-          kind: 'delete_visited',
+          kind: 'delete_waypoint',
           rowId: 12,
           waypointNumber: 2,
           systemName: 'Alpha Centauri',
           visitedAtGalactic: '3312-01-10 10:00 UTC',
+          isArrivedFcStop: false,
         },
         onConfirm: () => {},
         onCancel: () => {},
@@ -661,10 +662,11 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const deleteArrivedFcHtml = renderToString(
       createElement(PlannerConfirmModal, {
         confirmState: {
-          kind: 'delete_arrived_fc',
+          kind: 'delete_waypoint',
           rowId: 14,
           waypointNumber: 3,
           systemName: 'Colonia',
+          isArrivedFcStop: true,
         },
         onConfirm: () => {},
         onCancel: () => {},
@@ -673,6 +675,24 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(deleteArrivedFcHtml).toContain('Delete Arrived Carrier Stop')
     expect(deleteArrivedFcHtml).toContain('ARRIVED')
     expect(deleteArrivedFcHtml).toContain('DELETE WAYPOINT')
+
+    const deleteVisitedAndArrivedFcHtml = renderToString(
+      createElement(PlannerConfirmModal, {
+        confirmState: {
+          kind: 'delete_waypoint',
+          rowId: 16,
+          waypointNumber: 4,
+          systemName: 'Sagittarius A*',
+          visitedAtGalactic: '3312-02-01 18:00 UTC',
+          isArrivedFcStop: true,
+        },
+        onConfirm: () => {},
+        onCancel: () => {},
+      }),
+    )
+    expect(deleteVisitedAndArrivedFcHtml).toContain('Delete Visited Carrier Stop')
+    expect(deleteVisitedAndArrivedFcHtml).toContain('3312-02-01 18:00 UTC')
+    expect(deleteVisitedAndArrivedFcHtml).toContain('ARRIVED')
 
     const moveResetFcHtml = renderToString(
       createElement(PlannerConfirmModal, {
@@ -735,6 +755,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const baseTableProps = {
       plan: routePlan,
       tableItems,
+      dropSlotGaps: new Set<number>(),
       modesList: [],
       isPlanning: false,
       isCompleted: false,
