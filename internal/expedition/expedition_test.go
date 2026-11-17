@@ -3,6 +3,7 @@ package expedition_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,9 +134,12 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	if initialPlan.VisitedWaypointCount != 2 {
 		t.Fatalf("initial visited count = %d, want 2", initialPlan.VisitedWaypointCount)
 	}
-	beagleInitialView := initialPlan.Rows[5]
-	if len(beagleInitialView.DropPreviews) != 6 || beagleInitialView.DropPreviews[2].Status != expedition.DropSlotValidVisited {
-		t.Fatalf("expected Beagle Point drop preview at index 2 to be valid_visited, got %+v", beagleInitialView.DropPreviews)
+	beaglePreviews, beaglePreviewErr := expedition.ComputeRowDropPreviews(dbConn, waypoint5.ID)
+	if beaglePreviewErr != nil {
+		t.Fatal(beaglePreviewErr)
+	}
+	if len(beaglePreviews) != 6 || beaglePreviews[2].Status != expedition.DropSlotValidVisited {
+		t.Fatalf("expected Beagle Point drop preview at index 2 to be valid_visited, got %+v", beaglePreviews)
 	}
 
 	// Manually reorder Beagle Point to index 2 (immediately after Dryooe Prou FF-Z d696).
@@ -970,18 +974,22 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 		testingContext.Fatal(overrideErr)
 	}
 
-	plan, planErr := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
-	if planErr != nil {
-		testingContext.Fatal(planErr)
+	wp4Previews, wp4PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID)
+	if wp4PrevErr != nil {
+		testingContext.Fatal(wp4PrevErr)
 	}
 	// wp4 ("Barnard's Star") was visited at 11:00 (between wp1 Sol@10:00 and wp2 Alpha Centauri@12:00),
 	// so index 1 is chronologically valid, but blocked_fc because wp4 is a PENDING FC stop and wp3 (at index 2) is ARRIVED!
-	if plan.Rows[3].DropPreviews[1].Status != expedition.DropSlotBlockedFC {
-		testingContext.Fatalf("expected wp4 drop preview at index 1 to be blocked_fc, got %+v", plan.Rows[3].DropPreviews[1])
+	if wp4Previews[1].Status != expedition.DropSlotBlockedFC {
+		testingContext.Fatalf("expected wp4 drop preview at index 1 to be blocked_fc, got %+v", wp4Previews[1])
+	}
+	wp3Previews, wp3PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID)
+	if wp3PrevErr != nil {
+		testingContext.Fatal(wp3PrevErr)
 	}
 	// wp3 ("Sirius", ARRIVED) moved to index 3 (below PENDING wp4) sets ResetsFCArrived = true.
-	if !plan.Rows[2].DropPreviews[3].ResetsFCArrived {
-		testingContext.Fatalf("expected wp3 drop preview at index 3 to set ResetsFCArrived=true, got %+v", plan.Rows[2].DropPreviews[3])
+	if !wp3Previews[3].ResetsFCArrived {
+		testingContext.Fatalf("expected wp3 drop preview at index 3 to set ResetsFCArrived=true, got %+v", wp3Previews[3])
 	}
 
 	// Add an unvisited non-FC waypoint wp5 ("Vega") before PENDING wp4; moving ARRIVED wp3 into the unvisited
@@ -994,11 +1002,14 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); reevalErr != nil {
 		testingContext.Fatal(reevalErr)
 	}
-	planWithUnvisited, _ := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil)
+	wp3PreviewsWithUnvisited, wp3UnvisitedErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID)
+	if wp3UnvisitedErr != nil {
+		testingContext.Fatal(wp3UnvisitedErr)
+	}
 	// Moving wp3 (index 2, ARRIVED) to index 3 (after unvisited Vega, but before wp4 at index 4) makes wp3 unvisited
 	// without crossing any PENDING FC stop, so ResetsFCArrived must be false.
-	if planWithUnvisited.Rows[2].DropPreviews[3].Status != expedition.DropSlotValidUnvisited || planWithUnvisited.Rows[2].DropPreviews[3].ResetsFCArrived {
-		testingContext.Fatalf("expected wp3 drop preview at unvisited index 3 before pending stop to keep ResetsFCArrived=false, got %+v", planWithUnvisited.Rows[2].DropPreviews[3])
+	if wp3PreviewsWithUnvisited[3].Status != expedition.DropSlotValidUnvisited || wp3PreviewsWithUnvisited[3].ResetsFCArrived {
+		testingContext.Fatalf("expected wp3 drop preview at unvisited index 3 before pending stop to keep ResetsFCArrived=false, got %+v", wp3PreviewsWithUnvisited[3])
 	}
 	if moveBeforePendingErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
 		if _, err := expedition.MoveRow(tx, wp3.ID, 3); err != nil {
@@ -1024,5 +1035,104 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	reloadedAfterCascade, _ := expedition.GetRow(databaseConnection, wp3.ID)
 	if reloadedAfterCascade.FCArrived {
 		testingContext.Fatalf("expected SetCarrierArrivalOverride(wp1, false) to cascade to wp3")
+	}
+
+	// Active Spansh route to wp3 (now at index 3) locks wp3 against moves/deletes, blocks moving PENDING wp4 above wp3,
+	// and is automatically cleared if wp4 is manually overridden to ARRIVED.
+	spanshRouteKey := fmt.Sprintf("active_carrier_route_%d", expeditionRecord.ID)
+	spanshRouteJSON := fmt.Sprintf(`{"expeditionId":%d,"targetRowId":%d,"manualMode":false,"route":{"manualMode":false,"jumps":[{"systemName":"Sirius"}]}}`, expeditionRecord.ID, wp3.ID)
+	if setRouteError := db.SetSetting(databaseConnection, spanshRouteKey, spanshRouteJSON); setRouteError != nil {
+		testingContext.Fatal(setRouteError)
+	}
+	wp4SpanshBlocked, wp4BlockedError := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID)
+	if wp4BlockedError != nil {
+		testingContext.Fatal(wp4BlockedError)
+	}
+	if wp4SpanshBlocked[2].Status != expedition.DropSlotBlockedFC {
+		testingContext.Fatalf("expected wp4 drop before active Spansh target wp3 to be blocked_fc, got %+v", wp4SpanshBlocked[2])
+	}
+	if overrideClearError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		_, overrideError := expedition.SetCarrierArrivalOverride(transaction, wp4.ID, true)
+		return overrideError
+	}); overrideClearError != nil {
+		testingContext.Fatal(overrideClearError)
+	}
+	persistedRoute, getRouteError := db.GetSetting(databaseConnection, spanshRouteKey)
+	if getRouteError != nil {
+		testingContext.Fatal(getRouteError)
+	}
+	if persistedRoute != "" {
+		testingContext.Fatalf("expected active Spansh route to clear when target stop overridden to arrived, got %q", persistedRoute)
+	}
+}
+
+func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expedition.InvalidateShipCache()
+	expedition.InvalidateVisitCache()
+
+	modeList, listModesError := modes.List(databaseConnection)
+	if listModesError != nil {
+		testingContext.Fatal(listModesError)
+	}
+	explorationModeID := modeList[0].ID
+	travelModeID := modeList[2].ID
+	if setWindowError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		if firstWindowError := modes.SetWindow(transaction, 0, explorationModeID, "2026-03-01T10:00:00Z", "2026-03-01T11:15:00Z"); firstWindowError != nil {
+			return firstWindowError
+		}
+		return modes.SetWindow(transaction, 0, travelModeID, "2026-03-01T11:15:00Z", "2026-03-01T13:00:00Z")
+	}); setWindowError != nil {
+		testingContext.Fatal(setWindowError)
+	}
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":2001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-03-01T11:00:00Z","event":"FSDJump","StarSystem":"Hub","SystemAddress":2002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-03-01T11:30:00Z","event":"FSDJump","StarSystem":"Outpost","SystemAddress":2003,"StarPos":[20,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"FSDJump","StarSystem":"Hub","SystemAddress":2002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	})
+
+	expeditionRecord, wpSol := createExpeditionWithOriginRow(testingContext, databaseConnection, "Hub Loop Test", "")
+	setRowSystemName(testingContext, databaseConnection, wpSol.ID, "Sol")
+	wpOutpost := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpSol.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wpOutpost.ID, "Outpost")
+	wpHub := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpOutpost.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wpHub.ID, "Hub")
+	wpVega := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpHub.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, wpVega.ID, "Vega")
+
+	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z")
+	}); startError != nil {
+		testingContext.Fatal(startError)
+	}
+
+	initialHub, getInitialHubError := expedition.GetRow(databaseConnection, wpHub.ID)
+	if getInitialHubError != nil {
+		testingContext.Fatal(getInitialHubError)
+	}
+	if initialHub.VisitedAt != "2026-03-01T12:00:00Z" || initialHub.LegModeID != travelModeID {
+		testingContext.Fatalf("expected Hub initially at 12:00 with travel mode %d, got visitedAt=%q mode=%d", travelModeID, initialHub.VisitedAt, initialHub.LegModeID)
+	}
+
+	// Moving visited Outpost down into the unvisited section (index 3, below Vega) must succeed,
+	// re-binding Hub to its earlier 11:00 arrival and updating Hub's LegModeID to Exploration!
+	if moveOutpostError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		if _, moveError := expedition.MoveRow(transaction, wpOutpost.ID, 3); moveError != nil {
+			return moveError
+		}
+		_, reevalError := expedition.Reevaluate(transaction, expeditionRecord.ID)
+		return reevalError
+	}); moveOutpostError != nil {
+		testingContext.Fatalf("expected moving Outpost to unvisited to succeed across Hub revisit, got %v", moveOutpostError)
+	}
+
+	reboundHub, getReboundHubError := expedition.GetRow(databaseConnection, wpHub.ID)
+	if getReboundHubError != nil {
+		testingContext.Fatal(getReboundHubError)
+	}
+	if reboundHub.VisitedAt != "2026-03-01T11:00:00Z" || reboundHub.LegModeID != explorationModeID {
+		testingContext.Fatalf("expected Hub to rebind to 11:00 with exploration mode %d, got visitedAt=%q mode=%d", explorationModeID, reboundHub.VisitedAt, reboundHub.LegModeID)
 	}
 }

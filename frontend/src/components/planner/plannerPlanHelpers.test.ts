@@ -125,7 +125,7 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
       { targetIndex: 3, status: 'blocked_fc' },
       { targetIndex: 4, status: 'invalid' },
       { targetIndex: 5, status: 'valid_unvisited' },
-    ]
+    ].map((item) => expedition.DropSlotPreview.createFrom(item))
     const plan = expedition.PlanView.createFrom({
       expedition: { id: 1, status: 'active' },
       rows: [
@@ -138,12 +138,11 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
           row: { id: 6, rowType: 'waypoint', systemName: 'LP 355-65' },
           number: 6,
           visitState: 'future',
-          dropPreviews,
         },
       ],
     })
 
-    const items = buildPlannerTableItems(plan, {}, false, 5, 4)
+    const items = buildPlannerTableItems(plan, {}, false, 5, 4, dropPreviews)
     expect(items.map((item) => item.kind)).toEqual([
       'collapsed_visited', // Row 0 (HR 839) collapsed
       'waypoint', // Row 1 (Mu Cephei) visible above Gap 2
@@ -162,7 +161,7 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
       { targetIndex: 1, status: 'valid_visited', visitedAtGalactic: '3312-11-16 04:26 UTC' },
       { targetIndex: 2, status: 'valid_visited', visitedAtGalactic: '3312-11-16 04:26 UTC' },
       { targetIndex: 3, status: 'valid_unvisited' },
-    ]
+    ].map((item) => expedition.DropSlotPreview.createFrom(item))
     const plan = expedition.PlanView.createFrom({
       expedition: { id: 1, status: 'active' },
       rows: [
@@ -173,14 +172,13 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
           row: { id: 4, rowType: 'waypoint', systemName: 'Syreadiae' },
           number: 3,
           visitState: 'future',
-          dropPreviews,
         },
       ],
     })
 
     // lastVisitedIndex is 0 (Schee Eaec), Region Header is at index 1, first unvisited waypoint is at index 2 (Hypo Aeb),
     // and grabbed row is index 3 (Syreadiae). Both Gap 1 (above Formidine Rift) and Gap 2 (below Formidine Rift) get drop_slots!
-    const items = buildPlannerTableItems(plan, {}, false, 3, 0)
+    const items = buildPlannerTableItems(plan, {}, false, 3, 0, dropPreviews)
     expect(items.map((item) => item.kind)).toEqual([
       'waypoint', // Row 0 (Schee Eaec)
       'drop_slot', // Gap 1 (above Formidine Rift)
@@ -198,7 +196,7 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
       { targetIndex: 2, status: 'valid_visited', visitedAtGalactic: '3312-10-28 02:48 UTC' },
       { targetIndex: 3, status: 'invalid' },
       { targetIndex: 4, status: 'invalid' },
-    ]
+    ].map((item) => expedition.DropSlotPreview.createFrom(item))
     const plan = expedition.PlanView.createFrom({
       expedition: { id: 1, status: 'active' },
       rows: [
@@ -208,7 +206,6 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
           row: { id: 3, rowType: 'waypoint', systemName: 'NGC 7822' },
           number: 3,
           visitState: 'visited',
-          dropPreviews,
         },
         { row: { id: 4, rowType: 'waypoint', systemName: 'BD+83 357' }, number: 4, visitState: 'visited' },
         { row: { id: 5, rowType: 'waypoint', systemName: 'Schee Eaec' }, number: 5, visitState: 'visited' },
@@ -217,7 +214,7 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
 
     // Grabbed row is index 2 (NGC 7822). Its neighbors index 1 (V509 Cassiopeiae) and index 3 (BD+83 357)
     // remain uncollapsed to frame the original position, while index 0 and index 4 collapse.
-    const items = buildPlannerTableItems(plan, {}, false, 2, 4)
+    const items = buildPlannerTableItems(plan, {}, false, 2, 4, dropPreviews)
     expect(items.map((item) => item.kind)).toEqual([
       'collapsed_visited', // Row 0 (HR 839)
       'waypoint', // Row 1 (V509 Cassiopeiae) frames original position above

@@ -82,6 +82,10 @@ export function GetRegionOptions(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetRegionOptions'](arg1, arg2, arg3);
 }
 
+export function GetRowDropPreviews(arg1) {
+  return window['go']['app']['App']['GetRowDropPreviews'](arg1);
+}
+
 export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }

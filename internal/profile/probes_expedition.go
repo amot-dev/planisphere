@@ -89,6 +89,16 @@ func runExpeditionProbes(
 		results = append(results, reevalProbe)
 	}
 
+	if dataset.SampleVisitedLegRowID > 0 && matchesFilter("Expedition/RowDropPreviews", options.FilterPattern) {
+		dropProbe, ok, err := profileRowDropPreviews(database, recorder, dataset, options.Iterations)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			results = append(results, dropProbe)
+		}
+	}
+
 	if matchesFilter("Expedition/StartCandidates", options.FilterPattern) {
 		candidatesProbe, ok, err := profileStartCandidates(database, recorder, dataset, options.Iterations)
 		if err != nil {
@@ -328,6 +338,50 @@ func profileStartCandidates(
 				summary:   summary,
 				items:     max(len(candidates), 1),
 				secondary: len(candidates),
+			}, nil
+		},
+	)
+	return probe, true, err
+}
+
+func profileRowDropPreviews(
+	database *sql.DB,
+	recorder *treeRecorder,
+	dataset DatasetSummary,
+	iterations int,
+) (ProbeResult, bool, error) {
+	initialPreviews, initialError := expedition.ComputeRowDropPreviews(database, dataset.SampleVisitedLegRowID)
+	if initialError != nil || len(initialPreviews) == 0 {
+		return ProbeResult{}, false, initialError
+	}
+
+	probe, err := runColdWarmProbe(
+		database,
+		recorder,
+		"Expedition/RowDropPreviews",
+		"Expedition",
+		fmt.Sprintf("Compute chronological drop-slot previews for leg #%d", dataset.SampleVisitedLegNumber),
+		"expedition.ComputeRowDropPreviews",
+		"slots",
+		"valid",
+		iterations,
+		func() (singleExecOutcome, error) {
+			previews, computeError := expedition.ComputeRowDropPreviews(database, dataset.SampleVisitedLegRowID)
+			if computeError != nil {
+				return singleExecOutcome{}, computeError
+			}
+			validCount := 0
+			for _, preview := range previews {
+				if preview.Status == expedition.DropSlotValidVisited || preview.Status == expedition.DropSlotValidUnvisited {
+					validCount++
+				}
+			}
+			summary := fmt.Sprintf("Slots=%d Valid=%d", len(previews), validCount)
+			return singleExecOutcome{
+				value:     previews,
+				summary:   summary,
+				items:     max(len(previews), 1),
+				secondary: validCount,
 			}, nil
 		},
 	)

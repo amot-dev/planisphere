@@ -49,11 +49,10 @@ type RowView struct {
 	DistFromCurrentLy *float64          `json:"distFromCurrentLy,omitempty"`
 	IsNextWaypoint    bool              `json:"isNextWaypoint,omitempty"`
 	Transitions       []Transition      `json:"transitions"` // ships flown during the leg arriving at this waypoint
-	LegModeID         int64             `json:"legModeId"`
-	LegModeName       string            `json:"legModeName"`
-	LegModeColor      string            `json:"legModeColor"`
-	GEC               *GECRef           `json:"gec,omitempty"`
-	DropPreviews      []DropSlotPreview `json:"dropPreviews,omitempty"`
+	LegModeID         int64        `json:"legModeId"`
+	LegModeName       string       `json:"legModeName"`
+	LegModeColor      string       `json:"legModeColor"`
+	GEC               *GECRef      `json:"gec,omitempty"`
 }
 
 // PlanView is the full planner sheet.
@@ -90,7 +89,6 @@ type planBuildContext struct {
 	defaultModeID      int64
 	previousVisitByID  map[int64]string
 	visitCountBySystem map[string]int
-	dropPreviewsByRow  [][]DropSlotPreview
 	gecLookup          GECLookup
 }
 
@@ -192,13 +190,6 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		}
 		if buildCtx.jumpTimestamps, jumpError = loadJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); jumpError != nil {
 			return nil, jumpError
-		}
-		if expeditionRecord.Status == StatusActive {
-			arrivals, arrivalsError := loadCachedExpeditionArrivals(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-			if arrivalsError != nil {
-				return nil, arrivalsError
-			}
-			buildCtx.dropPreviewsByRow = computePlanDropPreviews(rows, expeditionRecord.StartTimestamp, arrivals)
 		}
 	}
 
@@ -364,9 +355,6 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup) (Pla
 		waypointNumber++
 		planView.WaypointCount++
 		rowViewItem := buildWaypointRowView(buildCtx, rowItem, waypointNumber, previousWaypoint, &planView)
-		if i < len(buildCtx.dropPreviewsByRow) {
-			rowViewItem.DropPreviews = buildCtx.dropPreviewsByRow[i]
-		}
 		rowCopy := rowItem
 		previousWaypoint = &rowCopy
 		planView.Rows = append(planView.Rows, rowViewItem)

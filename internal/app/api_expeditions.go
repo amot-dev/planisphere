@@ -138,6 +138,21 @@ func (app *App) GetPlan(id int64) (expedition.PlanView, error) {
 	return expedition.BuildPlan(app.db, id, app.gecLookup)
 }
 
+// GetRowDropPreviews computes valid historical and unvisited drop-slot previews
+// for reordering rowID within an active expedition.
+func (app *App) GetRowDropPreviews(rowID int64) ([]expedition.DropSlotPreview, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if readyError := app.ready(); readyError != nil {
+		return nil, readyError
+	}
+	previews, previewError := expedition.ComputeRowDropPreviews(app.db, rowID)
+	if previews == nil {
+		previews = []expedition.DropSlotPreview{}
+	}
+	return previews, previewError
+}
+
 // gecLookup searches the GEC catalog for POIs matching a system. Caller must hold app.dbMu.RLock.
 func (app *App) gecLookup(name string, address int64) *expedition.GECRef {
 	if app.gec == nil {

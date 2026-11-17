@@ -189,15 +189,28 @@ func loadExpeditionArrivals(queryer db.Queryer, startTimestamp, endTimestamp str
 }
 
 func loadCachedExpeditionArrivals(queryer db.Queryer, startTimestamp, endTimestamp string) ([]Arrival, error) {
+	sqlDB, isSQLDB := queryer.(*sql.DB)
+	if !isSQLDB {
+		return loadExpeditionArrivals(queryer, startTimestamp, endTimestamp)
+	}
+	var maxJournalID int64
+	if queryError := queryer.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM journal_events`).Scan(&maxJournalID); queryError != nil {
+		return loadExpeditionArrivals(queryer, startTimestamp, endTimestamp)
+	}
+
 	cacheKey := fmt.Sprintf("%s|%s", startTimestamp, endTimestamp)
 	shipCacheMu.Lock()
-	if lastMaxJournalID >= 0 {
-		if cachedArrivals, ok := arrivalsCacheMap[cacheKey]; ok {
-			shipCacheMu.Unlock()
-			return cachedArrivals, nil
-		}
+	if shipCacheDB != sqlDB || maxJournalID != lastMaxJournalID {
+		shipCacheDB = sqlDB
+		shipCacheGen++
+		shipCacheMap = make(map[string][]shipState)
+		arrivalsCacheMap = make(map[string][]Arrival)
+		lastMaxJournalID = maxJournalID
+	} else if cachedArrivals, ok := arrivalsCacheMap[cacheKey]; ok {
+		shipCacheMu.Unlock()
+		return cachedArrivals, nil
 	}
-	capturedMaxID := lastMaxJournalID
+	capturedGen := shipCacheGen
 	shipCacheMu.Unlock()
 
 	arrivals, loadError := loadExpeditionArrivals(queryer, startTimestamp, endTimestamp)
@@ -206,7 +219,7 @@ func loadCachedExpeditionArrivals(queryer db.Queryer, startTimestamp, endTimesta
 	}
 
 	shipCacheMu.Lock()
-	if capturedMaxID >= 0 && lastMaxJournalID == capturedMaxID {
+	if shipCacheDB == sqlDB && shipCacheGen == capturedGen && maxJournalID == lastMaxJournalID {
 		arrivalsCacheMap[cacheKey] = arrivals
 	}
 	shipCacheMu.Unlock()
@@ -290,7 +303,7 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, transitions, modeTimeline)
 }
 
-func reconcileEvaluatedRowState(rows []Row, originalRowsByID map[int64]Row) {
+func reconcileEvaluatedRowState(rows []Row, originalRowsByID map[int64]Row, modeTimeline *modes.Timeline) {
 	seenPendingFCStop := false
 	for i := range rows {
 		if !rows[i].IsWaypoint() {
@@ -299,6 +312,12 @@ func reconcileEvaluatedRowState(rows []Row, originalRowsByID map[int64]Row) {
 		originalRow := originalRowsByID[rows[i].ID]
 		if rows[i].VisitedAt == "" && originalRow.VisitedAt != "" {
 			rows[i].LegModeID = 0
+		} else if rows[i].VisitedAt != "" && originalRow.VisitedAt != "" && rows[i].VisitedAt != originalRow.VisitedAt {
+			if modeTimeline != nil {
+				rows[i].LegModeID = modeTimeline.ModeAt(rows[i].VisitedAt)
+			} else {
+				rows[i].LegModeID = 0
+			}
 		}
 		if rows[i].FCStop {
 			if seenPendingFCStop && rows[i].FCArrived {
@@ -394,7 +413,7 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	}
 
 	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals, modeTimeline)
-	reconcileEvaluatedRowState(rows, originalRowsByID)
+	reconcileEvaluatedRowState(rows, originalRowsByID, modeTimeline)
 	changed, persistError := persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
 	if changed {
 		InvalidateVisitCache()

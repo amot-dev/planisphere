@@ -5,7 +5,7 @@
 export interface PlannerActiveLegFooterProps {
   isPlanning: boolean
   isCompleted: boolean
-  isReordering?: boolean
+  hasCollapsedRows?: boolean
   onAppendRow: (rowType: 'waypoint' | 'region') => void
 }
 
@@ -16,7 +16,7 @@ export interface PlannerActiveLegFooterProps {
 export function PlannerActiveLegFooter({
   isPlanning,
   isCompleted,
-  isReordering = false,
+  hasCollapsedRows = false,
   onAppendRow,
 }: PlannerActiveLegFooterProps) {
   return (
@@ -53,8 +53,9 @@ export function PlannerActiveLegFooter({
 
       {/* Breathing room to scroll past the bottom of the list */}
       <div
+        data-planner-bottom-spacer="true"
         className={
-          isReordering
+          hasCollapsedRows
             ? 'h-[85vh] shrink-0 pointer-events-none'
             : 'h-48 shrink-0 pointer-events-none'
         }

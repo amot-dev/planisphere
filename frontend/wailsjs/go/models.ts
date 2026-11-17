@@ -695,7 +695,6 @@ export namespace expedition {
 	    legModeName: string;
 	    legModeColor: string;
 	    gec?: GECRef;
-	    dropPreviews?: DropSlotPreview[];
 	
 	    static createFrom(source: any = {}) {
 	        return new RowView(source);
@@ -719,7 +718,6 @@ export namespace expedition {
 	        this.legModeName = source["legModeName"];
 	        this.legModeColor = source["legModeColor"];
 	        this.gec = this.convertValues(source["gec"], GECRef);
-	        this.dropPreviews = this.convertValues(source["dropPreviews"], DropSlotPreview);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

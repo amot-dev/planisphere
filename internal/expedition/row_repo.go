@@ -297,6 +297,9 @@ func DeleteRow(transaction *sql.Tx, rowID int64) (int64, error) {
 		return 0, errors.New("completed expedition rows cannot be deleted")
 	}
 	if expeditionRecord.Status != StatusPlanning && rowItem.IsWaypoint() {
+		if lockedSpanshTargetRowID := readLockedSpanshTargetRowID(transaction, rowItem.ExpeditionID); lockedSpanshTargetRowID > 0 && lockedSpanshTargetRowID == rowID {
+			return 0, errors.New("waypoint cannot be deleted while fleet carrier route is active")
+		}
 		existingRows, listExistingError := ListRows(transaction, rowItem.ExpeditionID)
 		if listExistingError != nil {
 			return 0, listExistingError

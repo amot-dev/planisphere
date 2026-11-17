@@ -15,7 +15,6 @@ export interface PlannerRegionRowProps {
   isPlanning: boolean
   isLocked: boolean
   isBeingDragged: boolean
-  isDragTarget?: boolean
   topGapHighlight?: boolean
   bottomGapHighlight?: boolean
   lastVisitedIndex: number
@@ -44,7 +43,6 @@ export function PlannerRegionRow({
   isPlanning,
   isLocked,
   isBeingDragged,
-  isDragTarget = false,
   topGapHighlight = false,
   bottomGapHighlight = false,
   lastVisitedIndex,
@@ -68,9 +66,7 @@ export function PlannerRegionRow({
       ? '*:shadow-[inset_0_2px_0_0_#00D2FF]'
       : bottomGapHighlight
         ? '*:shadow-[inset_0_-2px_0_0_#00D2FF]'
-        : isDragTarget
-          ? 'outline-2 outline-[#00D2FF]'
-          : ''
+        : ''
 
   return (
     <tr

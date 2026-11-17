@@ -23,14 +23,18 @@ type shipState struct {
 
 var (
 	shipCacheMu      sync.Mutex
+	shipCacheDB      *sql.DB
+	shipCacheGen     uint64
 	shipCacheMap           = make(map[string][]shipState)
 	arrivalsCacheMap       = make(map[string][]Arrival)
 	lastMaxJournalID int64 = -1
 )
 
-// InvalidateShipCache clears the cached ship timeline states and origin metrics.
+// InvalidateShipCache clears the cached ship timeline states, expedition arrivals, and origin metrics.
 func InvalidateShipCache() {
 	shipCacheMu.Lock()
+	shipCacheDB = nil
+	shipCacheGen++
 	lastMaxJournalID = -1
 	shipCacheMap = make(map[string][]shipState)
 	arrivalsCacheMap = make(map[string][]Arrival)
@@ -107,17 +111,21 @@ func fetchShipStates(queryer db.Queryer, startTimestamp, endTimestamp string) ([
 }
 
 func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) ([]shipState, error) {
+	sqlDB, isSQLDB := queryer.(*sql.DB)
+	if !isSQLDB {
+		return fetchShipStates(queryer, startTimestamp, endTimestamp)
+	}
 	var maxJournalID int64
-	queryError := queryer.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM journal_events`).Scan(&maxJournalID)
-	if queryError != nil {
-		// Non-standard queryer or table not available; bypass cache.
+	if queryError := queryer.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM journal_events`).Scan(&maxJournalID); queryError != nil {
 		return fetchShipStates(queryer, startTimestamp, endTimestamp)
 	}
 
 	cacheKey := fmt.Sprintf("%s|%s", startTimestamp, endTimestamp)
 
 	shipCacheMu.Lock()
-	if maxJournalID != lastMaxJournalID {
+	if shipCacheDB != sqlDB || maxJournalID != lastMaxJournalID {
+		shipCacheDB = sqlDB
+		shipCacheGen++
 		shipCacheMap = make(map[string][]shipState)
 		arrivalsCacheMap = make(map[string][]Arrival)
 		lastMaxJournalID = maxJournalID
@@ -125,6 +133,7 @@ func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) (
 		shipCacheMu.Unlock()
 		return cachedTimeline, nil
 	}
+	capturedGen := shipCacheGen
 	shipCacheMu.Unlock()
 
 	states, fetchError := fetchShipStates(queryer, startTimestamp, endTimestamp)
@@ -133,7 +142,7 @@ func loadShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) (
 	}
 
 	shipCacheMu.Lock()
-	if maxJournalID == lastMaxJournalID {
+	if shipCacheDB == sqlDB && shipCacheGen == capturedGen && maxJournalID == lastMaxJournalID {
 		shipCacheMap[cacheKey] = states
 	}
 	shipCacheMu.Unlock()
@@ -256,9 +265,11 @@ var (
 	visitCacheMap = make(map[string]int)
 )
 
-// InvalidateVisitCache clears cached per-system journal visit counts.
+// InvalidateVisitCache clears cached per-system journal visit counts and commander-filtered timelines.
 func InvalidateVisitCache() {
 	shipCacheMu.Lock()
+	shipCacheGen++
+	shipCacheMap = make(map[string][]shipState)
 	arrivalsCacheMap = make(map[string][]Arrival)
 	shipCacheMu.Unlock()
 	visitCacheMu.Lock()

@@ -45,6 +45,8 @@ export function GetPlan(arg1:number):Promise<expedition.PlanView>;
 
 export function GetRegionOptions(arg1:number,arg2:number,arg3:boolean):Promise<app.RegionOptions>;
 
+export function GetRowDropPreviews(arg1:number):Promise<Array<expedition.DropSlotPreview>>;
+
 export function GetSettings():Promise<app.Settings>;
 
 export function GetSidebarStats(arg1:number,arg2:stats.Filter):Promise<app.SidebarStats>;

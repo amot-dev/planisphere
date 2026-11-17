@@ -8,8 +8,8 @@ import { HoverOpenInLinks } from './widgets/HoverOpenInLinks'
 import { RowManipulationButtons } from './widgets/RowManipulationButtons'
 
 /**
- * WaypointRowItemProps defines the row data, interaction flags, drop-slot preview,
- * and event callbacks for a single waypoint row in the flight planner table.
+ * WaypointRowItemProps defines the row data, interaction flags, and event
+ * callbacks for a single waypoint row in the flight planner table.
  */
 export interface WaypointRowItemProps {
   rowView: expedition.RowView
@@ -20,7 +20,6 @@ export interface WaypointRowItemProps {
   isActivelyRoutedFcStop?: boolean
   lastFcArrivedIndex?: number
   isBeingDragged: boolean
-  isDragTarget?: boolean
   topGapHighlight?: boolean
   bottomGapHighlight?: boolean
   isExpanded: boolean
@@ -31,7 +30,6 @@ export interface WaypointRowItemProps {
   copiedSystemRowId: number | null
   insertMenuOpen: boolean
   lastVisitedIndex: number
-  totalRows?: number
   rowStyle: CSSProperties
   dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
@@ -45,7 +43,6 @@ export interface WaypointRowItemProps {
   onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void
   onToggleInsertMenu: (id: number) => void
   onInsert: (afterId: number, type: 'waypoint' | 'region') => void
-  onMove?: (id: number, targetIndex: number) => void
   onDelete: (id: number) => void
   onHoldStart?: (index: number) => void
   onHoldEnd?: () => void
@@ -164,7 +161,6 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   isActivelyRoutedFcStop = false,
   lastFcArrivedIndex = -1,
   isBeingDragged,
-  isDragTarget = false,
   topGapHighlight = false,
   bottomGapHighlight = false,
   isExpanded,
@@ -246,9 +242,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       ? '*:shadow-[inset_0_2px_0_0_#00D2FF]'
       : bottomGapHighlight
         ? '*:shadow-[inset_0_-2px_0_0_#00D2FF]'
-        : isDragTarget
-          ? 'outline-2 outline-[#00D2FF]'
-          : ''
+        : ''
 
   return (
     <tr
@@ -309,9 +303,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
         className={`px-1.5 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top ${
           isPlanning && isBeingDragged
             ? 'border-l-2 border-l-[#FF7100] border-b border-[#24180e]'
-            : isPlanning && isVisited
-              ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
-              : 'border-b border-[#24180e]'
+            : 'border-b border-[#24180e]'
         }`}
       >
         <div className="h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5">

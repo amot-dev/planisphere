@@ -201,9 +201,9 @@ export function PlannerRouteTable({
             !dropSlotGaps.has(index)
           const bottomGapHighlight =
             draggedIndex !== null &&
-            (index === totalRows - 1 || item.kind === 'region') &&
-            dragOverGapIndex === index + 1 &&
-            !dropSlotGaps.has(index + 1)
+            index === totalRows - 1 &&
+            dragOverGapIndex === totalRows &&
+            !dropSlotGaps.has(totalRows)
 
           if (item.kind === 'region') {
             return (
@@ -266,7 +266,10 @@ export function PlannerRouteTable({
               (isManualCarrierRoute ? isNextFcStop : activeCarrierTargetRowId === row.id),
           )
           // Manual logging leaves the target stop editable until arrival is logged;
-          // an active Spansh route locks through routedCarrierStopIndex while hops are in progress.
+          // an active Spansh route locks the target stop and all preceding carrier stops.
+          const isSpanshRoutedFcStop = Boolean(
+            activeCarrierRoute && !isManualCarrierRoute && activeCarrierTargetRowId === row.id,
+          )
           const isFcStopLocked = Boolean(
             activeCarrierRoute &&
               routedCarrierStopIndex >= 0 &&
@@ -283,7 +286,7 @@ export function PlannerRouteTable({
               isPlanning={isPlanning}
               isLocked={isLocked}
               isFcStopLocked={isFcStopLocked}
-              isActivelyRoutedFcStop={hasActiveCarrierRoute}
+              isActivelyRoutedFcStop={isSpanshRoutedFcStop}
               lastFcArrivedIndex={lastFcArrivedIndex}
               isBeingDragged={isBeingDragged}
               topGapHighlight={topGapHighlight}

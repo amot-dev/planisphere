@@ -144,11 +144,11 @@ function collectVisitedDropSlotsAndVisibleRows(
   rows: expedition.RowView[],
   heldIndex: number,
   lastVisitedIndex: number,
+  activeDropPreviews: expedition.DropSlotPreview[],
 ): {
   slotsByGap: Map<number, { targetIndex: number; preview: expedition.DropSlotPreview }>
   visibleVisitedRowIndices: Set<number>
 } {
-  const heldRowView = rows[heldIndex]
   const slotsByGap = new Map<number, { targetIndex: number; preview: expedition.DropSlotPreview }>()
   const visibleVisitedRowIndices = new Set<number>()
   if (heldIndex <= lastVisitedIndex) {
@@ -167,7 +167,7 @@ function collectVisitedDropSlotsAndVisibleRows(
   for (let gapIndex = 1; gapIndex <= rows.length; gapIndex++) {
     const targetIndex = gapToTargetIndex(heldIndex, gapIndex)
     if (targetIndex === null) continue
-    const preview = heldRowView?.dropPreviews?.[targetIndex]
+    const preview = activeDropPreviews[targetIndex]
     if (!preview) continue
     const isEndOfAllVisitedTable =
       gapIndex === rows.length &&
@@ -196,11 +196,13 @@ function buildGrabbedWaypointTableItems(
   rows: expedition.RowView[],
   heldIndex: number,
   lastVisitedIndex: number,
+  activeDropPreviews: expedition.DropSlotPreview[],
 ): PlannerTableItem[] {
   const { slotsByGap, visibleVisitedRowIndices } = collectVisitedDropSlotsAndVisibleRows(
     rows,
     heldIndex,
     lastVisitedIndex,
+    activeDropPreviews,
   )
   const items: PlannerTableItem[] = []
   let collapseStart: number | null = null
@@ -272,6 +274,7 @@ export function buildPlannerTableItems(
   isPlanning: boolean,
   heldOrDraggedIndex: number | null = null,
   lastVisitedIndex = -1,
+  activeDropPreviews: expedition.DropSlotPreview[] | null = null,
 ): PlannerTableItem[] {
   if (!plan || !plan.rows) return []
   const rows = plan.rows ?? []
@@ -281,9 +284,16 @@ export function buildPlannerTableItems(
     heldOrDraggedIndex >= 0 &&
     heldOrDraggedIndex < rows.length &&
     rows[heldOrDraggedIndex]?.row?.rowType === 'waypoint' &&
-    lastVisitedIndex >= 0
+    lastVisitedIndex >= 0 &&
+    activeDropPreviews !== null &&
+    activeDropPreviews.length > 0
   ) {
-    return buildGrabbedWaypointTableItems(rows, heldOrDraggedIndex, lastVisitedIndex)
+    return buildGrabbedWaypointTableItems(
+      rows,
+      heldOrDraggedIndex,
+      lastVisitedIndex,
+      activeDropPreviews,
+    )
   }
 
   const items: PlannerTableItem[] = []

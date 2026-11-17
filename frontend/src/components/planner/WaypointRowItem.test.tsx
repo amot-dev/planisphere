@@ -13,14 +13,12 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       isPlanning: false,
       isLocked: false,
       isBeingDragged: false,
-      isDragTarget: false,
       isExpanded: false,
       isNextFcStop: false,
       hasActiveCarrierRoute: false,
       copiedSystemRowId: null,
       insertMenuOpen: false,
       lastVisitedIndex: 0,
-      totalRows: 5,
       rowStyle: {},
       dropProps: {},
       onToggleExpand: () => {},
@@ -30,7 +28,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       onOpenCarrierRoutePrompt: () => {},
       onToggleInsertMenu: () => {},
       onInsert: () => {},
-      onMove: () => {},
       onDelete: () => {},
       onDragStart: () => {},
       onDragEnd: () => {},
@@ -66,7 +63,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       index: 10,
       isLocked: true,
       lastVisitedIndex: 10,
-      totalRows: 25,
     })
 
     // Cell padding py-1.5 and align-top on all cells
@@ -111,7 +107,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       rowView: mockRowView,
       index: 16,
       lastVisitedIndex: 10,
-      totalRows: 25,
     })
 
     // Unvisited input has h-7, py-[3px], border-transparent matching the locked span
@@ -142,7 +137,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       index: 19,
       isLocked: true,
       lastVisitedIndex: 20,
-      totalRows: 25,
     })
 
     expect(html).toContain('ARRIVED')
@@ -166,7 +160,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       isFcStopLocked: true,
       hasActiveCarrierRoute: true,
       lastVisitedIndex: 0,
-      totalRows: 3,
     })
 
     expect(lockedFcRowHtml).toContain('ROUTING')
