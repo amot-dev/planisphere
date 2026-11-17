@@ -49,8 +49,21 @@ func TestSalesLedgerCachingAndBusInvalidation(testingContext *testing.T) {
 	insertLedgerTestEvent(testingContext, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`)
 
-	// Unrelated events must leave cached SalesLedger untouched.
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventFSDTarget, journal.EventFSSDiscoveryScan))
+	// Unrelated and session-context-only events must leave cached SalesLedger untouched.
+	initialLedgerGeneration := salesLedger.Generation()
+	eventBus.PublishJournal(journal.NewEventSet(
+		journal.EventFSDTarget,
+		journal.EventFSSDiscoveryScan,
+		journal.EventLoadGame,
+		journal.EventLocation,
+		journal.EventFSDJump,
+		journal.EventCarrierJump,
+		journal.EventDocked,
+		journal.EventUndocked,
+	))
+	if salesLedger.Generation() != initialLedgerGeneration {
+		testingContext.Fatalf("expected session-context events not to invalidate SalesLedger, gen %d->%d", initialLedgerGeneration, salesLedger.Generation())
+	}
 	cachedResult, cachedError := salesLedger.Breakdown("2026-03-01T09:00:00Z", "2026-03-01T11:00:00Z", nil)
 	if cachedError != nil {
 		testingContext.Fatalf("cached Breakdown failed: %v", cachedError)

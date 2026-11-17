@@ -1,7 +1,9 @@
 package stats
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -67,7 +69,8 @@ type computeAccumulator struct {
 	until                   string
 	filterSet               *filterSets
 	session                 *projections.SessionState
-	carrierLegs             map[string]projections.CarrierLeg
+	previousPosition        *reference.Vec3
+	previousPositionSeeded  bool
 	realizationLedger       *realization.Ledger
 	realizationLedgerLoaded bool
 	scans                   map[bodyKey]*journal.ScanEvent
@@ -82,6 +85,7 @@ func (accumulator *computeAccumulator) processEvent(rowItem journal.Row, metrics
 		accumulator.session.ApplyLoadGame(rowItem.RawJSON)
 	case journal.EventLocation:
 		accumulator.session.ApplyLocation(rowItem.RawJSON)
+		accumulator.recordStarPosition(rowItem.StarPos)
 	case journal.EventFSDJump:
 		accumulator.processFSDJump(rowItem, metrics)
 	case journal.EventCarrierJump:
@@ -92,6 +96,36 @@ func (accumulator *computeAccumulator) processEvent(rowItem journal.Row, metrics
 		return accumulator.processMapping(rowItem, metrics)
 	case journal.EventScanOrganic:
 		return accumulator.processOrganic(rowItem, metrics)
+	}
+	return nil
+}
+
+func (accumulator *computeAccumulator) recordStarPosition(starPos *reference.Vec3) {
+	if starPos == nil {
+		return
+	}
+	positionCopy := *starPos
+	accumulator.previousPosition = &positionCopy
+}
+
+func (accumulator *computeAccumulator) ensurePreviousPosition() error {
+	if accumulator.previousPosition != nil || accumulator.previousPositionSeeded {
+		return nil
+	}
+	accumulator.previousPositionSeeded = true
+	if accumulator.after == "" {
+		return nil
+	}
+	var starX, starY, starZ sql.NullFloat64
+	queryError := accumulator.engine.DB.QueryRow(`SELECT star_x, star_y, star_z FROM journal_events
+		WHERE event IN ('FSDJump', 'Location', 'CarrierJump') AND star_x IS NOT NULL
+		AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
+		ORDER BY timestamp DESC, id DESC LIMIT 1`, accumulator.after).Scan(&starX, &starY, &starZ)
+	if queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
+		return fmt.Errorf("seed previous star position before %s: %w", accumulator.after, queryError)
+	}
+	if starX.Valid && starY.Valid && starZ.Valid {
+		accumulator.previousPosition = &reference.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
 	}
 	return nil
 }
@@ -116,6 +150,7 @@ func creditJump(timestamp string, distanceLy float64, boostUsed int, filterSet *
 }
 
 func (accumulator *computeAccumulator) processFSDJump(rowItem journal.Row, metrics *Metrics) {
+	accumulator.recordStarPosition(rowItem.StarPos)
 	var jumpEvent journal.FSDJumpEvent
 	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
 		return
@@ -126,26 +161,17 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem journal.Row, metri
 
 func (accumulator *computeAccumulator) processCarrierJump(rowItem journal.Row, metrics *Metrics) error {
 	accumulator.session.ApplyCarrierJump(rowItem.RawJSON)
-	if accumulator.carrierLegs == nil {
-		var legError error
-		if accumulator.carrierLegs, legError = accumulator.engine.CarrierLegsRange(accumulator.after, accumulator.until); legError != nil {
-			return legError
-		}
+	if seedError := accumulator.ensurePreviousPosition(); seedError != nil {
+		return seedError
 	}
-	leg := accumulator.carrierLegs[rowItem.UID]
-	if accumulator.filterSet.allow(rowItem.Timestamp, false) {
-		metrics.CarrierPassengerLy += leg.DistanceLy
-		metrics.DistanceLy += leg.DistanceLy
+	var legDistanceLy float64
+	if accumulator.previousPosition != nil && rowItem.StarPos != nil {
+		legDistanceLy = reference.Distance(*accumulator.previousPosition, *rowItem.StarPos)
 	}
-	metrics.CarrierJumps++
-	metrics.CarrierDistanceLy += leg.DistanceLy
-	if leg.Tritium > 0 {
-		currentTritium := 0
-		if metrics.TritiumUsed != nil {
-			currentTritium = *metrics.TritiumUsed
-		}
-		nextTritium := currentTritium + leg.Tritium
-		metrics.TritiumUsed = &nextTritium
+	accumulator.recordStarPosition(rowItem.StarPos)
+	if legDistanceLy > 0 && accumulator.filterSet.allow(rowItem.Timestamp, false) {
+		metrics.CarrierPassengerLy += legDistanceLy
+		metrics.DistanceLy += legDistanceLy
 	}
 	return nil
 }

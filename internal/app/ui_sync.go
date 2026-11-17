@@ -14,7 +14,6 @@ import (
 
 func (app *App) wireProjections(dbConn *sql.DB) {
 	bus := projection.NewBus()
-	app.commanderRoster = projections.NewCommanderRoster(dbConn, bus)
 	app.recoveredJumps = projections.NewRecoveredJumps(dbConn, bus)
 	app.systemArrivals = projections.NewSystemArrivals(dbConn, bus)
 	app.systemVisitCounts = projections.NewSystemVisitCounts(dbConn, bus, app.recoveredJumps)
@@ -46,7 +45,7 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetStats,
 		projection.TriggersFrom(app.careerStats, app.timeRangeStats).
-			WithJournal(journal.EventCommander).
+			WithJournal(journal.EventCommander, journal.EventLoadGame).
 			WithApp(events.AppAdjustmentsChanged, events.AppSettingsChanged),
 	)
 	bus.SubscribeUI(

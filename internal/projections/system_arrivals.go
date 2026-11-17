@@ -1,3 +1,5 @@
+// Package projections implements self-contained read-only projections backed
+// by generation-guarded caches that subscribe to typed journal and application events.
 package projections
 
 import (

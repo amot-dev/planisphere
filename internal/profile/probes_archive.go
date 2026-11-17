@@ -106,7 +106,7 @@ func profileListCommanders(
 		iterations,
 		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			commanders, listError := proj.commanderRoster.Commanders()
+			commanders, listError := journal.ListCommanders(database)
 			if listError != nil {
 				return singleExecOutcome{}, listError
 			}

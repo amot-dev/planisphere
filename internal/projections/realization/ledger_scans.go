@@ -38,7 +38,7 @@ type ledgerBuilder struct {
 // BuildLedger constructs the full chronological lifecycle realization ledger
 // directly from queryer without registering on a projection bus.
 func BuildLedger(queryer db.Queryer, defaultOdyssey bool) (*Ledger, error) {
-	loadedEvents, loadError := journal.LoadEvents(queryer, "", "9999-12-31T23:59:59Z", salesLedgerJournalEvents)
+	loadedEvents, loadError := journal.LoadEvents(queryer, "", "9999-12-31T23:59:59Z", salesLedgerReplayEvents)
 	if loadError != nil {
 		return nil, loadError
 	}

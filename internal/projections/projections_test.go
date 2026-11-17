@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/sources/journal"
@@ -26,7 +25,7 @@ func insertJournalRow(testingContext *testing.T, database *sql.DB, timestamp, ev
 	}
 }
 
-func TestCommanderRosterCachingAndFilterInvalidation(testingContext *testing.T) {
+func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 	databaseConnection := openProjectionTestDB(testingContext)
 	temporaryDirectory := testingContext.TempDir()
 	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-05-01T000000.01.log")
@@ -42,29 +41,19 @@ func TestCommanderRosterCachingAndFilterInvalidation(testingContext *testing.T) 
 		testingContext.Fatal(scanError)
 	}
 
-	eventBus := projection.NewBus()
-	roster := projections.NewCommanderRoster(databaseConnection, eventBus)
-
-	commanders, listError := roster.Commanders()
+	commanders, listError := journal.ListCommanders(databaseConnection)
 	if listError != nil || len(commanders) != 2 {
-		testingContext.Fatalf("Commanders: len=%d err=%v", len(commanders), listError)
+		testingContext.Fatalf("ListCommanders: len=%d err=%v", len(commanders), listError)
 	}
-	careerStart, _, startError := roster.CareerStart()
-	if startError != nil || careerStart != "2026-05-01T10:00:00Z" {
-		testingContext.Fatalf("CareerStart = %q err=%v, want 2026-05-01T10:00:00Z", careerStart, startError)
+	careerStart, _ := journal.CareerStart(databaseConnection)
+	if careerStart != "2026-05-01T10:00:00Z" {
+		testingContext.Fatalf("CareerStart = %q, want 2026-05-01T10:00:00Z", careerStart)
 	}
 
-	// Disabling CmdrFirst without publishing keeps cached CareerStart until AppCommanderFilterChanged fires.
 	if err := journal.SetCommanderEnabled(databaseConnection, "CmdrFirst", false); err != nil {
 		testingContext.Fatal(err)
 	}
-	cachedStart, _, _ := roster.CareerStart()
-	if cachedStart != "2026-05-01T10:00:00Z" {
-		testingContext.Fatalf("expected cached CareerStart before invalidation, got %q", cachedStart)
-	}
-
-	eventBus.PublishApp(events.AppCommanderFilterChanged)
-	updatedStart, _, _ := roster.CareerStart()
+	updatedStart, _ := journal.CareerStart(databaseConnection)
 	if updatedStart != "2026-05-02T10:00:00Z" {
 		testingContext.Fatalf("expected updated CareerStart 2026-05-02T10:00:00Z, got %q", updatedStart)
 	}

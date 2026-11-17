@@ -212,16 +212,6 @@ var computeMetricEvents = journal.NewEventSet(
 
 type bodyKey struct{ systemAddress, bodyID int64 }
 
-// CarrierLegs simulates carrier history up to untilTimestamp using projections.CarrierLegs.
-func (engine *Engine) CarrierLegs(untilTimestamp string) (map[string]projections.CarrierLeg, error) {
-	return projections.CarrierLegs(engine.DB, untilTimestamp)
-}
-
-// CarrierLegsRange simulates carrier jumps in (afterTimestamp, untilTimestamp].
-func (engine *Engine) CarrierLegsRange(afterTimestamp, untilTimestamp string) (map[string]projections.CarrierLeg, error) {
-	return projections.CarrierLegsRange(engine.DB, afterTimestamp, untilTimestamp)
-}
-
 func (engine *Engine) loadLedger() (*realization.Ledger, error) {
 	if engine.salesLedger != nil {
 		return engine.salesLedger.Get()

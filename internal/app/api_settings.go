@@ -56,10 +56,7 @@ func (app *App) GetSettings() (Settings, error) {
 		return Settings{}, readyError
 	}
 	dir := app.journalDir()
-	var commanders []journal.Commander
-	if app.commanderRoster != nil {
-		commanders, _ = app.commanderRoster.Commanders()
-	}
+	commanders, _ := journal.ListCommanders(app.db)
 	if commanders == nil {
 		commanders = []journal.Commander{}
 	}

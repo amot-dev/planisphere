@@ -57,12 +57,6 @@ func runStatsProbes(
 		results = append(results, filteredProbe)
 	}
 
-	if carrierProbe, ok, err := profileCarrierLegs(database, proj, recorder, options); err != nil {
-		return nil, nil, err
-	} else if ok {
-		results = append(results, carrierProbe)
-	}
-
 	var scalingModels []ScalingModel
 	if len(computePoints) >= 2 {
 		scalingModels = append(scalingModels, computeLinearScalingModel("stats.Engine.Compute (Warm Ledger)", "metric_events", computePoints))
@@ -202,54 +196,6 @@ func profileModeFilteredCompute(
 		},
 	}
 	result, err := profileStatsComputeWindow(database, proj, recorder, targetWindow, modeFilter, probeName, options.Iterations)
-	return result, true, err
-}
-
-func profileCarrierLegs(
-	database *sql.DB,
-	proj *profileProjections,
-	recorder *treeRecorder,
-	options Options,
-) (ProbeResult, bool, error) {
-	probeName := "Stats/CarrierLegsRange/AllTime"
-	if !matchesFilter(probeName, options.FilterPattern) {
-		return ProbeResult{}, false, nil
-	}
-	var navEventCount int
-	_ = database.QueryRow(`SELECT COUNT(*) FROM journal_events WHERE event IN ('FSDJump', 'Location', 'CarrierJump', 'CarrierStats')`).Scan(&navEventCount)
-
-	result, err := runColdWarmProbe(
-		database,
-		recorder,
-		probeName,
-		"Stats",
-		"Simulate all-time Fleet Carrier jumps and Tritium fuel deltas",
-		"stats.(*Engine).CarrierLegsRange",
-		"nav_events",
-		"carrier_jumps",
-		options.Iterations,
-		proj.invalidate,
-		func() (singleExecOutcome, error) {
-			statsEngine := proj.statsEngine()
-			legs, legsError := statsEngine.CarrierLegsRange("", "9999-12-31T23:59:59Z")
-			if legsError != nil {
-				return singleExecOutcome{}, legsError
-			}
-			var totalDistance float64
-			var totalTritium int
-			for _, leg := range legs {
-				totalDistance += leg.DistanceLy
-				totalTritium += leg.Tritium
-			}
-			summary := fmt.Sprintf("CarrierJumps=%d Dist=%.1fLy Tritium=%dt", len(legs), totalDistance, totalTritium)
-			return singleExecOutcome{
-				value:     len(legs),
-				summary:   summary,
-				items:     max(navEventCount, 1),
-				secondary: len(legs),
-			}, nil
-		},
-	)
 	return result, true, err
 }
 

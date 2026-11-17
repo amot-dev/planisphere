@@ -16,13 +16,9 @@ import (
 
 var (
 	timeRangeStatsJournalEvents = journal.NewEventSet(
-		journal.EventLoadGame,
 		journal.EventLocation,
 		journal.EventFSDJump,
 		journal.EventCarrierJump,
-		journal.EventCarrierStats,
-		journal.EventDocked,
-		journal.EventUndocked,
 		journal.EventScan,
 		journal.EventSAAScanComplete,
 		journal.EventScanOrganic,
@@ -89,8 +85,7 @@ func (timeRangeStats *TimeRangeStats) Generation() uint64 {
 }
 
 // Compute returns cached or freshly evaluated metrics and realization breakdown
-// for timeRange and optional mode filter. Carrier operations metrics are
-// preserved unzeroed so origin baselines can compute pre-expedition deltas.
+// for timeRange and optional mode filter.
 func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (TelemetrySummary, error) {
 	if timeRangeStats.database == nil {
 		return TelemetrySummary{}, fmt.Errorf("time range stats database is nil")

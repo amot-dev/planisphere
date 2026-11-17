@@ -83,11 +83,6 @@ func (app *App) warmInitialStats() {
 			log.Printf("warm initial career stats: %v", metricsError)
 		}
 	}
-	if app.commanderRoster != nil {
-		if _, rosterError := app.commanderRoster.Snapshot(); rosterError != nil {
-			log.Printf("warm initial commander roster: %v", rosterError)
-		}
-	}
 	activeID := app.activeExpeditionID()
 	if activeID == 0 {
 		expeditionsList, listError := expedition.List(app.db)

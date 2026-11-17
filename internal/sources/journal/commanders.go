@@ -61,6 +61,22 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	return status, nil
 }
 
+// CareerStart returns the earliest active commander timestamp in ISO-8601 UTC
+// and Galactic Standard Time formats.
+func CareerStart(queryer db.Queryer) (string, string) {
+	var earliestSeenTimestamp sql.NullString
+	_ = queryer.QueryRow(
+		`SELECT MIN(commanders.first_seen) FROM commanders WHERE commanders.enabled = 1 AND commanders.first_seen IS NOT NULL AND commanders.first_seen != ''`,
+	).Scan(&earliestSeenTimestamp)
+	if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
+		_ = queryer.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + CmdrFilterSQL).Scan(&earliestSeenTimestamp)
+	}
+	if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
+		return "", ""
+	}
+	return earliestSeenTimestamp.String, reference.ToGalactic(earliestSeenTimestamp.String)
+}
+
 // Commander represents a player commander identity discovered in journals.
 type Commander struct {
 	Name          string `json:"name"`

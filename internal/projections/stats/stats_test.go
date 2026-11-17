@@ -37,13 +37,11 @@ func seedStatsDBFromLines(testingContext *testing.T, journalLines []string) *sql
 	return databaseConnection
 }
 
-func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
+func TestCarrierJumpPassengerDistanceRespectsModeFilter(t *testing.T) {
 	lines := []string{
 		`{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-01-18T19:10:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-		`{"timestamp":"2026-01-18T19:15:00Z","event":"CarrierStats","CarrierID":9001,"FuelLevel":1000,"SpaceUsage":{"FreeSpace":20000,"TotalCapacity":25000}}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"CarrierJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[0,0,100]}`,
-		`{"timestamp":"2026-01-18T19:40:00Z","event":"CarrierStats","CarrierID":9001,"FuelLevel":960,"SpaceUsage":{"FreeSpace":20000,"TotalCapacity":25000}}`,
 		`{"timestamp":"2026-01-18T19:50:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1003,"StarPos":[0,0,106],"JumpDist":6.0}`,
 	}
 	conn := seedStatsDBFromLines(t, lines)
@@ -70,15 +68,14 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 
 	engine := stats.NewEngine(conn)
 
-	unfiltered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
+	// Seeded window starting after Location ("19:20:00Z") must still resolve previous StarPos ([0,0,0]) for CarrierJump.
+	unfiltered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:20:00Z"}, nil)
 	if computeError != nil {
 		t.Fatal(computeError)
 	}
-	if unfiltered.CarrierJumps != 1 {
-		t.Fatalf("expected 1 carrier jump, got %d", unfiltered.CarrierJumps)
-	}
-	if unfiltered.CarrierDistanceLy != 100.0 {
-		t.Fatalf("expected 100.0 carrier distance Ly, got %.1f", unfiltered.CarrierDistanceLy)
+	if unfiltered.CarrierJumps != 0 || unfiltered.CarrierDistanceLy != 0 || unfiltered.TritiumUsed != nil {
+		t.Fatalf("expected journal Compute not to populate carrier operation metrics, got jumps=%d dist=%.1f tritium=%v",
+			unfiltered.CarrierJumps, unfiltered.CarrierDistanceLy, unfiltered.TritiumUsed)
 	}
 	if unfiltered.CarrierPassengerLy != 100.0 {
 		t.Fatalf("expected 100.0 carrier passenger Ly, got %.1f", unfiltered.CarrierPassengerLy)
@@ -88,9 +85,6 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	}
 	if unfiltered.DistanceLy != 106.0 {
 		t.Fatalf("expected 106.0 total distance Ly, got %.1f", unfiltered.DistanceLy)
-	}
-	if unfiltered.TritiumUsed == nil || *unfiltered.TritiumUsed != 40 {
-		t.Fatalf("expected 40 tritium used, got %v", unfiltered.TritiumUsed)
 	}
 
 	filtered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
@@ -102,45 +96,8 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	if computeError != nil {
 		t.Fatal(computeError)
 	}
-
-	if filtered.CarrierJumps != 1 {
-		t.Fatalf("expected CarrierJumps to ignore mode filter (want 1), got %d", filtered.CarrierJumps)
-	}
-	if filtered.CarrierDistanceLy != 100.0 {
-		t.Fatalf("expected CarrierDistanceLy to ignore mode filter (want 100.0), got %.1f", filtered.CarrierDistanceLy)
-	}
-	if filtered.TritiumUsed == nil || *filtered.TritiumUsed != 40 {
-		t.Fatalf("expected TritiumUsed to ignore mode filter (want 40), got %v", filtered.TritiumUsed)
-	}
-
-	if filtered.CarrierPassengerLy != 0 {
-		t.Fatalf("expected CarrierPassengerLy to be filtered to 0, got %.1f", filtered.CarrierPassengerLy)
-	}
-	if filtered.ShipDistanceLy != 0 {
-		t.Fatalf("expected ShipDistanceLy to be filtered to 0, got %.1f", filtered.ShipDistanceLy)
-	}
-	if filtered.DistanceLy != 0 {
-		t.Fatalf("expected DistanceLy to be filtered to 0, got %.1f", filtered.DistanceLy)
-	}
-	if filtered.Jumps != 0 {
-		t.Fatalf("expected Jumps to be filtered to 0, got %d", filtered.Jumps)
-	}
-
-	filteredEmpty, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
-		Enabled: true,
-		Modes:   []stats.ModeSelection{},
-	})
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	if filteredEmpty.CarrierJumps != 1 || filteredEmpty.CarrierDistanceLy != 100.0 {
-		t.Fatalf("expected carrier operations to ignore empty mode filter: %+v", filteredEmpty)
-	}
-	if filteredEmpty.TritiumUsed == nil || *filteredEmpty.TritiumUsed != 40 {
-		t.Fatalf("expected tritium used 40 with empty filter, got %v", filteredEmpty.TritiumUsed)
-	}
-	if filteredEmpty.CarrierPassengerLy != 0 || filteredEmpty.DistanceLy != 0 {
-		t.Fatalf("expected passenger distance 0 with empty filter: %+v", filteredEmpty)
+	if filtered.CarrierPassengerLy != 0 || filtered.ShipDistanceLy != 0 || filtered.DistanceLy != 0 || filtered.Jumps != 0 {
+		t.Fatalf("expected travel metrics filtered to 0 when Travel=false: %+v", filtered)
 	}
 
 	filteredTravelOn, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
@@ -152,12 +109,12 @@ func TestCarrierOperationsIgnoreModeFilter(t *testing.T) {
 	if computeError != nil {
 		t.Fatal(computeError)
 	}
-	if filteredTravelOn.CarrierJumps != 1 || filteredTravelOn.CarrierDistanceLy != 100.0 || filteredTravelOn.CarrierPassengerLy != 100.0 {
+	if filteredTravelOn.CarrierPassengerLy != 100.0 || filteredTravelOn.DistanceLy != 106.0 {
 		t.Fatalf("unexpected metrics with Travel=true: %+v", filteredTravelOn)
 	}
 }
 
-func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
+func TestCarrierPassengerDistanceSpanningDifferentModes(t *testing.T) {
 	lines := []string{
 		`{"timestamp":"2026-01-18T20:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-01-18T20:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
@@ -194,11 +151,8 @@ func TestCarrierOperationsSpanningDifferentModes(t *testing.T) {
 		t.Fatal(computeError)
 	}
 
-	if computeResult.CarrierJumps != 2 {
-		t.Fatalf("expected 2 carrier jumps across modes, got %d", computeResult.CarrierJumps)
-	}
-	if computeResult.CarrierDistanceLy != 300.0 {
-		t.Fatalf("expected 300.0 carrier distance Ly, got %.1f", computeResult.CarrierDistanceLy)
+	if computeResult.CarrierJumps != 0 || computeResult.CarrierDistanceLy != 0 || computeResult.TritiumUsed != nil {
+		t.Fatalf("expected carrier operation metrics to remain zeroed, got %+v", computeResult)
 	}
 	if computeResult.CarrierPassengerLy != 200.0 {
 		t.Fatalf("expected 200.0 carrier passenger Ly, got %.1f", computeResult.CarrierPassengerLy)
@@ -451,17 +405,21 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	}
 	initialRangeGeneration := timeRangeStats.Generation()
 
-	// Insert second scan and publish disconnect-lookback/ship-swap events: neither CareerStats nor TimeRangeStats should invalidate.
+	// Insert second scan and publish replay-context/carrier-stats/pre-jump/swap events: neither CareerStats nor TimeRangeStats should invalidate.
 	ingestTestLine(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":2,"BodyName":"RangeSys 2","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 	eventBus.PublishJournal(journal.NewEventSet(
+		journal.EventLoadGame,
+		journal.EventCarrierStats,
+		journal.EventDocked,
+		journal.EventUndocked,
 		journal.EventStartJump,
 		journal.EventJetConeBoost,
 		journal.EventSynthesis,
 		journal.EventShipyardSwap,
 	))
 	if careerStats.Generation() != initialCareerGeneration || timeRangeStats.Generation() != initialRangeGeneration {
-		testingContext.Fatalf("expected pre-jump/swap events not to invalidate stats caches (careerGen=%d->%d, rangeGen=%d->%d)",
+		testingContext.Fatalf("expected non-metric events not to invalidate stats caches (careerGen=%d->%d, rangeGen=%d->%d)",
 			initialCareerGeneration, careerStats.Generation(), initialRangeGeneration, timeRangeStats.Generation())
 	}
 	cachedSummary, _ := timeRangeStats.Compute(timeRange, nil)

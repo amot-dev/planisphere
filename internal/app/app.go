@@ -100,7 +100,6 @@ type App struct {
 	resolutionSemaphore  chan struct{}
 
 	bus               *projection.Bus
-	commanderRoster   *projections.CommanderRoster
 	recoveredJumps    *projections.RecoveredJumps
 	systemArrivals    *projections.SystemArrivals
 	systemVisitCounts *projections.SystemVisitCounts

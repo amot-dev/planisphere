@@ -3,6 +3,7 @@ package app
 import (
 	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
+	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 )
 
@@ -73,12 +74,10 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
-	if app.commanderRoster != nil {
-		if careerStart, careerStartGalactic, careerError := app.commanderRoster.CareerStart(); careerError == nil && careerStart != "" {
-			sidebar.CareerStart = careerStart
-			sidebar.CareerStartGalactic = careerStartGalactic
-			sidebar.CareerDuration = expedition.Elapsed(careerStart, "")
-		}
+	if careerStart, careerStartGalactic := journal.CareerStart(app.db); careerStart != "" {
+		sidebar.CareerStart = careerStart
+		sidebar.CareerStartGalactic = careerStartGalactic
+		sidebar.CareerDuration = expedition.Elapsed(careerStart, "")
 	}
 
 	if sidebar.Started {
@@ -96,17 +95,10 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		if computeError != nil {
 			return sidebar, computeError
 		}
-		liveMetrics := expeditionSummary.Metrics
-		// Carrier operations metrics (carrier jumps, carrier distance, and tritium) for the expedition
-		// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments) to prevent duplication.
-		// Non-operation personal navigation metrics (CarrierPassengerLy and total DistanceLy)
-		// are preserved directly from journal events when the commander is aboard.
-		liveMetrics.CarrierJumps = 0
-		liveMetrics.CarrierDistanceLy = 0
-		liveMetrics.TritiumUsed = nil
-
-		sidebar.Live = liveMetrics
-		sidebar.Expedition = liveMetrics.Add(expeditionRecord.Adjustments)
+		// Expedition carrier operations (CarrierJumps, CarrierDistanceLy, and TritiumUsed)
+		// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments).
+		sidebar.Live = expeditionSummary.Metrics
+		sidebar.Expedition = expeditionSummary.Metrics.Add(expeditionRecord.Adjustments)
 		sidebar.Realization = expeditionSummary.Realization
 	} else {
 		sidebar.Expedition = expeditionRecord.Adjustments

@@ -14,13 +14,9 @@ import (
 
 var (
 	careerStatsJournalEvents = journal.NewEventSet(
-		journal.EventLoadGame,
 		journal.EventLocation,
 		journal.EventFSDJump,
 		journal.EventCarrierJump,
-		journal.EventCarrierStats,
-		journal.EventDocked,
-		journal.EventUndocked,
 		journal.EventScan,
 		journal.EventSAAScanComplete,
 		journal.EventScanOrganic,
@@ -110,10 +106,6 @@ func (careerStats *CareerStats) loadSummary() (TelemetrySummary, error) {
 
 	// All-time Personal Carrier Operations come strictly from Frontier Statistics
 	// (0 when no owned carrier stats exist) so passenger CarrierJump rides never leak in.
-	allMetrics.CarrierJumps = 0
-	allMetrics.CarrierDistanceLy = 0
-	allMetrics.TritiumUsed = nil
-
 	var rawStatistics string
 	queryError := careerStats.database.QueryRow(`SELECT raw_json FROM journal_events
 		WHERE event = 'Statistics' AND json_extract(raw_json, '$.FLEETCARRIER') IS NOT NULL AND `+journal.CmdrFilterSQL+`

@@ -260,12 +260,9 @@ func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
 	}
 	waitGroup.Wait()
 
-	if !testApp.commanderRoster.IsValid() {
-		testingContext.Errorf("expected commanderRoster snapshot to be valid")
-	}
-	careerStart, _, careerErr := testApp.commanderRoster.CareerStart()
-	if careerErr != nil || careerStart != expectedCareerStart {
-		testingContext.Errorf("expected commanderRoster CareerStart %s, got %s (err=%v)", expectedCareerStart, careerStart, careerErr)
+	careerStart, _ := journal.CareerStart(testApp.db)
+	if careerStart != expectedCareerStart {
+		testingContext.Errorf("expected CareerStart %s, got %s", expectedCareerStart, careerStart)
 	}
 }
 
@@ -468,15 +465,14 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 
 	initialTimeRangeGen := testApp.timeRangeStats.Generation()
-	initialRosterGen := testApp.commanderRoster.Generation()
 	initialCarrierGen := testApp.carrierState.Generation()
 	initialCareerGen := testApp.careerStats.Generation()
 
 	if testApp.timeRangeStats.CachedCount() == 0 {
 		testingContext.Fatal("expected timeRangeStats to cache an entry after GetSidebarStats")
 	}
-	if !testApp.commanderRoster.IsValid() || !testApp.carrierState.IsValid() || !testApp.careerStats.IsValid() {
-		testingContext.Fatalf("expected all single-value projections to be valid after warmup")
+	if !testApp.carrierState.IsValid() || !testApp.careerStats.IsValid() {
+		testingContext.Fatalf("expected single-value projections to be valid after warmup")
 	}
 
 	// AppExpeditionBoundsChanged selectively clears TimeRangeStats while preserving lifetime and carrier projections.
@@ -487,9 +483,6 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 	if testApp.timeRangeStats.CachedCount() != 0 {
 		testingContext.Errorf("expected timeRangeStats cache to be empty after AppExpeditionBoundsChanged, got %d", testApp.timeRangeStats.CachedCount())
-	}
-	if testApp.commanderRoster.Generation() != initialRosterGen || !testApp.commanderRoster.IsValid() {
-		testingContext.Errorf("expected commanderRoster to remain valid across AppExpeditionBoundsChanged")
 	}
 	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
 		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionBoundsChanged")
@@ -504,9 +497,6 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 	testApp.publishApp("settings", 0, events.AppDatabaseSwitched)
 
-	if testApp.commanderRoster.Generation() != initialRosterGen+1 || testApp.commanderRoster.IsValid() {
-		testingContext.Errorf("expected commanderRoster to invalidate on AppDatabaseSwitched")
-	}
 	if testApp.carrierState.Generation() != initialCarrierGen+1 || testApp.carrierState.IsValid() {
 		testingContext.Errorf("expected carrierState to invalidate on AppDatabaseSwitched")
 	}

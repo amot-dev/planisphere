@@ -22,16 +22,15 @@ import (
 )
 
 type profileProjections struct {
-	database        *sql.DB
-	bus             *projection.Bus
-	commanderRoster *projections.CommanderRoster
-	recoveredJumps  *projections.RecoveredJumps
-	systemArrivals  *projections.SystemArrivals
-	visitCounts     *projections.SystemVisitCounts
-	shipHistory     *projections.ShipHistory
-	salesLedger     *realization.SalesLedger
-	careerStats     *stats.CareerStats
-	timeRangeStats  *stats.TimeRangeStats
+	database       *sql.DB
+	bus            *projection.Bus
+	recoveredJumps *projections.RecoveredJumps
+	systemArrivals *projections.SystemArrivals
+	visitCounts    *projections.SystemVisitCounts
+	shipHistory    *projections.ShipHistory
+	salesLedger    *realization.SalesLedger
+	careerStats    *stats.CareerStats
+	timeRangeStats *stats.TimeRangeStats
 }
 
 func newProfileProjections(database *sql.DB) *profileProjections {
@@ -39,16 +38,15 @@ func newProfileProjections(database *sql.DB) *profileProjections {
 	recoveredJumps := projections.NewRecoveredJumps(database, bus)
 	salesLedger := realization.NewSalesLedger(database, bus)
 	return &profileProjections{
-		database:        database,
-		bus:             bus,
-		commanderRoster: projections.NewCommanderRoster(database, bus),
-		recoveredJumps:  recoveredJumps,
-		systemArrivals:  projections.NewSystemArrivals(database, bus),
-		visitCounts:     projections.NewSystemVisitCounts(database, bus, recoveredJumps),
-		shipHistory:     projections.NewShipHistory(database, bus, recoveredJumps),
-		salesLedger:     salesLedger,
-		careerStats:     stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
-		timeRangeStats:  stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps),
+		database:       database,
+		bus:            bus,
+		recoveredJumps: recoveredJumps,
+		systemArrivals: projections.NewSystemArrivals(database, bus),
+		visitCounts:    projections.NewSystemVisitCounts(database, bus, recoveredJumps),
+		shipHistory:    projections.NewShipHistory(database, bus, recoveredJumps),
+		salesLedger:    salesLedger,
+		careerStats:    stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
+		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps),
 	}
 }
 

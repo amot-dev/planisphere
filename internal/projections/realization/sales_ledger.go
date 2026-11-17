@@ -15,13 +15,29 @@ import (
 )
 
 var (
-	salesLedgerJournalEvents = journal.NewEventSet(
+	// salesLedgerReplayEvents includes session-context events (LoadGame, Location,
+	// FSDJump, CarrierJump, Docked, Undocked) needed during SQL replay alongside
+	// the events that create or settle ledger records.
+	salesLedgerReplayEvents = journal.NewEventSet(
 		journal.EventLoadGame,
 		journal.EventLocation,
 		journal.EventFSDJump,
 		journal.EventCarrierJump,
 		journal.EventDocked,
 		journal.EventUndocked,
+		journal.EventScan,
+		journal.EventSAAScanComplete,
+		journal.EventScanOrganic,
+		journal.EventSellExplorationData,
+		journal.EventMultiSellExplorationData,
+		journal.EventSellOrganicData,
+		journal.EventResurrect,
+		journal.EventNpcCrewPaidWage,
+	)
+	// salesLedgerJournalEvents restricts cache invalidation to events that actually
+	// create, settle, or forfeit ledger records; session-context events are already
+	// persisted in SQLite before any subsequent scan or sale is evaluated.
+	salesLedgerJournalEvents = journal.NewEventSet(
 		journal.EventScan,
 		journal.EventSAAScanComplete,
 		journal.EventScanOrganic,
