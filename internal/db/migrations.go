@@ -83,6 +83,11 @@ var migrations = []migration{
 		description: "Deduplicate SellOrganicData events and normalize their canonical event_uid",
 		apply:       migrateSellOrganicUIDsV8,
 	},
+	{
+		key:         "unarm_expeditions_v9",
+		description: "Convert legacy armed expeditions lacking a start timestamp back to planning",
+		apply:       migrateUnarmExpeditionsV9,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -232,6 +237,29 @@ func migrateRealizationEventsV6(dbConn *sql.DB) error {
 func migrateSourceFileIndexV7(dbConn *sql.DB) error {
 	if _, createIndexError := dbConn.Exec(`CREATE INDEX IF NOT EXISTS idx_journal_events_source ON journal_events(source_file)`); createIndexError != nil {
 		return fmt.Errorf("create idx_journal_events_source: %w", createIndexError)
+	}
+	return nil
+}
+
+func migrateUnarmExpeditionsV9(dbConn *sql.DB) error {
+	if _, deleteRoutesError := dbConn.Exec(`DELETE FROM settings
+		WHERE key IN (
+			SELECT 'active_carrier_route_' || id FROM expeditions
+			WHERE status = 'active' AND COALESCE(start_timestamp, '') = ''
+		)`); deleteRoutesError != nil {
+		return fmt.Errorf("clear carrier routes on armed expeditions (v9): %w", deleteRoutesError)
+	}
+	if _, resetRowsError := dbConn.Exec(`UPDATE expedition_rows
+		SET fc_arrived = 0, visited_at = NULL, visit_event_uid = NULL, leg_mode_id = 0
+		WHERE expedition_id IN (
+			SELECT id FROM expeditions WHERE status = 'active' AND COALESCE(start_timestamp, '') = ''
+		)`); resetRowsError != nil {
+		return fmt.Errorf("reset rows on armed expeditions (v9): %w", resetRowsError)
+	}
+	if _, unarmError := dbConn.Exec(`UPDATE expeditions
+		SET status = 'planning', armed_at = NULL
+		WHERE status = 'active' AND COALESCE(start_timestamp, '') = ''`); unarmError != nil {
+		return fmt.Errorf("migrate armed expeditions to planning (v9): %w", unarmError)
 	}
 	return nil
 }

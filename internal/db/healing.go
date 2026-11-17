@@ -66,6 +66,9 @@ func healDowngradedJournalIngest(dbConn *sql.DB) error {
 			}
 		}
 	}
+	if unarmError := migrateUnarmExpeditionsV9(dbConn); unarmError != nil {
+		return unarmError
+	}
 
 	var latestJournalUpdatedAt string
 	if maxQueryError := dbConn.QueryRow(`SELECT COALESCE(MAX(updated_at), '') FROM ingested_journals`).Scan(&latestJournalUpdatedAt); maxQueryError != nil {

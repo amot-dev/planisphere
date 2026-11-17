@@ -420,18 +420,14 @@ func MoveRow(transaction *sql.Tx, rowID int64, toIndex int) (int64, error) {
 		return rowItem.ExpeditionID, nil
 	}
 	if expeditionRecord.Status != StatusPlanning && rowItem.IsWaypoint() {
-		if expeditionRecord.StartTimestamp != "" {
-			preview, validateError := validateWaypointMove(transaction, expeditionRecord, rows, fromIndex, toIndex)
-			if validateError != nil {
-				return 0, validateError
+		preview, validateError := validateWaypointMove(transaction, expeditionRecord, rows, fromIndex, toIndex)
+		if validateError != nil {
+			return 0, validateError
+		}
+		if preview.ResetsFCArrived {
+			if _, resetError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE id = ?`, rowID); resetError != nil {
+				return 0, resetError
 			}
-			if preview.ResetsFCArrived {
-				if _, resetError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE id = ?`, rowID); resetError != nil {
-					return 0, resetError
-				}
-			}
-		} else if firstIdx := firstWaypoint(rows); firstIdx >= 0 && (fromIndex == firstIdx || toIndex <= firstIdx) {
-			return 0, errors.New("waypoint #1 cannot be moved after the expedition has started")
 		}
 	}
 	rows = moveTo(rows, fromIndex, toIndex)

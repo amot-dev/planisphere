@@ -18,7 +18,6 @@ import (
 // Expedition statuses.
 const (
 	StatusPlanning  = "planning"
-	StatusArmed     = "armed"
 	StatusActive    = "active"
 	StatusCompleted = "completed"
 )
@@ -31,7 +30,6 @@ type Expedition struct {
 	Status              string        `json:"status"`
 	StartTimestamp      string        `json:"startTimestamp"`
 	EndTimestamp        string        `json:"endTimestamp"`
-	ArmedAt             string        `json:"armedAt"`
 	Adjustments         stats.Metrics `json:"adjustments"`
 	CarrierType         string        `json:"carrierType"`
 	CarrierWeeklyUpkeep int64         `json:"carrierWeeklyUpkeep"`
@@ -40,19 +38,18 @@ type Expedition struct {
 }
 
 const expeditionCols = `id, name, description, status, COALESCE(start_timestamp,''), COALESCE(end_timestamp,''),
-	COALESCE(armed_at,''), adjustments_json,
-	COALESCE(carrier_type,'player'), COALESCE(carrier_weekly_upkeep,0), created_at, updated_at`
+	adjustments_json, COALESCE(carrier_type,'player'), COALESCE(carrier_weekly_upkeep,0), created_at, updated_at`
 
 func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error) {
 	var expeditionRecord Expedition
 	var adjustmentsJSON string
-	scanError := scanner.Scan(&expeditionRecord.ID, &expeditionRecord.Name, &expeditionRecord.Description, &expeditionRecord.Status, &expeditionRecord.StartTimestamp, &expeditionRecord.EndTimestamp, &expeditionRecord.ArmedAt,
+	scanError := scanner.Scan(&expeditionRecord.ID, &expeditionRecord.Name, &expeditionRecord.Description, &expeditionRecord.Status, &expeditionRecord.StartTimestamp, &expeditionRecord.EndTimestamp,
 		&adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
 	if scanError != nil {
 		return expeditionRecord, scanError
 	}
-	if expeditionRecord.Status == StatusActive && expeditionRecord.ArmedAt != "" && expeditionRecord.StartTimestamp == "" {
-		expeditionRecord.Status = StatusArmed
+	if expeditionRecord.Status == StatusActive && expeditionRecord.StartTimestamp == "" {
+		expeditionRecord.Status = StatusPlanning
 	}
 	if expeditionRecord.CarrierType == "" {
 		expeditionRecord.CarrierType = "player"
@@ -205,9 +202,9 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 	return Get(dbConn, newExpeditionID)
 }
 
-func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTimestamp, endTimestamp, armedTimestamp any) error {
-	_, execError := queryer.Exec(`UPDATE expeditions SET status = ?, start_timestamp = ?, end_timestamp = ?, armed_at = ?, updated_at = ? WHERE id = ?`,
-		status, startTimestamp, endTimestamp, armedTimestamp, ed.NowISO(), expeditionID)
+func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTimestamp, endTimestamp any) error {
+	_, execError := queryer.Exec(`UPDATE expeditions SET status = ?, start_timestamp = ?, end_timestamp = ?, armed_at = NULL, updated_at = ? WHERE id = ?`,
+		status, startTimestamp, endTimestamp, ed.NowISO(), expeditionID)
 	return execError
 }
 

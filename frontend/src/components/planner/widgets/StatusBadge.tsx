@@ -1,21 +1,19 @@
 /**
- * StatusBadgeProps defines the lifecycle state and optional arming timestamp
- * displayed in the expedition header badge.
+ * StatusBadgeProps defines the lifecycle state displayed in the expedition header badge.
  */
 export interface StatusBadgeProps {
   status: string
-  armedAt: string
 }
 
 /**
- * StatusBadge renders the high-level expedition lifecycle state (Planning / Armed / Active / Completed).
+ * StatusBadge renders the high-level expedition lifecycle state (Planning / Active / Completed).
  */
-export function StatusBadge({ status, armedAt }: StatusBadgeProps) {
-  if (status === 'armed' || status === 'active') {
+export function StatusBadge({ status }: StatusBadgeProps) {
+  if (status === 'active') {
     return (
       <span className="inline-flex items-center gap-2 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.14em] bg-[#211307] text-[#FF7100] border border-[#FF7100] border-l-3">
         <span className="w-2 h-2 bg-[#FF7100] animate-pulse" />
-        {status === 'armed' || armedAt ? 'ARMED // AWAITING WAYPOINT #1' : 'ACTIVE EXPEDITION'}
+        ACTIVE EXPEDITION
       </span>
     )
   }

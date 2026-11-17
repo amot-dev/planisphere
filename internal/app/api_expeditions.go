@@ -432,12 +432,6 @@ func (app *App) StartExpedition(expeditionID int64, timestamp string) error {
 	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Start(transaction, expeditionID, timestamp) })
 }
 
-// StartExpeditionOnArrival activates the expedition and waits for the next
-// arrival at Waypoint #1 to set the start timestamp.
-func (app *App) StartExpeditionOnArrival(expeditionID int64) error {
-	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Arm(transaction, expeditionID) })
-}
-
 // CompleteExpedition ends the expedition now.
 func (app *App) CompleteExpedition(expeditionID int64) error {
 	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Complete(transaction, expeditionID, "") })

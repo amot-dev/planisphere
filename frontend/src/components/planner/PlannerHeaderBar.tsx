@@ -26,7 +26,7 @@ export function PlannerHeaderBar({
 }: PlannerHeaderBarProps) {
   const currentExpedition = plan.expedition
   const isPlanning = currentExpedition.status === 'planning'
-  const isActive = currentExpedition.status === 'active' || currentExpedition.status === 'armed'
+  const isActive = currentExpedition.status === 'active'
   const isCompleted = currentExpedition.status === 'completed'
   const canComplete = (plan.visitedWaypointCount ?? 0) >= 2
 
@@ -44,7 +44,7 @@ export function PlannerHeaderBar({
   return (
     <div className="px-5 py-3 bg-[#0e0a07] border-b border-[#3d2816] flex flex-wrap items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-3.5">
-        <StatusBadge status={currentExpedition.status} armedAt={currentExpedition.armedAt} />
+        <StatusBadge status={currentExpedition.status} />
         <div className="border-l-2 border-[#FF7100]/60 pl-3">
           <div className="flex items-center gap-2.5">
             <h2 className="text-base font-extrabold uppercase tracking-[0.1em] text-[#F4ECE4]">

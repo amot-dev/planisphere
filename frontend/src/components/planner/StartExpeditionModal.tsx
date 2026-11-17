@@ -1,9 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  GetStartCandidates,
-  StartExpedition,
-  StartExpeditionOnArrival,
-} from '../../../wailsjs/go/app/App'
+import { GetStartCandidates, StartExpedition } from '../../../wailsjs/go/app/App'
 import { app } from '../../../wailsjs/go/models'
 import { fromGalacticTime, nowGalacticTime } from '../../utils/galacticTime'
 import { ModalShell } from '../common/ModalShell'
@@ -20,7 +16,7 @@ export interface StartExpeditionModalProps {
 
 /**
  * StartExpeditionModal renders the dialog for locking an expedition's start
- * timestamp from historical journal visits, live arrival arming, or a custom timestamp.
+ * timestamp from historical journal visits or a custom Galactic Standard Time timestamp.
  */
 export function StartExpeditionModal({
   expeditionId,
@@ -30,7 +26,7 @@ export function StartExpeditionModal({
   const [candidates, setCandidates] = useState<app.StartCandidates | null>(null)
   const [selectedTimestamp, setSelectedTimestamp] = useState<string>('')
   const [customGalactic, setCustomGalactic] = useState<string>(() => nowGalacticTime())
-  const [mode, setMode] = useState<'history' | 'custom' | 'arrival'>('history')
+  const [mode, setMode] = useState<'history' | 'custom'>('history')
   const [busy, setBusy] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
 
@@ -42,10 +38,10 @@ export function StartExpeditionModal({
           setSelectedTimestamp(candidatesResult.visits[0].timestamp)
           setMode('history')
         } else {
-          setMode('arrival')
+          setMode('custom')
         }
       })
-      .catch((error) => setError(String(error)))
+      .catch((loadError) => setError(String(loadError)))
   }, [expeditionId])
 
   async function handleConfirm() {
@@ -58,16 +54,14 @@ export function StartExpeditionModal({
           return
         }
         await StartExpedition(expeditionId, selectedTimestamp)
-      } else if (mode === 'custom') {
+      } else {
         const isoTimestamp = fromGalacticTime(customGalactic)
         await StartExpedition(expeditionId, isoTimestamp)
-      } else {
-        await StartExpeditionOnArrival(expeditionId)
       }
       onStarted()
       onClose()
-    } catch (error) {
-      setError(String(error))
+    } catch (startError) {
+      setError(String(startError))
     } finally {
       setBusy(false)
     }
@@ -128,28 +122,7 @@ export function StartExpeditionModal({
           </div>
         </label>
 
-        {/* Option 2: Wait for first arrival */}
-        <label className="flex items-start gap-2.5 p-3 border border-[#3d2816] bg-[#110c08] cursor-pointer">
-          <input
-            type="radio"
-            name="startMode"
-            checked={mode === 'arrival'}
-            onChange={() => setMode('arrival')}
-            className="mt-0.5 accent-[#FF7100]"
-          />
-          <div className="flex-1">
-            <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
-              Arm and Wait for First Arrival at Waypoint #1
-            </div>
-            <p className="text-[11px] text-[#a6907c] mt-0.5">
-              The moment your ship or carrier arrives in{' '}
-              <span className="text-[#F4ECE4]">{candidates?.systemName || 'Waypoint #1'}</span>, that
-              timestamp locks in as the expedition start.
-            </p>
-          </div>
-        </label>
-
-        {/* Option 3: Custom Galactic Timestamp */}
+        {/* Option 2: Custom Galactic Timestamp */}
         <label className="flex items-start gap-2.5 p-3 border border-[#3d2816] bg-[#110c08] cursor-pointer">
           <input
             type="radio"

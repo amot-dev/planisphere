@@ -269,9 +269,35 @@ func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
 		testingContext.Fatalf("insert duplicate SellOrganicData: %v", insertDuplicateOrganicError)
 	}
 
+	// Insert a legacy armed expedition (status='active', start_timestamp=NULL, armed_at!=''); Migrate must revert it to planning and clear fc_arrived.
+	armedInsertResult, insertArmedError := dbConn.Exec(`INSERT INTO expeditions (name, status, start_timestamp, armed_at, created_at, updated_at)
+		VALUES ('Legacy Armed', 'active', NULL, '2026-04-20T00:00:00Z', '2026-04-20T00:00:00Z', '2026-04-20T00:00:00Z')`)
+	if insertArmedError != nil {
+		testingContext.Fatalf("insert armed expedition: %v", insertArmedError)
+	}
+	armedExpID, lastIDError := armedInsertResult.LastInsertId()
+	if lastIDError != nil {
+		testingContext.Fatalf("armed expedition LastInsertId: %v", lastIDError)
+	}
+	if _, insertArmedRowError := dbConn.Exec(`INSERT INTO expedition_rows (expedition_id, position, row_type, system_name, fc_stop, fc_arrived, created_at, updated_at)
+		VALUES (?, 1, 'waypoint', 'Rohini', 1, 1, '2026-04-20T00:00:00Z', '2026-04-20T00:00:00Z')`, armedExpID); insertArmedRowError != nil {
+		testingContext.Fatalf("insert armed expedition row: %v", insertArmedRowError)
+	}
+
 	// Re-running Migrate simulates upgrading back to v0.4.0+
 	if migrateError := db.Migrate(dbConn); migrateError != nil {
 		testingContext.Fatalf("Migrate on re-upgrade: %v", migrateError)
+	}
+
+	var migratedStatus string
+	var migratedFcArrived int
+	if scanArmedErr := dbConn.QueryRow(`SELECT expeditions.status, expedition_rows.fc_arrived
+		FROM expeditions JOIN expedition_rows ON expedition_rows.expedition_id = expeditions.id
+		WHERE expeditions.id = ?`, armedExpID).Scan(&migratedStatus, &migratedFcArrived); scanArmedErr != nil {
+		testingContext.Fatalf("query migrated armed expedition: %v", scanArmedErr)
+	}
+	if migratedStatus != "planning" || migratedFcArrived != 0 {
+		testingContext.Errorf("expected legacy armed expedition to migrate to planning with fc_arrived=0, got status=%q fc_arrived=%d", migratedStatus, migratedFcArrived)
 	}
 
 	var oldOffset, oldLines int64

@@ -95,8 +95,6 @@ export function SetupConfigureJournals(arg1:string):Promise<app.IngestStatus>;
 
 export function StartExpedition(arg1:number,arg2:string):Promise<void>;
 
-export function StartExpeditionOnArrival(arg1:number):Promise<void>;
-
 export function SwitchMode(arg1:number):Promise<app.ModesState>;
 
 export function UpdateExpedition(arg1:number,arg2:string,arg3:string):Promise<void>;

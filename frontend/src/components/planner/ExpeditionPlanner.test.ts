@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { PlannerConfirmModal } from './PlannerConfirmModal'
+import { StartExpeditionModal } from './StartExpeditionModal'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { NavigationTelemetrySection } from '../sidebar/NavigationTelemetrySection'
@@ -35,7 +36,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         name: 'Beagle Point Survey',
         description: 'Deep reconnaissance',
         status: 'active',
-        armedAt: '3310-01-01T00:00:00Z',
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
@@ -130,7 +130,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         name: 'Empty Survey',
         description: '',
         status: 'planning',
-        armedAt: '',
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
@@ -154,7 +153,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         name: 'Null Rows Survey',
         description: '',
         status: 'planning',
-        armedAt: '',
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
@@ -177,7 +175,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         name: 'Completed Voyage',
         description: 'Done',
         status: 'completed',
-        armedAt: '3310-01-01T00:00:00Z',
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
@@ -233,7 +230,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         name: 'Native Scrolling Voyage',
         description: '',
         status: 'planning',
-        armedAt: '',
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
@@ -316,7 +312,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         name: 'Live Telemetry Expedition',
         description: '',
         status: 'active',
-        armedAt: '',
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
@@ -713,6 +708,15 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(overrideFcHtml).toContain('Manual State Repair Override')
     expect(overrideFcHtml).toContain('2 preceding pending carrier stops will also be marked ARRIVED')
     expect(overrideFcHtml).toContain('MARK AS ARRIVED')
+
+    const startModalHtml = renderToString(
+      createElement(StartExpeditionModal, {
+        expeditionId: 1,
+        onClose: () => {},
+        onStarted: () => {},
+      }),
+    )
+    expect(startModalHtml).not.toContain('Arm and Wait for First Arrival')
   })
 })
 

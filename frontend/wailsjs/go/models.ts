@@ -547,7 +547,6 @@ export namespace expedition {
 	    status: string;
 	    startTimestamp: string;
 	    endTimestamp: string;
-	    armedAt: string;
 	    adjustments: stats.Metrics;
 	    carrierType: string;
 	    carrierWeeklyUpkeep: number;
@@ -566,7 +565,6 @@ export namespace expedition {
 	        this.status = source["status"];
 	        this.startTimestamp = source["startTimestamp"];
 	        this.endTimestamp = source["endTimestamp"];
-	        this.armedAt = source["armedAt"];
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
 	        this.carrierType = source["carrierType"];
 	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];

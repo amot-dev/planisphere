@@ -161,7 +161,7 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 	buildCtx.playerPosition = playerPosition
 	planView.PlayerSystem = playerSystem
 
-	if expeditionRecord.Status == StatusActive || expeditionRecord.Status == StatusArmed {
+	if expeditionRecord.Status == StatusActive {
 		for _, rowItem := range rows {
 			if rowItem.IsWaypoint() && rowItem.VisitedAt == "" {
 				buildCtx.nextWaypointRowID = rowItem.ID
@@ -218,7 +218,7 @@ func accumulateRemainingDistanceLy(expeditionStatus string, rowItem Row, rowView
 		if rowViewItem.DistFromPrevLy != nil {
 			return *rowViewItem.DistFromPrevLy
 		}
-	case StatusActive, StatusArmed:
+	case StatusActive:
 		if rowViewItem.IsNextWaypoint {
 			if rowViewItem.DistFromCurrentLy != nil {
 				return *rowViewItem.DistFromCurrentLy

@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS expeditions (
     status           TEXT NOT NULL DEFAULT 'planning' CHECK (status IN ('planning', 'active', 'completed')),
     start_timestamp  TEXT,
     end_timestamp    TEXT,
-    armed_at         TEXT,   -- "wait for first arrival at Waypoint #1" requested at this time
+    armed_at         TEXT,   -- legacy (unused)
     baseline_enabled INTEGER NOT NULL DEFAULT 0,
     baseline_source  TEXT NOT NULL DEFAULT '',   -- '', 'statistics', 'manual'
     baseline_json    TEXT NOT NULL DEFAULT '{}', -- stats.Metrics snapshot "before expedition"

@@ -182,10 +182,6 @@ export function StartExpedition(arg1, arg2) {
   return window['go']['app']['App']['StartExpedition'](arg1, arg2);
 }
 
-export function StartExpeditionOnArrival(arg1) {
-  return window['go']['app']['App']['StartExpeditionOnArrival'](arg1);
-}
-
 export function SwitchMode(arg1) {
   return window['go']['app']['App']['SwitchMode'](arg1);
 }
