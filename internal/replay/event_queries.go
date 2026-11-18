@@ -92,7 +92,7 @@ func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, event
 	}
 	defer rows.Close()
 
-	var loadedRows []Row
+	loadedRows := make([]Row, 0, 256)
 	for rows.Next() {
 		rowItem, scanError := scanJournalRow(rows)
 		if scanError != nil {

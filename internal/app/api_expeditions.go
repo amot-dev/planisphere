@@ -430,7 +430,6 @@ func (app *App) lifecycle(expeditionID int64, action func() error) error {
 	if err := app.withReadyReadLock(action); err != nil {
 		return err
 	}
-	app.reevaluate(expeditionID)
 	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
 	return nil
 }

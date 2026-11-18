@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"slices"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
@@ -81,14 +82,14 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 }
 
 func (app *App) onArrivalTrigger(_ projection.Triggers) {
-	app.reevaluateActive()
+	reevaluatedIDs := app.reevaluateActive()
 	app.dbMu.RLock()
 	var currentActiveID int64
 	if app.db != nil {
 		currentActiveID = app.activeExpeditionID()
 	}
 	app.dbMu.RUnlock()
-	if currentActiveID > 0 {
+	if currentActiveID > 0 && !slices.Contains(reevaluatedIDs, currentActiveID) {
 		app.kickResolution(currentActiveID, false)
 	}
 }

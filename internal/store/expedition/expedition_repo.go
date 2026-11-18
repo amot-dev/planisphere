@@ -235,6 +235,15 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 				newExpeditionID, RowWaypoint, now, now)
 			return seedError
 		}
+		rowInsertStmt, prepareError := transaction.Prepare(`INSERT INTO expedition_rows(
+			expedition_id, position, row_type, region_id, fc_stop, fc_arrived, leg_mode_id,
+			system_name, poi_name, notes, system_address, edsm_id, x, y, z, coords_source,
+			created_at, updated_at
+		) VALUES(?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?)`)
+		if prepareError != nil {
+			return prepareError
+		}
+		defer rowInsertStmt.Close()
 		for i, sourceRow := range sourceRows {
 			var regionValue, systemAddressValue, edsmIDValue, xCoord, yCoord, zCoord any
 			if sourceRow.RowType == RowRegion && sourceRow.RegionID > 0 {
@@ -249,11 +258,7 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 			if sourceRow.HasCoords {
 				xCoord, yCoord, zCoord = sourceRow.X, sourceRow.Y, sourceRow.Z
 			}
-			if _, rowInsertError := transaction.Exec(`INSERT INTO expedition_rows(
-				expedition_id, position, row_type, region_id, fc_stop, fc_arrived, leg_mode_id,
-				system_name, poi_name, notes, system_address, edsm_id, x, y, z, coords_source,
-				created_at, updated_at
-			) VALUES(?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?)`,
+			if _, rowInsertError := rowInsertStmt.Exec(
 				newExpeditionID, i+1, sourceRow.RowType, regionValue, sourceRow.FCStop,
 				sourceRow.SystemName, sourceRow.POIName, sourceRow.Notes, systemAddressValue, edsmIDValue, xCoord, yCoord, zCoord, sourceRow.CoordsSource,
 				now, now); rowInsertError != nil {

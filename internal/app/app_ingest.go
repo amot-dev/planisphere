@@ -113,22 +113,23 @@ func (app *App) onJournalBatch(scanResult journal.Result) {
 	app.emitDataChanged("journal", 0, affectedTargets)
 }
 
-func (app *App) reevaluateActive() {
+func (app *App) reevaluateActive() []int64 {
 	app.dbMu.RLock()
 	if app.db == nil {
 		app.dbMu.RUnlock()
-		return
+		return nil
 	}
 	expeditionIDs, getIDsError := expedition.ActiveExpeditionIDs(app.db)
 	app.dbMu.RUnlock()
 	if getIDsError != nil {
 		log.Printf("reevaluate: %v", getIDsError)
-		return
+		return nil
 	}
 	for _, expeditionID := range expeditionIDs {
 		app.reevaluate(expeditionID)
 		app.kickResolution(expeditionID, false)
 	}
+	return expeditionIDs
 }
 
 func (app *App) reevaluate(expeditionID int64) {

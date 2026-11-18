@@ -276,11 +276,12 @@ func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestam
 	for _, address := range addressChunk {
 		queryArgs = append(queryArgs, address)
 	}
+	// Unary +event forces SQLite to seek idx_journal_events_body (system_address) instead of scanning all arrival rows on idx_journal_events_event_ts.
 	query := `SELECT system_address, raw_json FROM (
 		SELECT system_address, raw_json,
 		       ROW_NUMBER() OVER (PARTITION BY system_address ORDER BY timestamp DESC, id DESC) as row_rank
 		FROM journal_events
-		WHERE event IN ('FSDJump', 'Location', 'CarrierJump')
+		WHERE +event IN ('FSDJump', 'Location', 'CarrierJump')
 		  AND timestamp <= ? AND ` + CmdrFilterSQL + `
 		  AND system_address IN (` + placeholders + `)
 	) WHERE row_rank = 1`
