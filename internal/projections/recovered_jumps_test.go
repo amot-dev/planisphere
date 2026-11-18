@@ -213,3 +213,59 @@ func TestRecoveredJumpsRejections(testingContext *testing.T) {
 	}
 }
 
+func TestRecoveredJumpsMultiCommanderIsolation(testingContext *testing.T) {
+	databaseConnection := openProjectionTestDB(testingContext)
+	temporaryDirectory := testingContext.TempDir()
+
+	sessions := []struct {
+		fileName string
+		lines    []string
+	}{
+		{
+			fileName: "Journal.2026-11-17T030000.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-17T03:00:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
+				`{"timestamp":"2026-11-17T03:00:05Z","event":"Location","StarSystem":"StartSystem","SystemAddress":1000,"StarPos":[1000,0,0],"Docked":false}`,
+				`{"timestamp":"2026-11-17T03:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"DeepDest","SystemAddress":1001}`,
+			},
+		},
+		{
+			fileName: "Journal.2026-11-17T030200.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-17T03:02:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"CobraMkV"}`,
+				`{"timestamp":"2026-11-17T03:02:05Z","event":"Location","StarSystem":"Sol","SystemAddress":2000,"StarPos":[0,0,0],"Docked":false}`,
+				`{"timestamp":"2026-11-17T03:02:30Z","event":"JetConeBoost","BoostValue":4.0}`,
+				`{"timestamp":"2026-11-17T03:02:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"BubbleDest","SystemAddress":2001}`,
+				`{"timestamp":"2026-11-17T03:03:00Z","event":"FSDJump","StarSystem":"BubbleDest","SystemAddress":2001,"StarPos":[0,30,0],"JumpDist":30.0}`,
+			},
+		},
+		{
+			fileName: "Journal.2026-11-17T030500.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-17T03:05:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
+				`{"timestamp":"2026-11-17T03:05:10Z","event":"Location","StarSystem":"DeepDest","SystemAddress":1001,"StarPos":[1000,60,80],"Docked":false}`,
+			},
+		},
+	}
+	for _, session := range sessions {
+		journalPath := filepath.Join(temporaryDirectory, session.fileName)
+		if writeError := os.WriteFile(journalPath, []byte(strings.Join(session.lines, "\n")+"\n"), 0o644); writeError != nil {
+			testingContext.Fatal(writeError)
+		}
+	}
+	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
+		testingContext.Fatal(scanError)
+	}
+
+	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	if recoverError != nil {
+		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+	}
+	if len(recovered) != 1 {
+		testingContext.Fatalf("expected 1 recovered jump for CmdrExplorer, got %d: %+v", len(recovered), recovered)
+	}
+	recoveredJump := recovered[0]
+	if recoveredJump.SystemName != "DeepDest" || math.Abs(recoveredJump.JumpDist-100.0) > 1e-6 || recoveredJump.BoostUsed != 0 {
+		testingContext.Fatalf("unexpected recovered jump %+v (want DeepDest, 100.0 Ly from StartSystem, BoostUsed 0)", recoveredJump)
+	}
+}

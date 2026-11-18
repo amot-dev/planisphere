@@ -121,6 +121,9 @@ func resolveCandidateFromSlice(candidate primedDisconnectCandidate, windowEvents
 		boostUsed       int
 	)
 	for _, item := range windowEvents {
+		if candidate.commander != "" && item.commander != "" && !strings.EqualFold(candidate.commander, item.commander) {
+			continue
+		}
 		if !eventOrderedBefore(candidate.previousArrival.timestamp, candidate.previousArrival.id, item.timestamp, item.id) {
 			continue
 		}
@@ -154,4 +157,3 @@ func resolveCandidateFromSlice(candidate primedDisconnectCandidate, windowEvents
 		BoostUsed:        boostUsed,
 	}, true
 }
-

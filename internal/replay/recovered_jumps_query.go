@@ -48,6 +48,7 @@ func (columns nullableArrivalColumns) toSnapshot() arrivalSnapshot {
 type primedDisconnectCandidate struct {
 	loadGameID        int64
 	loadGameTimestamp string
+	commander         string
 	locationID        int64
 	locationUID       string
 	locationTimestamp string
@@ -60,6 +61,7 @@ type primedDisconnectCandidate struct {
 type preDisconnectEvent struct {
 	id            int64
 	timestamp     string
+	commander     string
 	eventType     journal.EventType
 	systemName    string
 	systemAddress int64
@@ -102,6 +104,10 @@ func commanderFilterForAlias(alias string, applyFilter bool) string {
 	return ` AND (` + alias + `.commander IS NULL OR ` + alias + `.commander = '' OR NOT EXISTS (SELECT 1 FROM commanders c WHERE c.name = ` + alias + `.commander COLLATE NOCASE AND c.enabled = 0))`
 }
 
+func sameCommanderAsSQL(alias, referenceCommanderExpr string) string {
+	return ` AND (COALESCE(` + alias + `.commander, '') = '' OR COALESCE(` + referenceCommanderExpr + `, '') = '' OR ` + alias + `.commander = ` + referenceCommanderExpr + ` COLLATE NOCASE)`
+}
+
 func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 	loadGameFilter := commanderFilterForAlias("lg", applyCommanderFilter)
 	nextLocFilter := commanderFilterForAlias("loc", applyCommanderFilter)
@@ -115,26 +121,27 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 		SELECT
 			lg.id AS lg_id,
 			lg.timestamp AS lg_ts,
+			COALESCE(lg.commander, '') AS lg_cmdr,
 			(SELECT loc.id FROM journal_events loc
-			 WHERE loc.event = 'Location' AND (loc.timestamp, loc.id) > (lg.timestamp, lg.id)` + nextLocFilter + `
+			 WHERE loc.event = 'Location' AND (loc.timestamp, loc.id) > (lg.timestamp, lg.id)` + nextLocFilter + sameCommanderAsSQL("loc", "lg.commander") + `
 			 ORDER BY loc.timestamp ASC, loc.id ASC LIMIT 1) AS next_loc_id,
 			(SELECT sj.id FROM journal_events sj
-			 WHERE sj.event = 'StartJump' AND (sj.timestamp, sj.id) < (lg.timestamp, lg.id)` + startJumpFilter + `
+			 WHERE sj.event = 'StartJump' AND (sj.timestamp, sj.id) < (lg.timestamp, lg.id)` + startJumpFilter + sameCommanderAsSQL("sj", "lg.commander") + `
 			 ORDER BY sj.timestamp DESC, sj.id DESC LIMIT 1) AS last_sj_id
 		FROM journal_events lg
 		WHERE lg.event = 'LoadGame'` + loadGameFilter + `
 	),
 	uncompleted AS (
 		SELECT
-			u.lg_id, u.lg_ts, u.next_loc_id,
+			u.lg_id, u.lg_ts, u.lg_cmdr, u.next_loc_id,
 			(SELECT l2.id FROM journal_events l2
-			 WHERE l2.event = 'Location' AND (l2.timestamp, l2.id) < (u.lg_ts, u.lg_id)` + prevLocFilter + `
+			 WHERE l2.event = 'Location' AND (l2.timestamp, l2.id) < (u.lg_ts, u.lg_id)` + prevLocFilter + sameCommanderAsSQL("l2", "u.lg_cmdr") + `
 			 ORDER BY l2.timestamp DESC, l2.id DESC LIMIT 1) AS prev_loc_id,
 			(SELECT f.id FROM journal_events f
-			 WHERE f.event = 'FSDJump' AND (f.timestamp, f.id) < (loc.timestamp, loc.id)` + prevFSDFilter + `
+			 WHERE f.event = 'FSDJump' AND (f.timestamp, f.id) < (loc.timestamp, loc.id)` + prevFSDFilter + sameCommanderAsSQL("f", "u.lg_cmdr") + `
 			 ORDER BY f.timestamp DESC, f.id DESC LIMIT 1) AS prev_fsd_id,
 			(SELECT c.id FROM journal_events c
-			 WHERE c.event = 'CarrierJump' AND (c.timestamp, c.id) < (loc.timestamp, loc.id)` + prevCarrierFilter + `
+			 WHERE c.event = 'CarrierJump' AND (c.timestamp, c.id) < (loc.timestamp, loc.id)` + prevCarrierFilter + sameCommanderAsSQL("c", "u.lg_cmdr") + `
 			 ORDER BY c.timestamp DESC, c.id DESC LIMIT 1) AS prev_cj_id
 		FROM lg_uncompleted_sj u
 		JOIN journal_events loc ON loc.id = u.next_loc_id
@@ -143,11 +150,11 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 			SELECT 1 FROM journal_events f2
 			WHERE f2.event = 'FSDJump'
 			  AND (f2.timestamp, f2.id) > (sj.timestamp, sj.id)
-			  AND (f2.timestamp, f2.id) < (loc.timestamp, loc.id)` + completedFSDFilter + `
+			  AND (f2.timestamp, f2.id) < (loc.timestamp, loc.id)` + completedFSDFilter + sameCommanderAsSQL("f2", "u.lg_cmdr") + `
 		)
 	)
 	SELECT
-		u.lg_id, u.lg_ts, lg.raw_json,
+		u.lg_id, u.lg_ts, u.lg_cmdr, lg.raw_json,
 		loc.id, loc.event_uid, loc.timestamp, COALESCE(loc.system_name, ''), COALESCE(loc.system_address, 0),
 		loc.star_x, loc.star_y, loc.star_z, loc.raw_json,
 		prev_f.id, prev_f.timestamp, prev_f.system_name, prev_f.system_address, prev_f.star_x, prev_f.star_y, prev_f.star_z,
@@ -165,6 +172,7 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 func evaluatePrimedRow(
 	loadGameID int64,
 	loadGameTimestamp string,
+	loadGameCommander string,
 	loadGameJSON string,
 	locationID int64,
 	locationUID string,
@@ -198,6 +206,7 @@ func evaluatePrimedRow(
 	return primedDisconnectCandidate{
 		loadGameID:        loadGameID,
 		loadGameTimestamp: loadGameTimestamp,
+		commander:         loadGameCommander,
 		locationID:        locationID,
 		locationUID:       locationUID,
 		locationTimestamp: locationTimestamp,
@@ -218,14 +227,14 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 	var candidates []primedDisconnectCandidate
 	for databaseRows.Next() {
 		var (
-			loadGameID, locationID, locationAddress                         int64
-			loadGameTimestamp, loadGameJSON, locationUID, locationTimestamp string
-			locationSystem, locationJSON                                    string
-			locX, locY, locZ                                                sql.NullFloat64
-			prevFSD, prevLoc, prevCarrier                                   nullableArrivalColumns
+			loadGameID, locationID, locationAddress                                            int64
+			loadGameTimestamp, loadGameCommander, loadGameJSON, locationUID, locationTimestamp string
+			locationSystem, locationJSON                                                       string
+			locX, locY, locZ                                                                   sql.NullFloat64
+			prevFSD, prevLoc, prevCarrier                                                      nullableArrivalColumns
 		)
 		scanError := databaseRows.Scan(
-			&loadGameID, &loadGameTimestamp, &loadGameJSON,
+			&loadGameID, &loadGameTimestamp, &loadGameCommander, &loadGameJSON,
 			&locationID, &locationUID, &locationTimestamp, &locationSystem, &locationAddress,
 			&locX, &locY, &locZ, &locationJSON,
 			&prevFSD.id, &prevFSD.timestamp, &prevFSD.systemName, &prevFSD.systemAddress, &prevFSD.starX, &prevFSD.starY, &prevFSD.starZ,
@@ -237,7 +246,7 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 		}
 		latestPrevious := selectLatestArrival(prevFSD.toSnapshot(), prevLoc.toSnapshot(), prevCarrier.toSnapshot())
 		candidate, isCandidate := evaluatePrimedRow(
-			loadGameID, loadGameTimestamp, loadGameJSON,
+			loadGameID, loadGameTimestamp, loadGameCommander, loadGameJSON,
 			locationID, locationUID, locationTimestamp, locationSystem, locationAddress,
 			locX, locY, locZ, locationJSON, latestPrevious,
 		)
@@ -267,7 +276,7 @@ func loadPreDisconnectChunk(
 		queryArgs = append(queryArgs, candidate.previousArrival.timestamp, candidate.locationTimestamp)
 	}
 	// Omit SQL ORDER BY across MULTI-INDEX OR ranges to avoid a temporary B-tree sort; sort the tiny slice in Go.
-	query := `SELECT je.id, je.timestamp, je.event, COALESCE(je.system_name, ''), COALESCE(je.system_address, 0), je.raw_json
+	query := `SELECT je.id, je.timestamp, COALESCE(je.commander, ''), je.event, COALESCE(je.system_name, ''), COALESCE(je.system_address, 0), je.raw_json
 		FROM journal_events je
 		WHERE +je.event IN ('Resurrect', 'ShipyardSwap', 'StartJump', 'JetConeBoost', 'Synthesis')` +
 		commanderFilterForAlias("je", applyCommanderFilter) +
@@ -283,7 +292,7 @@ func loadPreDisconnectChunk(
 	for databaseRows.Next() {
 		var item preDisconnectEvent
 		var eventName string
-		if scanError := databaseRows.Scan(&item.id, &item.timestamp, &eventName, &item.systemName, &item.systemAddress, &item.rawJSON); scanError != nil {
+		if scanError := databaseRows.Scan(&item.id, &item.timestamp, &item.commander, &eventName, &item.systemName, &item.systemAddress, &item.rawJSON); scanError != nil {
 			return nil, fmt.Errorf("scan pre-disconnect verification event: %w", scanError)
 		}
 		if parsedType, knownType := journal.ParseEventType(eventName); knownType {
@@ -308,4 +317,3 @@ func loadPreDisconnectChunk(
 	})
 	return loadedEvents, nil
 }
-
