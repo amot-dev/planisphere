@@ -201,6 +201,12 @@ func findMatchingOrganicBatch(
 	return candidateIndices[:claimCount]
 }
 
+// organicCandidateTier scores how well a pending ScanOrganic record matches a
+// sold BioData item across three variant tiers (5 for an exact non-empty
+// variant match, 3 for a compatible empty-variant match, 1 for a
+// conflicting-variant species fallback, and 0 when non-pending or species
+// mismatches), adding a +1 tie-breaker within each tier when the scan's
+// first-logged bonus expectation matches whether Vista Genomics paid a bonus.
 func organicCandidateTier(candidateRecord *scanRecord, soldSpecies, soldVariant string, expectedBonus bool) int {
 	if candidateRecord.status != "pending" || candidateRecord.normalizedSpecies != soldSpecies {
 		return 0

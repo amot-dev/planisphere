@@ -173,6 +173,10 @@ function collectVisitedDropSlotsAndVisibleRows(
     if (targetIndex === null) continue
     const preview = activeDropPreviews[targetIndex]
     if (!preview) continue
+    // When every waypoint is visited there are no unvisited rows below to host
+    // normal hover insertion gaps (and visited rows reject hover-gap drops), so
+    // an explicit tail drop slot lets a dragged visited waypoint append as
+    // unvisited and keeps the final visited waypoint uncollapsed above it.
     const isEndOfAllVisitedTable =
       gapIndex === rows.length &&
       !hasAnyUnvisitedWaypoint &&

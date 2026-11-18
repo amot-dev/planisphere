@@ -108,6 +108,12 @@ func sameCommanderAsSQL(alias, referenceCommanderExpr string) string {
 	return ` AND (COALESCE(` + alias + `.commander, '') = '' OR COALESCE(` + referenceCommanderExpr + `, '') = '' OR ` + alias + `.commander = ` + referenceCommanderExpr + ` COLLATE NOCASE)`
 }
 
+// buildPrimedCandidatesSQL builds the candidate query pairing each LoadGame with
+// its next Location and latest prior StartJump when no FSDJump completed between
+// them. prev_loc_id stops strictly before LoadGame so a same-system relog cuts
+// off pre-relog boosts, whereas prev_fsd_id and prev_cj_id scan up to Location
+// so normal jumps logged between LoadGame and Location advance previousArrival
+// past LoadGame and cause evaluatePrimedRow to reject the candidate.
 func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 	loadGameFilter := commanderFilterForAlias("lg", applyCommanderFilter)
 	nextLocFilter := commanderFilterForAlias("loc", applyCommanderFilter)
@@ -264,6 +270,9 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 	return candidates, nil
 }
 
+// loadPreDisconnectChunk loads verification events across [previousArrival, locationTimestamp]
+// rather than stopping at loadGameTimestamp so Resurrect events between LoadGame and
+// Location still abort recovery, while boost and StartJump attribution is bounded at LoadGame in Go.
 func loadPreDisconnectChunk(
 	queryer db.Queryer,
 	chunk []primedDisconnectCandidate,

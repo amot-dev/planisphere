@@ -94,6 +94,7 @@ func FilterRecoveredJumpsInRange(allRecovered []RecoveredJump, afterTimestamp, u
 func applyPreDisconnectEvent(item preDisconnectEvent, boostUsed *int, latestStartJump **journal.StartJumpEvent) {
 	switch item.eventType {
 	case journal.EventShipyardSwap:
+		// Swapping ships discards any jet-cone or FSD synthesis boost armed on the old ship.
 		*boostUsed = 0
 	case journal.EventJetConeBoost:
 		var jetBoost journal.JetConeBoostEvent
@@ -130,9 +131,13 @@ func resolveCandidateFromSlice(candidate primedDisconnectCandidate, windowEvents
 		if eventOrderedBefore(candidate.locationTimestamp, candidate.locationID, item.timestamp, item.id) {
 			continue
 		}
+		// Any Resurrect in (previousArrival, location] marks a respawn/rebuy teleport
+		// rather than a completed jump, so abort recovery across the entire window.
 		if item.eventType == journal.EventResurrect {
 			return RecoveredJump{}, false
 		}
+		// Cut off boost, swap, and StartJump attribution at LoadGame; events after
+		// LoadGame belong to the post-reconnect session rather than the crashed jump.
 		if !eventOrderedBefore(candidate.loadGameTimestamp, candidate.loadGameID, item.timestamp, item.id) {
 			applyPreDisconnectEvent(item, &boostUsed, &latestStartJump)
 		}

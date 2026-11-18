@@ -235,7 +235,7 @@ func (timeRange Range) bounds() (string, string) {
 // ModeSelection controls which modes contribute to which metric family.
 type ModeSelection struct {
 	ModeID    int64 `json:"modeId"`    // Unassigned (0) = time not covered by a window
-	Travel    bool  `json:"travel"`    // jumps, distance, boosts, carrier passenger travel
+	Travel    bool  `json:"travel"`    // jumps, distance, boosts, carrier passenger travel (carrier operations ignore mode)
 	Discovery bool  `json:"discovery"` // scans, mapping, values, exobiology
 }
 

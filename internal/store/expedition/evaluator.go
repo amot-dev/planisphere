@@ -118,6 +118,12 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, transitions, modeTimeline)
 }
 
+// reconcileEvaluatedRowState synchronizes derived row fields after chronological
+// re-evaluation: clearing LegModeID on waypoints that became unvisited,
+// re-resolving LegModeID when a waypoint rebinds to a different arrival
+// timestamp (preserving existing or manual leg modes when VisitedAt is unchanged),
+// and clearing any FCArrived flags that sit after a pending FC stop so Fleet
+// Carrier progress remains strictly sequential.
 func reconcileEvaluatedRowState(rows []Row, originalRowsByID map[int64]Row, modeTimeline *modes.Timeline) {
 	seenPendingFCStop := false
 	for i := range rows {

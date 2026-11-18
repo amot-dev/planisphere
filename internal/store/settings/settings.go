@@ -28,12 +28,12 @@ const (
 	keyEDDHistoryRecovered  = "edd_history_recovered_v1"
 	keyEDDDisconnectsDone   = "edd_history_disconnects_v7"
 	keyEDDDatabasePath      = "edd_db_path"
+)
 
-	// ExternalLinkOn always shows the external star system link.
-	ExternalLinkOn = "on"
-	// ExternalLinkOff hides the external star system link.
-	ExternalLinkOff = "off"
-	// ExternalLinkIfNoGEC shows the link only when no GEC/GMP entry matched.
+// External link visibility modes.
+const (
+	ExternalLinkOn      = "on"
+	ExternalLinkOff     = "off"
 	ExternalLinkIfNoGEC = "if_no_gec"
 )
 

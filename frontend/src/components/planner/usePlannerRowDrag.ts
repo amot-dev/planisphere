@@ -306,6 +306,8 @@ function useDragEdgeAutoScroll(
 
   const recordDragOverClientY = useCallback((clientY: number) => {
     if (dragStartClientYRef.current !== null) {
+      // Ignore sub-12px pointer jitter near the grab point so dragging a row
+      // near a viewport edge does not engage auto-scroll before actual travel.
       if (Math.abs(clientY - dragStartClientYRef.current) < 12) return
       dragStartClientYRef.current = null
     }
@@ -627,6 +629,8 @@ export function usePlannerRowDrag({
       dragClientYRef.current = null
       event.dataTransfer.effectAllowed = 'move'
       event.dataTransfer.setData('text/plain', String(dragRowId))
+      // Defer collapsing non-matching visited stretches until the next frame so
+      // the browser snapshots the uncollapsed row drag ghost before layout shrinks.
       window.requestAnimationFrame(() => {
         if (interactionTokenRef.current !== token) return
         const alreadyCollapsed = activeDropPreviews !== null && heldIndex === dragRowIndex

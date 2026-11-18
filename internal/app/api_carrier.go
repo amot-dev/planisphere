@@ -74,6 +74,8 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 }
 
 // GetCarrierDepotInfo returns the latest Fleet Carrier capacity, depot tritium level, and cargo storage.
+// It retrieves the actual in-game values from CarrierStats or CarrierDepositFuel journal events,
+// defaulting DepotTritium to 1000 (full depot tank) and UsedCapacity to 5000 if not recorded.
 func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 	defaultInfo := CarrierDepotInfo{
 		UsedCapacity: 5000,

@@ -190,6 +190,8 @@ func latestCarrierJumpRequest(queryer db.Queryer, playerCarrierID int64, playerC
 }
 
 // QueryCarrierDepotInfo returns the latest Fleet Carrier capacity, depot tritium level, and cargo storage.
+// It retrieves actual in-game values from the CarrierStats snapshot and newer matching CarrierDepositFuel
+// journal events, defaulting DepotTritium to 1000 (full depot tank) and UsedCapacity to 5000 if not recorded.
 func QueryCarrierDepotInfo(queryer db.Queryer, statsSnapshot CarrierStatsSnapshot) (CarrierDepotInfo, error) {
 	depotInfo := CarrierDepotInfo{
 		UsedCapacity: 5000,

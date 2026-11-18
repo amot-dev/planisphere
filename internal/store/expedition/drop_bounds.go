@@ -146,6 +146,10 @@ func isChronologicallyValidMove(
 			return false
 		}
 		originalIndex := originalIndexByID[rowItem.ID]
+		// Moving the dragged row later shifts rows originally behind it earlier in
+		// the route, uncovering earlier historical arrivals (for example, skipping a
+		// loop leg before a revisited hub) up to originalVisit; all other visited
+		// rows must stay pinned to their exact original visit timestamp.
 		canRebindEarlier := fromIndex < targetIndex && fromIndex < originalIndex
 		if canRebindEarlier {
 			if rowItem.VisitedAt > originalVisit {
@@ -161,6 +165,9 @@ func isChronologicallyValidMove(
 	return true
 }
 
+// hasLockedOrArrivedCarrierStopAfter reports whether placing a pending FC stop at
+// targetIndex would position it ahead of an already-arrived FC stop or the active
+// Spansh target stop, which would invert the sequential carrier frontier.
 func hasLockedOrArrivedCarrierStopAfter(
 	candidateRows []Row,
 	draggedRowID int64,
@@ -177,6 +184,10 @@ func hasLockedOrArrivedCarrierStopAfter(
 	return false
 }
 
+// moveResetsCarrierArrival reports whether dragging an arrived FC stop below at
+// least one pending FC stop crosses the carrier frontier. Unlike moving a pending
+// stop up (which is blocked), dragging an arrived stop past a pending stop is
+// allowed with confirmation and clears fc_arrived on the moved stop.
 func moveResetsCarrierArrival(candidateRows []Row, draggedRow Row, targetIndex int) bool {
 	if !draggedRow.FCStop || !draggedRow.FCArrived {
 		return false
@@ -197,6 +208,8 @@ func evaluateRowDropTarget(
 	targetIndex int,
 ) DropSlotPreview {
 	draggedRow := rows[fromIndex]
+	// Lock the active Spansh route destination in place so navigation progress
+	// stays aligned with its target waypoint row.
 	if evaluationContext.lockedSpanshTargetRowID > 0 && draggedRow.ID == evaluationContext.lockedSpanshTargetRowID {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotInvalid}
 	}
@@ -242,6 +255,9 @@ func evaluateRowDropTarget(
 	) {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotInvalid}
 	}
+	// Enforce the asymmetric Fleet Carrier frontier: pending stops cannot move
+	// above arrived or Spansh-routed stops, whereas arrived stops moving past a
+	// pending stop are permitted with reset confirmation.
 	if draggedRow.FCStop && !draggedRow.FCArrived &&
 		hasLockedOrArrivedCarrierStopAfter(evaluationContext.candidateRows, draggedRow.ID, targetIndex, evaluationContext.lockedSpanshTargetRowID) {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotBlockedFC}
