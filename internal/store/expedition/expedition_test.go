@@ -954,26 +954,26 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 		`{"timestamp":"2026-01-18T14:00:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1004,"StarPos":[5,0,0],"JumpDist":5.0}`,
 	})
 
-	expeditionRecord, wp1 := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Frontier Test", "")
-	setRowSystemName(testingContext, databaseConnection, wp1.ID, "Sol")
-	wp2 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp1.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wp2.ID, "Alpha Centauri")
-	wp3 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp2.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wp3.ID, "Sirius")
-	wp4 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp3.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wp4.ID, "Barnard's Star")
+	expeditionRecord, solWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Frontier Test", "")
+	setRowSystemName(testingContext, databaseConnection, solWaypoint.ID, "Sol")
+	alphaCentauriWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, solWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, alphaCentauriWaypoint.ID, "Alpha Centauri")
+	siriusWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, alphaCentauriWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, siriusWaypoint.ID, "Sirius")
+	barnardWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, siriusWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, barnardWaypoint.ID, "Barnard's Star")
 
 	fcTrue := true
-	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: wp1.ID, FCStop: &fcTrue})
-	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: wp3.ID, FCStop: &fcTrue})
-	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: wp4.ID, FCStop: &fcTrue})
+	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: solWaypoint.ID, FCStop: &fcTrue})
+	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: siriusWaypoint.ID, FCStop: &fcTrue})
+	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: barnardWaypoint.ID, FCStop: &fcTrue})
 
 	if startErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
 		return expedition.Start(tx, expeditionRecord.ID, "2026-01-18T10:00:00Z")
 	}); startErr != nil {
 		testingContext.Fatal(startErr)
 	}
-	startedOriginRow, startOriginErr := expedition.GetRow(databaseConnection, wp1.ID)
+	startedOriginRow, startOriginErr := expedition.GetRow(databaseConnection, solWaypoint.ID)
 	if startOriginErr != nil {
 		testingContext.Fatal(startOriginErr)
 	}
@@ -981,53 +981,53 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 		testingContext.Fatalf("expected FC stops to start as pending (FCArrived=false) on Engage")
 	}
 
-	// Mark wp3 (Sirius) as carrier arrived via SetCarrierArrivalOverride; wp1 and wp3 are now ARRIVED, wp4 is PENDING.
+	// Mark siriusWaypoint (Sirius) as carrier arrived via SetCarrierArrivalOverride; solWaypoint and siriusWaypoint are now ARRIVED, barnardWaypoint is PENDING.
 	if overrideErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
-		_, err := expedition.SetCarrierArrivalOverride(tx, wp3.ID, true)
+		_, err := expedition.SetCarrierArrivalOverride(tx, siriusWaypoint.ID, true)
 		return err
 	}); overrideErr != nil {
 		testingContext.Fatal(overrideErr)
 	}
 
-	wp4Previews, wp4PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID, proj)
-	if wp4PrevErr != nil {
-		testingContext.Fatal(wp4PrevErr)
+	barnardDropPreviews, barnardPreviewError := expedition.ComputeRowDropPreviews(databaseConnection, barnardWaypoint.ID, proj)
+	if barnardPreviewError != nil {
+		testingContext.Fatal(barnardPreviewError)
 	}
-	// wp4 ("Barnard's Star") was visited at 11:00 (between wp1 Sol@10:00 and wp2 Alpha Centauri@12:00),
-	// so index 1 is chronologically valid, but blocked_fc because wp4 is a PENDING FC stop and wp3 (at index 2) is ARRIVED!
-	if wp4Previews[1].Status != expedition.DropSlotBlockedFC {
-		testingContext.Fatalf("expected wp4 drop preview at index 1 to be blocked_fc, got %+v", wp4Previews[1])
+	// barnardWaypoint ("Barnard's Star") was visited at 11:00 (between solWaypoint Sol@10:00 and alphaCentauriWaypoint Alpha Centauri@12:00),
+	// so index 1 is chronologically valid, but blocked_fc because barnardWaypoint is a PENDING FC stop and siriusWaypoint (at index 2) is ARRIVED!
+	if barnardDropPreviews[1].Status != expedition.DropSlotBlockedFC {
+		testingContext.Fatalf("expected barnardWaypoint drop preview at index 1 to be blocked_fc, got %+v", barnardDropPreviews[1])
 	}
-	wp3Previews, wp3PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID, proj)
-	if wp3PrevErr != nil {
-		testingContext.Fatal(wp3PrevErr)
+	siriusDropPreviews, siriusPreviewError := expedition.ComputeRowDropPreviews(databaseConnection, siriusWaypoint.ID, proj)
+	if siriusPreviewError != nil {
+		testingContext.Fatal(siriusPreviewError)
 	}
-	// wp3 ("Sirius", ARRIVED) moved to index 3 (below PENDING wp4) sets ResetsFCArrived = true.
-	if !wp3Previews[3].ResetsFCArrived {
-		testingContext.Fatalf("expected wp3 drop preview at index 3 to set ResetsFCArrived=true, got %+v", wp3Previews[3])
+	// siriusWaypoint ("Sirius", ARRIVED) moved to index 3 (below PENDING barnardWaypoint) sets ResetsFCArrived = true.
+	if !siriusDropPreviews[3].ResetsFCArrived {
+		testingContext.Fatalf("expected siriusWaypoint drop preview at index 3 to set ResetsFCArrived=true, got %+v", siriusDropPreviews[3])
 	}
 
-	// Add an unvisited non-FC waypoint wp5 ("Vega") before PENDING wp4; moving ARRIVED wp3 into the unvisited
-	// slot after wp5 (but still before PENDING wp4) must NOT set ResetsFCArrived.
-	wp5 := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wp3.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wp5.ID, "Vega")
+	// Add an unvisited non-FC waypoint vegaWaypoint ("Vega") before PENDING barnardWaypoint; moving ARRIVED siriusWaypoint into the unvisited
+	// slot after vegaWaypoint (but still before PENDING barnardWaypoint) must NOT set ResetsFCArrived.
+	vegaWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, siriusWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, vegaWaypoint.ID, "Vega")
 	if reevalErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
 		_, err := expedition.Reevaluate(tx, expeditionRecord.ID)
 		return err
 	}); reevalErr != nil {
 		testingContext.Fatal(reevalErr)
 	}
-	wp3PreviewsWithUnvisited, wp3UnvisitedErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID, proj)
-	if wp3UnvisitedErr != nil {
-		testingContext.Fatal(wp3UnvisitedErr)
+	siriusPreviewsWithUnvisited, siriusUnvisitedPreviewError := expedition.ComputeRowDropPreviews(databaseConnection, siriusWaypoint.ID, proj)
+	if siriusUnvisitedPreviewError != nil {
+		testingContext.Fatal(siriusUnvisitedPreviewError)
 	}
-	// Moving wp3 (index 2, ARRIVED) to index 3 (after unvisited Vega, but before wp4 at index 4) makes wp3 unvisited
+	// Moving siriusWaypoint (index 2, ARRIVED) to index 3 (after unvisited Vega, but before barnardWaypoint at index 4) makes siriusWaypoint unvisited
 	// without crossing any PENDING FC stop, so ResetsFCArrived must be false.
-	if wp3PreviewsWithUnvisited[3].Status != expedition.DropSlotValidUnvisited || wp3PreviewsWithUnvisited[3].ResetsFCArrived {
-		testingContext.Fatalf("expected wp3 drop preview at unvisited index 3 before pending stop to keep ResetsFCArrived=false, got %+v", wp3PreviewsWithUnvisited[3])
+	if siriusPreviewsWithUnvisited[3].Status != expedition.DropSlotValidUnvisited || siriusPreviewsWithUnvisited[3].ResetsFCArrived {
+		testingContext.Fatalf("expected siriusWaypoint drop preview at unvisited index 3 before pending stop to keep ResetsFCArrived=false, got %+v", siriusPreviewsWithUnvisited[3])
 	}
 	if moveBeforePendingErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
-		if _, err := expedition.MoveRow(tx, wp3.ID, 3); err != nil {
+		if _, err := expedition.MoveRow(tx, siriusWaypoint.ID, 3); err != nil {
 			return err
 		}
 		_, err := expedition.Reevaluate(tx, expeditionRecord.ID)
@@ -1035,39 +1035,39 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); moveBeforePendingErr != nil {
 		testingContext.Fatal(moveBeforePendingErr)
 	}
-	movedRow3, _ := expedition.GetRow(databaseConnection, wp3.ID)
+	movedRow3, _ := expedition.GetRow(databaseConnection, siriusWaypoint.ID)
 	if !movedRow3.FCArrived {
-		testingContext.Fatalf("expected wp3 to remain FCArrived=true when moved into unvisited slot before first pending stop")
+		testingContext.Fatalf("expected siriusWaypoint to remain FCArrived=true when moved into unvisited slot before first pending stop")
 	}
 
-	// Cascading override: setting wp1 to arrived=false cascades to wp3 as well.
+	// Cascading override: setting solWaypoint to arrived=false cascades to siriusWaypoint as well.
 	if cascadeErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
-		_, err := expedition.SetCarrierArrivalOverride(tx, wp1.ID, false)
+		_, err := expedition.SetCarrierArrivalOverride(tx, solWaypoint.ID, false)
 		return err
 	}); cascadeErr != nil {
 		testingContext.Fatal(cascadeErr)
 	}
-	reloadedAfterCascade, _ := expedition.GetRow(databaseConnection, wp3.ID)
+	reloadedAfterCascade, _ := expedition.GetRow(databaseConnection, siriusWaypoint.ID)
 	if reloadedAfterCascade.FCArrived {
-		testingContext.Fatalf("expected SetCarrierArrivalOverride(wp1, false) to cascade to wp3")
+		testingContext.Fatalf("expected SetCarrierArrivalOverride(solWaypoint, false) to cascade to siriusWaypoint")
 	}
 
-	// Active Spansh route to wp3 (now at index 3) locks wp3 against moves/deletes, blocks moving PENDING wp4 above wp3,
-	// and is automatically cleared if wp4 is manually overridden to ARRIVED.
+	// Active Spansh route to siriusWaypoint (now at index 3) locks siriusWaypoint against moves/deletes, blocks moving PENDING barnardWaypoint above siriusWaypoint,
+	// and is automatically cleared if barnardWaypoint is manually overridden to ARRIVED.
 	spanshRouteKey := fmt.Sprintf("active_carrier_route_%d", expeditionRecord.ID)
-	spanshRouteJSON := fmt.Sprintf(`{"expeditionId":%d,"targetRowId":%d,"manualMode":false,"route":{"manualMode":false,"jumps":[{"systemName":"Sirius"}]}}`, expeditionRecord.ID, wp3.ID)
+	spanshRouteJSON := fmt.Sprintf(`{"expeditionId":%d,"targetRowId":%d,"manualMode":false,"route":{"manualMode":false,"jumps":[{"systemName":"Sirius"}]}}`, expeditionRecord.ID, siriusWaypoint.ID)
 	if setRouteError := settings.Set(databaseConnection, spanshRouteKey, spanshRouteJSON); setRouteError != nil {
 		testingContext.Fatal(setRouteError)
 	}
-	wp4SpanshBlocked, wp4BlockedError := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID, proj)
-	if wp4BlockedError != nil {
-		testingContext.Fatal(wp4BlockedError)
+	barnardSpanshBlocked, barnardBlockedError := expedition.ComputeRowDropPreviews(databaseConnection, barnardWaypoint.ID, proj)
+	if barnardBlockedError != nil {
+		testingContext.Fatal(barnardBlockedError)
 	}
-	if wp4SpanshBlocked[2].Status != expedition.DropSlotBlockedFC {
-		testingContext.Fatalf("expected wp4 drop before active Spansh target wp3 to be blocked_fc, got %+v", wp4SpanshBlocked[2])
+	if barnardSpanshBlocked[2].Status != expedition.DropSlotBlockedFC {
+		testingContext.Fatalf("expected barnardWaypoint drop before active Spansh target siriusWaypoint to be blocked_fc, got %+v", barnardSpanshBlocked[2])
 	}
 	if overrideClearError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		_, overrideError := expedition.SetCarrierArrivalOverride(transaction, wp4.ID, true)
+		_, overrideError := expedition.SetCarrierArrivalOverride(transaction, barnardWaypoint.ID, true)
 		return overrideError
 	}); overrideClearError != nil {
 		testingContext.Fatal(overrideClearError)
@@ -1106,14 +1106,14 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"FSDJump","StarSystem":"Hub","SystemAddress":2002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 	})
 
-	expeditionRecord, wpSol := createExpeditionWithOriginRow(testingContext, databaseConnection, "Hub Loop Test", "")
-	setRowSystemName(testingContext, databaseConnection, wpSol.ID, "Sol")
-	wpOutpost := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpSol.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wpOutpost.ID, "Outpost")
-	wpHub := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpOutpost.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wpHub.ID, "Hub")
-	wpVega := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpHub.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wpVega.ID, "Vega")
+	expeditionRecord, solWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Hub Loop Test", "")
+	setRowSystemName(testingContext, databaseConnection, solWaypoint.ID, "Sol")
+	outpostWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, solWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, outpostWaypoint.ID, "Outpost")
+	hubWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, outpostWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, hubWaypoint.ID, "Hub")
+	vegaWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, hubWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, vegaWaypoint.ID, "Vega")
 
 	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
 		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z")
@@ -1121,7 +1121,7 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 		testingContext.Fatal(startError)
 	}
 
-	initialHub, getInitialHubError := expedition.GetRow(databaseConnection, wpHub.ID)
+	initialHub, getInitialHubError := expedition.GetRow(databaseConnection, hubWaypoint.ID)
 	if getInitialHubError != nil {
 		testingContext.Fatal(getInitialHubError)
 	}
@@ -1132,7 +1132,7 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 	// Moving visited Outpost down into the unvisited section (index 3, below Vega) must succeed,
 	// re-binding Hub to its earlier 11:00 arrival and updating Hub's LegModeID to Exploration!
 	if moveOutpostError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		if _, moveError := expedition.MoveRow(transaction, wpOutpost.ID, 3); moveError != nil {
+		if _, moveError := expedition.MoveRow(transaction, outpostWaypoint.ID, 3); moveError != nil {
 			return moveError
 		}
 		_, reevalError := expedition.Reevaluate(transaction, expeditionRecord.ID)
@@ -1141,7 +1141,7 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 		testingContext.Fatalf("expected moving Outpost to unvisited to succeed across Hub revisit, got %v", moveOutpostError)
 	}
 
-	reboundHub, getReboundHubError := expedition.GetRow(databaseConnection, wpHub.ID)
+	reboundHub, getReboundHubError := expedition.GetRow(databaseConnection, hubWaypoint.ID)
 	if getReboundHubError != nil {
 		testingContext.Fatal(getReboundHubError)
 	}
@@ -1163,15 +1163,15 @@ func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testi
 		`{"timestamp":"2026-11-17T01:41:53Z","event":"Location","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321,"StarPos":[-9962.1875,-1.3125,-7604.875],"Docked":false}`,
 	})
 
-	expeditionRecord, wpOrigin := createExpeditionWithOriginRow(testingContext, databaseConnection, "Disconnect Leg Test", "")
-	setRowSystemName(testingContext, databaseConnection, wpOrigin.ID, "Hypo Aeb ST-B b54-0")
-	if originCoordsError := expedition.SetRowCoords(databaseConnection, wpOrigin.ID, "Hypo Aeb ST-B b54-0", 538078878161, 0, &reference.Vec3{X: -9894.84375, Y: -5.5625, Z: -7569.25}, "journal"); originCoordsError != nil {
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Disconnect Leg Test", "")
+	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Hypo Aeb ST-B b54-0")
+	if originCoordsError := expedition.SetRowCoords(databaseConnection, originWaypoint.ID, "Hypo Aeb ST-B b54-0", 538078878161, 0, &reference.Vec3{X: -9894.84375, Y: -5.5625, Z: -7569.25}, "journal"); originCoordsError != nil {
 		testingContext.Fatal(originCoordsError)
 	}
 
-	wpDest := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, wpOrigin.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, wpDest.ID, "Hypo Aeb JS-D b53-0")
-	if destCoordsError := expedition.SetRowCoords(databaseConnection, wpDest.ID, "Hypo Aeb JS-D b53-0", 537273637321, 0, &reference.Vec3{X: -9962.1875, Y: -1.3125, Z: -7604.875}, "journal"); destCoordsError != nil {
+	destinationWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, destinationWaypoint.ID, "Hypo Aeb JS-D b53-0")
+	if destCoordsError := expedition.SetRowCoords(databaseConnection, destinationWaypoint.ID, "Hypo Aeb JS-D b53-0", 537273637321, 0, &reference.Vec3{X: -9962.1875, Y: -1.3125, Z: -7604.875}, "journal"); destCoordsError != nil {
 		testingContext.Fatal(destCoordsError)
 	}
 

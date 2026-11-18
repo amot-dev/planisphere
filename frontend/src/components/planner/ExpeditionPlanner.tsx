@@ -235,11 +235,11 @@ export function ExpeditionPlanner({
     const targetArrived = !rowView.row.fcArrived
     const rowIndex = plan.rows.findIndex((item) => item?.row?.id === rowView.row.id)
     let cascadedCount = 0
-    ;(plan.rows ?? []).forEach((candidateView, idx) => {
+    ;(plan.rows ?? []).forEach((candidateView, candidateRowIndex) => {
       const candidateRow = candidateView?.row
       if (!candidateRow || candidateRow.rowType !== 'waypoint' || !candidateRow.fcStop) return
-      if (targetArrived && idx < rowIndex && !candidateRow.fcArrived) cascadedCount++
-      if (!targetArrived && idx > rowIndex && candidateRow.fcArrived) cascadedCount++
+      if (targetArrived && candidateRowIndex < rowIndex && !candidateRow.fcArrived) cascadedCount++
+      if (!targetArrived && candidateRowIndex > rowIndex && candidateRow.fcArrived) cascadedCount++
     })
     setConfirmState({
       kind: 'override_fc_arrival',

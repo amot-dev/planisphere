@@ -90,8 +90,8 @@ function buildCollapsedVisitedItem(
   let lastWaypointNumber = 0
   let lastSystemName = ''
 
-  for (let idx = startIndex; idx <= endIndex; idx++) {
-    const rowView = rows[idx]
+  for (let rowIndex = startIndex; rowIndex <= endIndex; rowIndex++) {
+    const rowView = rows[rowIndex]
     if (!rowView?.row) continue
     if (rowView.row.rowType === 'waypoint') {
       waypointCount++
@@ -127,16 +127,20 @@ function markFlankingVisitedWaypointsVisible(
   nextStartIndex: number,
   lastVisitedIndex: number,
 ): void {
-  let prevIdx = Math.max(0, prevStartIndex)
-  while (prevIdx > 0 && rows[prevIdx]?.row?.rowType !== 'waypoint') {
-    prevIdx--
+  let previousWaypointIndex = Math.max(0, prevStartIndex)
+  while (previousWaypointIndex > 0 && rows[previousWaypointIndex]?.row?.rowType !== 'waypoint') {
+    previousWaypointIndex--
   }
-  let nextIdx = Math.min(Math.max(0, nextStartIndex), lastVisitedIndex)
-  while (nextIdx < lastVisitedIndex && rows[nextIdx]?.row?.rowType !== 'waypoint') {
-    nextIdx++
+  let nextWaypointIndex = Math.min(Math.max(0, nextStartIndex), lastVisitedIndex)
+  while (nextWaypointIndex < lastVisitedIndex && rows[nextWaypointIndex]?.row?.rowType !== 'waypoint') {
+    nextWaypointIndex++
   }
-  for (let visIdx = Math.max(0, prevIdx); visIdx <= Math.min(lastVisitedIndex, nextIdx); visIdx++) {
-    visibleSet.add(visIdx)
+  for (
+    let visibleIndex = Math.max(0, previousWaypointIndex);
+    visibleIndex <= Math.min(lastVisitedIndex, nextWaypointIndex);
+    visibleIndex++
+  ) {
+    visibleSet.add(visibleIndex)
   }
 }
 
@@ -162,7 +166,7 @@ function collectVisitedDropSlotsAndVisibleRows(
   }
 
   const hasAnyUnvisitedWaypoint = rows.some(
-    (rowView, idx) => idx > lastVisitedIndex && rowView?.row?.rowType === 'waypoint',
+    (rowView, rowIndex) => rowIndex > lastVisitedIndex && rowView?.row?.rowType === 'waypoint',
   )
   for (let gapIndex = 1; gapIndex <= rows.length; gapIndex++) {
     const targetIndex = gapToTargetIndex(heldIndex, gapIndex)

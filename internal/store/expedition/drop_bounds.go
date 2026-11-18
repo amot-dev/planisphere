@@ -191,13 +191,13 @@ func moveResetsCarrierArrival(candidateRows []Row, draggedRow Row, targetIndex i
 }
 
 func evaluateRowDropTarget(
-	evalCtx *boundsEvaluationContext,
+	evaluationContext *boundsEvaluationContext,
 	rows []Row,
 	fromIndex int,
 	targetIndex int,
 ) DropSlotPreview {
 	draggedRow := rows[fromIndex]
-	if evalCtx.lockedSpanshTargetRowID > 0 && draggedRow.ID == evalCtx.lockedSpanshTargetRowID {
+	if evaluationContext.lockedSpanshTargetRowID > 0 && draggedRow.ID == evaluationContext.lockedSpanshTargetRowID {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotInvalid}
 	}
 	if fromIndex == targetIndex {
@@ -210,45 +210,45 @@ func evaluateRowDropTarget(
 		}
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotValidUnvisited}
 	}
-	if targetIndex <= evalCtx.firstWaypointIndex {
+	if targetIndex <= evaluationContext.firstWaypointIndex {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotInvalid}
 	}
 
-	copy(evalCtx.candidateRows, rows)
-	copy(evalCtx.candidateSystems, evalCtx.normalizedSystemNames)
-	for i := range evalCtx.candidateRows {
-		evalCtx.candidateRows[i].VisitedAt, evalCtx.candidateRows[i].VisitEventUID = "", ""
+	copy(evaluationContext.candidateRows, rows)
+	copy(evaluationContext.candidateSystems, evaluationContext.normalizedSystemNames)
+	for i := range evaluationContext.candidateRows {
+		evaluationContext.candidateRows[i].VisitedAt, evaluationContext.candidateRows[i].VisitEventUID = "", ""
 	}
-	evalCtx.candidateRows = moveTo(evalCtx.candidateRows, fromIndex, targetIndex)
-	evalCtx.candidateSystems = moveTo(evalCtx.candidateSystems, fromIndex, targetIndex)
-	evalCtx.candidateRows = replayIndexedTransitions(
-		evalCtx.candidateRows,
-		evalCtx.candidateSystems,
-		evalCtx.firstWaypointIndex,
-		evalCtx.startTimestamp,
-		evalCtx.originVisitUID,
-		evalCtx.transitions,
+	evaluationContext.candidateRows = moveTo(evaluationContext.candidateRows, fromIndex, targetIndex)
+	evaluationContext.candidateSystems = moveTo(evaluationContext.candidateSystems, fromIndex, targetIndex)
+	evaluationContext.candidateRows = replayIndexedTransitions(
+		evaluationContext.candidateRows,
+		evaluationContext.candidateSystems,
+		evaluationContext.firstWaypointIndex,
+		evaluationContext.startTimestamp,
+		evaluationContext.originVisitUID,
+		evaluationContext.transitions,
 	)
 
 	if !isChronologicallyValidMove(
-		evalCtx.candidateRows,
+		evaluationContext.candidateRows,
 		draggedRow.ID,
 		fromIndex,
 		targetIndex,
-		evalCtx.firstWaypointIndex,
-		rows[evalCtx.firstWaypointIndex].ID,
-		evalCtx.originalVisitedAt,
-		evalCtx.originalIndexByID,
+		evaluationContext.firstWaypointIndex,
+		rows[evaluationContext.firstWaypointIndex].ID,
+		evaluationContext.originalVisitedAt,
+		evaluationContext.originalIndexByID,
 	) {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotInvalid}
 	}
 	if draggedRow.FCStop && !draggedRow.FCArrived &&
-		hasLockedOrArrivedCarrierStopAfter(evalCtx.candidateRows, draggedRow.ID, targetIndex, evalCtx.lockedSpanshTargetRowID) {
+		hasLockedOrArrivedCarrierStopAfter(evaluationContext.candidateRows, draggedRow.ID, targetIndex, evaluationContext.lockedSpanshTargetRowID) {
 		return DropSlotPreview{TargetIndex: targetIndex, Status: DropSlotBlockedFC}
 	}
 
-	resetsFCArrived := moveResetsCarrierArrival(evalCtx.candidateRows, draggedRow, targetIndex)
-	evaluatedDragged := evalCtx.candidateRows[targetIndex]
+	resetsFCArrived := moveResetsCarrierArrival(evaluationContext.candidateRows, draggedRow, targetIndex)
+	evaluatedDragged := evaluationContext.candidateRows[targetIndex]
 	if evaluatedDragged.VisitedAt != "" {
 		return DropSlotPreview{
 			TargetIndex:       targetIndex,
@@ -312,8 +312,8 @@ func prepareBoundsEvaluation(
 // ComputeRowDropPreviews evaluates all candidate target indices for moving rowID
 // within an active expedition, returning nil when the expedition is not active
 // or rowID cannot be reordered.
-func ComputeRowDropPreviews(queryer db.Queryer, rowID int64, proj *Projections) ([]DropSlotPreview, error) {
-	if proj == nil || proj.Arrivals == nil {
+func ComputeRowDropPreviews(queryer db.Queryer, rowID int64, expeditionProjections *Projections) ([]DropSlotPreview, error) {
+	if expeditionProjections == nil || expeditionProjections.Arrivals == nil {
 		return nil, errors.New("expedition Arrivals projection is required")
 	}
 	targetRow, getError := GetRow(queryer, rowID)
@@ -338,21 +338,21 @@ func ComputeRowDropPreviews(queryer db.Queryer, rowID int64, proj *Projections) 
 	if fromIndex < 0 {
 		return nil, nil
 	}
-	arrivals, arrivalsError := proj.Arrivals.InWindow(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	arrivals, arrivalsError := expeditionProjections.Arrivals.InWindow(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
 	if arrivalsError != nil {
 		return nil, arrivalsError
 	}
-	evalCtx, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, arrivals)
-	if prepError != nil || evalCtx == nil || fromIndex == evalCtx.firstWaypointIndex {
+	evaluationContext, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, arrivals)
+	if prepError != nil || evaluationContext == nil || fromIndex == evaluationContext.firstWaypointIndex {
 		return nil, prepError
 	}
-	if evalCtx.lockedSpanshTargetRowID > 0 && rowID == evalCtx.lockedSpanshTargetRowID {
+	if evaluationContext.lockedSpanshTargetRowID > 0 && rowID == evaluationContext.lockedSpanshTargetRowID {
 		return nil, nil
 	}
 
 	rowPreviews := make([]DropSlotPreview, len(rows))
 	for targetIndex := range rows {
-		rowPreviews[targetIndex] = evaluateRowDropTarget(evalCtx, rows, fromIndex, targetIndex)
+		rowPreviews[targetIndex] = evaluateRowDropTarget(evaluationContext, rows, fromIndex, targetIndex)
 	}
 	return rowPreviews, nil
 }
@@ -373,11 +373,11 @@ func validateWaypointMove(queryer db.Queryer, expeditionRecord Expedition, rows 
 	if arrivalsError != nil {
 		return DropSlotPreview{}, arrivalsError
 	}
-	evalCtx, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, arrivals)
-	if prepError != nil || evalCtx == nil {
+	evaluationContext, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, arrivals)
+	if prepError != nil || evaluationContext == nil {
 		return DropSlotPreview{}, prepError
 	}
-	preview := evaluateRowDropTarget(evalCtx, rows, fromIndex, toIndex)
+	preview := evaluateRowDropTarget(evaluationContext, rows, fromIndex, toIndex)
 	switch preview.Status {
 	case DropSlotInvalid:
 		return preview, errors.New("waypoint cannot be moved outside its chronological visit bounds")

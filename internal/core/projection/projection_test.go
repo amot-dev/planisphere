@@ -95,14 +95,14 @@ func TestCacheABAGenerationSafetyOnInvalidate(testingContext *testing.T) {
 func TestKeyedCacheGetOrLoadGetManyOrLoadAndABASafety(testingContext *testing.T) {
 	keyed := NewKeyedCache[string, int](nil, "keyed", Triggers{})
 
-	firstVal, firstErr := keyed.GetOrLoad("alpha", func() (int, error) { return 10, nil })
-	if firstErr != nil || firstVal != 10 {
-		testingContext.Fatalf("GetOrLoad alpha = (%d, %v)", firstVal, firstErr)
+	firstValue, firstError := keyed.GetOrLoad("alpha", func() (int, error) { return 10, nil })
+	if firstError != nil || firstValue != 10 {
+		testingContext.Fatalf("GetOrLoad alpha = (%d, %v)", firstValue, firstError)
 	}
 
 	var batchCalls atomic.Int32
 	var lastMissing []string
-	batchResult, batchErr := keyed.GetManyOrLoad([]string{"alpha", "beta", "beta", "gamma"}, func(missing []string) (map[string]int, error) {
+	batchResult, batchError := keyed.GetManyOrLoad([]string{"alpha", "beta", "beta", "gamma"}, func(missing []string) (map[string]int, error) {
 		batchCalls.Add(1)
 		lastMissing = slices.Clone(missing)
 		loaded := make(map[string]int, len(missing))
@@ -111,8 +111,8 @@ func TestKeyedCacheGetOrLoadGetManyOrLoadAndABASafety(testingContext *testing.T)
 		}
 		return loaded, nil
 	})
-	if batchErr != nil {
-		testingContext.Fatalf("GetManyOrLoad failed: %v", batchErr)
+	if batchError != nil {
+		testingContext.Fatalf("GetManyOrLoad failed: %v", batchError)
 	}
 	if batchCalls.Load() != 1 || !slices.Equal(lastMissing, []string{"beta", "gamma"}) {
 		testingContext.Fatalf("expected 1 batch call for [beta gamma], got calls=%d missing=%v", batchCalls.Load(), lastMissing)
@@ -127,26 +127,26 @@ func TestKeyedCacheGetOrLoadGetManyOrLoadAndABASafety(testingContext *testing.T)
 	var attempt atomic.Int32
 	goErrCh := make(chan error, 1)
 	go func() {
-		_, loadErr := keyed.GetManyOrLoad([]string{"delta"}, func(missing []string) (map[string]int, error) {
+		_, loadError := keyed.GetManyOrLoad([]string{"delta"}, func(missing []string) (map[string]int, error) {
 			if attempt.Add(1) == 1 {
 				close(loadStarted)
 				<-releaseLoad
 			}
 			return map[string]int{"delta": 99}, nil
 		})
-		goErrCh <- loadErr
+		goErrCh <- loadError
 	}()
 
 	<-loadStarted
 	keyed.Invalidate()
 	close(releaseLoad)
-	if asyncErr := <-goErrCh; asyncErr != nil {
-		testingContext.Fatalf("async GetManyOrLoad error: %v", asyncErr)
+	if asyncError := <-goErrCh; asyncError != nil {
+		testingContext.Fatalf("async GetManyOrLoad error: %v", asyncError)
 	}
 
-	refreshed, refreshErr := keyed.GetOrLoad("delta", func() (int, error) { return 123, nil })
-	if refreshErr != nil || refreshed != 123 {
-		testingContext.Fatalf("expected fresh value 123 after Invalidate, got %d (err=%v)", refreshed, refreshErr)
+	refreshed, refreshError := keyed.GetOrLoad("delta", func() (int, error) { return 123, nil })
+	if refreshError != nil || refreshed != 123 {
+		testingContext.Fatalf("expected fresh value 123 after Invalidate, got %d (err=%v)", refreshed, refreshError)
 	}
 }
 

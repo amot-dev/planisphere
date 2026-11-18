@@ -87,15 +87,15 @@ type planBuildContext struct {
 	gecLookup          GECLookup
 }
 
-func (buildCtx *planBuildContext) resolveMode(modeID int64) (int64, string, string) {
-	if modeItem, ok := buildCtx.modeByID[modeID]; ok {
+func (buildContext *planBuildContext) resolveMode(modeID int64) (int64, string, string) {
+	if modeItem, ok := buildContext.modeByID[modeID]; ok {
 		return modeItem.ID, modeItem.Name, modeItem.Color
 	}
-	if modeItem, ok := buildCtx.modeByID[buildCtx.defaultModeID]; ok {
+	if modeItem, ok := buildContext.modeByID[buildContext.defaultModeID]; ok {
 		return modeItem.ID, modeItem.Name, modeItem.Color
 	}
-	if len(buildCtx.modeList) > 0 {
-		return buildCtx.modeList[0].ID, buildCtx.modeList[0].Name, buildCtx.modeList[0].Color
+	if len(buildContext.modeList) > 0 {
+		return buildContext.modeList[0].ID, buildContext.modeList[0].Name, buildContext.modeList[0].Color
 	}
 	return 0, "Travel", "#FF7100"
 }
@@ -118,7 +118,7 @@ func buildPreviousVisitMap(rows []Row) map[int64]string {
 	return previousVisitByID
 }
 
-func resolvePlanVisitCounts(rows []Row, proj *Projections) (map[string]int, error) {
+func resolvePlanVisitCounts(rows []Row, expeditionProjections *Projections) (map[string]int, error) {
 	waypointSystems := make([]string, 0, len(rows))
 	seenKeys := make(map[string]bool, len(rows))
 	for _, rowItem := range rows {
@@ -134,29 +134,29 @@ func resolvePlanVisitCounts(rows []Row, proj *Projections) (map[string]int, erro
 	if len(waypointSystems) == 0 {
 		return nil, nil
 	}
-	return proj.VisitCounts.CountsForSystems(waypointSystems)
+	return expeditionProjections.VisitCounts.CountsForSystems(waypointSystems)
 }
 
-func loadPlanShipContext(queryer db.Queryer, expeditionRecord Expedition, buildCtx *planBuildContext, proj *Projections) error {
+func loadPlanShipContext(queryer db.Queryer, expeditionRecord Expedition, buildContext *planBuildContext, expeditionProjections *Projections) error {
 	var shipError error
-	if buildCtx.shipTimeline, shipError = proj.ShipHistory.Timeline(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
+	if buildContext.shipTimeline, shipError = expeditionProjections.ShipHistory.Timeline(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
 		return shipError
 	}
-	recoveredJumps, recoverError := proj.RecoveredJumps.InRange(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	recoveredJumps, recoverError := expeditionProjections.RecoveredJumps.InRange(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
 	if recoverError != nil {
 		return recoverError
 	}
 	var jumpError error
-	buildCtx.jumpTimestamps, jumpError = replay.QueryJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, recoveredJumps)
+	buildContext.jumpTimestamps, jumpError = replay.QueryJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, recoveredJumps)
 	return jumpError
 }
 
-func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView, proj *Projections) (*planBuildContext, error) {
-	visitCountBySystem, visitCountsError := resolvePlanVisitCounts(rows, proj)
+func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView, expeditionProjections *Projections) (*planBuildContext, error) {
+	visitCountBySystem, visitCountsError := resolvePlanVisitCounts(rows, expeditionProjections)
 	if visitCountsError != nil {
 		return nil, visitCountsError
 	}
-	buildCtx := &planBuildContext{
+	buildContext := &planBuildContext{
 		expeditionRecord:   expeditionRecord,
 		modeByID:           map[int64]modes.Mode{},
 		previousVisitByID:  buildPreviousVisitMap(rows),
@@ -167,57 +167,57 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 	// Current waypoint is the visited waypoint with the latest visit time.
 	for i := range rows {
 		rowItem := &rows[i]
-		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && (buildCtx.currentWaypoint == nil || rowItem.VisitedAt > buildCtx.currentWaypoint.VisitedAt) {
-			buildCtx.currentWaypoint = rowItem
+		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && (buildContext.currentWaypoint == nil || rowItem.VisitedAt > buildContext.currentWaypoint.VisitedAt) {
+			buildContext.currentWaypoint = rowItem
 		}
 	}
-	if buildCtx.currentWaypoint != nil {
-		planView.CurrentRowID = buildCtx.currentWaypoint.ID
+	if buildContext.currentWaypoint != nil {
+		planView.CurrentRowID = buildContext.currentWaypoint.ID
 	}
 
 	playerPosition, playerSystem, playerLocationError := replay.QueryLatestPlayerLocation(queryer)
 	if playerLocationError != nil && !errors.Is(playerLocationError, sql.ErrNoRows) {
 		return nil, playerLocationError
 	}
-	if playerPosition == nil && buildCtx.currentWaypoint != nil && buildCtx.currentWaypoint.HasCoords {
-		coords, _ := buildCtx.currentWaypoint.Coords()
+	if playerPosition == nil && buildContext.currentWaypoint != nil && buildContext.currentWaypoint.HasCoords {
+		coords, _ := buildContext.currentWaypoint.Coords()
 		playerPosition = &coords
-		playerSystem = buildCtx.currentWaypoint.SystemName
+		playerSystem = buildContext.currentWaypoint.SystemName
 	}
-	buildCtx.playerPosition = playerPosition
+	buildContext.playerPosition = playerPosition
 	planView.PlayerSystem = playerSystem
 
 	if expeditionRecord.Status == StatusActive {
 		for _, rowItem := range rows {
 			if rowItem.IsWaypoint() && rowItem.VisitedAt == "" {
-				buildCtx.nextWaypointRowID = rowItem.ID
+				buildContext.nextWaypointRowID = rowItem.ID
 				break
 			}
 		}
 	}
-	planView.NextWaypointRowID = buildCtx.nextWaypointRowID
+	planView.NextWaypointRowID = buildContext.nextWaypointRowID
 
 	var modeError error
-	if buildCtx.modeTimeline, modeError = modes.LoadTimeline(queryer); modeError != nil {
+	if buildContext.modeTimeline, modeError = modes.LoadTimeline(queryer); modeError != nil {
 		return nil, modeError
 	}
 	var listError error
-	if buildCtx.modeList, listError = modes.List(queryer); listError != nil {
+	if buildContext.modeList, listError = modes.List(queryer); listError != nil {
 		return nil, listError
 	}
-	planView.Modes = buildCtx.modeList
-	for _, modeItem := range buildCtx.modeList {
-		buildCtx.modeByID[modeItem.ID] = modeItem
+	planView.Modes = buildContext.modeList
+	for _, modeItem := range buildContext.modeList {
+		buildContext.modeByID[modeItem.ID] = modeItem
 	}
-	buildCtx.defaultModeID = modes.DefaultFallbackModeID(queryer)
+	buildContext.defaultModeID = modes.DefaultFallbackModeID(queryer)
 
 	if expeditionRecord.StartTimestamp != "" {
-		if shipContextError := loadPlanShipContext(queryer, expeditionRecord, buildCtx, proj); shipContextError != nil {
+		if shipContextError := loadPlanShipContext(queryer, expeditionRecord, buildContext, expeditionProjections); shipContextError != nil {
 			return nil, shipContextError
 		}
 	}
 
-	return buildCtx, nil
+	return buildContext, nil
 }
 
 // accumulateRemainingDistanceLy accumulates remaining light years across unvisited waypoints:
@@ -248,34 +248,34 @@ func accumulateRemainingDistanceLy(expeditionStatus string, rowItem Row, rowView
 	return 0
 }
 
-func populateWaypointLegTelemetry(buildCtx *planBuildContext, rowItem Row, waypointNumber int, rowViewItem *RowView) {
+func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, waypointNumber int, rowViewItem *RowView) {
 	switch rowViewItem.VisitState {
 	case VisitVisited:
 		rowViewItem.VisitedAtGalactic = reference.ToGalactic(rowItem.VisitedAt)
-		if afterTimestamp, ok := buildCtx.previousVisitByID[rowItem.ID]; ok && buildCtx.shipTimeline != nil {
-			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
+		if afterTimestamp, ok := buildContext.previousVisitByID[rowItem.ID]; ok && buildContext.shipTimeline != nil {
+			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildContext.shipTimeline, buildContext.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
 			modeID := rowItem.LegModeID
-			if modeID == 0 && buildCtx.modeTimeline != nil {
-				modeID = buildCtx.modeTimeline.ModeAt(rowItem.VisitedAt)
+			if modeID == 0 && buildContext.modeTimeline != nil {
+				modeID = buildContext.modeTimeline.ModeAt(rowItem.VisitedAt)
 			}
-			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(modeID)
+			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(modeID)
 		}
 	case VisitCurrent:
-		untilTimestamp := buildCtx.expeditionRecord.EndTimestamp
+		untilTimestamp := buildContext.expeditionRecord.EndTimestamp
 		if untilTimestamp == "" {
 			untilTimestamp = reference.NowISO()
 		}
-		if buildCtx.shipTimeline != nil {
-			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, buildCtx.currentWaypoint.VisitedAt, untilTimestamp)
+		if buildContext.shipTimeline != nil {
+			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildContext.shipTimeline, buildContext.jumpTimestamps, buildContext.currentWaypoint.VisitedAt, untilTimestamp)
 		}
 		var modeID int64
-		if buildCtx.modeTimeline != nil {
-			modeID = buildCtx.modeTimeline.ModeAt(untilTimestamp)
+		if buildContext.modeTimeline != nil {
+			modeID = buildContext.modeTimeline.ModeAt(untilTimestamp)
 		}
-		rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(modeID)
+		rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(modeID)
 	default:
 		if waypointNumber > 1 && rowItem.LegModeID > 0 {
-			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildCtx.resolveMode(rowItem.LegModeID)
+			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(rowItem.LegModeID)
 		}
 	}
 	if rowViewItem.Transitions == nil {
@@ -283,7 +283,7 @@ func populateWaypointLegTelemetry(buildCtx *planBuildContext, rowItem Row, waypo
 	}
 }
 
-func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumber int, previousWaypoint *Row, planView *PlanView) RowView {
+func buildWaypointRowView(buildContext *planBuildContext, rowItem Row, waypointNumber int, previousWaypoint *Row, planView *PlanView) RowView {
 	rowViewItem := RowView{Row: rowItem, Number: waypointNumber, Transitions: []Transition{}}
 	if rowItem.FCStop && !rowItem.FCArrived && planView.NextFCStopRowID == 0 {
 		planView.NextFCStopRowID = rowItem.ID
@@ -292,7 +292,7 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 		if region, ok := reference.RegionAt(rowItem.X, rowItem.Y, rowItem.Z); ok {
 			rowViewItem.DetectedRegionID, rowViewItem.DetectedRegion = region.ID, region.Name
 		}
-		visitCount := buildCtx.visitCountBySystem[replay.NormalizeSystemKey(rowItem.SystemName)]
+		visitCount := buildContext.visitCountBySystem[replay.NormalizeSystemKey(rowItem.SystemName)]
 		rowViewItem.VisitCount = visitCount
 		if visitCount > 0 && rowViewItem.Row.CoordsSource != "journal" {
 			rowViewItem.Row.CoordsSource = "journal"
@@ -305,13 +305,13 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 	case rowItem.VisitedAt != "":
 		rowViewItem.VisitState = VisitVisited
 		planView.VisitedWaypointCount++
-	case buildCtx.currentWaypoint != nil && buildCtx.nextWaypointRowID > 0 && rowItem.ID == buildCtx.nextWaypointRowID:
+	case buildContext.currentWaypoint != nil && buildContext.nextWaypointRowID > 0 && rowItem.ID == buildContext.nextWaypointRowID:
 		rowViewItem.VisitState = VisitCurrent
 	default:
 		rowViewItem.VisitState = VisitFuture
 	}
 
-	populateWaypointLegTelemetry(buildCtx, rowItem, waypointNumber, &rowViewItem)
+	populateWaypointLegTelemetry(buildContext, rowItem, waypointNumber, &rowViewItem)
 
 	if previousWaypoint != nil && previousWaypoint.HasCoords && rowItem.HasCoords {
 		startPosition, _ := previousWaypoint.Coords()
@@ -324,28 +324,28 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 		}
 	}
 
-	if buildCtx.nextWaypointRowID > 0 && rowItem.ID == buildCtx.nextWaypointRowID {
+	if buildContext.nextWaypointRowID > 0 && rowItem.ID == buildContext.nextWaypointRowID {
 		rowViewItem.IsNextWaypoint = true
-		if buildCtx.playerPosition != nil && rowItem.HasCoords {
+		if buildContext.playerPosition != nil && rowItem.HasCoords {
 			endPosition, _ := rowItem.Coords()
-			playerDistanceLy := reference.Distance(*buildCtx.playerPosition, endPosition)
+			playerDistanceLy := reference.Distance(*buildContext.playerPosition, endPosition)
 			rowViewItem.DistFromCurrentLy = &playerDistanceLy
 		} else if rowViewItem.DistFromPrevLy != nil {
 			rowViewItem.DistFromCurrentLy = rowViewItem.DistFromPrevLy
 		}
 	}
 
-	planView.RemainingLy += accumulateRemainingDistanceLy(buildCtx.expeditionRecord.Status, rowItem, rowViewItem)
+	planView.RemainingLy += accumulateRemainingDistanceLy(buildContext.expeditionRecord.Status, rowItem, rowViewItem)
 
-	if buildCtx.gecLookup != nil && rowItem.SystemName != "" {
-		rowViewItem.GEC = buildCtx.gecLookup(rowItem.SystemName, rowItem.SystemAddress)
+	if buildContext.gecLookup != nil && rowItem.SystemName != "" {
+		rowViewItem.GEC = buildContext.gecLookup(rowItem.SystemName, rowItem.SystemAddress)
 	}
 	return rowViewItem
 }
 
 // BuildPlan assembles the planner view for an expedition.
-func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, proj *Projections) (PlanView, error) {
-	if proj == nil || proj.VisitCounts == nil || proj.ShipHistory == nil || proj.RecoveredJumps == nil {
+func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expeditionProjections *Projections) (PlanView, error) {
+	if expeditionProjections == nil || expeditionProjections.VisitCounts == nil || expeditionProjections.ShipHistory == nil || expeditionProjections.RecoveredJumps == nil {
 		return PlanView{}, errors.New("expedition VisitCounts, ShipHistory, and RecoveredJumps projections are required")
 	}
 	expeditionRecord, getExpeditionError := Get(queryer, expeditionID)
@@ -362,7 +362,7 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, proj
 		EndGalactic:   reference.ToGalactic(expeditionRecord.EndTimestamp),
 	}
 
-	buildCtx, contextError := loadPlanBuildContext(queryer, expeditionRecord, rows, gecLookup, &planView, proj)
+	buildContext, contextError := loadPlanBuildContext(queryer, expeditionRecord, rows, gecLookup, &planView, expeditionProjections)
 	if contextError != nil {
 		return planView, contextError
 	}
@@ -381,7 +381,7 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, proj
 		}
 		waypointNumber++
 		planView.WaypointCount++
-		rowViewItem := buildWaypointRowView(buildCtx, rowItem, waypointNumber, previousWaypoint, &planView)
+		rowViewItem := buildWaypointRowView(buildContext, rowItem, waypointNumber, previousWaypoint, &planView)
 		rowCopy := rowItem
 		previousWaypoint = &rowCopy
 		planView.Rows = append(planView.Rows, rowViewItem)
