@@ -74,4 +74,3 @@ func EvaluateOrganic(context OrganicContext) reference.ScanValue {
 	standardBaseValue := reference.SpeciesBaseValue(context.SpeciesCodex, context.SpeciesLocalised, context.GenusCodex)
 	return reference.OrganicValue(standardBaseValue, context.FirstLogged)
 }
-

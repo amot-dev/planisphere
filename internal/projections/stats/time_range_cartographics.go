@@ -58,7 +58,7 @@ func (timeRangeCarto *TimeRangeCartographics) Compute(timeRange Range, filter *F
 	if timeRangeCarto.database == nil {
 		return CartographicsMetrics{}, nil
 	}
-	cacheKey := buildDiscoveryStatsKey(timeRange, filter)
+	cacheKey := buildModeDomainStatsKey(timeRange, filter, true)
 	return timeRangeCarto.entries.GetOrLoad(cacheKey, func() (CartographicsMetrics, error) {
 		engine := replaystats.NewEngineWithSources(
 			timeRangeCarto.database,

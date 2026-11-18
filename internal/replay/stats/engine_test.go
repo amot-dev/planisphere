@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"planisphere/internal/core/db"
-	"planisphere/internal/replay/stats"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/modes"
 )

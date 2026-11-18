@@ -13,4 +13,3 @@ func TestLatestReleaseAPIURL(testingContext *testing.T) {
 		testingContext.Fatalf("LatestReleaseAPIURL() = %q, want %q", gotURL, wantURL)
 	}
 }
-

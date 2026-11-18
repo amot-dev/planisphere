@@ -16,6 +16,23 @@ export type BinaryExternalLinkMode = 'on' | 'off'
 export type EdsmExternalLinkMode = 'on' | 'if_no_gec' | 'off'
 
 /**
+ * normalizeBinaryMode coerces an Inara or GEC link visibility setting to 'on' or 'off'.
+ */
+export function normalizeBinaryMode(rawMode: string | undefined): BinaryExternalLinkMode {
+  return rawMode === 'off' ? 'off' : 'on'
+}
+
+/**
+ * normalizeEdsmMode coerces an EDSM link visibility setting to 'on', 'off', or 'if_no_gec'.
+ */
+export function normalizeEdsmMode(rawMode: string | undefined): EdsmExternalLinkMode {
+  if (rawMode === 'on' || rawMode === 'off') {
+    return rawMode
+  }
+  return 'if_no_gec'
+}
+
+/**
  * HoverOpenInLinksProps defines the waypoint row view and configured visibility
  * modes used to render external Inara, EDSM, and EDAstro GEC links.
  */
@@ -39,13 +56,14 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
   const systemName = rowView.row.systemName?.trim()
   if (!systemName) return null
 
-  const showInara = externalLinkInara !== 'off'
+  const showInara = normalizeBinaryMode(externalLinkInara) === 'on'
   const gecEntry = rowView.gec
-  const showGec = externalLinkGec !== 'off' && Boolean(gecEntry?.url)
+  const showGec = normalizeBinaryMode(externalLinkGec) === 'on' && Boolean(gecEntry?.url)
+  const normalizedEdsmMode = normalizeEdsmMode(externalLinkEdsm)
   const showEdsm =
-    externalLinkEdsm === 'on'
+    normalizedEdsmMode === 'on'
       ? true
-      : externalLinkEdsm === 'off'
+      : normalizedEdsmMode === 'off'
         ? false
         : !showGec
 

@@ -273,4 +273,3 @@ func shipAtTimestamp(timeline []ShipSwitch, timestamp string) *ShipSwitch {
 	}
 	return &timeline[segmentIndex]
 }
-

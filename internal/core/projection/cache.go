@@ -101,4 +101,3 @@ func (cache *Cache[V]) Get() (V, error) {
 	cache.mu.Unlock()
 	return loadedValue, nil
 }
-

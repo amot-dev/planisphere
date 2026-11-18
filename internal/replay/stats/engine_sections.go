@@ -230,4 +230,3 @@ func (engine *Engine) prepareExobiologyScans(untilTimestamp string, loadedEvents
 	}
 	return chronologicalScans, nil
 }
-

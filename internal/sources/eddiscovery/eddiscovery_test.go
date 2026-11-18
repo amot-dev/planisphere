@@ -173,4 +173,3 @@ func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
 		t.Fatalf("expected context.Canceled error from ImportEDDiscoveryDB, got %v", importError)
 	}
 }
-

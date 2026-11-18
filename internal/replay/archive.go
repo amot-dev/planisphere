@@ -183,4 +183,3 @@ func ListCommanders(queryer db.Queryer) ([]Commander, error) {
 	}
 	return discoveredCommanders, nil
 }
-

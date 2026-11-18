@@ -205,4 +205,3 @@ func QueryCarrierRoute(ctx context.Context, sourceSystem, destinationSystem stri
 	}
 	return pollRouteJob(ctx, httpClient, jobID, capacityUsed, depotTritium)
 }
-

@@ -320,4 +320,3 @@ func Import(ctx context.Context, ingester *journal.Ingester, databasePath string
 		return result, txError
 	})
 }
-

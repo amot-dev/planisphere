@@ -94,4 +94,3 @@ func copyFileReadOnly(sourcePath, destinationPath string) error {
 	}
 	return copyToOpenFile(sourcePath, destinationFile)
 }
-

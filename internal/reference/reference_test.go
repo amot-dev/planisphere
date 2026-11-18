@@ -87,14 +87,14 @@ func TestBonusEligibilityPredicates(t *testing.T) {
 	boolFalse := false
 
 	eligibilityCases := []struct {
-		name               string
-		systemPopulation   int64
-		wasDiscovered      bool
-		wasMapped          bool
-		wasFootfalled      *bool
-		wantFirstDisc      bool
-		wantFirstMap       bool
-		wantFirstLogged    bool
+		name             string
+		systemPopulation int64
+		wasDiscovered    bool
+		wasMapped        bool
+		wasFootfalled    *bool
+		wantFirstDisc    bool
+		wantFirstMap     bool
+		wantFirstLogged  bool
 	}{
 		{
 			name:             "unpopulated untouched modern body",
@@ -347,7 +347,7 @@ func TestDurationDaysLabel(t *testing.T) {
 		{24 * 45, "45d"},
 		{24 * 365, "1y"},
 		{24 * (365 + 15), "1y 15d"},
-		{24 * (365 * 3 + 120), "3y 120d"},
+		{24 * (365*3 + 120), "3y 120d"},
 		{24 * (365 * 2), "2y"},
 	}
 	for _, testCase := range tests {
@@ -378,4 +378,3 @@ func TestShipDisplayName(t *testing.T) {
 		}
 	}
 }
-

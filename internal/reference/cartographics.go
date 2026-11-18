@@ -65,7 +65,9 @@ func (bodyScan BodyScan) IsStar() bool { return bodyScan.StarType != "" }
 
 // IsValuable reports whether the scan describes a star or planet. Belt
 // clusters and rings produce Scan events with neither StarType nor PlanetClass.
-func (bodyScan BodyScan) IsValuable() bool { return bodyScan.StarType != "" || bodyScan.PlanetClass != "" }
+func (bodyScan BodyScan) IsValuable() bool {
+	return bodyScan.StarType != "" || bodyScan.PlanetClass != ""
+}
 
 // IsTerraformable reports whether the body is (or was) a terraforming candidate.
 func (bodyScan BodyScan) IsTerraformable() bool {

@@ -224,4 +224,3 @@ func normalizeVariant(codexID, localised string) string {
 	trimmedCodexID := strings.Trim(strings.TrimSpace(codexID), "$;")
 	return strings.ToLower(trimmedCodexID)
 }
-

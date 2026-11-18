@@ -150,4 +150,3 @@ func (catalog *Catalog) Import(body []byte) (int, error) {
 	})
 	return count, txError
 }
-

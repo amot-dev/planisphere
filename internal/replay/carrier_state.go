@@ -244,4 +244,3 @@ func QueryCarrierDepotInfo(queryer db.Queryer, statsSnapshot CarrierStatsSnapsho
 	}
 	return depotInfo, nil
 }
-

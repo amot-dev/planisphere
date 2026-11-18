@@ -125,4 +125,3 @@ func QueryLatestEvent(queryer db.Queryer, eventSet journal.EventSet) (*Row, erro
 	}
 	return &rowItem, nil
 }
-

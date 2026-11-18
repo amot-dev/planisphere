@@ -801,4 +801,3 @@ func SetRowPOIIfBlank(queryer db.Queryer, rowID int64, poiName string) error {
 	)
 	return execError
 }
-

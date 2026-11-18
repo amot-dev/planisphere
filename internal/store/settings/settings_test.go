@@ -91,4 +91,3 @@ func TestSettingsRoundTripsAndNormalization(testingContext *testing.T) {
 		testingContext.Fatal("expected error for unknown commander")
 	}
 }
-

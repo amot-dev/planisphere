@@ -311,4 +311,3 @@ func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestam
 	}
 	return nil
 }
-

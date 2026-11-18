@@ -40,9 +40,12 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 	app.ingestMu.RLock()
 	defer app.ingestMu.RUnlock()
 	app.dbMu.RLock()
-	dir := app.journalDir()
 	ingester := app.ingester
 	database := app.db
+	dir := ""
+	if ingester != nil && database != nil {
+		dir = settings.JournalDir(database, journal.DefaultJournalDir())
+	}
 	app.dbMu.RUnlock()
 	if ingester == nil || database == nil {
 		return false, true, 0
@@ -83,7 +86,7 @@ func (app *App) warmInitialStats() {
 			log.Printf("warm initial career stats: %v", metricsError)
 		}
 	}
-	activeID := app.activeExpeditionID()
+	activeID := settings.ActiveExpeditionID(app.db)
 	if activeID == 0 {
 		expeditionsList, listError := expedition.List(app.db)
 		if listError != nil {
@@ -150,12 +153,15 @@ func (app *App) maybeRefreshGEC() {
 	defer app.gecRefreshing.Store(false)
 
 	app.dbMu.RLock()
-	online := app.onlineEnabled()
-	gecCatalog := app.gec
-	var lastFetched string
+	var (
+		online      bool
+		lastFetched string
+	)
 	if app.db != nil {
+		online = settings.OnlineLookups(app.db)
 		lastFetched = settings.GECFetchedAt(app.db)
 	}
+	gecCatalog := app.gec
 	app.dbMu.RUnlock()
 	if !online || gecCatalog == nil {
 		return
@@ -218,4 +224,3 @@ func (app *App) maybeCatchUpEDD() {
 		app.emitDataChanged("journal", 0, affectedTargets)
 	}
 }
-

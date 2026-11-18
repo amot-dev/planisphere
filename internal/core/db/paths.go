@@ -99,4 +99,3 @@ func SaveConfiguredPath(dbPath string) error {
 	}
 	return os.WriteFile(configFilePath, append(encodedConfig, '\n'), 0o644)
 }
-

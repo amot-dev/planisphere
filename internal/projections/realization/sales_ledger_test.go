@@ -98,4 +98,3 @@ func TestSalesLedgerCachingAndBusInvalidation(testingContext *testing.T) {
 		testingContext.Fatalf("expected TotalRealized 0 after disabling commander, got %d", filteredResult.TotalRealized)
 	}
 }
-

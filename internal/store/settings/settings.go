@@ -14,20 +14,20 @@ import (
 )
 
 const (
-	keyJournalDir            = "journal_dir"
-	keyJournalDebounceMs     = "journal_debounce_ms"
-	keyOnlineLookups         = "online_lookups"
-	keyActiveExpedition      = "active_expedition_id"
-	keyLastScanAt            = "last_scan_at"
-	keySetupCompleted        = "setup_completed"
-	keyTritiumPricePerTonne  = "tritium_price_per_tonne"
-	keyGECFetchedAt          = "gec_fetched_at"
-	keyExternalLinkInara     = "external_link_inara"
-	keyExternalLinkEDSM      = "external_link_edsm"
-	keyExternalLinkGEC       = "external_link_gec"
-	keyEDDHistoryRecovered   = "edd_history_recovered_v1"
-	keyEDDDisconnectsDone    = "edd_history_disconnects_v7"
-	keyEDDDatabasePath       = "edd_db_path"
+	keyJournalDir           = "journal_dir"
+	keyJournalDebounceMs    = "journal_debounce_ms"
+	keyOnlineLookups        = "online_lookups"
+	keyActiveExpedition     = "active_expedition_id"
+	keyLastScanAt           = "last_scan_at"
+	keySetupCompleted       = "setup_completed"
+	keyTritiumPricePerTonne = "tritium_price_per_tonne"
+	keyGECFetchedAt         = "gec_fetched_at"
+	keyExternalLinkInara    = "external_link_inara"
+	keyExternalLinkEDSM     = "external_link_edsm"
+	keyExternalLinkGEC      = "external_link_gec"
+	keyEDDHistoryRecovered  = "edd_history_recovered_v1"
+	keyEDDDisconnectsDone   = "edd_history_disconnects_v7"
+	keyEDDDatabasePath      = "edd_db_path"
 
 	// ExternalLinkOn always shows the external star system link.
 	ExternalLinkOn = "on"
@@ -299,4 +299,3 @@ func SetCommanderEnabled(queryer db.Queryer, name string, enabled bool) error {
 	}
 	return nil
 }
-

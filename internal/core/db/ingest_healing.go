@@ -77,4 +77,3 @@ func healDowngradedJournalIngest(dbConn *sql.DB) error {
 	}
 	return setMetaSetting(dbConn, LastAppVersionKey, version.Version)
 }
-

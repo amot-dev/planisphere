@@ -272,4 +272,3 @@ func TestSessionOdysseyAndPreUpdate14Realization(t *testing.T) {
 		t.Errorf("expected pre-Update-14 Clypeus Speculumi 711,500 + 711,500 = 1,423,000, got %+v", legacyBioMetrics)
 	}
 }
-

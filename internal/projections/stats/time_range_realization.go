@@ -62,7 +62,7 @@ func (timeRangeReal *TimeRangeRealization) Compute(timeRange Range, filter *Filt
 	if timeRangeReal.database == nil {
 		return RealizationBreakdown{}, nil
 	}
-	cacheKey := buildDiscoveryStatsKey(timeRange, filter)
+	cacheKey := buildModeDomainStatsKey(timeRange, filter, true)
 	return timeRangeReal.entries.GetOrLoad(cacheKey, func() (RealizationBreakdown, error) {
 		engine := replaystats.NewEngineWithSources(
 			timeRangeReal.database,

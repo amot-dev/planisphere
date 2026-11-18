@@ -302,4 +302,3 @@ func RecordCarrierJump(queryer db.Queryer, expeditionID int64, distanceLy float6
 	}
 	return SaveAdjustments(queryer, expeditionID, carrierStats)
 }
-

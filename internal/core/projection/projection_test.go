@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	testEventScan         events.JournalEvent = 0
-	testEventFSDJump      events.JournalEvent = 1
-	testEventCarrierStats events.JournalEvent = 2
-	testEventDocked       events.JournalEvent = 3
-	testEventFSDTarget    events.JournalEvent = 4
+	testEventScan         events.JournalEvent    = 0
+	testEventFSDJump      events.JournalEvent    = 1
+	testEventCarrierStats events.JournalEvent    = 2
+	testEventDocked       events.JournalEvent    = 3
+	testEventFSDTarget    events.JournalEvent    = 4
 	testAllJournalEvents  events.JournalEventSet = (1 << 5) - 1
 )
 
@@ -222,4 +222,3 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 		testingContext.Fatalf("expected [stats] UI target for AppAdjustmentsChanged, got %v", uiOnAdjustment.Names())
 	}
 }
-

@@ -14,4 +14,3 @@ func Distance(pointA, pointB Vec3) float64 {
 	deltaX, deltaY, deltaZ := pointB.X-pointA.X, pointB.Y-pointA.Y, pointB.Z-pointA.Z
 	return math.Sqrt(deltaX*deltaX + deltaY*deltaY + deltaZ*deltaZ)
 }
-

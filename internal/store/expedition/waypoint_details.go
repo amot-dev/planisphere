@@ -149,4 +149,3 @@ func Details(conn *sql.DB, rowID int64, proj *Projections) (WaypointDetails, err
 	waypointDetails.Elapsed = formatLegElapsed(waypointDetails.From, waypointDetails.To)
 	return waypointDetails, nil
 }
-

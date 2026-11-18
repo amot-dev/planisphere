@@ -66,4 +66,3 @@ type Projection interface {
 	Name() string
 	Invalidate()
 }
-

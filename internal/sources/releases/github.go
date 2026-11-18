@@ -57,4 +57,3 @@ func FetchLatestRelease(ctx context.Context) (string, error) {
 	normalizedVersion = strings.TrimPrefix(strings.TrimPrefix(normalizedVersion, "v"), "V")
 	return normalizedVersion, nil
 }
-

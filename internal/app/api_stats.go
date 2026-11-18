@@ -5,6 +5,7 @@ import (
 	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
 
 // CarrierCostBreakdown holds the expedition Fleet Carrier cost breakdown in credits.
@@ -34,10 +35,10 @@ type SidebarStats struct {
 	CareerStartGalactic    string                     `json:"careerStartGalactic"`
 	CareerDuration         string                     `json:"careerDuration"`
 	FilterActive           bool                       `json:"filterActive"`
-	Live                   stats.Metrics              `json:"live"`        // from journals (mode-filtered)
-	Adjustments            stats.Metrics              `json:"adjustments"` // manual
-	Expedition             stats.Metrics              `json:"expedition"`  // live + adjustments
-	AllJournals            stats.Metrics              `json:"allJournals"` // all ingested journal events (unfiltered)
+	Live                   stats.Metrics              `json:"live"`                   // from journals (mode-filtered)
+	Adjustments            stats.Metrics              `json:"adjustments"`            // manual
+	Expedition             stats.Metrics              `json:"expedition"`             // live + adjustments
+	AllJournals            stats.Metrics              `json:"allJournals"`            // all ingested journal events (unfiltered)
 	Realization            stats.RealizationBreakdown `json:"realization"`            // expedition realized earnings and losses (mode-filtered)
 	AllJournalsRealization stats.RealizationBreakdown `json:"allJournalsRealization"` // all-time realized earnings and losses across all journals (unfiltered)
 	CarrierCost            CarrierCostBreakdown       `json:"carrierCost"`
@@ -113,7 +114,7 @@ func (app *App) computeExpeditionCarrierCost(
 	expeditionMetrics stats.Metrics,
 	expeditionStarted bool,
 ) CarrierCostBreakdown {
-	tritiumPrice := app.tritiumPricePerTonne()
+	tritiumPrice := settings.TritiumPricePerTonne(app.db)
 	var tritiumTonnes int64
 	if expeditionMetrics.TritiumUsed != nil && *expeditionMetrics.TritiumUsed > 0 {
 		tritiumTonnes = int64(*expeditionMetrics.TritiumUsed)
@@ -141,4 +142,3 @@ func (app *App) computeExpeditionCarrierCost(
 		TotalEstimated: tritiumCost > 0 || upkeepCost > 0,
 	}
 }
-

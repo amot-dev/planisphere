@@ -78,4 +78,3 @@ func TestEvaluateOrganicExceptions(t *testing.T) {
 		}
 	}
 }
-

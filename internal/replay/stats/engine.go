@@ -264,4 +264,3 @@ func (engine *Engine) ComputeRealization(timeRange Range, filter *Filter) (Reali
 	}
 	return ledger.Breakdown(after, until, allowDiscovery), nil
 }
-

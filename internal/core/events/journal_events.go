@@ -45,4 +45,3 @@ func (eventSet JournalEventSet) Intersects(otherSet JournalEventSet) bool {
 func (eventSet JournalEventSet) IsEmpty() bool {
 	return eventSet == 0
 }
-

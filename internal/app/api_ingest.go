@@ -132,4 +132,3 @@ func (app *App) OpenURL(link string) error {
 	runtime.BrowserOpenURL(app.ctx, link)
 	return nil
 }
-

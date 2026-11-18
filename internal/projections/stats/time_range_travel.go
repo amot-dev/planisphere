@@ -62,7 +62,7 @@ func (timeRangeTravel *TimeRangeTravel) Compute(timeRange Range, filter *Filter)
 	if timeRangeTravel.database == nil {
 		return TravelMetrics{}, nil
 	}
-	cacheKey := buildTravelStatsKey(timeRange, filter)
+	cacheKey := buildModeDomainStatsKey(timeRange, filter, false)
 	return timeRangeTravel.entries.GetOrLoad(cacheKey, func() (TravelMetrics, error) {
 		engine := replaystats.NewEngineWithSources(
 			timeRangeTravel.database,

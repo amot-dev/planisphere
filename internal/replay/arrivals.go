@@ -121,4 +121,3 @@ func loadArrivalsWhere(queryer db.Queryer, whereClause string, queryArgs ...any)
 	}
 	return arrivals, databaseRows.Err()
 }
-

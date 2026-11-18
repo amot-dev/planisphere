@@ -59,7 +59,7 @@ func (app *App) GetSettings() (Settings, error) {
 	if readyError := app.ready(); readyError != nil {
 		return Settings{}, readyError
 	}
-	dir := app.journalDir()
+	dir := settings.JournalDir(app.db, journal.DefaultJournalDir())
 	commanders, _ := replay.ListCommanders(app.db)
 	if commanders == nil {
 		commanders = []replay.Commander{}
@@ -75,21 +75,21 @@ func (app *App) GetSettings() (Settings, error) {
 	latestVersion, versionCheckFailed := app.getVersionStatus()
 	externalLinkInara, externalLinkEDSM, externalLinkGEC := settings.ExternalLinkModes(app.db)
 	return Settings{
-		SetupCompleted:              app.setupCompleted(),
+		SetupCompleted:              settings.SetupCompleted(app.db),
 		JournalDir:                  dir,
 		DefaultJournalDir:           journal.DefaultJournalDir(),
 		JournalDirExists:            dirExists(dir),
-		JournalDebounceMs:           app.journalDebounceMs(),
+		JournalDebounceMs:           settings.JournalDebounceMs(app.db),
 		DefaultJournalDebounceMs:    int(reference.DefaultDebounceDelay / time.Millisecond),
-		TritiumPricePerTonne:        app.tritiumPricePerTonne(),
+		TritiumPricePerTonne:        settings.TritiumPricePerTonne(app.db),
 		DefaultTritiumPricePerTonne: reference.DefaultTritiumPricePerTonne,
-		OnlineLookups:               app.onlineEnabled(),
+		OnlineLookups:               settings.OnlineLookups(app.db),
 		ExternalLinkInara:           externalLinkInara,
 		ExternalLinkEDSM:            externalLinkEDSM,
 		ExternalLinkGEC:             externalLinkGEC,
 		DBPath:                      app.dbPath,
 		DefaultDBPath:               defaultDBPath,
-		ActiveExpeditionID:          app.activeExpeditionID(),
+		ActiveExpeditionID:          settings.ActiveExpeditionID(app.db),
 		GECCount:                    gecCount,
 		GECFetchedAt:                gecFetched,
 		Commanders:                  commanders,
@@ -208,9 +208,9 @@ func (app *App) CompleteSetup() (Settings, error) {
 			return saveError
 		}
 		if app.watcher != nil && (app.ctx == nil || app.ctx.Err() == nil) {
-			activeWatcher, watchContext, configuredDir = app.watcher, app.ctx, app.journalDir()
+			activeWatcher, watchContext, configuredDir = app.watcher, app.ctx, settings.JournalDir(app.db, journal.DefaultJournalDir())
 		}
-		if app.onlineEnabled() && app.gec != nil && app.gec.Count() == 0 {
+		if settings.OnlineLookups(app.db) && app.gec != nil && app.gec.Count() == 0 {
 			shouldRefresh = true
 		}
 		return nil
@@ -308,7 +308,10 @@ func (app *App) SetJournalDir(dir string) (Settings, error) {
 func (app *App) BrowseJournalDir() (string, error) {
 	app.dbMu.RLock()
 	app.waitStartupLocked()
-	defaultDir := app.journalDir()
+	defaultDir := journal.DefaultJournalDir()
+	if app.db != nil {
+		defaultDir = settings.JournalDir(app.db, defaultDir)
+	}
 	app.dbMu.RUnlock()
 	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
 		Title:            "Select Elite Dangerous Journal Directory",

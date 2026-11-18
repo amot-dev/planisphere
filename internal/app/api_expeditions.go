@@ -88,7 +88,7 @@ func (app *App) DeleteExpedition(id int64) error {
 	wasActive := false
 	nextActiveID := int64(0)
 	if deleteError := app.withReadyReadLock(func() error {
-		wasActive = app.activeExpeditionID() == id
+		wasActive = settings.ActiveExpeditionID(app.db) == id
 		if expeditionDeleteError := expedition.Delete(app.db, id); expeditionDeleteError != nil {
 			return expeditionDeleteError
 		}

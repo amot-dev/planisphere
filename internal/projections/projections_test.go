@@ -237,4 +237,3 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 		testingContext.Fatalf("updated DepotInfo = %+v err=%v, want DepotTritium=900", updatedDepot, updatedDepotErr)
 	}
 }
-

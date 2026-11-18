@@ -44,4 +44,3 @@ func evaluateHIP87621RadicoidaCG(context OrganicContext) (reference.ScanValue, b
 	cgBaseValue := standardBaseValue * hip87621RadicoidaCGMultiplier
 	return reference.OrganicValue(cgBaseValue, context.FirstLogged), true
 }
-

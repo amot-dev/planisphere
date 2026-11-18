@@ -138,14 +138,6 @@ func newTimeRangeDomainCache[V any](
 	return entries
 }
 
-func buildTravelStatsKey(timeRange Range, filter *Filter) string {
-	return buildModeDomainStatsKey(timeRange, filter, false)
-}
-
-func buildDiscoveryStatsKey(timeRange Range, filter *Filter) string {
-	return buildModeDomainStatsKey(timeRange, filter, true)
-}
-
 func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bool) string {
 	if filter == nil || !filter.Enabled {
 		return timeRange.After + "|" + timeRange.Until + "|all"

@@ -251,4 +251,3 @@ func (builder *ledgerBuilder) recordOrganicScan(journalEvent replay.Row) {
 	builder.unsoldOrganic = append(builder.unsoldOrganic, scanEntry)
 	builder.ledger.records = append(builder.ledger.records, scanEntry)
 }
-

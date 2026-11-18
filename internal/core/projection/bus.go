@@ -113,4 +113,3 @@ func (bus *Bus) PublishApp(appEvents ...events.AppEvent) events.UITargetSet {
 	}
 	return bus.Publish(Triggers{App: appSet})
 }
-

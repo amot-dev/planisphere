@@ -79,4 +79,3 @@ func TestUITargetEnumParseAndSetOperations(testingContext *testing.T) {
 		testingContext.Fatalf("targetSet.Names() = %v, want %v", targetSet.Names(), expectedNames)
 	}
 }
-

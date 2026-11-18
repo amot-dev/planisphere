@@ -199,4 +199,3 @@ func lookupPreUpdate14BaseValue(context OrganicContext, effectiveTimestamp strin
 	}
 	return 0
 }
-

@@ -62,7 +62,7 @@ func (timeRangeExo *TimeRangeExobiology) Compute(timeRange Range, filter *Filter
 	if timeRangeExo.database == nil {
 		return ExobiologyMetrics{}, nil
 	}
-	cacheKey := buildDiscoveryStatsKey(timeRange, filter)
+	cacheKey := buildModeDomainStatsKey(timeRange, filter, true)
 	return timeRangeExo.entries.GetOrLoad(cacheKey, func() (ExobiologyMetrics, error) {
 		engine := replaystats.NewEngineWithSources(
 			timeRangeExo.database,

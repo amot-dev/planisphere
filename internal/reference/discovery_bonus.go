@@ -56,4 +56,3 @@ func CanExpectFirstLogged(systemPopulation int64, wasDiscovered, wasMapped bool,
 	}
 	return !wasDiscovered && !wasMapped
 }
-

@@ -130,4 +130,3 @@ func ReopenTx(dbConn *sql.DB, expeditionID int64) error {
 		return Reopen(transaction, expeditionID)
 	})
 }
-

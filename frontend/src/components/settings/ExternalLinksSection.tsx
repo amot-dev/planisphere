@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { SetExternalLinks } from '../../../wailsjs/go/app/App'
 import { app } from '../../../wailsjs/go/models'
-import type {
-  BinaryExternalLinkMode,
-  EdsmExternalLinkMode,
+import {
+  normalizeBinaryMode,
+  normalizeEdsmMode,
+  type BinaryExternalLinkMode,
+  type EdsmExternalLinkMode,
 } from '../planner/widgets/HoverOpenInLinks'
 
 interface SegmentedOption<ModeValue extends string> {
@@ -26,17 +28,6 @@ const EDSM_LINK_OPTIONS: ReadonlyArray<SegmentedOption<EdsmExternalLinkMode>> = 
   },
   { value: 'off', label: 'Off' },
 ]
-
-function normalizeBinaryMode(rawMode: string | undefined): BinaryExternalLinkMode {
-  return rawMode === 'off' ? 'off' : 'on'
-}
-
-function normalizeEdsmMode(rawMode: string | undefined): EdsmExternalLinkMode {
-  if (rawMode === 'on' || rawMode === 'off') {
-    return rawMode
-  }
-  return 'if_no_gec'
-}
 
 function SegmentedLinkRow<ModeValue extends string>({
   serviceLabel,

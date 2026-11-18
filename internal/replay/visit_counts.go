@@ -77,4 +77,3 @@ func QuerySystemVisitCounts(
 	}
 	return resolvedCounts, nil
 }
-

@@ -250,4 +250,3 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 		testingContext.Fatalf("unexpected carrier cost breakdown: %+v", cost)
 	}
 }
-

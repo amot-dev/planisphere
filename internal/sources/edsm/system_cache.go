@@ -89,4 +89,3 @@ func (resolver *Resolver) store(name string, systemInfo *Info) {
 		source=excluded.source, fetched_at=excluded.fetched_at`,
 		key(name), systemInfo.Name, nullableSystemAddress, nullableEDSMID, xCoord, yCoord, zCoord, systemInfo.Source, reference.NowISO())
 }
-

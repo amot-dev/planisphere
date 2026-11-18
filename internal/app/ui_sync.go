@@ -12,6 +12,7 @@ import (
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/store/settings"
 )
 
 func (app *App) wireProjections(dbConn *sql.DB) {
@@ -86,7 +87,7 @@ func (app *App) onArrivalTrigger(_ projection.Triggers) {
 	app.dbMu.RLock()
 	var currentActiveID int64
 	if app.db != nil {
-		currentActiveID = app.activeExpeditionID()
+		currentActiveID = settings.ActiveExpeditionID(app.db)
 	}
 	app.dbMu.RUnlock()
 	if currentActiveID > 0 && !slices.Contains(reevaluatedIDs, currentActiveID) {

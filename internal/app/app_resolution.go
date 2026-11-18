@@ -233,4 +233,3 @@ func (app *App) populateMissingPOIs() {
 		app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress)
 	}
 }
-

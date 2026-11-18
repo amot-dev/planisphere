@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	eddiscoveryPathsOnce     sync.Once
-	cachedDiscoveredDBPath   string
-	cachedDefaultEDDBPath    string
+	eddiscoveryPathsOnce   sync.Once
+	cachedDiscoveredDBPath string
+	cachedDefaultEDDBPath  string
 )
 
 // DiscoverDBPath dynamically locates an existing EDDiscovery SQLite database
@@ -87,4 +87,3 @@ func computeDefaultEDDiscoveryDBPath(discoveredPath string) string {
 	}
 	return filepath.Join("EDDiscovery", "EDDUser.sqlite")
 }
-

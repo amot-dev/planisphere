@@ -32,18 +32,18 @@ type GECRef struct {
 
 // RowView is a row enriched for display.
 type RowView struct {
-	Row               Row               `json:"row"`
-	Number            int               `json:"number"` // waypoint # (0 for region headers)
-	RegionName        string            `json:"regionName"`
-	DetectedRegionID  int               `json:"detectedRegionId"` // region containing the coordinates
-	DetectedRegion    string            `json:"detectedRegion"`
-	VisitCount        int               `json:"visitCount"`
-	VisitState        string            `json:"visitState"`
-	VisitedAtGalactic string            `json:"visitedAtGalactic"`
-	DistFromPrevLy    *float64          `json:"distFromPrevLy,omitempty"`
-	DistFromCurrentLy *float64          `json:"distFromCurrentLy,omitempty"`
-	IsNextWaypoint    bool              `json:"isNextWaypoint,omitempty"`
-	Transitions       []Transition      `json:"transitions"` // ships flown during the leg arriving at this waypoint
+	Row               Row          `json:"row"`
+	Number            int          `json:"number"` // waypoint # (0 for region headers)
+	RegionName        string       `json:"regionName"`
+	DetectedRegionID  int          `json:"detectedRegionId"` // region containing the coordinates
+	DetectedRegion    string       `json:"detectedRegion"`
+	VisitCount        int          `json:"visitCount"`
+	VisitState        string       `json:"visitState"`
+	VisitedAtGalactic string       `json:"visitedAtGalactic"`
+	DistFromPrevLy    *float64     `json:"distFromPrevLy,omitempty"`
+	DistFromCurrentLy *float64     `json:"distFromCurrentLy,omitempty"`
+	IsNextWaypoint    bool         `json:"isNextWaypoint,omitempty"`
+	Transitions       []Transition `json:"transitions"` // ships flown during the leg arriving at this waypoint
 	LegModeID         int64        `json:"legModeId"`
 	LegModeName       string       `json:"legModeName"`
 	LegModeColor      string       `json:"legModeColor"`
@@ -52,20 +52,20 @@ type RowView struct {
 
 // PlanView is the full planner sheet.
 type PlanView struct {
-	Expedition        Expedition   `json:"expedition"`
-	StartGalactic     string       `json:"startGalactic"`
-	EndGalactic       string       `json:"endGalactic"`
-	Rows              []RowView    `json:"rows"`
-	CurrentRowID      int64        `json:"currentRowId"`
-	NextWaypointRowID int64        `json:"nextWaypointRowId,omitempty"`
-	NextFCStopRowID   int64        `json:"nextFcStopRowId"`
-	PlayerSystem      string       `json:"playerSystem,omitempty"`
+	Expedition           Expedition   `json:"expedition"`
+	StartGalactic        string       `json:"startGalactic"`
+	EndGalactic          string       `json:"endGalactic"`
+	Rows                 []RowView    `json:"rows"`
+	CurrentRowID         int64        `json:"currentRowId"`
+	NextWaypointRowID    int64        `json:"nextWaypointRowId,omitempty"`
+	NextFCStopRowID      int64        `json:"nextFcStopRowId"`
+	PlayerSystem         string       `json:"playerSystem,omitempty"`
 	WaypointCount        int          `json:"waypointCount"`
 	VisitedWaypointCount int          `json:"visitedWaypointCount"`
 	PlannedLy            float64      `json:"plannedLy"`   // sum of straight-line distances across all planned waypoint legs
-	CoveredLy         float64      `json:"coveredLy"`   // sum of straight-line distances across visited waypoint legs
-	RemainingLy       float64      `json:"remainingLy"` // straight-line distance from current player position to next waypoint plus remaining unvisited legs
-	Modes             []modes.Mode `json:"modes"`
+	CoveredLy            float64      `json:"coveredLy"`   // sum of straight-line distances across visited waypoint legs
+	RemainingLy          float64      `json:"remainingLy"` // straight-line distance from current player position to next waypoint plus remaining unvisited legs
+	Modes                []modes.Mode `json:"modes"`
 }
 
 // GECLookup resolves GEC entries for a system.

@@ -61,4 +61,3 @@ func isShipDestructionResurrect(resurrectEvent journal.ResurrectEvent) bool {
 	}
 	return option == "rebuy" || option == "freewinder" || resurrectEvent.Bankrupt || resurrectEvent.Cost > 0
 }
-

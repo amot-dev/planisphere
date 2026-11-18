@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -21,8 +20,8 @@ import {
   resolveHoverGap,
 } from './plannerDragHelpers'
 import { buildPlannerTableItems, type PlannerTableItem } from './plannerPlanHelpers'
+import { useIsomorphicLayoutEffect } from './useInitialExpeditionScroll'
 
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
 const HOLD_PREVIEW_DELAY_MS = 140
 
 /**

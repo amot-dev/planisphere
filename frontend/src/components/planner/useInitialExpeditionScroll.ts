@@ -1,6 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
+/**
+ * useIsomorphicLayoutEffect selects useLayoutEffect in browser environments and
+ * falls back to useEffect when window is unavailable.
+ */
+export const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
 
 /**
  * useInitialExpeditionScroll positions the planner scroll container on initial

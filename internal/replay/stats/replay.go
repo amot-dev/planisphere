@@ -328,4 +328,3 @@ func (accumulator *computeAccumulator) firstLogged(organicEvent *journal.ScanOrg
 	}
 	return reference.CanExpectFirstLogged(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped, parentScan.WasFootfalled), nil
 }
-

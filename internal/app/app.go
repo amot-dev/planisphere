@@ -275,7 +275,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.db, app.dbPath = dbConn, dbPath
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
-	app.watcher.SetDebounceDelay(time.Duration(app.journalDebounceMs()) * time.Millisecond)
+	app.watcher.SetDebounceDelay(time.Duration(settings.JournalDebounceMs(app.db)) * time.Millisecond)
 	app.resolver = edsm.NewResolver(dbConn, func() bool {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
@@ -347,17 +347,20 @@ func (app *App) shutdown(ctx context.Context) {
 func (app *App) isSetupCompleted() bool {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
-	return app.setupCompleted()
+	if app.db == nil {
+		return false
+	}
+	return settings.SetupCompleted(app.db)
 }
 
 func (app *App) startConfiguredWatcher() {
 	watcher, configuredJournalDir := func() (*journal.Watcher, string) {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
-		if app.ctx != nil && app.ctx.Err() != nil {
+		if app.db == nil || (app.ctx != nil && app.ctx.Err() != nil) {
 			return nil, ""
 		}
-		return app.watcher, app.journalDir()
+		return app.watcher, settings.JournalDir(app.db, journal.DefaultJournalDir())
 	}()
 	if watcher != nil {
 		watcher.Start(app.ctx, configuredJournalDir)
@@ -420,39 +423,7 @@ func (app *App) emitEDDProgress(active bool, current, total, files int, stage st
 	})
 }
 
-// journalDir returns the configured or default journal directory. Caller must hold app.dbMu.RLock.
-func (app *App) journalDir() string {
-	return settings.JournalDir(app.db, journal.DefaultJournalDir())
-}
-
-// onlineEnabled reports whether online lookups are enabled. Caller must hold app.dbMu.RLock.
-func (app *App) onlineEnabled() bool {
-	return settings.OnlineLookups(app.db)
-}
-
-// activeExpeditionID returns the currently active expedition ID. Caller must hold app.dbMu.RLock.
-func (app *App) activeExpeditionID() int64 {
-	return settings.ActiveExpeditionID(app.db)
-}
-
-// setupCompleted reports whether initial onboarding setup has finished. Caller must hold app.dbMu.RLock.
-func (app *App) setupCompleted() bool {
-	return settings.SetupCompleted(app.db)
-}
-
-// journalDebounceMs returns the configured or default live journal file-watcher
-// debounce delay in milliseconds, clamped to [MinDebounceDelay, MaxDebounceDelay].
-// Caller must hold app.dbMu.RLock or app.dbMu.Lock.
-func (app *App) journalDebounceMs() int {
-	return settings.JournalDebounceMs(app.db)
-}
-
-// tritiumPricePerTonne returns the configured or default Tritium cost in credits
-// per tonne. Caller must hold app.dbMu.RLock or app.dbMu.Lock.
-func (app *App) tritiumPricePerTonne() int64 {
-	return settings.TritiumPricePerTonne(app.db)
-}
-
+// These database path helpers keep internal/core/db imports isolated to app.go.
 func (app *App) defaultDatabasePath() (string, error) {
 	return db.DefaultPath()
 }

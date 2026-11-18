@@ -516,4 +516,3 @@ func TestRealizationCrewWageWindowAndBinarySearchBounds(testingContext *testing.
 		testingContext.Errorf("expected NpcCrewLoss 30,000 from wage events within 5-second window, got %d", breakdown.NpcCrewLoss)
 	}
 }
-
