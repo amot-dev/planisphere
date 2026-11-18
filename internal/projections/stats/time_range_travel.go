@@ -11,8 +11,6 @@ import (
 
 var timeRangeTravelAppEvents = events.NewAppSet(
 	events.AppCommanderFilterChanged,
-	events.AppModesChanged,
-	events.AppExpeditionBoundsChanged,
 	events.AppDatabaseSwitched,
 )
 
@@ -40,7 +38,7 @@ func NewTimeRangeTravel(
 		database:       dbConn,
 		recoveredJumps: recoveredJumps,
 		modeLoader:     modeLoader,
-		entries:        projection.NewKeyedCache[string, TravelMetrics](bus, "TimeRangeTravel", triggers),
+		entries:        newTimeRangeDomainCache[TravelMetrics](bus, "TimeRangeTravel", triggers),
 	}
 }
 

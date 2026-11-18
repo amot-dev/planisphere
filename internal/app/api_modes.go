@@ -106,7 +106,7 @@ func (app *App) DeleteMode(id int64) error {
 	}); deleteError != nil {
 		return deleteError
 	}
-	app.publishApp("modes", 0, events.AppModesChanged)
+	app.publishApp("modes", 0, events.AppModesChanged, events.AppModeWindowsChanged)
 	return nil
 }
 
@@ -117,7 +117,6 @@ func (app *App) SwitchMode(modeID int64) (ModesState, error) {
 	}); switchError != nil {
 		return ModesState{}, switchError
 	}
-	app.publishApp("modes", 0, events.AppModesChanged)
+	app.publishApp("modes", 0, events.AppModesChanged, events.AppModeWindowsChanged)
 	return app.GetModesState()
 }
-

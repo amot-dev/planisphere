@@ -239,7 +239,7 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 		if rowItem.SystemName != "" {
 			app.resolveRowAsync(rowItem, true)
 		}
-		app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+		app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 		return nil
 	}
 	app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
@@ -262,7 +262,7 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 	}(); err != nil {
 		return err
 	}
-	app.publishApp("modes", expeditionID, events.AppModesChanged)
+	app.publishApp("modes", expeditionID, events.AppModesChanged, events.AppModeWindowsChanged)
 	return nil
 }
 
@@ -303,7 +303,7 @@ func (app *App) DeleteRow(rowID int64) error {
 		return err
 	}
 	app.reevaluate(expeditionID)
-	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -330,7 +330,7 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 	}
 	if rowItem.RowType == expedition.RowWaypoint {
 		app.reevaluate(expeditionID)
-		app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+		app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
 		return nil
 	}
 	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
@@ -339,10 +339,10 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 
 // RegionOptions is the prioritised region dropdown content.
 type RegionOptions struct {
-	AnchorID          int               `json:"anchorId"`
-	AnchorName        string            `json:"anchorName"`
-	AnchorIsDefault   bool              `json:"anchorIsDefault"`
-	SuggestedRegionID int               `json:"suggestedRegionId"` // region of the next waypoint's coordinates
+	AnchorID          int                      `json:"anchorId"`
+	AnchorName        string                   `json:"anchorName"`
+	AnchorIsDefault   bool                     `json:"anchorIsDefault"`
+	SuggestedRegionID int                      `json:"suggestedRegionId"` // region of the next waypoint's coordinates
 	Options           []reference.RegionOption `json:"options"`
 }
 
@@ -459,4 +459,3 @@ func (app *App) GetWaypointDetails(rowID int64) (expedition.WaypointDetails, err
 	}
 	return expedition.Details(app.db, rowID, app.expeditionProjections())
 }
-

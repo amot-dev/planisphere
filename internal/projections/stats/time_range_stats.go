@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
@@ -117,6 +118,24 @@ func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (
 		Metrics:     combinedMetrics,
 		Realization: realizationBreakdown,
 	}, nil
+}
+
+// newTimeRangeDomainCache registers standard triggers for a time-window cache
+// and narrows AppModeWindowsChanged invalidation to mode-filtered keys.
+func newTimeRangeDomainCache[V any](
+	bus *projection.Bus,
+	projectionName string,
+	triggers projection.Triggers,
+) *projection.KeyedCache[string, V] {
+	entries := projection.NewKeyedCache[string, V](bus, projectionName, triggers)
+	if bus != nil {
+		bus.OnTrigger(projection.Triggers{App: events.NewAppSet(events.AppModeWindowsChanged)}, func(_ projection.Triggers) {
+			entries.InvalidateWhere(func(cacheKey string) bool {
+				return !strings.HasSuffix(cacheKey, "|all")
+			})
+		})
+	}
+	return entries
 }
 
 func buildTravelStatsKey(timeRange Range, filter *Filter) string {

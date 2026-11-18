@@ -51,6 +51,20 @@ func (cache *KeyedCache[K, V]) Invalidate() {
 	cache.mu.Unlock()
 }
 
+// InvalidateWhere drops cached entries matching predicate (or all entries when
+// predicate is nil) and increments the generation counter so concurrent loads
+// cannot write stale results back.
+func (cache *KeyedCache[K, V]) InvalidateWhere(predicate func(K) bool) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	for key := range cache.entries {
+		if predicate == nil || predicate(key) {
+			delete(cache.entries, key)
+		}
+	}
+	cache.generation++
+}
+
 // Len returns the number of entries currently cached.
 func (cache *KeyedCache[K, V]) Len() int {
 	cache.mu.Lock()
@@ -147,4 +161,3 @@ func (cache *KeyedCache[K, V]) GetManyOrLoad(
 	}
 	return results, nil
 }
-

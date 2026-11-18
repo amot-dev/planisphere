@@ -359,7 +359,7 @@ func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist tritium price setting: %w", saveError)
 	}
-	app.publishApp("settings", 0, events.AppSettingsChanged)
+	app.publishApp("settings", 0, events.AppSettingsChanged, events.AppAdjustmentsChanged)
 	return app.GetSettings()
 }
 

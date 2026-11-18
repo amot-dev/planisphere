@@ -11,8 +11,6 @@ import (
 
 var timeRangeRealizationAppEvents = events.NewAppSet(
 	events.AppCommanderFilterChanged,
-	events.AppModesChanged,
-	events.AppExpeditionBoundsChanged,
 	events.AppDatabaseSwitched,
 )
 
@@ -40,7 +38,7 @@ func NewTimeRangeRealization(
 		database:    dbConn,
 		salesLedger: salesLedger,
 		modeLoader:  modeLoader,
-		entries:     projection.NewKeyedCache[string, RealizationBreakdown](bus, "TimeRangeRealization", triggers),
+		entries:     newTimeRangeDomainCache[RealizationBreakdown](bus, "TimeRangeRealization", triggers),
 	}
 }
 

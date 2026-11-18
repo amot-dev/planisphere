@@ -459,8 +459,12 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	expeditionID := createAndStartExpedition(testingContext, testApp, "Generation Test", "Sol")
 
-	if _, statsErr := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsErr != nil {
-		testingContext.Fatalf("GetSidebarStats: %v", statsErr)
+	modeFilter := stats.Filter{
+		Enabled: true,
+		Modes:   []stats.ModeSelection{{ModeID: 0, Travel: true, Discovery: true}},
+	}
+	if _, statsError := testApp.GetSidebarStats(expeditionID, modeFilter); statsError != nil {
+		testingContext.Fatalf("GetSidebarStats: %v", statsError)
 	}
 	if _, carrierErr := testApp.carrierState.LatestStats(); carrierErr != nil {
 		testingContext.Fatalf("LatestStats: %v", carrierErr)
@@ -477,20 +481,38 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 		testingContext.Fatalf("expected single-value projections to be valid after warmup")
 	}
 
-	// AppExpeditionBoundsChanged selectively clears TimeRangeStats while preserving lifetime and carrier projections.
-	testApp.publishApp("plan", expeditionID, events.AppExpeditionBoundsChanged)
+	// AppExpeditionBoundsChanged and AppModesChanged preserve TimeRangeStats while keeping lifetime and carrier projections valid.
+	testApp.publishApp("plan", expeditionID, events.AppExpeditionBoundsChanged, events.AppModesChanged)
 
-	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+1 {
-		testingContext.Errorf("expected timeRangeStats generation %d, got %d", initialTimeRangeGen+1, testApp.timeRangeStats.Generation())
+	if testApp.timeRangeStats.Generation() != initialTimeRangeGen {
+		testingContext.Errorf("expected timeRangeStats generation %d after AppExpeditionBoundsChanged and AppModesChanged, got %d",
+			initialTimeRangeGen, testApp.timeRangeStats.Generation())
 	}
-	if testApp.timeRangeStats.CachedCount() != 0 {
-		testingContext.Errorf("expected timeRangeStats cache to be empty after AppExpeditionBoundsChanged, got %d", testApp.timeRangeStats.CachedCount())
+	if testApp.timeRangeStats.CachedCount() == 0 {
+		testingContext.Errorf("expected timeRangeStats cache to remain populated after AppExpeditionBoundsChanged and AppModesChanged")
 	}
 	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
-		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionBoundsChanged")
+		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionBoundsChanged and AppModesChanged")
 	}
 	if testApp.careerStats.Generation() != initialCareerGen || !testApp.careerStats.IsValid() {
-		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionBoundsChanged")
+		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionBoundsChanged and AppModesChanged")
+	}
+
+	// AppModeWindowsChanged clears mode-filtered TimeRangeStats entries while preserving lifetime and carrier projections.
+	testApp.publishApp("modes", 0, events.AppModeWindowsChanged)
+
+	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+1 {
+		testingContext.Errorf("expected timeRangeStats generation %d after AppModeWindowsChanged, got %d",
+			initialTimeRangeGen+1, testApp.timeRangeStats.Generation())
+	}
+	if testApp.timeRangeStats.CachedCount() != 0 {
+		testingContext.Errorf("expected timeRangeStats cache to be empty after AppModeWindowsChanged, got %d", testApp.timeRangeStats.CachedCount())
+	}
+	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
+		testingContext.Errorf("expected carrierState to remain valid across AppModeWindowsChanged")
+	}
+	if testApp.careerStats.Generation() != initialCareerGen || !testApp.careerStats.IsValid() {
+		testingContext.Errorf("expected careerStats to remain valid across AppModeWindowsChanged")
 	}
 
 	// Re-warm timeRangeStats, then publish AppDatabaseSwitched to invalidate every projection.

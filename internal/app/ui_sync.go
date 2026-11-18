@@ -47,18 +47,18 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetStats,
 		projection.TriggersFrom(app.careerStats, app.timeRangeStats).
-			WithJournal(journal.EventCommander, journal.EventLoadGame).
-			WithApp(events.AppAdjustmentsChanged, events.AppSettingsChanged),
+			WithJournal(journal.EventCommander).
+			WithApp(events.AppAdjustmentsChanged, events.AppExpeditionBoundsChanged, events.AppModeWindowsChanged),
 	)
 	bus.SubscribeUI(
 		events.UITargetPlan,
 		projection.TriggersFrom(app.systemArrivals, app.systemVisitCounts, app.shipHistory).
-			WithApp(events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppModesChanged),
+			WithApp(events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppModeWindowsChanged),
 	)
 	bus.SubscribeUI(
 		events.UITargetModes,
 		projection.Triggers{
-			App: events.NewAppSet(events.AppModesChanged, events.AppDatabaseSwitched),
+			App: events.NewAppSet(events.AppModesChanged, events.AppModeWindowsChanged, events.AppDatabaseSwitched),
 		},
 	)
 	bus.SubscribeUI(
@@ -75,7 +75,7 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetSettings,
 		projection.Triggers{
-			Journal: journal.NewEventSet(journal.EventCommander, journal.EventLoadGame),
+			Journal: journal.NewEventSet(journal.EventCommander),
 			App:     events.NewAppSet(events.AppSettingsChanged, events.AppCommanderFilterChanged, events.AppDatabaseSwitched),
 		},
 	)
@@ -136,4 +136,3 @@ func (app *App) publishApp(scope string, expeditionID int64, appEvents ...events
 	}
 	app.emitDataChanged(scope, expeditionID, targets)
 }
-

@@ -11,6 +11,7 @@ type AppEvent uint8
 const (
 	AppCommanderFilterChanged AppEvent = iota
 	AppModesChanged
+	AppModeWindowsChanged
 	AppExpeditionPlanChanged
 	AppExpeditionBoundsChanged
 	AppAdjustmentsChanged
@@ -22,6 +23,7 @@ const (
 var appEventNames = [appEventCount]string{
 	AppCommanderFilterChanged:  "CommanderFilterChanged",
 	AppModesChanged:            "ModesChanged",
+	AppModeWindowsChanged:      "ModeWindowsChanged",
 	AppExpeditionPlanChanged:   "ExpeditionPlanChanged",
 	AppExpeditionBoundsChanged: "ExpeditionBoundsChanged",
 	AppAdjustmentsChanged:      "AdjustmentsChanged",
@@ -193,4 +195,3 @@ func (targetSet UITargetSet) Names() []string {
 	}
 	return resolvedNames
 }
-

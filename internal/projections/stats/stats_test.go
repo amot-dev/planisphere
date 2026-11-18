@@ -173,11 +173,15 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 		testingContext.Fatalf("expected cached BodiesScanned=1 before invalidation, got %d", cachedSummary.Metrics.BodiesScanned)
 	}
 
-	// Publishing AppModesChanged clears TimeRangeStats even without raw journal changes.
-	eventBus.PublishApp(events.AppModesChanged)
-	afterModeInvalidation, _ := timeRangeStats.Compute(timeRange, nil)
-	if afterModeInvalidation.Metrics.BodiesScanned != 2 {
-		testingContext.Fatalf("expected refreshed BodiesScanned=2 after AppModesChanged, got %d", afterModeInvalidation.Metrics.BodiesScanned)
+	// Publishing AppModesChanged and AppExpeditionBoundsChanged preserves TimeRangeStats caches.
+	eventBus.PublishApp(events.AppModesChanged, events.AppExpeditionBoundsChanged)
+	if timeRangeStats.Generation() != initialRangeGeneration || timeRangeStats.CachedCount() != 1 {
+		testingContext.Fatalf("expected AppModesChanged and AppExpeditionBoundsChanged to preserve TimeRangeStats (gen=%d->%d, count=%d)",
+			initialRangeGeneration, timeRangeStats.Generation(), timeRangeStats.CachedCount())
+	}
+	preservedSummary, preservedError := timeRangeStats.Compute(timeRange, nil)
+	if preservedError != nil || preservedSummary.Metrics.BodiesScanned != 1 {
+		testingContext.Fatalf("expected preserved cached BodiesScanned=1, got %d (err=%v)", preservedSummary.Metrics.BodiesScanned, preservedError)
 	}
 
 	// Insert third scan and publish EventScan: only Cartographics and Realization invalidate; Travel, CarrierOps, and Exobiology stay valid.
@@ -199,6 +203,39 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 		testingContext.Fatalf("expected refreshed BodiesScanned=3 after EventScan, got %d", afterScanInvalidation.Metrics.BodiesScanned)
 	}
 	_, _ = careerStats.Get()
+
+	// Warm a mode-filtered entry alongside the unfiltered entry, then verify AppModeWindowsChanged
+	// invalidates only the mode-filtered cache while preserving the unfiltered "|all" cache.
+	modeFilter := &stats.Filter{
+		Enabled: true,
+		Modes:   []stats.ModeSelection{{ModeID: modes.DefaultFallbackModeID(databaseConnection), Travel: true, Discovery: true}},
+	}
+	filteredBeforeWindowChange, filteredBeforeError := timeRangeStats.Compute(timeRange, modeFilter)
+	if filteredBeforeError != nil || filteredBeforeWindowChange.Metrics.BodiesScanned != 3 {
+		testingContext.Fatalf("expected mode-filtered BodiesScanned=3 before invalidation, got %d (err=%v)",
+			filteredBeforeWindowChange.Metrics.BodiesScanned, filteredBeforeError)
+	}
+	if timeRangeStats.CachedCount() != 2 {
+		testingContext.Fatalf("expected 2 cached entries (unfiltered and filtered), got %d", timeRangeStats.CachedCount())
+	}
+
+	ingestTestLine(testingContext, databaseConnection,
+		`{"timestamp":"2026-01-18T19:40:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":4,"BodyName":"RangeSys 4","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	eventBus.PublishApp(events.AppModeWindowsChanged)
+
+	if timeRangeStats.CachedCount() != 1 {
+		testingContext.Fatalf("expected AppModeWindowsChanged to drop CachedCount from 2 to 1, got %d", timeRangeStats.CachedCount())
+	}
+	preservedUnfilteredSummary, preservedUnfilteredError := timeRangeStats.Compute(timeRange, nil)
+	if preservedUnfilteredError != nil || preservedUnfilteredSummary.Metrics.BodiesScanned != 3 {
+		testingContext.Fatalf("expected unfiltered cache to stay at BodiesScanned=3, got %d (err=%v)",
+			preservedUnfilteredSummary.Metrics.BodiesScanned, preservedUnfilteredError)
+	}
+	refreshedFilteredSummary, refreshedFilteredError := timeRangeStats.Compute(timeRange, modeFilter)
+	if refreshedFilteredError != nil || refreshedFilteredSummary.Metrics.BodiesScanned != 4 {
+		testingContext.Fatalf("expected mode-filtered BodiesScanned=4 after AppModeWindowsChanged, got %d (err=%v)",
+			refreshedFilteredSummary.Metrics.BodiesScanned, refreshedFilteredError)
+	}
 }
 
 func TestRealizationLedgerCaching(testingContext *testing.T) {

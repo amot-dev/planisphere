@@ -11,8 +11,6 @@ import (
 
 var timeRangeExobiologyAppEvents = events.NewAppSet(
 	events.AppCommanderFilterChanged,
-	events.AppModesChanged,
-	events.AppExpeditionBoundsChanged,
 	events.AppDatabaseSwitched,
 )
 
@@ -40,7 +38,7 @@ func NewTimeRangeExobiology(
 		database:    dbConn,
 		salesLedger: salesLedger,
 		modeLoader:  modeLoader,
-		entries:     projection.NewKeyedCache[string, ExobiologyMetrics](bus, "TimeRangeExobiology", triggers),
+		entries:     newTimeRangeDomainCache[ExobiologyMetrics](bus, "TimeRangeExobiology", triggers),
 	}
 }
 

@@ -10,8 +10,6 @@ import (
 
 var timeRangeCartographicsAppEvents = events.NewAppSet(
 	events.AppCommanderFilterChanged,
-	events.AppModesChanged,
-	events.AppExpeditionBoundsChanged,
 	events.AppDatabaseSwitched,
 )
 
@@ -36,7 +34,7 @@ func NewTimeRangeCartographics(
 	return &TimeRangeCartographics{
 		database:   dbConn,
 		modeLoader: modeLoader,
-		entries:    projection.NewKeyedCache[string, CartographicsMetrics](bus, "TimeRangeCartographics", triggers),
+		entries:    newTimeRangeDomainCache[CartographicsMetrics](bus, "TimeRangeCartographics", triggers),
 	}
 }
 

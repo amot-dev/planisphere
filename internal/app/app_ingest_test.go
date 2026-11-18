@@ -165,8 +165,19 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("CompleteExpedition: %v", completeError)
 	}
 	sizeAfterComplete := testApp.timeRangeStats.CachedCount()
-	if sizeAfterComplete != 0 {
-		testingContext.Fatalf("expected CompleteExpedition to invalidate timeRangeStats, got %d entries", sizeAfterComplete)
+	if sizeAfterComplete != 2 {
+		testingContext.Fatalf("expected CompleteExpedition to preserve prior cached windows, got %d entries", sizeAfterComplete)
+	}
+
+	completedSidebar, completedSidebarError := testApp.GetSidebarStats(expeditionID, stats.Filter{})
+	if completedSidebarError != nil {
+		testingContext.Fatalf("GetSidebarStats completed: %v", completedSidebarError)
+	}
+	if completedSidebar.EndIsNow {
+		testingContext.Fatalf("expected completed expedition sidebar EndIsNow=false")
+	}
+	sizeAfterCompletedQuery := testApp.timeRangeStats.CachedCount()
+	if sizeAfterCompletedQuery != 3 {
+		testingContext.Fatalf("expected completed bounds query to cache new entry alongside prior 2 windows, got %d entries", sizeAfterCompletedQuery)
 	}
 }
-
