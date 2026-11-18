@@ -74,6 +74,7 @@ type computeAccumulator struct {
 	realizationLedger       *realization.Ledger
 	realizationLedgerLoaded bool
 	scans                   map[bodyKey]*journal.ScanEvent
+	chronologicalScans      map[bodyKey][]*journal.ScanEvent
 	missingScans            map[bodyKey]bool
 	scannedBodies           map[bodyKey]bool
 	mappedBodies            map[bodyKey]bool
@@ -284,7 +285,20 @@ func (accumulator *computeAccumulator) processOrganic(rowItem replay.Row, metric
 	return nil
 }
 
+func latestScanAtOrBefore(bodyScans []*journal.ScanEvent, sampleTimestamp string) *journal.ScanEvent {
+	var matchedScan *journal.ScanEvent
+	for _, candidate := range bodyScans {
+		if candidate.Timestamp == "" || candidate.Timestamp <= sampleTimestamp {
+			matchedScan = candidate
+		}
+	}
+	return matchedScan
+}
+
 func (accumulator *computeAccumulator) resolveParentScan(key bodyKey, timestamp string) (*journal.ScanEvent, error) {
+	if accumulator.chronologicalScans != nil {
+		return latestScanAtOrBefore(accumulator.chronologicalScans[key], timestamp), nil
+	}
 	parentScan := accumulator.scans[key]
 	if parentScan != nil || accumulator.missingScans[key] {
 		return parentScan, nil

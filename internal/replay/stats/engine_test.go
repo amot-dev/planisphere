@@ -316,6 +316,55 @@ func TestComputeRecoversDisconnectedJumpsAcrossRangeAndFilter(testingContext *te
 	}
 }
 
+func TestComputeExobiologyChronologicalScanResolution(testingContext *testing.T) {
+	testCases := []struct {
+		name           string
+		journalLines   []string
+		wantSamples    int
+		wantFirstLog   int
+		wantValueTotal int64
+	}{
+		{
+			name: "revisit footfall flips after initial unfootfalled scan",
+			journalLines: []string{
+				`{"timestamp":"2026-06-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RevisitSys","SystemAddress":8001,"BodyID":1,"BodyName":"RevisitSys 1","PlanetClass":"Rocky body","MassEM":0.2,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`,
+				`{"timestamp":"2026-06-01T10:05:00Z","event":"ScanOrganic","ScanType":"Log","Genus":"$Codex_Ent_Bacterial_Genus_Name;","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","SystemAddress":8001,"Body":1}`,
+				`{"timestamp":"2026-06-01T10:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Bacterial_Genus_Name;","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","SystemAddress":8001,"Body":1}`,
+				`{"timestamp":"2026-06-05T12:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RevisitSys","SystemAddress":8001,"BodyID":1,"BodyName":"RevisitSys 1","PlanetClass":"Rocky body","MassEM":0.2,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`,
+				`{"timestamp":"2026-06-05T12:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Stratum_Genus_Name;","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","SystemAddress":8001,"Body":1}`,
+			},
+			wantSamples:    2,
+			wantFirstLog:   1,
+			wantValueTotal: 5000000 + 19010800,
+		},
+		{
+			name: "delayed autoscan after first organic analysis",
+			journalLines: []string{
+				`{"timestamp":"2026-06-02T10:05:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Bacterial_Genus_Name;","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","SystemAddress":8002,"Body":2}`,
+				`{"timestamp":"2026-06-02T10:10:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DelaySys","SystemAddress":8002,"BodyID":2,"BodyName":"DelaySys 2","PlanetClass":"Rocky body","MassEM":0.2,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`,
+				`{"timestamp":"2026-06-02T10:15:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Stratum_Genus_Name;","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","SystemAddress":8002,"Body":2}`,
+			},
+			wantSamples:    2,
+			wantFirstLog:   1,
+			wantValueTotal: 1000000 + 95054000,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testingContext.Run(testCase.name, func(subTest *testing.T) {
+			databaseConnection := seedStatsDBFromLines(subTest, testCase.journalLines)
+			engineInstance := newEngineWithModes(databaseConnection)
+			exobiologyMetrics, computeError := engineInstance.ComputeExobiology(stats.Range{}, nil)
+			if computeError != nil {
+				subTest.Fatalf("ComputeExobiology failed: %v", computeError)
+			}
+			if exobiologyMetrics.OrganicSamples != testCase.wantSamples || exobiologyMetrics.FirstLogged != testCase.wantFirstLog || exobiologyMetrics.OrganicValueTotal != testCase.wantValueTotal {
+				subTest.Fatalf("got %+v, want OrganicSamples=%d FirstLogged=%d OrganicValueTotal=%d",
+					exobiologyMetrics, testCase.wantSamples, testCase.wantFirstLog, testCase.wantValueTotal)
+			}
+		})
+	}
+}
 
 func newEngineWithModes(queryer db.Queryer) *stats.Engine {
 	return stats.NewEngineWithSources(queryer, nil, nil, modes.LoadModeLookup)

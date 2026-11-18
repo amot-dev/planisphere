@@ -114,7 +114,55 @@ func (engine *Engine) preloadScans(keys []bodyKey, untilTimestamp string) (map[b
 	return result, nil
 }
 
+// preloadChronologicalScans batch-loads all Scan events for multiple bodies in chronological
+// order, chunked to avoid SQLite parameter limits and N+1 queries.
+func (engine *Engine) preloadChronologicalScans(keys []bodyKey, untilTimestamp string) (map[bodyKey][]*journal.ScanEvent, error) {
+	if len(keys) == 0 {
+		return map[bodyKey][]*journal.ScanEvent{}, nil
+	}
+	scansByBody := make(map[bodyKey][]*journal.ScanEvent, len(keys))
+	chunkSize := 200
+	for startIndex := 0; startIndex < len(keys); startIndex += chunkSize {
+		endIndex := min(startIndex+chunkSize, len(keys))
+		if chunkError := engine.preloadChronologicalScanChunk(keys[startIndex:endIndex], untilTimestamp, scansByBody); chunkError != nil {
+			return nil, chunkError
+		}
+	}
+	return scansByBody, nil
+}
+
 func (engine *Engine) preloadScanChunk(chunk []bodyKey, untilTimestamp string, result map[bodyKey]*journal.ScanEvent) error {
+	return engine.queryBodyScanChunk(chunk, untilTimestamp, func(conditionsSQL string) string {
+		return `SELECT system_address, body_id, raw_json FROM (
+			SELECT system_address, body_id, raw_json,
+			       ROW_NUMBER() OVER (PARTITION BY system_address, body_id ORDER BY timestamp DESC) as rn
+			FROM journal_events
+			WHERE +event = 'Scan' AND timestamp <= ? AND ` + replay.CmdrFilterSQL + `
+			  AND (` + conditionsSQL + `)
+		) WHERE rn = 1`
+	}, func(key bodyKey, scanEvent *journal.ScanEvent) {
+		result[key] = scanEvent
+	})
+}
+
+func (engine *Engine) preloadChronologicalScanChunk(chunk []bodyKey, untilTimestamp string, scansByBody map[bodyKey][]*journal.ScanEvent) error {
+	return engine.queryBodyScanChunk(chunk, untilTimestamp, func(conditionsSQL string) string {
+		return `SELECT system_address, body_id, raw_json
+			FROM journal_events
+			WHERE +event = 'Scan' AND timestamp <= ? AND ` + replay.CmdrFilterSQL + `
+			  AND (` + conditionsSQL + `)
+			ORDER BY timestamp ASC, id ASC`
+	}, func(key bodyKey, scanEvent *journal.ScanEvent) {
+		scansByBody[key] = append(scansByBody[key], scanEvent)
+	})
+}
+
+func (engine *Engine) queryBodyScanChunk(
+	chunk []bodyKey,
+	untilTimestamp string,
+	buildQuery func(conditionsSQL string) string,
+	visitScan func(bodyKey, *journal.ScanEvent),
+) error {
 	conditions := make([]string, 0, len(chunk))
 	args := make([]any, 0, len(chunk)*2+1)
 	args = append(args, untilTimestamp)
@@ -122,15 +170,7 @@ func (engine *Engine) preloadScanChunk(chunk []bodyKey, untilTimestamp string, r
 		conditions = append(conditions, "(system_address = ? AND body_id = ?)")
 		args = append(args, key.systemAddress, key.bodyID)
 	}
-	query := `SELECT system_address, body_id, raw_json FROM (
-		SELECT system_address, body_id, raw_json,
-		       ROW_NUMBER() OVER (PARTITION BY system_address, body_id ORDER BY timestamp DESC) as rn
-		FROM journal_events
-		WHERE +event = 'Scan' AND timestamp <= ? AND ` + replay.CmdrFilterSQL + `
-		  AND (` + strings.Join(conditions, " OR ") + `)
-	) WHERE rn = 1`
-
-	databaseRows, queryError := engine.DB.Query(query, args...)
+	databaseRows, queryError := engine.DB.Query(buildQuery(strings.Join(conditions, " OR ")), args...)
 	if queryError != nil {
 		return fmt.Errorf("query scan chunk: %w", queryError)
 	}
@@ -143,7 +183,7 @@ func (engine *Engine) preloadScanChunk(chunk []bodyKey, untilTimestamp string, r
 		}
 		var scanEvent journal.ScanEvent
 		if json.Unmarshal([]byte(rawJSON), &scanEvent) == nil {
-			result[bodyKey{systemAddress, bodyID}] = &scanEvent
+			visitScan(bodyKey{systemAddress, bodyID}, &scanEvent)
 		}
 	}
 	if iterationError := databaseRows.Err(); iterationError != nil {

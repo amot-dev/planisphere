@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/replay"
@@ -182,19 +183,18 @@ func (engine *Engine) ComputeExobiology(timeRange Range, filter *Filter) (Exobio
 	if preloadPopError := replay.PreloadSystemPopulationsForRows(engine.DB, loadedEvents, until, session); preloadPopError != nil {
 		return ExobiologyMetrics{}, fmt.Errorf("preload exobiology system populations: %w", preloadPopError)
 	}
-	scans, missingScans, preloadScanError := engine.prepareExobiologyScans(until, loadedEvents)
+	chronologicalScans, preloadScanError := engine.prepareExobiologyScans(until, loadedEvents)
 	if preloadScanError != nil {
 		return ExobiologyMetrics{}, fmt.Errorf("prepare exobiology scans: %w", preloadScanError)
 	}
 
 	accumulator := &computeAccumulator{
-		engine:       engine,
-		after:        after,
-		until:        until,
-		filterSet:    filterSet,
-		session:      session,
-		scans:        scans,
-		missingScans: missingScans,
+		engine:             engine,
+		after:              after,
+		until:              until,
+		filterSet:          filterSet,
+		session:            session,
+		chronologicalScans: chronologicalScans,
 	}
 	for _, rowItem := range loadedEvents {
 		if stepError := accumulator.processOrganic(rowItem, &metrics); stepError != nil {
@@ -204,41 +204,30 @@ func (engine *Engine) ComputeExobiology(timeRange Range, filter *Filter) (Exobio
 	return ExtractExobiologyMetrics(metrics), nil
 }
 
-func (engine *Engine) prepareExobiologyScans(
-	untilTimestamp string,
-	loadedEvents []replay.Row,
-) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
-	scans := make(map[bodyKey]*journal.ScanEvent)
-	missingScans := make(map[bodyKey]bool)
-	earliestTimestampByBody := make(map[bodyKey]string)
+func (engine *Engine) prepareExobiologyScans(untilTimestamp string, loadedEvents []replay.Row) (map[bodyKey][]*journal.ScanEvent, error) {
+	seenBodies := make(map[bodyKey]bool)
 	var neededKeys []bodyKey
 	for _, rowItem := range loadedEvents {
-		if rowItem.Type != journal.EventScanOrganic || !rowItem.SystemAddress.Valid || !rowItem.BodyID.Valid {
+		if rowItem.Type != journal.EventScanOrganic {
 			continue
 		}
-		key := bodyKey{rowItem.SystemAddress.Int64, rowItem.BodyID.Int64}
-		if _, seen := earliestTimestampByBody[key]; !seen {
-			earliestTimestampByBody[key] = rowItem.Timestamp
+		var organicEvent journal.ScanOrganicEvent
+		if json.Unmarshal([]byte(rowItem.RawJSON), &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
+			continue
+		}
+		key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}
+		if !seenBodies[key] {
+			seenBodies[key] = true
 			neededKeys = append(neededKeys, key)
 		}
 	}
 	if len(neededKeys) == 0 {
-		return scans, missingScans, nil
+		return map[bodyKey][]*journal.ScanEvent{}, nil
 	}
-	preloaded, preloadError := engine.preloadScans(neededKeys, untilTimestamp)
+	chronologicalScans, preloadError := engine.preloadChronologicalScans(neededKeys, untilTimestamp)
 	if preloadError != nil {
-		return nil, nil, fmt.Errorf("preload exobiology parent scans before %s: %w", untilTimestamp, preloadError)
+		return nil, fmt.Errorf("preload exobiology parent scans before %s: %w", untilTimestamp, preloadError)
 	}
-	for _, key := range neededKeys {
-		scanEvent := preloaded[key]
-		if scanEvent == nil {
-			missingScans[key] = true
-			continue
-		}
-		if scanEvent.Timestamp == "" || scanEvent.Timestamp <= earliestTimestampByBody[key] {
-			scans[key] = scanEvent
-		}
-	}
-	return scans, missingScans, nil
+	return chronologicalScans, nil
 }
 
