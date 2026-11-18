@@ -4,12 +4,18 @@ import { renderToString } from 'react-dom/server'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { PlannerConfirmModal } from './PlannerConfirmModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
+import { PlannerRegionRow } from './PlannerRegionRow'
 import { PlannerRouteTable } from './PlannerRouteTable'
 import { StartExpeditionModal } from './StartExpeditionModal'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { NavigationTelemetrySection } from '../sidebar/NavigationTelemetrySection'
 import { StatsSidebar } from '../sidebar/StatsSidebar'
+import {
+  createCachedRowDropPropsGetter,
+  resolveActiveDragRowIndex,
+  stepDragAutoScroll,
+} from './usePlannerRowDrag'
 import { app, expedition, stats } from '../../../wailsjs/go/models'
 
 describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
@@ -833,6 +839,118 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       createElement(PlannerRouteTable, { ...baseTableProps, isManualCarrierRoute: false }),
     )
     expect(spanshTableHtml).toContain('Locked while Fleet Carrier route to this waypoint is active')
+  })
+
+  it('resolveActiveDragRowIndex locates shifted rows by row.id after route updates and returns -1 when removed', () => {
+    const firstRow = expedition.RowView.createFrom({ row: { id: 101, rowType: 'waypoint', systemName: 'Sol' } })
+    const grabbedRow = expedition.RowView.createFrom({ row: { id: 102, rowType: 'waypoint', systemName: 'Colonia' } })
+    const insertedRow = expedition.RowView.createFrom({ row: { id: 103, rowType: 'waypoint', systemName: 'Rohini' } })
+
+    expect(resolveActiveDragRowIndex([firstRow, grabbedRow], 102)).toBe(1)
+    expect(resolveActiveDragRowIndex([firstRow, null, insertedRow, grabbedRow], 102)).toBe(3)
+    expect(resolveActiveDragRowIndex([firstRow, insertedRow], 102)).toBe(-1)
+    expect(resolveActiveDragRowIndex(null, 102)).toBe(-1)
+    expect(resolveActiveDragRowIndex([firstRow, grabbedRow], null)).toBe(-1)
+  })
+
+  it('stepDragAutoScroll scrolls only inside edge zones and sleeps when delta is zero', () => {
+    const mockContainer = {
+      scrollTop: 150,
+      clientHeight: 400,
+      scrollHeight: 1200,
+      getBoundingClientRect: () => ({ top: 100, bottom: 500 }),
+      querySelector: () => null,
+    } as unknown as HTMLElement
+
+    // Idle middle of viewport does not scroll and stops the animation frame loop.
+    expect(stepDragAutoScroll(mockContainer, 300)).toBe(false)
+    expect(mockContainer.scrollTop).toBe(150)
+
+    // Null cursor also sleeps without modifying scrollTop.
+    expect(stepDragAutoScroll(mockContainer, null)).toBe(false)
+    expect(mockContainer.scrollTop).toBe(150)
+
+    // Top edge zone scrolls upward until hitting scrollTop 0, then sleeps.
+    expect(stepDragAutoScroll(mockContainer, 120)).toBe(true)
+    expect(mockContainer.scrollTop).toBeLessThan(150)
+    mockContainer.scrollTop = 0
+    expect(stepDragAutoScroll(mockContainer, 120)).toBe(false)
+
+    // Bottom edge zone scrolls downward until reaching bottom, then sleeps.
+    mockContainer.scrollTop = 100
+    expect(stepDragAutoScroll(mockContainer, 485)).toBe(true)
+    expect(mockContainer.scrollTop).toBeGreaterThan(100)
+    mockContainer.scrollTop = 800
+    expect(stepDragAutoScroll(mockContainer, 485)).toBe(false)
+  })
+
+  it('createCachedRowDropPropsGetter keeps per-row dropProps references stable across gap hover updates and PlannerRegionRow stays memoized', () => {
+    const dragPlan = expedition.PlanView.createFrom({
+      expedition: { id: 1, status: 'planning' },
+      rows: [
+        { row: { id: 1, rowType: 'waypoint', systemName: 'Sol' }, number: 1 },
+        { row: { id: 2, rowType: 'waypoint', systemName: 'Alpha Centauri' }, number: 2 },
+        { row: { id: 3, rowType: 'waypoint', systemName: 'Colonia' }, number: 3 },
+      ],
+    })
+    const dragOverGapIndexRef = { current: null as number | null }
+    const gapUpdates: Array<number | null> = []
+    const dropMoves: Array<{ fromIndex: number; targetIndex: number }> = []
+    const scrollContainerElement = {
+      getBoundingClientRect: () => ({ top: 0 }),
+    } as unknown as HTMLDivElement
+
+    const getRowDropProps = createCachedRowDropPropsGetter({
+      plan: dragPlan,
+      isPlanning: true,
+      isCompleted: false,
+      lastVisitedIndex: -1,
+      draggedIndex: 0,
+      dragOverGapIndexRef,
+      updateDragOverGapIndex: (gapIndex) => {
+        dragOverGapIndexRef.current = gapIndex
+        gapUpdates.push(gapIndex)
+      },
+      dropSlotGaps: new Set<number>(),
+      activeDropPreviews: null,
+      scrollContainerRef: { current: scrollContainerElement },
+      recordDragOverClientY: () => {},
+      finishDropMove: (fromIndex, targetIndex) => {
+        dropMoves.push({ fromIndex, targetIndex })
+      },
+    })
+
+    const initialRowTwoProps = getRowDropProps(2)
+    expect(getRowDropProps(2)).toBe(initialRowTwoProps)
+
+    let defaultPrevented = false
+    const makeDragEvent = (clientY: number) =>
+      ({
+        clientY,
+        currentTarget: { getBoundingClientRect: () => ({ top: 100, height: 40 }) },
+        dataTransfer: { dropEffect: '' },
+        preventDefault: () => {
+          defaultPrevented = true
+        },
+      }) as unknown as Parameters<typeof initialRowTwoProps.onDragOver>[0]
+
+    // Hovering top half then bottom half of row 2 updates the gap via ref without recreating dropProps.
+    initialRowTwoProps.onDragOver(makeDragEvent(110))
+    expect(defaultPrevented).toBe(true)
+    expect(dragOverGapIndexRef.current).toBe(2)
+    expect(getRowDropProps(2)).toBe(initialRowTwoProps)
+
+    initialRowTwoProps.onDragOver(makeDragEvent(130))
+    expect(dragOverGapIndexRef.current).toBe(3)
+    expect(gapUpdates).toEqual([2, 3])
+    expect(getRowDropProps(2)).toBe(initialRowTwoProps)
+
+    initialRowTwoProps.onDrop(makeDragEvent(130))
+    expect(dropMoves).toEqual([{ fromIndex: 0, targetIndex: 2 }])
+
+    expect((PlannerRegionRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
+    )
   })
 })
 

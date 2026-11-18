@@ -1,4 +1,4 @@
-import type { CSSProperties, DragEvent } from 'react'
+import { useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
 import { expedition, modes } from '../../../wailsjs/go/models'
 import type { NextCarrierStopEntry } from './carrierRouteHelpers'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
@@ -140,6 +140,94 @@ export function PlannerRouteTable({
   onRowDragStart,
   onRowDragEnd,
 }: PlannerRouteTableProps) {
+  const rowViewById = useMemo(() => {
+    const rowMap = new Map<number, expedition.RowView>()
+    for (const item of tableItems) {
+      if (item.kind === 'region' || item.kind === 'waypoint') {
+        rowMap.set(item.rowView.row.id, item.rowView)
+      }
+    }
+    return rowMap
+  }, [tableItems])
+
+  const latestCallbacksRef = useRef({
+    rowViewById,
+    insertMenuAfterId,
+    onSetInsertMenuAfterId,
+    onChangeRegion,
+    onInsert,
+    onDeleteRow,
+    onToggleExpand,
+    onOriginSystemFilledChange,
+    onFieldBlur,
+    onCopySystem,
+    onToggleFcStop,
+    onOverrideFcArrived,
+    onOpenCarrierRoutePrompt,
+    onRowHoldStart,
+    onRowHoldEnd,
+    onRowDragStart,
+    onRowDragEnd,
+  })
+  latestCallbacksRef.current = {
+    rowViewById,
+    insertMenuAfterId,
+    onSetInsertMenuAfterId,
+    onChangeRegion,
+    onInsert,
+    onDeleteRow,
+    onToggleExpand,
+    onOriginSystemFilledChange,
+    onFieldBlur,
+    onCopySystem,
+    onToggleFcStop,
+    onOverrideFcArrived,
+    onOpenCarrierRoutePrompt,
+    onRowHoldStart,
+    onRowHoldEnd,
+    onRowDragStart,
+    onRowDragEnd,
+  }
+
+  // Keep per-row callback identities constant so memoized rows skip unaffected re-renders.
+  const stableRowHandlers = useMemo(
+    () => ({
+      onChangeRegion: (rowId: number, regionId: number) =>
+        latestCallbacksRef.current.onChangeRegion(rowId, regionId),
+      onToggleInsertMenu: (rowId: number) => {
+        const { insertMenuAfterId: openMenuRowId, onSetInsertMenuAfterId: setMenuAfterId } =
+          latestCallbacksRef.current
+        setMenuAfterId(openMenuRowId === rowId ? null : rowId)
+      },
+      onInsert: (afterRowId: number, rowType: 'waypoint' | 'region') =>
+        latestCallbacksRef.current.onInsert(afterRowId, rowType),
+      onDelete: (rowId: number) => {
+        const targetRowView = latestCallbacksRef.current.rowViewById.get(rowId)
+        if (targetRowView) latestCallbacksRef.current.onDeleteRow(targetRowView)
+      },
+      onToggleExpand: (rowId: number) => latestCallbacksRef.current.onToggleExpand(rowId),
+      onOriginSystemFilledChange: (hasSystem: boolean) =>
+        latestCallbacksRef.current.onOriginSystemFilledChange?.(hasSystem),
+      onFieldBlur: (
+        row: expedition.Row,
+        fieldName: 'systemName' | 'poiName' | 'notes',
+        fieldValue: string,
+      ) => latestCallbacksRef.current.onFieldBlur(row, fieldName, fieldValue),
+      onCopySystem: (rowId: number, systemName: string) =>
+        latestCallbacksRef.current.onCopySystem(rowId, systemName),
+      onToggleFcStop: (row: expedition.Row) => latestCallbacksRef.current.onToggleFcStop(row),
+      onOverrideFcArrived: (rowView: expedition.RowView) =>
+        latestCallbacksRef.current.onOverrideFcArrived(rowView),
+      onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) =>
+        latestCallbacksRef.current.onOpenCarrierRoutePrompt(rowIndex, targetRow),
+      onHoldStart: (rowIndex: number) => latestCallbacksRef.current.onRowHoldStart(rowIndex),
+      onHoldEnd: () => latestCallbacksRef.current.onRowHoldEnd(),
+      onDragStart: (rowIndex: number, rowId: number, event: DragEvent) =>
+        latestCallbacksRef.current.onRowDragStart(rowIndex, rowId, event),
+      onDragEnd: () => latestCallbacksRef.current.onRowDragEnd(),
+    }),
+    [],
+  )
   const currentExpedition = plan.expedition
   const totalRows = plan.rows?.length ?? 0
   const heldRowView = heldOrDraggedIndex !== null ? plan.rows?.[heldOrDraggedIndex] : null
@@ -224,16 +312,14 @@ export function PlannerRouteTable({
                 insertMenuOpen={insertMenuAfterId === row.id}
                 rowStyle={rowStyle}
                 dropProps={getRowDropProps(index)}
-                onChangeRegion={onChangeRegion}
-                onToggleInsertMenu={() =>
-                  onSetInsertMenuAfterId(insertMenuAfterId === row.id ? null : row.id)
-                }
-                onInsert={(insertType) => onInsert(row.id, insertType)}
-                onDelete={() => onDeleteRow(rowView)}
-                onHoldStart={() => onRowHoldStart(index)}
-                onHoldEnd={onRowHoldEnd}
-                onDragStart={(event) => onRowDragStart(index, row.id, event)}
-                onDragEnd={onRowDragEnd}
+                onChangeRegion={stableRowHandlers.onChangeRegion}
+                onToggleInsertMenu={stableRowHandlers.onToggleInsertMenu}
+                onInsert={stableRowHandlers.onInsert}
+                onDelete={stableRowHandlers.onDelete}
+                onHoldStart={stableRowHandlers.onHoldStart}
+                onHoldEnd={stableRowHandlers.onHoldEnd}
+                onDragStart={stableRowHandlers.onDragStart}
+                onDragEnd={stableRowHandlers.onDragEnd}
               />
             )
           }
@@ -309,23 +395,23 @@ export function PlannerRouteTable({
               externalLinkEdsm={externalLinkEdsm}
               externalLinkGec={externalLinkGec}
               onOriginSystemFilledChange={
-                rowView.number === 1 ? onOriginSystemFilledChange : undefined
+                rowView.number === 1 && onOriginSystemFilledChange
+                  ? stableRowHandlers.onOriginSystemFilledChange
+                  : undefined
               }
-              onToggleExpand={onToggleExpand}
-              onFieldBlur={onFieldBlur}
-              onCopySystem={onCopySystem}
-              onToggleFcStop={onToggleFcStop}
-              onOverrideFcArrived={onOverrideFcArrived}
-              onOpenCarrierRoutePrompt={onOpenCarrierRoutePrompt}
-              onToggleInsertMenu={(id) =>
-                onSetInsertMenuAfterId(insertMenuAfterId === id ? null : id)
-              }
-              onInsert={onInsert}
-              onDelete={() => onDeleteRow(rowView)}
-              onHoldStart={onRowHoldStart}
-              onHoldEnd={onRowHoldEnd}
-              onDragStart={onRowDragStart}
-              onDragEnd={onRowDragEnd}
+              onToggleExpand={stableRowHandlers.onToggleExpand}
+              onFieldBlur={stableRowHandlers.onFieldBlur}
+              onCopySystem={stableRowHandlers.onCopySystem}
+              onToggleFcStop={stableRowHandlers.onToggleFcStop}
+              onOverrideFcArrived={stableRowHandlers.onOverrideFcArrived}
+              onOpenCarrierRoutePrompt={stableRowHandlers.onOpenCarrierRoutePrompt}
+              onToggleInsertMenu={stableRowHandlers.onToggleInsertMenu}
+              onInsert={stableRowHandlers.onInsert}
+              onDelete={stableRowHandlers.onDelete}
+              onHoldStart={stableRowHandlers.onHoldStart}
+              onHoldEnd={stableRowHandlers.onHoldEnd}
+              onDragStart={stableRowHandlers.onDragStart}
+              onDragEnd={stableRowHandlers.onDragEnd}
             />
           )
         })}
