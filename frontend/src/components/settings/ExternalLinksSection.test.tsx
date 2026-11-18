@@ -9,7 +9,6 @@ describe('ExternalLinksSection', () => {
     const defaultHtml = renderToString(
       createElement(ExternalLinksSection, {
         settings: null,
-        onRefresh: () => {},
         onSetError: () => {},
       }),
     )
@@ -32,7 +31,6 @@ describe('ExternalLinksSection', () => {
     const customHtml = renderToString(
       createElement(ExternalLinksSection, {
         settings: customSettings,
-        onRefresh: () => {},
         onSetError: () => {},
       }),
     )

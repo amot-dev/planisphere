@@ -79,7 +79,6 @@ export function ExpeditionManageModal({
     return runExpeditionAction(async () => {
       await DeleteExpedition(expeditionId)
       setConfirmDeleteId(null)
-      onRefresh()
     })
   }
 

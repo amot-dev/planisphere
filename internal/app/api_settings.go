@@ -326,6 +326,7 @@ func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
 	if enabled {
 		app.spawnBackground(app.maybeRefreshGEC)
 	}
+	app.publishApp("settings", 0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -370,5 +371,6 @@ func (app *App) SetExternalLinks(inaraMode, edsmMode, gecMode string) (Settings,
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist external link settings: %w", saveError)
 	}
+	app.publishApp("settings", 0, events.AppSettingsChanged)
 	return app.GetSettings()
 }

@@ -35,7 +35,6 @@ export default function App() {
     handleSelectExpedition,
     handleQuickSwitchMode,
     refreshAll,
-    refreshPlanAndStats,
     handleRefreshPlan,
     refreshSettings,
   } = useBackendSync()
@@ -130,7 +129,6 @@ export default function App() {
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
             onRefreshPlan={handleRefreshPlan}
-            onRefreshAll={refreshPlanAndStats}
             onBusyChange={setBusyAction}
             onRegisterManualPlotter={handleRegisterManualPlotter}
             onCarrierRouteOpenChange={setCarrierRouteOpen}

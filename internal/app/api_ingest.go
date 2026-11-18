@@ -119,7 +119,7 @@ func (app *App) RefreshGEC() (int, error) {
 		return nil
 	})
 	app.populateMissingPOIs()
-	app.publishApp("plan", 0, events.AppExpeditionPlanChanged)
+	app.publishApp("plan", 0, events.AppExpeditionPlanChanged, events.AppSettingsChanged)
 	return refreshCount, nil
 }
 

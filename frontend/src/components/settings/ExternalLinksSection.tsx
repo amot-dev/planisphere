@@ -91,7 +91,6 @@ function SegmentedLinkRow<ModeValue extends string>({
  */
 export interface ExternalLinksSectionProps {
   settings: app.Settings | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -101,7 +100,6 @@ export interface ExternalLinksSectionProps {
  */
 export function ExternalLinksSection({
   settings,
-  onRefresh,
   onSetError,
 }: ExternalLinksSectionProps) {
   const configuredInara = normalizeBinaryMode(settings?.externalLinkInara)
@@ -153,7 +151,6 @@ export function ExternalLinksSection({
         setEdsmMode(savedEdsm)
         setGecMode(savedGec)
       }
-      onRefresh()
     } catch (saveError) {
       if (currentSequence === requestSequenceRef.current) {
         draftModesRef.current = {

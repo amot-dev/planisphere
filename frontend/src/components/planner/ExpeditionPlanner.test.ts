@@ -20,7 +20,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         onPlanOptimisticUpdate: () => {},
         onOpenStartModal: () => {},
         onRefreshPlan: () => {},
-        onRefreshAll: () => {},
         onBusyChange: () => {},
       }),
     )

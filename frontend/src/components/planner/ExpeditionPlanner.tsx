@@ -46,7 +46,6 @@ export interface ExpeditionPlannerProps {
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
   onOpenStartModal: () => void
   onRefreshPlan: () => void
-  onRefreshAll: () => void
   onBusyChange: (busyMessage: string | null) => void
   onRegisterManualPlotter?: (openManualPlotter: () => void) => void
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
@@ -65,7 +64,6 @@ export function ExpeditionPlanner({
   onPlanOptimisticUpdate,
   onOpenStartModal,
   onRefreshPlan,
-  onRefreshAll,
   onBusyChange,
   onRegisterManualPlotter,
   onCarrierRouteOpenChange,
@@ -153,7 +151,7 @@ export function ExpeditionPlanner({
       'UPDATING CARRIER ARRIVAL',
       'Failed to update carrier arrival',
       () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, fcArrived: arrived })),
-      { optimisticPlan: buildOptimisticFcArrivedPlan(plan, rowId, arrived), onSuccess: onRefreshPlan },
+      { optimisticPlan: buildOptimisticFcArrivedPlan(plan, rowId, arrived) },
     )
   }
 
@@ -228,7 +226,7 @@ export function ExpeditionPlanner({
       'UPDATING FC STOP',
       'Failed to toggle fleet carrier stop',
       () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, fcStop: nextFcStop })),
-      { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop), onSuccess: onRefreshPlan },
+      { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop) },
     )
   }
 
@@ -259,7 +257,7 @@ export function ExpeditionPlanner({
       'UPDATING FLIGHT MODE',
       'Failed to update leg flight mode',
       () => SetLegMode(rowId, modeId),
-      { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId), onSuccess: onRefreshAll },
+      { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId) },
     )
   }
 
@@ -268,7 +266,7 @@ export function ExpeditionPlanner({
       'UPDATING REGION',
       'Failed to update galactic region',
       () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, regionId })),
-      { onSuccess: onRefreshPlan, rollbackOnError: true },
+      { rollbackOnError: true },
     )
   }
 
@@ -279,7 +277,7 @@ export function ExpeditionPlanner({
       rowType === 'region' ? 'ADDING REGION HEADER' : 'ADDING WAYPOINT',
       `Failed to insert ${rowType}`,
       () => AddRow(plan.expedition.id, afterRowId, rowType, DEFAULT_GALACTIC_REGION_ID),
-      { onSuccess: onRefreshPlan, rollbackOnError: true },
+      { rollbackOnError: true },
     )
   }
 
@@ -290,7 +288,7 @@ export function ExpeditionPlanner({
       targetRow?.rowType === 'region' ? 'REMOVING REGION HEADER' : 'REMOVING WAYPOINT',
       'Failed to delete row',
       () => DeleteRow(rowId),
-      { optimisticPlan: buildOptimisticDeletedRowPlan(plan, rowId), onSuccess: onRefreshPlan },
+      { optimisticPlan: buildOptimisticDeletedRowPlan(plan, rowId) },
     )
   }
 
@@ -320,10 +318,10 @@ export function ExpeditionPlanner({
         'REORDERING ROUTE',
         'Failed to reorder route row',
         () => MoveRow(rowId, toIndex),
-        { optimisticPlan: buildOptimisticMovedRowPlan(plan, fromIndex, toIndex), onSuccess: onRefreshPlan },
+        { optimisticPlan: buildOptimisticMovedRowPlan(plan, fromIndex, toIndex) },
       )
     },
-    [onRefreshPlan, plan, runPlanMutation],
+    [plan, runPlanMutation],
   )
 
   const handleMoveRow = useCallback(
@@ -386,7 +384,6 @@ export function ExpeditionPlanner({
             if (shouldCloseSpanshRoute) {
               carrierRoute.handleCancelCarrierRoute()
             }
-            onRefreshPlan()
           },
           rollbackOnError: true,
         },
@@ -396,7 +393,6 @@ export function ExpeditionPlanner({
 
   async function handleLifecycleAction(label: string, actionFunction: () => Promise<void>) {
     await runPlanMutation(label, 'Failed to update expedition lifecycle state', actionFunction, {
-      onSuccess: onRefreshAll,
       rollbackOnError: true,
     })
   }

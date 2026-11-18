@@ -176,7 +176,7 @@ func (app *App) maybeRefreshGEC() {
 	}
 	app.dbMu.RUnlock()
 	app.populateMissingPOIs()
-	app.publishApp("plan", 0, events.AppExpeditionPlanChanged)
+	app.publishApp("plan", 0, events.AppExpeditionPlanChanged, events.AppSettingsChanged)
 }
 
 func (app *App) maybeCatchUpEDD() {

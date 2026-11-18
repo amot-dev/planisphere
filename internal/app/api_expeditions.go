@@ -85,18 +85,41 @@ func (app *App) UpdateExpeditionCarrierConfig(id int64, carrierType string, week
 
 // DeleteExpedition deletes an expedition plan (journal history is kept).
 func (app *App) DeleteExpedition(id int64) error {
+	wasActive := false
+	nextActiveID := int64(0)
 	if deleteError := app.withReadyReadLock(func() error {
-		if err := expedition.Delete(app.db, id); err != nil {
-			return err
+		wasActive = app.activeExpeditionID() == id
+		if expeditionDeleteError := expedition.Delete(app.db, id); expeditionDeleteError != nil {
+			return expeditionDeleteError
 		}
-		if app.activeExpeditionID() == id {
-			_ = settings.SetActiveExpeditionID(app.db, 0)
+		if !wasActive {
+			return nil
+		}
+		remainingExpeditions, listError := expedition.List(app.db)
+		if listError != nil {
+			return listError
+		}
+		if len(remainingExpeditions) > 0 {
+			nextActiveID = remainingExpeditions[0].ID
+		}
+		if setError := settings.SetActiveExpeditionID(app.db, nextActiveID); setError != nil {
+			return setError
 		}
 		return nil
 	}); deleteError != nil {
 		return deleteError
 	}
-	app.publishApp("plan", id, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+	if !wasActive {
+		app.emitDataChanged("expeditions", id, events.NewUITargetSet(events.UITargetExpeditions))
+		return nil
+	}
+	if nextActiveID > 0 {
+		app.kickResolution(nextActiveID, false)
+	}
+	if bus := app.currentBus(); bus != nil {
+		bus.PublishApp(events.AppSettingsChanged)
+	}
+	app.emitDataChanged("expeditions", 0, events.NewUITargetSet(events.UITargetSettings, events.UITargetExpeditions))
 	return nil
 }
 

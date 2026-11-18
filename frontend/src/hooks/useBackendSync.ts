@@ -72,11 +72,6 @@ export function routeDataChangedEvent(
   const currentActive = dispatchContext.currentActiveExpeditionId
   const eventExpeditionId = payload?.expeditionId
 
-  if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
-    dispatchContext.refreshExpeditionListOnly()
-    return
-  }
-
   const domains = payload?.domains
   if (domains && domains.length > 0) {
     const domainSet = new Set(domains)
@@ -84,6 +79,8 @@ export function routeDataChangedEvent(
       dispatchContext.refreshAll()
       return
     }
+    const isTargetActive =
+      !eventExpeditionId || (currentActive > 0 && eventExpeditionId === currentActive)
     if (domainSet.has('ingest')) {
       void dispatchContext.loadIngestStatusOnly()
     }
@@ -93,15 +90,23 @@ export function routeDataChangedEvent(
     if (domainSet.has('modes')) {
       void dispatchContext.loadModesOnly()
     }
-    if (domainSet.has('expeditions')) {
+    if (
+      domainSet.has('expeditions') ||
+      Boolean(eventExpeditionId && currentActive > 0 && !isTargetActive)
+    ) {
       dispatchContext.refreshExpeditionListOnly()
     }
-    if (domainSet.has('plan') && currentActive > 0) {
+    if (domainSet.has('plan') && isTargetActive && currentActive > 0) {
       void dispatchContext.loadPlanOnly(currentActive)
     }
-    if (domainSet.has('stats') && currentActive > 0) {
+    if (domainSet.has('stats') && currentActive > 0 && (isTargetActive || domainSet.has('modes'))) {
       void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
     }
+    return
+  }
+
+  if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
+    dispatchContext.refreshExpeditionListOnly()
     return
   }
 
@@ -222,6 +227,30 @@ export function useBackendSync() {
       console.error('Failed to load modes state:', modesError)
       return null
     }
+  }, [])
+
+  const refreshExpeditionListOnly = useCallback(() => {
+    ListExpeditions()
+      .then((expeditionList) => {
+        const loadedList = expeditionList || []
+        setExpeditions(loadedList)
+        if (
+          activeExpeditionIdRef.current > 0 &&
+          !loadedList.some((expeditionItem) => expeditionItem.id === activeExpeditionIdRef.current)
+        ) {
+          if (loadedList.length > 0) {
+            activeExpeditionIdRef.current = loadedList[0].id
+            setActiveExpeditionId(loadedList[0].id)
+          } else {
+            activeExpeditionIdRef.current = 0
+            setActiveExpeditionId(0)
+            setPlan(null)
+            setSidebarStats(null)
+            setStatsLoading(false)
+          }
+        }
+      })
+      .catch(console.error)
   }, [])
 
   const loadCoreState = useCallback(async (): Promise<{
@@ -436,11 +465,7 @@ export function useBackendSync() {
           bootState: bootStateRef.current,
           currentActiveExpeditionId: activeExpeditionIdRef.current,
           currentFilter: filterRef.current,
-          refreshExpeditionListOnly: () => {
-            ListExpeditions()
-              .then((expeditionList) => expeditionList && setExpeditions(expeditionList))
-              .catch(console.error)
-          },
+          refreshExpeditionListOnly,
           loadIngestStatusOnly,
           loadSettingsOnly,
           loadModesOnly,
@@ -469,6 +494,7 @@ export function useBackendSync() {
     loadSettingsOnly,
     loadStatsOnly,
     refreshAll,
+    refreshExpeditionListOnly,
   ])
 
   const handleSelectExpedition = useCallback(async (selectedExpeditionId: number) => {
@@ -503,13 +529,6 @@ export function useBackendSync() {
     [activeExpeditionId, filter, loadPlanOnly, loadStatsOnly],
   )
 
-  const refreshPlanAndStats = useCallback(() => {
-    if (activeExpeditionIdRef.current > 0) {
-      loadPlanOnly(activeExpeditionIdRef.current)
-      loadStatsOnly(activeExpeditionIdRef.current, filter)
-    }
-  }, [loadPlanOnly, loadStatsOnly, filter])
-
   const handleRefreshPlan = useCallback(() => {
     if (activeExpeditionIdRef.current > 0) {
       loadPlanOnly(activeExpeditionIdRef.current)
@@ -541,7 +560,6 @@ export function useBackendSync() {
     handleSelectExpedition,
     handleQuickSwitchMode,
     refreshAll,
-    refreshPlanAndStats,
     handleRefreshPlan,
     refreshSettings: loadSettingsOnly,
   }

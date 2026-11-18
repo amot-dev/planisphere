@@ -300,7 +300,6 @@ describe.skipIf(!fixturePath || !outputPath)('Live Data Frontend CLI Profiler', 
           onPlanOptimisticUpdate: () => {},
           onOpenStartModal: () => {},
           onRefreshPlan: () => {},
-          onRefreshAll: () => {},
           onBusyChange: () => {},
         }),
       )

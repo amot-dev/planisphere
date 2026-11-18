@@ -96,7 +96,6 @@ export function SettingsModal({
 
       <ExternalLinksSection
         settings={settings}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 

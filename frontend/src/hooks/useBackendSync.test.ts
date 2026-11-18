@@ -217,5 +217,49 @@ describe('routeDataChangedEvent', () => {
     expect(dedupHarness.loadPlanOnly).not.toHaveBeenCalled()
     expect(dedupHarness.loadStatsOnly).not.toHaveBeenCalled()
   })
+
+  it('routes domain updates with an inactive expeditionId without dropping global domains', () => {
+    const {
+      dispatchContext,
+      loadSettingsOnly,
+      refreshExpeditionListOnly,
+      loadPlanOnly,
+      loadStatsOnly,
+      refreshAll,
+    } = createDispatchHarness()
+
+    routeDataChangedEvent(
+      { scope: 'settings', expeditionId: 99, domains: ['settings', 'plan'] },
+      dispatchContext,
+    )
+
+    expect(loadSettingsOnly).toHaveBeenCalledTimes(1)
+    expect(refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
+    expect(loadPlanOnly).not.toHaveBeenCalled()
+    expect(loadStatsOnly).not.toHaveBeenCalled()
+    expect(refreshAll).not.toHaveBeenCalled()
+  })
+
+  it('routes active expedition deletion notifications without reloading stale plan or stats', () => {
+    const {
+      dispatchContext,
+      loadSettingsOnly,
+      refreshExpeditionListOnly,
+      loadPlanOnly,
+      loadStatsOnly,
+      refreshAll,
+    } = createDispatchHarness()
+
+    routeDataChangedEvent(
+      { scope: 'expeditions', expeditionId: 0, domains: ['settings', 'expeditions'] },
+      dispatchContext,
+    )
+
+    expect(loadSettingsOnly).toHaveBeenCalledTimes(1)
+    expect(refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
+    expect(loadPlanOnly).not.toHaveBeenCalled()
+    expect(loadStatsOnly).not.toHaveBeenCalled()
+    expect(refreshAll).not.toHaveBeenCalled()
+  })
 })
 
