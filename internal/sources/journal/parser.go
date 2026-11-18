@@ -20,7 +20,7 @@ import (
 var RelevantEvents map[string]bool
 
 // LocationEvents are the events that place the player in a system.
-var LocationEvents = NewEventSet(EventFSDJump, EventLocation, EventCarrierJump).Names()
+var LocationEvents = EventNames(NewEventSet(EventFSDJump, EventLocation, EventCarrierJump))
 
 // Event is a parsed, persistable journal event.
 type Event struct {
@@ -207,7 +207,7 @@ func shouldPersistRelevantEvent(fields *commonFields) (EventType, bool) {
 	case EventStartJump:
 		return eventType, strings.EqualFold(strings.TrimSpace(fields.JumpType), "Hyperspace")
 	case EventSynthesis:
-		return eventType, FSDSynthesisBoostTier(fields.Name) > 0
+		return eventType, reference.FSDSynthesisBoostTier(fields.Name) > 0
 	default:
 		return eventType, true
 	}
@@ -264,10 +264,11 @@ func ParseLine(line []byte, sourceFile string) (parsedEvent Event, ok bool, pars
 	if normalizeError != nil {
 		return Event{}, false, normalizeError
 	}
+	eventName := EventName(eventType)
 	parsedEvent = Event{
 		Timestamp:     normalizedTimestamp,
 		Type:          eventType,
-		Event:         eventType.String(),
+		Event:         eventName,
 		Commander:     strings.TrimSpace(fields.Commander),
 		FID:           strings.TrimSpace(fields.FID),
 		SystemAddress: fields.SystemAddress,
@@ -277,6 +278,6 @@ func ParseLine(line []byte, sourceFile string) (parsedEvent Event, ok bool, pars
 		Raw:           string(line),
 	}
 	populateParsedEventDetails(&parsedEvent, eventType, &fields)
-	parsedEvent.UID = ComputeUID(normalizedTimestamp, eventType.String(), keyIdentifiers(eventType, &fields, line)...)
+	parsedEvent.UID = ComputeUID(normalizedTimestamp, eventName, keyIdentifiers(eventType, &fields, line)...)
 	return parsedEvent, true, nil
 }

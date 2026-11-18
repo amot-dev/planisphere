@@ -9,26 +9,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"planisphere/internal/reference"
 )
 
-// Bounds and default duration for live journal file event debouncing.
-const (
-	MinDebounceDelay     = 300 * time.Millisecond
-	DefaultDebounceDelay = 2 * time.Second
-	MaxDebounceDelay     = 30 * time.Second
-	reconnectInterval    = 2 * time.Second
-)
-
-// ClampDebounceDelay restricts delay to [MinDebounceDelay, MaxDebounceDelay].
-func ClampDebounceDelay(delay time.Duration) time.Duration {
-	if delay < MinDebounceDelay {
-		return MinDebounceDelay
-	}
-	if delay > MaxDebounceDelay {
-		return MaxDebounceDelay
-	}
-	return delay
-}
+const reconnectInterval = 2 * time.Second
 
 // Watcher tails the journal directory: fsnotify events trigger ingestion of
 // the changed file (debounced).
@@ -47,7 +32,7 @@ type Watcher struct {
 	lastError string
 }
 
-// NewWatcher creates a watcher initialized with DefaultDebounceDelay. onBatch
+// NewWatcher creates a watcher initialized with reference.DefaultDebounceDelay. onBatch
 // is invoked (from the watcher goroutine) after every ingestion pass that
 // inserted new events.
 func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
@@ -56,7 +41,7 @@ func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
 		onBatch:         onBatch,
 		debounceChanged: make(chan struct{}, 1),
 	}
-	watcher.debounceNanos.Store(int64(DefaultDebounceDelay))
+	watcher.debounceNanos.Store(int64(reference.DefaultDebounceDelay))
 	return watcher
 }
 
@@ -64,15 +49,15 @@ func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
 func (watcher *Watcher) DebounceDelay() time.Duration {
 	storedNanos := watcher.debounceNanos.Load()
 	if storedNanos <= 0 {
-		return DefaultDebounceDelay
+		return reference.DefaultDebounceDelay
 	}
-	return ClampDebounceDelay(time.Duration(storedNanos))
+	return reference.ClampDebounceDelay(time.Duration(storedNanos))
 }
 
 // SetDebounceDelay updates the live file-event debounce duration (clamped to
-// [MinDebounceDelay, MaxDebounceDelay]) and reschedules any in-flight timer.
+// [reference.MinDebounceDelay, reference.MaxDebounceDelay]) and reschedules any in-flight timer.
 func (watcher *Watcher) SetDebounceDelay(delay time.Duration) {
-	clampedDelay := ClampDebounceDelay(delay)
+	clampedDelay := reference.ClampDebounceDelay(delay)
 	watcher.debounceNanos.Store(int64(clampedDelay))
 	select {
 	case watcher.debounceChanged <- struct{}{}:
@@ -145,7 +130,7 @@ func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{})
 	var errorChan <-chan error
 
 	tryWatch := func() {
-		if fsWatcher != nil || !DirExists(dir) {
+		if fsWatcher != nil || !dirExists(dir) {
 			return
 		}
 		newWatcher, watcherError := fsnotify.NewWatcher()

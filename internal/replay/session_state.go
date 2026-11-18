@@ -1,4 +1,4 @@
-package projections
+package replay
 
 import (
 	"database/sql"
@@ -10,14 +10,6 @@ import (
 	"planisphere/internal/reference"
 	"planisphere/internal/sources/journal"
 )
-
-// odysseyReleaseTimestamp is the UTC launch date of Elite Dangerous: Odyssey
-// (19 May 2021). When evaluating synthetic or truncated event streams that
-// lack an explicit preceding LoadGame event, timestamps prior to Odyssey's
-// release never apply the +30% Odyssey mapping bonus.
-const odysseyReleaseTimestamp = "2021-05-19T00:00:00Z"
-
-const fleetCarrierStationType = "FleetCarrier"
 
 // SessionState tracks chronological game-session and system metadata across
 // journal events so valuation and realization share identical Odyssey,
@@ -51,7 +43,7 @@ func (state *SessionState) OdysseyAt(timestamp string) bool {
 	if state.hasSeenLoadGame {
 		return state.currentOdyssey
 	}
-	if timestamp != "" && timestamp < odysseyReleaseTimestamp {
+	if timestamp != "" && timestamp < reference.OdysseyReleaseTimestamp {
 		return false
 	}
 	return state.defaultOdyssey
@@ -93,7 +85,7 @@ func (state *SessionState) ApplyLocation(rawJSON string) {
 	}
 	if locationEvent.Docked {
 		state.setFleetCarrierDocked(
-			strings.EqualFold(locationEvent.StationType, fleetCarrierStationType),
+			strings.EqualFold(locationEvent.StationType, reference.FleetCarrierStationType),
 			locationEvent.SystemAddress,
 		)
 		return
@@ -122,7 +114,7 @@ func (state *SessionState) ApplyDocked(rawJSON string) {
 		return
 	}
 	state.setFleetCarrierDocked(
-		strings.EqualFold(dockedEvent.StationType, fleetCarrierStationType),
+		strings.EqualFold(dockedEvent.StationType, reference.FleetCarrierStationType),
 		dockedEvent.SystemAddress,
 	)
 }
@@ -151,7 +143,7 @@ func (state *SessionState) ApplyCarrierJump(rawJSON string) {
 	}
 	if carrierJumpEvent.Docked {
 		state.setFleetCarrierDocked(
-			strings.EqualFold(carrierJumpEvent.StationType, fleetCarrierStationType),
+			strings.EqualFold(carrierJumpEvent.StationType, reference.FleetCarrierStationType),
 			carrierJumpEvent.SystemAddress,
 		)
 	} else if carrierJumpEvent.OnFoot {
@@ -199,7 +191,7 @@ func SeedLoadGameBefore(queryer db.Queryer, afterTimestamp string, state *Sessio
 	}
 	var rawLoadGame string
 	queryError := queryer.QueryRow(`SELECT raw_json FROM journal_events
-		WHERE event = 'LoadGame' AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
+		WHERE event = 'LoadGame' AND timestamp <= ? AND `+CmdrFilterSQL+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`, afterTimestamp).Scan(&rawLoadGame)
 	if queryError == sql.ErrNoRows {
 		return nil
@@ -217,7 +209,7 @@ func SeedLoadGameBefore(queryer db.Queryer, afterTimestamp string, state *Sessio
 func PreloadSystemPopulations(
 	queryer db.Queryer,
 	afterTimestamp string,
-	loadedRows []journal.Row,
+	loadedRows []Row,
 	untilTimestamp string,
 	state *SessionState,
 ) error {
@@ -232,7 +224,7 @@ func PreloadSystemPopulations(
 // does not have an accompanying arrival row in loadedRows.
 func PreloadSystemPopulationsForRows(
 	queryer db.Queryer,
-	loadedRows []journal.Row,
+	loadedRows []Row,
 	untilTimestamp string,
 	state *SessionState,
 ) error {
@@ -250,7 +242,7 @@ func PreloadSystemPopulationsForRows(
 	return nil
 }
 
-func collectUnseenSystemAddresses(loadedRows []journal.Row) []int64 {
+func collectUnseenSystemAddresses(loadedRows []Row) []int64 {
 	seenArrivalSystems := make(map[int64]bool, len(loadedRows)/4)
 	for _, rowItem := range loadedRows {
 		switch rowItem.Type {
@@ -289,7 +281,7 @@ func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestam
 		       ROW_NUMBER() OVER (PARTITION BY system_address ORDER BY timestamp DESC, id DESC) as row_rank
 		FROM journal_events
 		WHERE event IN ('FSDJump', 'Location', 'CarrierJump')
-		  AND timestamp <= ? AND ` + journal.CmdrFilterSQL + `
+		  AND timestamp <= ? AND ` + CmdrFilterSQL + `
 		  AND system_address IN (` + placeholders + `)
 	) WHERE row_rank = 1`
 

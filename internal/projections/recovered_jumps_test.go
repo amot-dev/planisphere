@@ -13,7 +13,9 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/settings"
 )
 
 func openProjectionTestDB(testingContext *testing.T) *sql.DB {
@@ -147,7 +149,7 @@ func TestRecoveredJumpsPositiveAndBoostLifecycle(testingContext *testing.T) {
 	}
 
 	// Disabling the commander and publishing AppCommanderFilterChanged must suppress recovered jumps.
-	if disableError := journal.SetCommanderEnabled(databaseConnection, "CmdrTest", false); disableError != nil {
+	if disableError := settings.SetCommanderEnabled(databaseConnection, "CmdrTest", false); disableError != nil {
 		testingContext.Fatal(disableError)
 	}
 	eventBus.PublishApp(events.AppCommanderFilterChanged)
@@ -202,7 +204,7 @@ func TestRecoveredJumpsRejections(testingContext *testing.T) {
 		testingContext.Fatal(scanError)
 	}
 
-	recovered, recoverError := projections.ComputeRecoveredJumpsInRange(databaseConnection, "", "")
+	recovered, recoverError := replay.ComputeRecoveredJumpsInRange(databaseConnection, "", "")
 	if recoverError != nil {
 		testingContext.Fatalf("ComputeRecoveredJumpsInRange: %v", recoverError)
 	}

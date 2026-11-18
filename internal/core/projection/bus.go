@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"planisphere/internal/core/events"
-	"planisphere/internal/sources/journal"
 )
 
 type triggerSubscription struct {
@@ -99,7 +98,7 @@ func (bus *Bus) Publish(observed Triggers) events.UITargetSet {
 }
 
 // PublishJournal dispatches a set of newly ingested journal events across the bus.
-func (bus *Bus) PublishJournal(journalEvents journal.EventSet) events.UITargetSet {
+func (bus *Bus) PublishJournal(journalEvents events.JournalEventSet) events.UITargetSet {
 	if journalEvents.IsEmpty() {
 		return 0
 	}

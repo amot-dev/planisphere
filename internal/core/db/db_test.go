@@ -3,6 +3,7 @@ package db_test
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,21 @@ import (
 	"planisphere/internal/core/db"
 	"planisphere/internal/version"
 )
+
+func getSettingForTest(queryer db.Queryer, key string) (string, error) {
+	var settingValue string
+	queryError := queryer.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&settingValue)
+	if errors.Is(queryError, sql.ErrNoRows) {
+		return "", nil
+	}
+	return settingValue, queryError
+}
+
+func setSettingForTest(queryer db.Queryer, key, value string) error {
+	_, execError := queryer.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return execError
+}
 
 func TestDefaultPath(t *testing.T) {
 	defaultPath, pathError := db.DefaultPath()
@@ -49,9 +65,9 @@ func TestMigrateIdempotency(t *testing.T) {
 	}
 
 	for _, key := range expectedKeys {
-		settingValue, err := db.GetSetting(dbConn, key)
+		settingValue, err := getSettingForTest(dbConn, key)
 		if err != nil {
-			t.Fatalf("GetSetting(%q): %v", key, err)
+			t.Fatalf("getSettingForTest(%q): %v", key, err)
 		}
 		if settingValue != "1" {
 			t.Errorf("expected setting %q to be '1', got %q", key, settingValue)
@@ -90,7 +106,7 @@ func TestWithTxRollbackOnPanic(t *testing.T) {
 			recoveredPanic = recover()
 		}()
 		_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
-			if setError := db.SetSetting(transaction, "panic_rollback_key", "uncommitted_value"); setError != nil {
+			if setError := setSettingForTest(transaction, "panic_rollback_key", "uncommitted_value"); setError != nil {
 				return setError
 			}
 			panic("simulated panic")
@@ -105,9 +121,9 @@ func TestWithTxRollbackOnPanic(t *testing.T) {
 	}
 
 	// Verify that the uncommitted change was rolled back
-	persistedValue, getSettingError := db.GetSetting(dbConn, "panic_rollback_key")
+	persistedValue, getSettingError := getSettingForTest(dbConn, "panic_rollback_key")
 	if getSettingError != nil {
-		t.Fatalf("GetSetting after panic: %v", getSettingError)
+		t.Fatalf("getSettingForTest after panic: %v", getSettingError)
 	}
 	if persistedValue != "" {
 		t.Fatalf("expected uncommitted setting to be rolled back, got %q", persistedValue)
@@ -115,15 +131,15 @@ func TestWithTxRollbackOnPanic(t *testing.T) {
 
 	// Verify that the connection is not locked and subsequent transactions succeed
 	secondTransactionError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return db.SetSetting(transaction, "panic_rollback_key", "committed_value")
+		return setSettingForTest(transaction, "panic_rollback_key", "committed_value")
 	})
 	if secondTransactionError != nil {
 		t.Fatalf("subsequent WithTx failed: %v", secondTransactionError)
 	}
 
-	finalValue, getFinalSettingError := db.GetSetting(dbConn, "panic_rollback_key")
+	finalValue, getFinalSettingError := getSettingForTest(dbConn, "panic_rollback_key")
 	if getFinalSettingError != nil {
-		t.Fatalf("GetSetting after subsequent transaction: %v", getFinalSettingError)
+		t.Fatalf("getSettingForTest after subsequent transaction: %v", getFinalSettingError)
 	}
 	if finalValue != "committed_value" {
 		t.Fatalf("expected setting to be %q, got %q", "committed_value", finalValue)
@@ -138,7 +154,7 @@ func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
 	if openSourceError != nil {
 		testingContext.Fatalf("Open source DB: %v", openSourceError)
 	}
-	if setError := db.SetSetting(sourceConn, "snapshot_marker", "original_value"); setError != nil {
+	if setError := setSettingForTest(sourceConn, "snapshot_marker", "original_value"); setError != nil {
 		sourceConn.Close()
 		testingContext.Fatalf("SetSetting on source DB: %v", setError)
 	}
@@ -165,17 +181,17 @@ func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
 	if openSnapshotError != nil {
 		testingContext.Fatalf("Open snapshot DB: %v", openSnapshotError)
 	}
-	markerValue, getMarkerError := db.GetSetting(snapshotConn, "snapshot_marker")
+	markerValue, getMarkerError := getSettingForTest(snapshotConn, "snapshot_marker")
 	if getMarkerError != nil {
 		snapshotConn.Close()
-		testingContext.Fatalf("GetSetting on snapshot DB: %v", getMarkerError)
+		testingContext.Fatalf("getSettingForTest on snapshot DB: %v", getMarkerError)
 	}
 	if markerValue != "original_value" {
 		snapshotConn.Close()
 		testingContext.Fatalf("expected snapshot_marker 'original_value', got %q", markerValue)
 	}
 
-	if mutateError := db.SetSetting(snapshotConn, "snapshot_marker", "mutated_in_debug"); mutateError != nil {
+	if mutateError := setSettingForTest(snapshotConn, "snapshot_marker", "mutated_in_debug"); mutateError != nil {
 		snapshotConn.Close()
 		testingContext.Fatalf("mutate snapshot DB: %v", mutateError)
 	}
@@ -227,16 +243,16 @@ func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
 	}
 	defer dbConn.Close()
 
-	lastVersion, versionError := db.GetSetting(dbConn, db.LastAppVersionKey)
+	lastVersion, versionError := getSettingForTest(dbConn, db.LastAppVersionKey)
 	if versionError != nil {
-		testingContext.Fatalf("GetSetting(%q): %v", db.LastAppVersionKey, versionError)
+		testingContext.Fatalf("getSettingForTest(%q): %v", db.LastAppVersionKey, versionError)
 	}
 	if lastVersion != version.Version {
 		testingContext.Fatalf("expected %s to be %q, got %q", db.LastAppVersionKey, version.Version, lastVersion)
 	}
 
 	// Set a known watermark representing when v0.4.0 last ingested journals
-	if setWatermarkError := db.SetSetting(dbConn, db.IngestSchemaWatermarkKey, "2026-05-01T00:00:00Z"); setWatermarkError != nil {
+	if setWatermarkError := setSettingForTest(dbConn, db.IngestSchemaWatermarkKey, "2026-05-01T00:00:00Z"); setWatermarkError != nil {
 		testingContext.Fatalf("SetSetting watermark: %v", setWatermarkError)
 	}
 
@@ -329,9 +345,9 @@ func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
 		testingContext.Errorf("expected surviving SellOrganicData UID to be normalized to canonical hash, got %q", survivingUID)
 	}
 
-	updatedWatermark, getUpdatedWatermarkError := db.GetSetting(dbConn, db.IngestSchemaWatermarkKey)
+	updatedWatermark, getUpdatedWatermarkError := getSettingForTest(dbConn, db.IngestSchemaWatermarkKey)
 	if getUpdatedWatermarkError != nil {
-		testingContext.Fatalf("GetSetting updated watermark: %v", getUpdatedWatermarkError)
+		testingContext.Fatalf("getSettingForTest updated watermark: %v", getUpdatedWatermarkError)
 	}
 	if updatedWatermark != "2099-01-01T00:00:00Z" {
 		testingContext.Errorf("expected watermark to advance to '2099-01-01T00:00:00Z', got %q", updatedWatermark)

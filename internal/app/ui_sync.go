@@ -10,6 +10,7 @@ import (
 	"planisphere/internal/projections/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/modes"
 )
 
 func (app *App) wireProjections(dbConn *sql.DB) {
@@ -17,11 +18,11 @@ func (app *App) wireProjections(dbConn *sql.DB) {
 	app.recoveredJumps = projections.NewRecoveredJumps(dbConn, bus)
 	app.systemArrivals = projections.NewSystemArrivals(dbConn, bus)
 	app.systemVisitCounts = projections.NewSystemVisitCounts(dbConn, bus, app.recoveredJumps)
-	app.shipHistory = projections.NewShipHistory(dbConn, bus, app.recoveredJumps)
+	app.shipHistory = projections.NewShipHistory(dbConn, bus)
 	app.carrierState = projections.NewCarrierState(dbConn, bus)
 	app.salesLedger = realization.NewSalesLedger(dbConn, bus)
 	app.careerStats = stats.NewCareerStats(dbConn, bus, app.salesLedger, app.recoveredJumps)
-	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps)
+	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps, modes.LoadModeLookup)
 
 	bus.OnTrigger(
 		projection.Triggers{

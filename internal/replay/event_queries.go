@@ -1,4 +1,4 @@
-package journal
+package replay
 
 import (
 	"database/sql"
@@ -8,14 +8,15 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
+	"planisphere/internal/sources/journal"
 )
 
-// Row is a persisted journal_events record loaded for downstream projection replay.
+// Row is a persisted journal_events record loaded for replay.
 type Row struct {
 	ID            int64
 	UID           string
 	Timestamp     string
-	Type          EventType
+	Type          journal.EventType
 	Event         string
 	SystemName    string
 	SystemAddress sql.NullInt64
@@ -47,7 +48,7 @@ func scanJournalRow(scanner rowScanner) (Row, error) {
 	if scanError != nil {
 		return Row{}, scanError
 	}
-	if parsedType, knownType := ParseEventType(rowItem.Event); knownType {
+	if parsedType, knownType := journal.ParseEventType(rowItem.Event); knownType {
 		rowItem.Type = parsedType
 	}
 	if starX.Valid && starY.Valid && starZ.Valid {
@@ -66,7 +67,7 @@ func commanderFilterPredicate(queryer db.Queryer) string {
 
 // LoadEvents queries persisted journal events matching eventSet within
 // (afterTimestamp, untilTimestamp] in chronological (timestamp, id) order.
-func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet EventSet) ([]Row, error) {
+func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet journal.EventSet) ([]Row, error) {
 	if eventSet.IsEmpty() {
 		return nil, nil
 	}
@@ -82,7 +83,7 @@ func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, event
 	}
 
 	query := `SELECT id, event_uid, timestamp, event, COALESCE(system_name, ''), system_address, body_id, star_x, star_y, star_z, raw_json
-		FROM journal_events WHERE ` + eventColumn + ` IN (` + eventSet.SQLInClause() + `) AND timestamp > ? AND timestamp <= ?` +
+		FROM journal_events WHERE ` + eventColumn + ` IN (` + journal.FormatSQLInClause(eventSet) + `) AND timestamp > ? AND timestamp <= ?` +
 		commanderFilterPredicate(queryer) + ` ORDER BY timestamp, id`
 
 	rows, queryError := queryer.Query(query, afterTimestamp, untilTimestamp)
@@ -107,12 +108,12 @@ func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, event
 
 // QueryLatestEvent returns the most recent persisted journal event matching eventSet,
 // or nil when no matching event exists for enabled commanders.
-func QueryLatestEvent(queryer db.Queryer, eventSet EventSet) (*Row, error) {
+func QueryLatestEvent(queryer db.Queryer, eventSet journal.EventSet) (*Row, error) {
 	if eventSet.IsEmpty() {
 		return nil, nil
 	}
 	query := `SELECT id, event_uid, timestamp, event, COALESCE(system_name, ''), system_address, body_id, star_x, star_y, star_z, raw_json
-		FROM journal_events WHERE event IN (` + eventSet.SQLInClause() + `)` +
+		FROM journal_events WHERE event IN (` + journal.FormatSQLInClause(eventSet) + `)` +
 		commanderFilterPredicate(queryer) + ` ORDER BY timestamp DESC, id DESC LIMIT 1`
 
 	rowItem, scanError := scanJournalRow(queryer.QueryRow(query))

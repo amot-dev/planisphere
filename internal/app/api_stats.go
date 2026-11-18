@@ -1,9 +1,9 @@
 package app
 
 import (
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
-	"planisphere/internal/sources/journal"
+	"planisphere/internal/replay"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 )
 
@@ -54,6 +54,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	if getExpeditionError != nil {
 		return SidebarStats{}, getExpeditionError
 	}
+	manualAdjustments := expeditionRecord.Adjustments.ToMetrics()
 	sidebar := SidebarStats{
 		ExpeditionID: expeditionRecord.ID,
 		Status:       expeditionRecord.Status,
@@ -61,7 +62,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		Start:        expeditionRecord.StartTimestamp,
 		End:          expeditionRecord.EndTimestamp,
 		FilterActive: filter.Enabled,
-		Adjustments:  expeditionRecord.Adjustments,
+		Adjustments:  manualAdjustments,
 	}
 
 	// Mode filters apply only to the current expedition, never to All Time.
@@ -74,10 +75,10 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	}
 
 	// Career metrics across all ingested journals for active commanders (populated at all times).
-	if careerStart, careerStartGalactic := journal.CareerStart(app.db); careerStart != "" {
+	if careerStart, careerStartGalactic := replay.CareerStart(app.db); careerStart != "" {
 		sidebar.CareerStart = careerStart
 		sidebar.CareerStartGalactic = careerStartGalactic
-		sidebar.CareerDuration = expedition.Elapsed(careerStart, "")
+		sidebar.CareerDuration = reference.Elapsed(careerStart, "")
 	}
 
 	if sidebar.Started {
@@ -88,7 +89,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 			sidebar.EndGalactic = reference.ToGalactic(sidebar.End)
 		}
 		sidebar.StartGalactic = reference.ToGalactic(sidebar.Start)
-		sidebar.Duration = expedition.Elapsed(sidebar.Start, sidebar.End)
+		sidebar.Duration = reference.Elapsed(sidebar.Start, sidebar.End)
 
 		expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
 		expeditionSummary, computeError := app.timeRangeStats.Compute(expeditionRange, &filter)
@@ -98,10 +99,10 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		// Expedition carrier operations (CarrierJumps, CarrierDistanceLy, and TritiumUsed)
 		// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments).
 		sidebar.Live = expeditionSummary.Metrics
-		sidebar.Expedition = expeditionSummary.Metrics.Add(expeditionRecord.Adjustments)
+		sidebar.Expedition = expeditionSummary.Metrics.Add(manualAdjustments)
 		sidebar.Realization = expeditionSummary.Realization
 	} else {
-		sidebar.Expedition = expeditionRecord.Adjustments
+		sidebar.Expedition = manualAdjustments
 	}
 	sidebar.CarrierCost = app.computeExpeditionCarrierCost(expeditionRecord, sidebar.Expedition, sidebar.Started)
 	return sidebar, nil

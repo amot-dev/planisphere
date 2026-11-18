@@ -56,6 +56,41 @@ var shipNames = map[string]string{
 	"lander01":                 "Nomad",
 }
 
+// NonPlayerVesselKeywords identifies non-starship vessel identifiers excluded
+// when tracking active player starships.
+var NonPlayerVesselKeywords = []string{"suit", "buggy", "srv", "fighter", "lander"}
+
+// IsPlayerShip reports whether internalShipName represents a jump-capable player
+// vessel rather than an on-foot suit, SRV, fighter, or ship-launched lander.
+func IsPlayerShip(internalShipName string) bool {
+	trimmedName := strings.TrimSpace(internalShipName)
+	if trimmedName == "" {
+		return false
+	}
+	lowercaseName := strings.ToLower(trimmedName)
+	for _, keyword := range NonPlayerVesselKeywords {
+		if strings.Contains(lowercaseName, keyword) {
+			return false
+		}
+	}
+	return true
+}
+
+// FSDSynthesisBoostTier maps an FSD injection synthesis recipe name to its
+// FSDJump BoostUsed code (1 basic, 2 standard, 3 premium), or 0 for non-FSD recipes.
+func FSDSynthesisBoostTier(recipeName string) int {
+	switch strings.ToLower(strings.TrimSpace(recipeName)) {
+	case "fsd basic":
+		return 1
+	case "fsd standard":
+		return 2
+	case "fsd premium":
+		return 3
+	default:
+		return 0
+	}
+}
+
 // ShipDisplayName returns a human-friendly ship name. A localised name from
 // the journal wins when present; otherwise the internal identifier is mapped.
 func ShipDisplayName(internal, localised string) string {

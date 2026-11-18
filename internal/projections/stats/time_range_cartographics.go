@@ -2,10 +2,10 @@ package stats
 
 import (
 	"database/sql"
-	"fmt"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
+	replaystats "planisphere/internal/replay/stats"
 )
 
 var timeRangeCartographicsAppEvents = events.NewAppSet(
@@ -18,27 +18,31 @@ var timeRangeCartographicsAppEvents = events.NewAppSet(
 // TimeRangeCartographics caches Universal Cartographics metrics for bounded
 // (after, until] time ranges and optional Discovery Flight Mode filters.
 type TimeRangeCartographics struct {
-	database *sql.DB
-	entries  *projection.KeyedCache[string, CartographicsMetrics]
+	database   *sql.DB
+	modeLoader replaystats.ModeTimelineLoader
+	entries    *projection.KeyedCache[string, CartographicsMetrics]
 }
 
 // NewTimeRangeCartographics creates a TimeRangeCartographics projection and registers it on bus.
-func NewTimeRangeCartographics(dbConn *sql.DB, bus *projection.Bus) *TimeRangeCartographics {
-	timeRangeCarto := &TimeRangeCartographics{database: dbConn}
-	timeRangeCarto.entries = projection.NewKeyedCache[string, CartographicsMetrics](
-		bus,
-		"time_range_cartographics",
-		timeRangeCarto.Triggers(),
-	)
-	return timeRangeCarto
-}
-
-// Triggers declares the journal and application events that invalidate TimeRangeCartographics.
-func (timeRangeCarto *TimeRangeCartographics) Triggers() projection.Triggers {
-	return projection.Triggers{
+func NewTimeRangeCartographics(
+	dbConn *sql.DB,
+	bus *projection.Bus,
+	modeLoader replaystats.ModeTimelineLoader,
+) *TimeRangeCartographics {
+	triggers := projection.Triggers{
 		Journal: cartographicsJournalEvents,
 		App:     timeRangeCartographicsAppEvents,
 	}
+	return &TimeRangeCartographics{
+		database:   dbConn,
+		modeLoader: modeLoader,
+		entries:    projection.NewKeyedCache[string, CartographicsMetrics](bus, "TimeRangeCartographics", triggers),
+	}
+}
+
+// Triggers reports the journal and app events that invalidate TimeRangeCartographics.
+func (timeRangeCarto *TimeRangeCartographics) Triggers() projection.Triggers {
+	return timeRangeCarto.entries.Triggers()
 }
 
 // CachedCount returns the number of bounded range cartographics entries currently cached.
@@ -46,24 +50,24 @@ func (timeRangeCarto *TimeRangeCartographics) CachedCount() int {
 	return timeRangeCarto.entries.Len()
 }
 
-// Generation returns the cache invalidation generation counter.
+// Generation returns the monotonically increasing invalidation generation counter.
 func (timeRangeCarto *TimeRangeCartographics) Generation() uint64 {
 	return timeRangeCarto.entries.Generation()
 }
 
-// Compute returns cached or freshly evaluated cartographics metrics for timeRange and optional mode filter.
+// Compute returns Universal Cartographics metrics for timeRange and filter, caching per discovery filter.
 func (timeRangeCarto *TimeRangeCartographics) Compute(timeRange Range, filter *Filter) (CartographicsMetrics, error) {
-	return timeRangeCarto.computeWithPreparedFilter(timeRange, cloneUnpreparedFilter(filter))
-}
-
-func (timeRangeCarto *TimeRangeCartographics) computeWithPreparedFilter(timeRange Range, preparedFilter *Filter) (CartographicsMetrics, error) {
 	if timeRangeCarto.database == nil {
-		return CartographicsMetrics{}, fmt.Errorf("time range cartographics database is nil")
+		return CartographicsMetrics{}, nil
 	}
-	cacheKey := buildDiscoveryStatsKey(timeRange, preparedFilter)
+	cacheKey := buildDiscoveryStatsKey(timeRange, filter)
 	return timeRangeCarto.entries.GetOrLoad(cacheKey, func() (CartographicsMetrics, error) {
-		engine := NewEngine(timeRangeCarto.database)
-		return engine.ComputeCartographics(timeRange, preparedFilter)
+		engine := replaystats.NewEngineWithSources(
+			timeRangeCarto.database,
+			nil,
+			nil,
+			timeRangeCarto.modeLoader,
+		)
+		return engine.ComputeCartographics(timeRange, replaystats.CloneUnprepared(filter))
 	})
 }
-

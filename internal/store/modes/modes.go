@@ -247,6 +247,13 @@ func Switch(transaction *sql.Tx, modeID int64, atTimestamp string) error {
 	return SetWindow(transaction, 0, modeID, atTimestamp, "")
 }
 
+// SwitchTx runs Switch inside a database transaction on dbConn.
+func SwitchTx(dbConn *sql.DB, modeID int64, atTimestamp string) error {
+	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		return Switch(transaction, modeID, atTimestamp)
+	})
+}
+
 // DefaultFallbackModeID returns the mode ID used whenever no explicit mode
 // window covers a timestamp (prefers the default "Travel" mode).
 func DefaultFallbackModeID(queryer db.Queryer) int64 {
@@ -286,6 +293,15 @@ func LoadTimeline(queryer db.Queryer) (*Timeline, error) {
 		return nil, listError
 	}
 	return NewTimeline(windowsList, DefaultFallbackModeID(queryer)), nil
+}
+
+// LoadModeLookup loads the active mode timeline and returns a timestamp-to-modeID lookup function.
+func LoadModeLookup(queryer db.Queryer) (func(timestamp string) int64, error) {
+	timeline, loadError := LoadTimeline(queryer)
+	if loadError != nil {
+		return nil, loadError
+	}
+	return timeline.ModeAt, nil
 }
 
 // ModeAt returns the mode active at targetTimestamp (falling back to the default mode, e.g. Travel, when none).

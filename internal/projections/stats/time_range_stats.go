@@ -2,19 +2,18 @@ package stats
 
 import (
 	"database/sql"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
+	replaystats "planisphere/internal/replay/stats"
 )
 
-// TimeRangeStats coordinates the four time-windowed statistics projections
-// (Travel, Cartographics, Exobiology, and Realization) for bounded (after, until]
-// ranges and optional Flight Mode filters, serving both the active Expedition
-// sidebar and Waypoint #1 pre-expedition baselines.
+// TimeRangeStats caches bounded expedition and telemetry window metrics across
+// specialized section projections.
 type TimeRangeStats struct {
 	travel        *TimeRangeTravel
 	cartographics *TimeRangeCartographics
@@ -22,44 +21,43 @@ type TimeRangeStats struct {
 	realization   *TimeRangeRealization
 }
 
-// NewTimeRangeStats creates a TimeRangeStats facade and registers its four
-// section projections on bus.
+// NewTimeRangeStats creates and registers all time-windowed section projections on bus.
 func NewTimeRangeStats(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
 	recoveredJumps *projections.RecoveredJumps,
+	modeLoader replaystats.ModeTimelineLoader,
 ) *TimeRangeStats {
 	return &TimeRangeStats{
-		travel:        NewTimeRangeTravel(dbConn, bus, recoveredJumps),
-		cartographics: NewTimeRangeCartographics(dbConn, bus),
-		exobiology:    NewTimeRangeExobiology(dbConn, bus, salesLedger),
-		realization:   NewTimeRangeRealization(dbConn, bus, salesLedger),
+		travel:        NewTimeRangeTravel(dbConn, bus, recoveredJumps, modeLoader),
+		cartographics: NewTimeRangeCartographics(dbConn, bus, modeLoader),
+		exobiology:    NewTimeRangeExobiology(dbConn, bus, salesLedger, modeLoader),
+		realization:   NewTimeRangeRealization(dbConn, bus, salesLedger, modeLoader),
 	}
 }
 
-// Travel returns the time-windowed Flight Operations travel projection.
+// Travel returns the time-windowed Flight Operations projection.
 func (timeRangeStats *TimeRangeStats) Travel() *TimeRangeTravel {
 	return timeRangeStats.travel
 }
 
-// Cartographics returns the time-windowed Universal Cartographics valuation projection.
+// Cartographics returns the time-windowed Universal Cartographics projection.
 func (timeRangeStats *TimeRangeStats) Cartographics() *TimeRangeCartographics {
 	return timeRangeStats.cartographics
 }
 
-// Exobiology returns the time-windowed Vista Genomics exobiology valuation projection.
+// Exobiology returns the time-windowed Vista Genomics exobiology projection.
 func (timeRangeStats *TimeRangeStats) Exobiology() *TimeRangeExobiology {
 	return timeRangeStats.exobiology
 }
 
-// Realization returns the time-windowed Realized Value breakdown projection.
+// Realization returns the time-windowed Realized Value projection.
 func (timeRangeStats *TimeRangeStats) Realization() *TimeRangeRealization {
 	return timeRangeStats.realization
 }
 
-// Triggers returns the union of journal and application events across all four
-// time-windowed statistics projections.
+// Triggers returns the combined journal and app triggers across all section projections.
 func (timeRangeStats *TimeRangeStats) Triggers() projection.Triggers {
 	return projection.TriggersFrom(
 		timeRangeStats.travel,
@@ -80,8 +78,8 @@ func (timeRangeStats *TimeRangeStats) CachedCount() int {
 	)
 }
 
-// Generation returns the highest cache invalidation generation counter across
-// the time-windowed section projections.
+// Generation returns the highest invalidation generation counter across all
+// time-windowed section projections.
 func (timeRangeStats *TimeRangeStats) Generation() uint64 {
 	return max(
 		timeRangeStats.travel.Generation(),
@@ -91,47 +89,34 @@ func (timeRangeStats *TimeRangeStats) Generation() uint64 {
 	)
 }
 
-// Compute returns cached or freshly evaluated metrics and realization breakdown
-// for timeRange and optional mode filter across all four section projections.
+// Compute returns the merged metrics and realization breakdown for timeRange
+// and optional Flight Mode filter, backed by the independently cached sections.
 func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (TelemetrySummary, error) {
-	preparedFilter := cloneUnpreparedFilter(filter)
-
-	travelMetrics, travelError := timeRangeStats.travel.computeWithPreparedFilter(timeRange, preparedFilter)
+	travelMetrics, travelError := timeRangeStats.travel.Compute(timeRange, filter)
 	if travelError != nil {
 		return TelemetrySummary{}, travelError
 	}
-	cartoMetrics, cartoError := timeRangeStats.cartographics.computeWithPreparedFilter(timeRange, preparedFilter)
+	cartoMetrics, cartoError := timeRangeStats.cartographics.Compute(timeRange, filter)
 	if cartoError != nil {
 		return TelemetrySummary{}, cartoError
 	}
-	exoMetrics, exoError := timeRangeStats.exobiology.computeWithPreparedFilter(timeRange, preparedFilter)
-	if exoError != nil {
-		return TelemetrySummary{}, exoError
+	exobiologyMetrics, exobiologyError := timeRangeStats.exobiology.Compute(timeRange, filter)
+	if exobiologyError != nil {
+		return TelemetrySummary{}, exobiologyError
 	}
-	realizationBreakdown, realizationError := timeRangeStats.realization.computeWithPreparedFilter(timeRange, preparedFilter)
+	realizationBreakdown, realizationError := timeRangeStats.realization.Compute(timeRange, filter)
 	if realizationError != nil {
 		return TelemetrySummary{}, realizationError
 	}
 
 	var combinedMetrics Metrics
-	travelMetrics.applyTo(&combinedMetrics)
-	cartoMetrics.applyTo(&combinedMetrics)
-	exoMetrics.applyTo(&combinedMetrics)
-
+	travelMetrics.ApplyTo(&combinedMetrics)
+	cartoMetrics.ApplyTo(&combinedMetrics)
+	exobiologyMetrics.ApplyTo(&combinedMetrics)
 	return TelemetrySummary{
 		Metrics:     combinedMetrics,
 		Realization: realizationBreakdown,
 	}, nil
-}
-
-func cloneUnpreparedFilter(filter *Filter) *Filter {
-	if filter == nil {
-		return nil
-	}
-	copied := *filter
-	copied.preparedSets = nil
-	copied.preparedDB = nil
-	return &copied
 }
 
 func buildTravelStatsKey(timeRange Range, filter *Filter) string {
@@ -143,34 +128,38 @@ func buildDiscoveryStatsKey(timeRange Range, filter *Filter) string {
 }
 
 func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bool) string {
-	var keyBuilder strings.Builder
-	keyBuilder.Grow(64)
-	keyBuilder.WriteString(timeRange.After)
-	keyBuilder.WriteByte('|')
-	keyBuilder.WriteString(timeRange.Until)
-	keyBuilder.WriteByte('|')
 	if filter == nil || !filter.Enabled {
-		keyBuilder.WriteString("unfiltered")
-		return keyBuilder.String()
+		return timeRange.After + "|" + timeRange.Until + "|all"
 	}
-	keyBuilder.WriteString("filtered:")
-	activeModeIDs := make([]int64, 0, len(filter.Modes))
+	seenIDs := make(map[int64]bool, len(filter.Modes))
+	selectedIDs := make([]int64, 0, len(filter.Modes))
 	for _, selection := range filter.Modes {
-		matched := selection.Travel
+		included := selection.Travel
 		if discoveryDomain {
-			matched = selection.Discovery
+			included = selection.Discovery
 		}
-		if matched {
-			activeModeIDs = append(activeModeIDs, selection.ModeID)
+		if !included || seenIDs[selection.ModeID] {
+			continue
 		}
+		seenIDs[selection.ModeID] = true
+		selectedIDs = append(selectedIDs, selection.ModeID)
 	}
-	slices.Sort(activeModeIDs)
-	activeModeIDs = slices.Compact(activeModeIDs)
-	for index, modeID := range activeModeIDs {
+	sort.Slice(selectedIDs, func(leftIndex, rightIndex int) bool {
+		return selectedIDs[leftIndex] < selectedIDs[rightIndex]
+	})
+	if len(selectedIDs) == 0 {
+		return timeRange.After + "|" + timeRange.Until + "|none"
+	}
+	var builder strings.Builder
+	builder.WriteString(timeRange.After)
+	builder.WriteByte('|')
+	builder.WriteString(timeRange.Until)
+	builder.WriteString("|modes:")
+	for index, modeID := range selectedIDs {
 		if index > 0 {
-			keyBuilder.WriteByte(',')
+			builder.WriteByte(',')
 		}
-		keyBuilder.WriteString(strconv.FormatInt(modeID, 10))
+		builder.WriteString(strconv.FormatInt(modeID, 10))
 	}
-	return keyBuilder.String()
+	return builder.String()
 }

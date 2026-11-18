@@ -1,3 +1,5 @@
+// Package stats maintains reactive in-memory telemetry metric caches over
+// replayed Elite Dangerous journal statistics.
 package stats
 
 import (
@@ -6,19 +8,27 @@ import (
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
+	replaystats "planisphere/internal/replay/stats"
 )
 
-// TelemetrySummary pairs computed navigation/discovery metrics with their
-// realized payout and deduction breakdown.
-type TelemetrySummary struct {
-	Metrics     Metrics
-	Realization RealizationBreakdown
-}
+// Type aliases preserve Wails and downstream package imports cleanly while
+// keeping replay calculations decoupled in internal/replay/stats.
+type (
+	RealizationBreakdown = replaystats.RealizationBreakdown
+	Metrics              = replaystats.Metrics
+	TelemetrySummary     = replaystats.TelemetrySummary
+	Range                = replaystats.Range
+	ModeSelection        = replaystats.ModeSelection
+	ModeLookup           = replaystats.ModeLookup
+	ModeTimelineLoader   = replaystats.ModeTimelineLoader
+	Filter               = replaystats.Filter
+	TravelMetrics        = replaystats.TravelMetrics
+	CarrierOpsMetrics    = replaystats.CarrierOpsMetrics
+	CartographicsMetrics = replaystats.CartographicsMetrics
+	ExobiologyMetrics    = replaystats.ExobiologyMetrics
+)
 
-// CareerStats coordinates the five all-time unfiltered career statistics
-// projections (Travel, CarrierOps, Cartographics, Exobiology, and Realization)
-// so each sidebar section invalidates and recomputes only when its own journal
-// or application triggers fire.
+// CareerStats caches all-time unfiltered commander telemetry across specialized section projections.
 type CareerStats struct {
 	travel        *CareerTravel
 	carrierOps    *CareerCarrierOps
@@ -27,8 +37,7 @@ type CareerStats struct {
 	realization   *CareerRealization
 }
 
-// NewCareerStats creates a CareerStats facade and registers its five section
-// projections on bus.
+// NewCareerStats creates and registers all career telemetry section projections on bus.
 func NewCareerStats(
 	dbConn *sql.DB,
 	bus *projection.Bus,
@@ -54,23 +63,22 @@ func (careerStats *CareerStats) CarrierOps() *CareerCarrierOps {
 	return careerStats.carrierOps
 }
 
-// Cartographics returns the all-time Universal Cartographics valuation projection.
+// Cartographics returns the all-time Universal Cartographics projection.
 func (careerStats *CareerStats) Cartographics() *CareerCartographics {
 	return careerStats.cartographics
 }
 
-// Exobiology returns the all-time Vista Genomics exobiology valuation projection.
+// Exobiology returns the all-time Vista Genomics exobiology projection.
 func (careerStats *CareerStats) Exobiology() *CareerExobiology {
 	return careerStats.exobiology
 }
 
-// Realization returns the all-time Realized Value breakdown projection.
+// Realization returns the all-time Realized Value projection.
 func (careerStats *CareerStats) Realization() *CareerRealization {
 	return careerStats.realization
 }
 
-// Triggers returns the union of journal and application events across all five
-// career statistics projections.
+// Triggers returns the combined journal and app triggers across all career section projections.
 func (careerStats *CareerStats) Triggers() projection.Triggers {
 	return projection.TriggersFrom(
 		careerStats.travel,
@@ -82,23 +90,23 @@ func (careerStats *CareerStats) Triggers() projection.Triggers {
 }
 
 // Get assembles the lifetime telemetry metrics and realization breakdown across
-// all five career section projections, recomputing only sections that were invalidated.
+// the independently cached career section projections.
 func (careerStats *CareerStats) Get() (TelemetrySummary, error) {
 	travelMetrics, travelError := careerStats.travel.Get()
 	if travelError != nil {
 		return TelemetrySummary{}, travelError
 	}
-	carrierMetrics, carrierError := careerStats.carrierOps.Get()
-	if carrierError != nil {
-		return TelemetrySummary{}, carrierError
+	carrierOpsMetrics, carrierOpsError := careerStats.carrierOps.Get()
+	if carrierOpsError != nil {
+		return TelemetrySummary{}, carrierOpsError
 	}
 	cartoMetrics, cartoError := careerStats.cartographics.Get()
 	if cartoError != nil {
 		return TelemetrySummary{}, cartoError
 	}
-	exoMetrics, exoError := careerStats.exobiology.Get()
-	if exoError != nil {
-		return TelemetrySummary{}, exoError
+	exobiologyMetrics, exobiologyError := careerStats.exobiology.Get()
+	if exobiologyError != nil {
+		return TelemetrySummary{}, exobiologyError
 	}
 	realizationBreakdown, realizationError := careerStats.realization.Get()
 	if realizationError != nil {
@@ -106,18 +114,17 @@ func (careerStats *CareerStats) Get() (TelemetrySummary, error) {
 	}
 
 	var combinedMetrics Metrics
-	travelMetrics.applyTo(&combinedMetrics)
-	carrierMetrics.applyTo(&combinedMetrics)
-	cartoMetrics.applyTo(&combinedMetrics)
-	exoMetrics.applyTo(&combinedMetrics)
-
+	travelMetrics.ApplyTo(&combinedMetrics)
+	carrierOpsMetrics.ApplyTo(&combinedMetrics)
+	cartoMetrics.ApplyTo(&combinedMetrics)
+	exobiologyMetrics.ApplyTo(&combinedMetrics)
 	return TelemetrySummary{
 		Metrics:     combinedMetrics,
 		Realization: realizationBreakdown,
 	}, nil
 }
 
-// IsValid reports whether all five career statistics section projections are currently cached.
+// IsValid reports whether all lifetime section caches currently hold warm values.
 func (careerStats *CareerStats) IsValid() bool {
 	return careerStats.travel.IsValid() &&
 		careerStats.carrierOps.IsValid() &&
@@ -126,8 +133,7 @@ func (careerStats *CareerStats) IsValid() bool {
 		careerStats.realization.IsValid()
 }
 
-// Generation returns the highest cache invalidation generation counter across
-// the career statistics section projections.
+// Generation returns the highest invalidation generation counter across all section caches.
 func (careerStats *CareerStats) Generation() uint64 {
 	return max(
 		careerStats.travel.Generation(),

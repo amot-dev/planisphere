@@ -1,12 +1,10 @@
 package app
 
 import (
-	"database/sql"
 	"sync"
 	"testing"
 
-	"planisphere/internal/core/db"
-	"planisphere/internal/projections/stats"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 )
 
@@ -226,9 +224,7 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 
 	// Start and complete expedition over exactly 7 days, and log 2 carrier jumps consuming 150t of tritium.
 	startExpeditionAtOrigin(testingContext, testApp, expeditionRecord.ID, "Sol")
-	if err := db.WithTx(testApp.db, func(transaction *sql.Tx) error {
-		return expedition.Complete(transaction, expeditionRecord.ID, "2026-01-08T00:00:00Z")
-	}); err != nil {
+	if err := expedition.CompleteTx(testApp.db, expeditionRecord.ID, "2026-01-08T00:00:00Z"); err != nil {
 		testingContext.Fatalf("Complete failed: %v", err)
 	}
 	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 490.0, 80); err != nil {

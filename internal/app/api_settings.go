@@ -2,50 +2,54 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/eddiscovery"
-	"planisphere/internal/sources/gec"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/settings"
 	"planisphere/internal/version"
+)
+
+// External link visibility modes preserved for package-internal tests.
+const (
+	ExternalLinkOn      = settings.ExternalLinkOn
+	ExternalLinkOff     = settings.ExternalLinkOff
+	ExternalLinkIfNoGEC = settings.ExternalLinkIfNoGEC
 )
 
 // Settings is the user-configurable application state.
 type Settings struct {
-	SetupCompleted              bool                `json:"setupCompleted"`
-	JournalDir                  string              `json:"journalDir"`
-	DefaultJournalDir           string              `json:"defaultJournalDir"`
-	JournalDirExists            bool                `json:"journalDirExists"`
-	JournalDebounceMs           int                 `json:"journalDebounceMs"`
-	DefaultJournalDebounceMs    int                 `json:"defaultJournalDebounceMs"`
-	TritiumPricePerTonne        int64               `json:"tritiumPricePerTonne"`
-	DefaultTritiumPricePerTonne int64               `json:"defaultTritiumPricePerTonne"`
-	OnlineLookups               bool                `json:"onlineLookups"`
-	ExternalLinkInara           string              `json:"externalLinkInara"`
-	ExternalLinkEDSM            string              `json:"externalLinkEdsm"`
-	ExternalLinkGEC             string              `json:"externalLinkGec"`
-	DBPath                      string              `json:"dbPath"`
-	DefaultDBPath               string              `json:"defaultDbPath"`
-	ActiveExpeditionID          int64               `json:"activeExpeditionId"`
-	GECCount                    int                 `json:"gecCount"`
-	GECFetchedAt                string              `json:"gecFetchedAt"`
-	Commanders                  []journal.Commander `json:"commanders"`
-	EDDiscoveryDBPath           string              `json:"edDiscoveryDbPath"`
-	DefaultEDDiscoveryDBPath    string              `json:"defaultEdDiscoveryDbPath"`
-	EDDiscoveryDBExists         bool                `json:"edDiscoveryDbExists"`
-	LatestVersion               string              `json:"latestVersion"`
-	VersionCheckFailed          bool                `json:"versionCheckFailed"`
+	SetupCompleted              bool               `json:"setupCompleted"`
+	JournalDir                  string             `json:"journalDir"`
+	DefaultJournalDir           string             `json:"defaultJournalDir"`
+	JournalDirExists            bool               `json:"journalDirExists"`
+	JournalDebounceMs           int                `json:"journalDebounceMs"`
+	DefaultJournalDebounceMs    int                `json:"defaultJournalDebounceMs"`
+	TritiumPricePerTonne        int64              `json:"tritiumPricePerTonne"`
+	DefaultTritiumPricePerTonne int64              `json:"defaultTritiumPricePerTonne"`
+	OnlineLookups               bool               `json:"onlineLookups"`
+	ExternalLinkInara           string             `json:"externalLinkInara"`
+	ExternalLinkEDSM            string             `json:"externalLinkEdsm"`
+	ExternalLinkGEC             string             `json:"externalLinkGec"`
+	DBPath                      string             `json:"dbPath"`
+	DefaultDBPath               string             `json:"defaultDbPath"`
+	ActiveExpeditionID          int64              `json:"activeExpeditionId"`
+	GECCount                    int                `json:"gecCount"`
+	GECFetchedAt                string             `json:"gecFetchedAt"`
+	Commanders                  []replay.Commander `json:"commanders"`
+	EDDiscoveryDBPath           string             `json:"edDiscoveryDbPath"`
+	DefaultEDDiscoveryDBPath    string             `json:"defaultEdDiscoveryDbPath"`
+	EDDiscoveryDBExists         bool               `json:"edDiscoveryDbExists"`
+	LatestVersion               string             `json:"latestVersion"`
+	VersionCheckFailed          bool               `json:"versionCheckFailed"`
 }
 
 // GetSettings returns the current settings.
@@ -56,28 +60,27 @@ func (app *App) GetSettings() (Settings, error) {
 		return Settings{}, readyError
 	}
 	dir := app.journalDir()
-	commanders, _ := journal.ListCommanders(app.db)
+	commanders, _ := replay.ListCommanders(app.db)
 	if commanders == nil {
-		commanders = []journal.Commander{}
+		commanders = []replay.Commander{}
 	}
-	defaultDBPath, _ := db.DefaultPath()
+	defaultDBPath, _ := app.defaultDatabasePath()
 	defaultEDDPath := eddiscovery.DefaultDBPath()
 	discoveredEDDPath := eddiscovery.DiscoverDBPath()
 	var gecCount int
-	var gecFetched string
 	if app.gec != nil {
 		gecCount = app.gec.Count()
-		gecFetched = app.gec.LastFetched()
 	}
+	gecFetched := settings.GECFetchedAt(app.db)
 	latestVersion, versionCheckFailed := app.getVersionStatus()
-	externalLinkInara, externalLinkEDSM, externalLinkGEC := app.externalLinkModes()
+	externalLinkInara, externalLinkEDSM, externalLinkGEC := settings.ExternalLinkModes(app.db)
 	return Settings{
 		SetupCompleted:              app.setupCompleted(),
 		JournalDir:                  dir,
 		DefaultJournalDir:           journal.DefaultJournalDir(),
-		JournalDirExists:            journal.DirExists(dir),
+		JournalDirExists:            dirExists(dir),
 		JournalDebounceMs:           app.journalDebounceMs(),
-		DefaultJournalDebounceMs:    int(journal.DefaultDebounceDelay / time.Millisecond),
+		DefaultJournalDebounceMs:    int(reference.DefaultDebounceDelay / time.Millisecond),
 		TritiumPricePerTonne:        app.tritiumPricePerTonne(),
 		DefaultTritiumPricePerTonne: reference.DefaultTritiumPricePerTonne,
 		OnlineLookups:               app.onlineEnabled(),
@@ -92,7 +95,7 @@ func (app *App) GetSettings() (Settings, error) {
 		Commanders:                  commanders,
 		EDDiscoveryDBPath:           discoveredEDDPath,
 		DefaultEDDiscoveryDBPath:    defaultEDDPath,
-		EDDiscoveryDBExists:         discoveredEDDPath != "" || journal.FileExists(defaultEDDPath),
+		EDDiscoveryDBExists:         discoveredEDDPath != "" || fileExists(defaultEDDPath),
 		LatestVersion:               latestVersion,
 		VersionCheckFailed:          versionCheckFailed,
 	}, nil
@@ -101,7 +104,7 @@ func (app *App) GetSettings() (Settings, error) {
 // BrowseDBPath opens a save-file dialog so the user can choose where the SQLite database file should be stored.
 func (app *App) BrowseDBPath() (string, error) {
 	defaultDir := ""
-	defaultFilename := db.DefaultDBFileName
+	defaultFilename := app.defaultDatabaseFilename()
 	app.dbMu.RLock()
 	app.waitStartupLocked()
 	currentDBPath := app.dbPath
@@ -128,13 +131,13 @@ func (app *App) BrowseDBPath() (string, error) {
 func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 	dbPath = strings.TrimSpace(dbPath)
 	if dbPath == "" {
-		defaultPath, defaultPathError := db.DefaultPath()
+		defaultPath, defaultPathError := app.defaultDatabasePath()
 		if defaultPathError != nil {
 			return Settings{}, defaultPathError
 		}
 		dbPath = defaultPath
-	} else if journal.DirExists(dbPath) {
-		dbPath = filepath.Join(dbPath, db.DefaultDBFileName)
+	} else if dirExists(dbPath) {
+		dbPath = filepath.Join(dbPath, app.defaultDatabaseFilename())
 	}
 	dbPath = filepath.Clean(dbPath)
 
@@ -153,7 +156,7 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 		}
 	}
 	if !isDebugMode {
-		if saveError := db.SaveConfiguredPath(dbPath); saveError != nil {
+		if saveError := app.saveConfiguredDatabasePath(dbPath); saveError != nil {
 			return Settings{}, saveError
 		}
 	}
@@ -164,10 +167,10 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 func (app *App) saveJournalDirSetting(dir string) error {
 	return app.withReadyReadLock(func() error {
 		dir = strings.TrimSpace(dir)
-		if dir != "" && !journal.DirExists(dir) {
+		if dir != "" && !dirExists(dir) {
 			return fmt.Errorf("directory does not exist: %s", dir)
 		}
-		return db.SetSetting(app.db, settingJournalDir, dir)
+		return settings.SetJournalDir(app.db, dir)
 	})
 }
 
@@ -201,7 +204,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 		shouldRefresh bool
 	)
 	if setupError := app.withReadyReadLock(func() error {
-		if saveError := db.SetSetting(app.db, settingSetupCompleted, "1"); saveError != nil {
+		if saveError := settings.SetSetupCompleted(app.db, true); saveError != nil {
 			return saveError
 		}
 		if app.watcher != nil && (app.ctx == nil || app.ctx.Err() == nil) {
@@ -227,7 +230,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 // SetCommanderEnabled enables or disables a commander in statistics and plans.
 func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error) {
 	if toggleError := app.withReadyReadLock(func() error {
-		return journal.SetCommanderEnabled(app.db, name, enabled)
+		return settings.SetCommanderEnabled(app.db, name, enabled)
 	}); toggleError != nil {
 		return Settings{}, toggleError
 	}
@@ -279,9 +282,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 
 	app.dbMu.RLock()
 	if app.db == database {
-		_ = db.SetSetting(app.db, "edd_history_recovered_v1", "1")
-		_ = db.SetSetting(app.db, "edd_db_path", eddPath)
-		_ = db.SetSetting(app.db, "edd_history_disconnects_v7", "1")
+		_ = settings.MarkEDDRecovered(app.db, eddPath)
 	}
 	app.dbMu.RUnlock()
 
@@ -310,19 +311,15 @@ func (app *App) BrowseJournalDir() (string, error) {
 	defaultDir := app.journalDir()
 	app.dbMu.RUnlock()
 	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
-		Title:            "Select Elite Dangerous journal directory",
+		Title:            "Select Elite Dangerous Journal Directory",
 		DefaultDirectory: defaultDir,
 	})
 }
 
-// SetOnlineLookups enables or disables EDSM and EDAstro network requests.
+// SetOnlineLookups toggles online EDSM/Spansh/GEC lookups.
 func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
 	if saveError := app.withReadyReadLock(func() error {
-		settingValue := "1"
-		if !enabled {
-			settingValue = "0"
-		}
-		return db.SetSetting(app.db, settingOnline, settingValue)
+		return settings.SetOnlineLookups(app.db, enabled)
 	}); saveError != nil {
 		return Settings{}, saveError
 	}
@@ -336,13 +333,12 @@ func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
 // in milliseconds, clamped to [MinDebounceDelay, MaxDebounceDelay], and
 // applies it immediately to the running watcher.
 func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
-	clampedDuration := journal.ClampDebounceDelay(time.Duration(milliseconds) * time.Millisecond)
-	clampedMilliseconds := strconv.FormatInt(clampedDuration.Milliseconds(), 10)
+	clampedDuration := reference.ClampDebounceDelay(time.Duration(milliseconds) * time.Millisecond)
 
 	var runningWatcher *journal.Watcher
 	if saveError := app.withReadyReadLock(func() error {
 		runningWatcher = app.watcher
-		return db.SetSetting(app.db, settingJournalDebounceMs, clampedMilliseconds)
+		return settings.SetJournalDebounceMs(app.db, milliseconds)
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist journal debounce setting: %w", saveError)
 	}
@@ -357,11 +353,8 @@ func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
 // SetTritiumPricePerTonne updates the Tritium cost per tonne in credits used for
 // expedition Fleet Carrier cost estimates.
 func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
-	if pricePerTonne < 0 {
-		pricePerTonne = 0
-	}
 	if saveError := app.withReadyReadLock(func() error {
-		return db.SetSetting(app.db, settingTritiumPricePerTonne, strconv.FormatInt(pricePerTonne, 10))
+		return settings.SetTritiumPricePerTonne(app.db, pricePerTonne)
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist tritium price setting: %w", saveError)
 	}
@@ -369,120 +362,13 @@ func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
 	return app.GetSettings()
 }
 
-// IngestStatus reports journal archive and watcher state.
-type IngestStatus struct {
-	Scanning           bool   `json:"scanning"`
-	WatcherActive      bool   `json:"watcherActive"`
-	WatcherError       string `json:"watcherError"`
-	LastError          string `json:"lastError"`
-	LastScanAt         string `json:"lastScanAt"`
-	FilesTracked       int    `json:"filesTracked"`
-	EventsStored       int    `json:"eventsStored"`
-	FirstEventAt       string `json:"firstEventAt"`
-	FirstEventGalactic string `json:"firstEventGalactic"`
-	LastEventAt        string `json:"lastEventAt"`
-	LastEventGalactic  string `json:"lastEventGalactic"`
-	CurrentSystem      string `json:"currentSystem"`
-	CurrentShip        string `json:"currentShip"`
+// SetExternalLinks updates the visibility modes for waypoint external star
+// system links (Inara: "on"/"off", EDSM: "on"/"if_no_gec"/"off", GEC: "on"/"off").
+func (app *App) SetExternalLinks(inaraMode, edsmMode, gecMode string) (Settings, error) {
+	if saveError := app.withReadyReadLock(func() error {
+		return settings.SetExternalLinkModes(app.db, inaraMode, edsmMode, gecMode)
+	}); saveError != nil {
+		return Settings{}, fmt.Errorf("persist external link settings: %w", saveError)
+	}
+	return app.GetSettings()
 }
-
-// GetIngestStatus returns the journal ingestion status.
-func (app *App) GetIngestStatus() (IngestStatus, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	readyError := app.ready()
-	status := IngestStatus{Scanning: app.scanning.Load(), LastError: app.getError()}
-	if readyError != nil {
-		return status, nil
-	}
-	if app.watcher != nil {
-		status.WatcherActive, status.WatcherError = app.watcher.Active()
-	}
-	status.LastScanAt, _ = db.GetSetting(app.db, settingLastScanAt)
-	archiveStatus, archiveError := journal.ArchiveStatus(app.db)
-	if archiveError != nil {
-		return status, archiveError
-	}
-	status.FilesTracked, status.EventsStored = archiveStatus.FilesTracked, archiveStatus.EventsStored
-	status.FirstEventAt, status.LastEventAt = archiveStatus.FirstEventAt, archiveStatus.LastEventAt
-	status.FirstEventGalactic = reference.ToGalactic(archiveStatus.FirstEventAt)
-	status.LastEventGalactic = reference.ToGalactic(archiveStatus.LastEventAt)
-	if app.systemArrivals != nil {
-		if _, currentSystemName, locationError := app.systemArrivals.LatestPlayerLocation(); locationError == nil {
-			status.CurrentSystem = currentSystemName
-		}
-	}
-	if app.shipHistory != nil {
-		if currentShipName, shipError := app.shipHistory.CurrentShip(); shipError == nil {
-			status.CurrentShip = currentShipName
-		}
-	}
-	status.Scanning = app.scanning.Load()
-	status.LastError = app.getError()
-	return status, nil
-}
-
-// withReadyReadLock acquires app.dbMu.RLock, waits for startup readiness, and runs action if non-nil.
-func (app *App) withReadyReadLock(action func() error) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	if action == nil {
-		return nil
-	}
-	return action()
-}
-
-func (app *App) readyGECCatalog() (*gec.Catalog, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return nil, readyError
-	}
-	if app.gec == nil {
-		return nil, errors.New("GEC catalog not initialized")
-	}
-	return app.gec, nil
-}
-
-// RescanJournals performs a full idempotent catch-up scan of the configured journal directory.
-func (app *App) RescanJournals() error {
-	if readyError := app.withReadyReadLock(nil); readyError != nil {
-		return readyError
-	}
-	app.runScan()
-	return nil
-}
-
-// RefreshGEC re-downloads the EDAstro Galactic Exploration Catalog.
-func (app *App) RefreshGEC() (int, error) {
-	if !app.gecRefreshing.CompareAndSwap(false, true) {
-		return 0, errors.New("GEC refresh is already in progress")
-	}
-	defer app.gecRefreshing.Store(false)
-
-	gecCatalog, catalogError := app.readyGECCatalog()
-	if catalogError != nil {
-		return 0, catalogError
-	}
-	refreshCount, refreshError := gecCatalog.Refresh(app.ctx)
-	if refreshError != nil {
-		return 0, refreshError
-	}
-	app.populateMissingPOIs()
-	app.publishApp("plan", 0, events.AppExpeditionPlanChanged)
-	return refreshCount, nil
-}
-
-// OpenURL opens an http(s) URL in the user's default browser.
-func (app *App) OpenURL(link string) error {
-	parsedURL, parseError := url.Parse(link)
-	if parseError != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
-		return fmt.Errorf("refusing to open %q", link)
-	}
-	runtime.BrowserOpenURL(app.ctx, link)
-	return nil
-}
-

@@ -1,4 +1,5 @@
-package version
+// Package releases queries GitHub Releases for Planisphere update notifications.
+package releases
 
 import (
 	"context"
@@ -7,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"planisphere/internal/version"
 )
 
 // LatestReleaseAPIURL derives the GitHub REST API latest-release endpoint from a repository URL.
@@ -26,12 +29,12 @@ func FetchLatestRelease(ctx context.Context) (string, error) {
 	requestContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	endpointURL := LatestReleaseAPIURL(Repository)
+	endpointURL := LatestReleaseAPIURL(version.Repository)
 	request, requestError := http.NewRequestWithContext(requestContext, http.MethodGet, endpointURL, nil)
 	if requestError != nil {
 		return "", fmt.Errorf("build github release request: %w", requestError)
 	}
-	request.Header.Set("User-Agent", UserAgent)
+	request.Header.Set("User-Agent", version.UserAgent)
 	request.Header.Set("Accept", "application/vnd.github+json")
 
 	response, responseError := http.DefaultClient.Do(request)

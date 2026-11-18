@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"planisphere/internal/core/events"
-	"planisphere/internal/projections/stats"
+	"planisphere/internal/replay"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 )
@@ -260,7 +261,7 @@ func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
 	}
 	waitGroup.Wait()
 
-	careerStart, _ := journal.CareerStart(testApp.db)
+	careerStart, _ := replay.CareerStart(testApp.db)
 	if careerStart != expectedCareerStart {
 		testingContext.Errorf("expected CareerStart %s, got %s", expectedCareerStart, careerStart)
 	}
@@ -653,9 +654,9 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 		seededDatabasePath,
 		"Boot Sync Survey",
 		"",
-		[2]string{settingSetupCompleted, "1"},
-		[2]string{settingOnline, "0"},
-		[2]string{settingJournalDir, emptyJournalDirectory},
+		[2]string{"setup_completed", "1"},
+		[2]string{"online_lookups", "0"},
+		[2]string{"journal_dir", emptyJournalDirectory},
 	)
 
 	testingContext.Setenv("ED_PLANNER_DB", seededDatabasePath)

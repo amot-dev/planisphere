@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"slices"
 	"sort"
-	"strings"
 
+	"planisphere/internal/reference"
 	"planisphere/internal/reference/exceptions"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
 )
 
@@ -23,7 +24,7 @@ type crewWageMatcher struct {
 
 // newCrewWageMatcher indexes all NpcCrewPaidWage events in chronological order
 // so sales can binary-search and claim concurrent crew wage deductions once.
-func newCrewWageMatcher(loadedEvents []journal.Row) *crewWageMatcher {
+func newCrewWageMatcher(loadedEvents []replay.Row) *crewWageMatcher {
 	wageEvents := make([]parsedWageEvent, 0, 50)
 	for _, journalEvent := range loadedEvents {
 		if journalEvent.Type != journal.EventNpcCrewPaidWage {
@@ -72,20 +73,12 @@ func (matcher *crewWageMatcher) claimWage(saleTimestamp string) int64 {
 	return totalWage
 }
 
-// computeCarrierTariff calculates Universal Cartographics' 25% Fleet Carrier
-// tariff from the journal's post-tariff BaseValue and Bonus fields. When docked
-// on a Fleet Carrier (including the commander's own vessel), Frontier logs
-// BaseValue + Bonus at exact 75% of pre-tariff scan value, making the 25%
-// tariff equal to one third of (BaseValue + Bonus).
-func computeCarrierTariff(isDockedOnFleetCarrier bool, baseValue, bonusValue int64) int64 {
-	if !isDockedOnFleetCarrier {
-		return 0
+func parseUnixSeconds(timestamp string) (int64, bool) {
+	parsedTime, parseError := reference.ParseISO(timestamp)
+	if parseError != nil {
+		return 0, false
 	}
-	postTariffGross := baseValue + bonusValue
-	if postTariffGross <= 0 {
-		return 0
-	}
-	return postTariffGross / 3
+	return parsedTime.Unix(), true
 }
 
 func (builder *ledgerBuilder) recordOrganicSale(rawJSON string) {
@@ -208,6 +201,55 @@ func findMatchingOrganicBatch(
 	return candidateIndices[:claimCount]
 }
 
+func organicCandidateTier(candidateRecord *scanRecord, soldSpecies, soldVariant string, expectedBonus bool) int {
+	if candidateRecord.status != "pending" || candidateRecord.normalizedSpecies != soldSpecies {
+		return 0
+	}
+	tierBaseScore := 3
+	if soldVariant != "" && candidateRecord.normalizedVariant != "" {
+		if candidateRecord.normalizedVariant == soldVariant {
+			tierBaseScore = 5
+		} else {
+			tierBaseScore = 1
+		}
+	}
+	if candidateRecord.undiscoveredAtScan == expectedBonus {
+		return tierBaseScore + 1
+	}
+	return tierBaseScore
+}
+
+// findMatchingOrganic returns the index of the best-matching pending ScanOrganic
+// record in unsoldOrganicRecords for the sold bioDataItem, or -1 if none matches.
+//
+// Frontier's SellOrganicData journal event (BioData) does not include
+// SystemAddress, StarSystem, BodyID, or BodyName, so sold samples cannot be
+// joined to ScanOrganic records by body. When a commander scans the same
+// species on both an already-footfalled body and an un-footfalled body before
+// selling at Vista Genomics, tie-breaking within each variant tier by
+// undiscoveredAtScan == (bioDataItem.Bonus > 0) prevents a bonus-paying sample
+// from matching the earlier footfalled-body scan and falsely triggering both a
+// retroactive bonus upgrade and a stolen-bonus loss on the un-footfalled scan.
+func findMatchingOrganic(unsoldOrganicRecords []*scanRecord, bioDataItem journal.BioDataItem) int {
+	soldSpecies := normalizeSpecies(bioDataItem.Species, bioDataItem.SpeciesLocalised)
+	if soldSpecies == "" {
+		return -1
+	}
+	soldVariant := normalizeVariant(bioDataItem.Variant, bioDataItem.VariantLocalised)
+	expectedBonus := bioDataItem.Bonus > 0
+
+	bestMatchIndex := -1
+	bestMatchTier := 0
+	for recordIndex, candidateRecord := range unsoldOrganicRecords {
+		candidateTier := organicCandidateTier(candidateRecord, soldSpecies, soldVariant, expectedBonus)
+		if candidateTier > bestMatchTier {
+			bestMatchTier = candidateTier
+			bestMatchIndex = recordIndex
+		}
+	}
+	return bestMatchIndex
+}
+
 func rankMatchingOrganicIndices(unsoldRecords []*scanRecord, bioItem journal.BioDataItem) []int {
 	soldSpecies := normalizeSpecies(bioItem.Species, bioItem.SpeciesLocalised)
 	soldVariant := normalizeVariant(bioItem.Variant, bioItem.VariantLocalised)
@@ -313,142 +355,3 @@ func (builder *ledgerBuilder) removeSoldOrganicRecords(claimedIndices []int) {
 	}
 	builder.unsoldOrganic = remaining
 }
-
-func (builder *ledgerBuilder) recordSingleCartoSale(rawJSON string) {
-	var sellEvent journal.SellExplorationDataEvent
-	if json.Unmarshal([]byte(rawJSON), &sellEvent) != nil {
-		return
-	}
-	saleKey := saleDedupKey{
-		kind:       "carto",
-		timestamp:  sellEvent.Timestamp,
-		primaryID:  sellEvent.TotalEarnings,
-		itemCount:  len(sellEvent.Systems),
-		totalValue: sellEvent.BaseValue,
-		totalBonus: sellEvent.Bonus,
-	}
-	if builder.seenSales[saleKey] {
-		return
-	}
-	builder.seenSales[saleKey] = true
-
-	totalCrewWage := builder.wageMatcher.claimWage(sellEvent.Timestamp)
-	carrierTariff := computeCarrierTariff(builder.session.IsDockedOnFleetCarrier(), sellEvent.BaseValue, sellEvent.Bonus)
-	soldSystemSet := buildNormalizedSet(sellEvent.Systems)
-	matchedRecords := builder.claimSoldCartoRecords(soldSystemSet, sellEvent.Timestamp)
-
-	if len(matchedRecords) == 0 {
-		builder.ledger.unattributedSales = append(builder.ledger.unattributedSales, unattributedSale{
-			timestamp:         sellEvent.Timestamp,
-			kind:              "carto",
-			netRealized:       sellEvent.TotalEarnings,
-			crewLoss:          totalCrewWage,
-			carrierTariffLoss: carrierTariff,
-		})
-		return
-	}
-
-	allocateCartoSalePayout(matchedRecords, sellEvent.Timestamp, sellEvent.TotalEarnings, sellEvent.BaseValue, sellEvent.Bonus, totalCrewWage, carrierTariff)
-	discoveredSet := buildNormalizedSet(sellEvent.Discovered)
-	for _, matchedRecord := range matchedRecords {
-		if matchedRecord.undiscoveredAtScan && matchedRecord.theoreticalBonus > 0 {
-			if !discoveredSet[matchedRecord.normalizedBodyName] && !discoveredSet[matchedRecord.normalizedStarSystem] {
-				matchedRecord.stolenLoss = matchedRecord.theoreticalBonus
-			}
-		}
-	}
-}
-
-// recordMultiCartoSale records a bulk MultiSellExplorationData page. Unlike
-// SellExplorationData, Frontier bakes First Discovery and First Mapped bonuses
-// directly into BaseValue on bulk pages and uses Bonus exclusively for flat
-// system-completion bonuses, so stolen-bonus shortfalls cannot be inferred from
-// MultiSellExplorationData.Bonus.
-func (builder *ledgerBuilder) recordMultiCartoSale(rawJSON string) {
-	var multiSellEvent journal.MultiSellExplorationDataEvent
-	if json.Unmarshal([]byte(rawJSON), &multiSellEvent) != nil {
-		return
-	}
-	saleKey := saleDedupKey{
-		kind:       "carto_multi",
-		timestamp:  multiSellEvent.Timestamp,
-		primaryID:  multiSellEvent.TotalEarnings,
-		itemCount:  len(multiSellEvent.Discovered),
-		totalValue: multiSellEvent.BaseValue,
-		totalBonus: multiSellEvent.Bonus,
-	}
-	if builder.seenSales[saleKey] {
-		return
-	}
-	builder.seenSales[saleKey] = true
-
-	totalCrewWage := builder.wageMatcher.claimWage(multiSellEvent.Timestamp)
-	carrierTariff := computeCarrierTariff(builder.session.IsDockedOnFleetCarrier(), multiSellEvent.BaseValue, multiSellEvent.Bonus)
-	soldSystemSet := make(map[string]bool, len(multiSellEvent.Discovered))
-	for _, discoveredEntry := range multiSellEvent.Discovered {
-		soldSystemSet[strings.ToLower(strings.TrimSpace(discoveredEntry.SystemName))] = true
-	}
-
-	matchedRecords := builder.claimSoldCartoRecords(soldSystemSet, multiSellEvent.Timestamp)
-	if len(matchedRecords) == 0 {
-		builder.ledger.unattributedSales = append(builder.ledger.unattributedSales, unattributedSale{
-			timestamp:         multiSellEvent.Timestamp,
-			kind:              "carto",
-			netRealized:       multiSellEvent.TotalEarnings,
-			crewLoss:          totalCrewWage,
-			carrierTariffLoss: carrierTariff,
-		})
-		return
-	}
-	allocateCartoSalePayout(matchedRecords, multiSellEvent.Timestamp, multiSellEvent.TotalEarnings, multiSellEvent.BaseValue, multiSellEvent.Bonus, totalCrewWage, carrierTariff)
-}
-
-func buildNormalizedSet(items []string) map[string]bool {
-	normalizedSet := make(map[string]bool, len(items))
-	for _, rawItem := range items {
-		normalizedSet[strings.ToLower(strings.TrimSpace(rawItem))] = true
-	}
-	return normalizedSet
-}
-
-// allocateCartoSalePayout distributes a cartographic sale's net TotalEarnings,
-// base value, completion bonus, NPC crew wage, and Fleet Carrier tariff across
-// matched scan records proportionally by theoreticalTotal (or evenly when zero),
-// assigning integer remainders to the final record so window sums remain exact.
-func allocateCartoSalePayout(
-	matchedRecords []*scanRecord, soldTimestamp string,
-	totalEarnings, baseValue, bonusValue, totalCrewWage, carrierTariff int64,
-) {
-	var totalTheoretical int64
-	for _, matchedRecord := range matchedRecords {
-		totalTheoretical += matchedRecord.theoreticalTotal
-	}
-	var allocatedNet, allocatedBase, allocatedBonus, allocatedCrew, allocatedTariff int64
-	for recordIndex, matchedRecord := range matchedRecords {
-		matchedRecord.status = "sold"
-		matchedRecord.soldTimestamp = soldTimestamp
-		if recordIndex == len(matchedRecords)-1 {
-			matchedRecord.actualNet = totalEarnings - allocatedNet
-			matchedRecord.actualBase = baseValue - allocatedBase
-			matchedRecord.actualBonus = bonusValue - allocatedBonus
-			matchedRecord.crewLoss = totalCrewWage - allocatedCrew
-			matchedRecord.carrierTariffLoss = carrierTariff - allocatedTariff
-			continue
-		}
-		allocationRatio := 1.0 / float64(len(matchedRecords))
-		if totalTheoretical > 0 {
-			allocationRatio = float64(matchedRecord.theoreticalTotal) / float64(totalTheoretical)
-		}
-		matchedRecord.actualNet = int64(float64(totalEarnings) * allocationRatio)
-		matchedRecord.actualBase = int64(float64(baseValue) * allocationRatio)
-		matchedRecord.actualBonus = int64(float64(bonusValue) * allocationRatio)
-		matchedRecord.crewLoss = int64(float64(totalCrewWage) * allocationRatio)
-		matchedRecord.carrierTariffLoss = int64(float64(carrierTariff) * allocationRatio)
-		allocatedNet += matchedRecord.actualNet
-		allocatedBase += matchedRecord.actualBase
-		allocatedBonus += matchedRecord.actualBonus
-		allocatedCrew += matchedRecord.crewLoss
-		allocatedTariff += matchedRecord.carrierTariffLoss
-	}
-}
-

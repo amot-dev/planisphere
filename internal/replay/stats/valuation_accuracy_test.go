@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"planisphere/internal/projections/stats"
+	"planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 )
 

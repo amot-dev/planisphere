@@ -1,15 +1,13 @@
 package expedition
 
 import (
-	"database/sql"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
 	"planisphere/internal/core/db"
-	"planisphere/internal/projections"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 )
 
 // Drop slot preview statuses.
@@ -270,21 +268,11 @@ func prepareBoundsEvaluation(
 	queryer db.Queryer,
 	expeditionRecord Expedition,
 	rows []Row,
-	proj *Projections,
+	arrivals []Arrival,
 ) (*boundsEvaluationContext, error) {
 	firstWaypointIndex := firstWaypoint(rows)
 	if firstWaypointIndex < 0 || expeditionRecord.StartTimestamp == "" {
 		return nil, nil
-	}
-	var arrivals []Arrival
-	var arrivalsError error
-	if proj != nil && proj.Arrivals != nil {
-		arrivals, arrivalsError = proj.Arrivals.InWindow(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-	} else {
-		arrivals, arrivalsError = projections.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-	}
-	if arrivalsError != nil {
-		return nil, arrivalsError
 	}
 
 	normalizedSystemNames := make([]string, len(rows))
@@ -325,6 +313,9 @@ func prepareBoundsEvaluation(
 // within an active expedition, returning nil when the expedition is not active
 // or rowID cannot be reordered.
 func ComputeRowDropPreviews(queryer db.Queryer, rowID int64, proj *Projections) ([]DropSlotPreview, error) {
+	if proj == nil || proj.Arrivals == nil {
+		return nil, errors.New("expedition Arrivals projection is required")
+	}
 	targetRow, getError := GetRow(queryer, rowID)
 	if getError != nil {
 		return nil, getError
@@ -347,7 +338,11 @@ func ComputeRowDropPreviews(queryer db.Queryer, rowID int64, proj *Projections) 
 	if fromIndex < 0 {
 		return nil, nil
 	}
-	evalCtx, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, proj)
+	arrivals, arrivalsError := proj.Arrivals.InWindow(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	if arrivalsError != nil {
+		return nil, arrivalsError
+	}
+	evalCtx, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, arrivals)
 	if prepError != nil || evalCtx == nil || fromIndex == evalCtx.firstWaypointIndex {
 		return nil, prepError
 	}
@@ -374,7 +369,11 @@ func validateWaypointMove(queryer db.Queryer, expeditionRecord Expedition, rows 
 	if lockedSpanshTargetRowID > 0 && rows[fromIndex].ID == lockedSpanshTargetRowID {
 		return DropSlotPreview{}, errors.New("waypoint cannot be moved while fleet carrier route is active")
 	}
-	evalCtx, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, nil)
+	arrivals, arrivalsError := replay.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	if arrivalsError != nil {
+		return DropSlotPreview{}, arrivalsError
+	}
+	evalCtx, prepError := prepareBoundsEvaluation(queryer, expeditionRecord, rows, arrivals)
 	if prepError != nil || evalCtx == nil {
 		return DropSlotPreview{}, prepError
 	}
@@ -386,44 +385,4 @@ func validateWaypointMove(queryer db.Queryer, expeditionRecord Expedition, rows 
 		return preview, errors.New("pending fleet carrier stop cannot be moved before an arrived or actively routed carrier stop")
 	}
 	return preview, nil
-}
-
-// SetCarrierArrivalOverride manually sets the Fleet Carrier arrival status on rowID
-// and cascades the change across preceding (when arrived is true) or subsequent
-// (when arrived is false) carrier stops so arrived stops always precede pending stops.
-func SetCarrierArrivalOverride(transaction *sql.Tx, rowID int64, arrived bool) (int64, error) {
-	targetRow, getError := GetRow(transaction, rowID)
-	if getError != nil {
-		return 0, getError
-	}
-	if !targetRow.IsWaypoint() || !targetRow.FCStop {
-		return targetRow.ExpeditionID, errors.New("row is not a designated fleet carrier stop")
-	}
-	lockedSpanshTargetRowID := readLockedSpanshTargetRowID(transaction, targetRow.ExpeditionID)
-	now := reference.NowISO()
-	if arrived {
-		if _, execError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 1, updated_at = ?
-			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1 AND position <= ?`,
-			now, targetRow.ExpeditionID, targetRow.Position); execError != nil {
-			return targetRow.ExpeditionID, execError
-		}
-		if lockedSpanshTargetRowID > 0 {
-			routedRow, routedError := GetRow(transaction, lockedSpanshTargetRowID)
-			if routedError == nil && routedRow.FCArrived {
-				if clearRouteError := ClearActiveCarrierRoute(transaction, targetRow.ExpeditionID); clearRouteError != nil {
-					return targetRow.ExpeditionID, fmt.Errorf("clear active carrier route: %w", clearRouteError)
-				}
-			}
-		}
-	} else {
-		if _, execError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0, updated_at = ?
-			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1 AND position >= ?`,
-			now, targetRow.ExpeditionID, targetRow.Position); execError != nil {
-			return targetRow.ExpeditionID, execError
-		}
-	}
-	if touchError := touch(transaction, targetRow.ExpeditionID); touchError != nil {
-		return targetRow.ExpeditionID, touchError
-	}
-	return targetRow.ExpeditionID, nil
 }

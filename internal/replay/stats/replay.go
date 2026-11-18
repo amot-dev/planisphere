@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"planisphere/internal/projections"
-	"planisphere/internal/projections/realization"
 	"planisphere/internal/reference"
 	"planisphere/internal/reference/exceptions"
+	"planisphere/internal/replay"
+	"planisphere/internal/replay/realization"
 	"planisphere/internal/sources/journal"
 )
 
@@ -18,7 +18,7 @@ import (
 // no Scan event in loadedEvents and preloads their latest prior Scan at or before
 // afterTimestamp. Two passes ensure same-second mappings ordered before their
 // matching Scan in loadedEvents are not marked missing.
-func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []journal.Row) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
+func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []replay.Row) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
 	scans := make(map[bodyKey]*journal.ScanEvent)
 	missingScans := make(map[bodyKey]bool)
 	scannedInEvents := make(map[bodyKey]bool, len(loadedEvents)/2)
@@ -68,7 +68,7 @@ type computeAccumulator struct {
 	after                   string
 	until                   string
 	filterSet               *filterSets
-	session                 *projections.SessionState
+	session                 *replay.SessionState
 	previousPosition        *reference.Vec3
 	previousPositionSeeded  bool
 	realizationLedger       *realization.Ledger
@@ -79,7 +79,7 @@ type computeAccumulator struct {
 	mappedBodies            map[bodyKey]bool
 }
 
-func (accumulator *computeAccumulator) processEvent(rowItem journal.Row, metrics *Metrics) error {
+func (accumulator *computeAccumulator) processEvent(rowItem replay.Row, metrics *Metrics) error {
 	switch rowItem.Type {
 	case journal.EventLoadGame:
 		if accumulator.session != nil {
@@ -123,7 +123,7 @@ func (accumulator *computeAccumulator) ensurePreviousPosition() error {
 	var starX, starY, starZ sql.NullFloat64
 	queryError := accumulator.engine.DB.QueryRow(`SELECT star_x, star_y, star_z FROM journal_events
 		WHERE event IN ('FSDJump', 'Location', 'CarrierJump') AND star_x IS NOT NULL
-		AND timestamp <= ? AND `+journal.CmdrFilterSQL+`
+		AND timestamp <= ? AND `+replay.CmdrFilterSQL+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`, accumulator.after).Scan(&starX, &starY, &starZ)
 	if queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
 		return fmt.Errorf("seed previous star position before %s: %w", accumulator.after, queryError)
@@ -153,7 +153,7 @@ func creditJump(timestamp string, distanceLy float64, boostUsed int, filterSet *
 	}
 }
 
-func (accumulator *computeAccumulator) processFSDJump(rowItem journal.Row, metrics *Metrics) {
+func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metrics *Metrics) {
 	accumulator.recordStarPosition(rowItem.StarPos)
 	var jumpEvent journal.FSDJumpEvent
 	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
@@ -165,7 +165,7 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem journal.Row, metri
 	creditJump(rowItem.Timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)
 }
 
-func (accumulator *computeAccumulator) processCarrierJump(rowItem journal.Row, metrics *Metrics) error {
+func (accumulator *computeAccumulator) processCarrierJump(rowItem replay.Row, metrics *Metrics) error {
 	if accumulator.session != nil {
 		accumulator.session.ApplyCarrierJump(rowItem.RawJSON)
 	}
@@ -184,7 +184,7 @@ func (accumulator *computeAccumulator) processCarrierJump(rowItem journal.Row, m
 	return nil
 }
 
-func (accumulator *computeAccumulator) processScan(rowItem journal.Row, metrics *Metrics) {
+func (accumulator *computeAccumulator) processScan(rowItem replay.Row, metrics *Metrics) {
 	var scanEvent journal.ScanEvent
 	if json.Unmarshal([]byte(rowItem.RawJSON), &scanEvent) != nil || scanEvent.IsBeltCluster() {
 		return
@@ -206,11 +206,11 @@ func (accumulator *computeAccumulator) processScan(rowItem journal.Row, metrics 
 	}
 	odysseyEnabled := accumulator.session.OdysseyAt(rowItem.Timestamp)
 	metrics.addScan(reference.EstimateBodyValue(
-		projections.ToBodyScanWithPopulation(&scanEvent, systemPopulation), reference.MappingInfo{}, odysseyEnabled,
+		replay.ToBodyScanWithPopulation(&scanEvent, systemPopulation), reference.MappingInfo{}, odysseyEnabled,
 	))
 }
 
-func (accumulator *computeAccumulator) processMapping(rowItem journal.Row, metrics *Metrics) error {
+func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metrics *Metrics) error {
 	var saaEvent journal.SAAScanCompleteEvent
 	if json.Unmarshal([]byte(rowItem.RawJSON), &saaEvent) != nil {
 		return nil
@@ -232,12 +232,12 @@ func (accumulator *computeAccumulator) processMapping(rowItem journal.Row, metri
 	odysseyEnabled := accumulator.session.OdysseyAt(rowItem.Timestamp)
 	mappingInfo := reference.MappingInfo{Mapped: true, ProbesUsed: saaEvent.ProbesUsed, EfficiencyTarget: saaEvent.EfficiencyTarget}
 	metrics.addScan(reference.EstimateMappingIncrement(
-		projections.ToBodyScanWithPopulation(parentScan, systemPopulation), mappingInfo, odysseyEnabled,
+		replay.ToBodyScanWithPopulation(parentScan, systemPopulation), mappingInfo, odysseyEnabled,
 	))
 	return nil
 }
 
-func (accumulator *computeAccumulator) processOrganic(rowItem journal.Row, metrics *Metrics) error {
+func (accumulator *computeAccumulator) processOrganic(rowItem replay.Row, metrics *Metrics) error {
 	var organicEvent journal.ScanOrganicEvent
 	if json.Unmarshal([]byte(rowItem.RawJSON), &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
 		return nil

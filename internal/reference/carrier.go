@@ -5,21 +5,11 @@ import (
 	"time"
 )
 
-// Vec3 is a galactic coordinate in light years (journal StarPos order x, y, z).
-type Vec3 struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-	Z float64 `json:"z"`
-}
-
-// Distance returns the 3D Euclidean distance between pointA and pointB.
-func Distance(pointA, pointB Vec3) float64 {
-	deltaX, deltaY, deltaZ := pointB.X-pointA.X, pointB.Y-pointA.Y, pointB.Z-pointA.Z
-	return math.Sqrt(deltaX*deltaX + deltaY*deltaY + deltaZ*deltaZ)
-}
-
 // Fleet carrier constants.
 const (
+	FleetCarrierStationType     = "FleetCarrier"
+	PersonalCarrierMaxCapacity  = 25000
+	SquadronCarrierMaxCapacity  = 60000
 	CarrierMaxJumpLy            = 500.0
 	CarrierFuelTankTonnes       = 1000
 	DefaultTritiumPricePerTonne = 50000
@@ -29,6 +19,22 @@ const (
 	carrierFixedJumpTonnes      = 5.0
 	secondsPerWeek              = 7 * 24 * 3600.0
 )
+
+// CarrierCartographicsTariff calculates Universal Cartographics' 25% Fleet Carrier
+// tariff from the journal's post-tariff BaseValue and Bonus fields. When docked
+// on a Fleet Carrier (including the commander's own vessel), Frontier logs
+// BaseValue + Bonus at exact 75% of pre-tariff scan value, making the 25%
+// tariff equal to one third of (BaseValue + Bonus).
+func CarrierCartographicsTariff(isDockedOnFleetCarrier bool, baseValue, bonusValue int64) int64 {
+	if !isDockedOnFleetCarrier {
+		return 0
+	}
+	postTariffGross := baseValue + bonusValue
+	if postTariffGross <= 0 {
+		return 0
+	}
+	return postTariffGross / 3
+}
 
 // CarrierTritiumCost estimates the tritium consumed by a fleet carrier jump
 // using the standard in-game formula:

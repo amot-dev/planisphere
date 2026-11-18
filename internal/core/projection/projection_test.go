@@ -6,23 +6,31 @@ import (
 	"testing"
 
 	"planisphere/internal/core/events"
-	"planisphere/internal/sources/journal"
+)
+
+const (
+	testEventScan         events.JournalEvent = 0
+	testEventFSDJump      events.JournalEvent = 1
+	testEventCarrierStats events.JournalEvent = 2
+	testEventDocked       events.JournalEvent = 3
+	testEventFSDTarget    events.JournalEvent = 4
+	testAllJournalEvents  events.JournalEventSet = (1 << 5) - 1
 )
 
 func TestTriggersCompositionAndMatching(testingContext *testing.T) {
 	scanTriggers := Triggers{
-		Journal: journal.NewEventSet(journal.EventScan),
+		Journal: events.NewJournalSet(testEventScan),
 		App:     events.NewAppSet(events.AppCommanderFilterChanged),
 	}
 	arrivalTriggers := Triggers{
-		Journal: journal.NewEventSet(journal.EventFSDJump),
+		Journal: events.NewJournalSet(testEventFSDJump),
 		App:     events.NewAppSet(events.AppModesChanged),
 	}
 
-	if !scanTriggers.Matches(Triggers{Journal: journal.NewEventSet(journal.EventScan, journal.EventDocked)}) {
-		testingContext.Fatalf("expected journal trigger match on EventScan")
+	if !scanTriggers.Matches(Triggers{Journal: events.NewJournalSet(testEventScan, testEventDocked)}) {
+		testingContext.Fatalf("expected journal trigger match on testEventScan")
 	}
-	if scanTriggers.Matches(Triggers{Journal: journal.NewEventSet(journal.EventDocked)}) {
+	if scanTriggers.Matches(Triggers{Journal: events.NewJournalSet(testEventDocked)}) {
 		testingContext.Fatalf("expected disjoint journal event not to match")
 	}
 
@@ -31,10 +39,10 @@ func TestTriggersCompositionAndMatching(testingContext *testing.T) {
 	secondCache := NewCache(bus, "arrivals", arrivalTriggers, func() (int, error) { return 2, nil })
 	combined := TriggersFrom(firstCache, nil, secondCache).
 		WithApp(events.AppSettingsChanged).
-		WithJournal(journal.EventCarrierStats)
+		WithJournal(testEventCarrierStats)
 
-	if !combined.Journal.Has(journal.EventScan) || !combined.Journal.Has(journal.EventFSDJump) || !combined.Journal.Has(journal.EventCarrierStats) {
-		testingContext.Fatalf("unexpected combined journal triggers: %v", combined.Journal.Names())
+	if !combined.Journal.Has(testEventScan) || !combined.Journal.Has(testEventFSDJump) || !combined.Journal.Has(testEventCarrierStats) {
+		testingContext.Fatalf("unexpected combined journal triggers: %v", combined.Journal)
 	}
 	if !combined.App.Has(events.AppCommanderFilterChanged) || !combined.App.Has(events.AppModesChanged) || !combined.App.Has(events.AppSettingsChanged) {
 		testingContext.Fatalf("unexpected combined app triggers: %v", combined.App.Names())
@@ -150,7 +158,7 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 		bus,
 		"arrivals",
 		Triggers{
-			Journal: journal.NewEventSet(journal.EventFSDJump),
+			Journal: events.NewJournalSet(testEventFSDJump),
 			App:     events.NewAppSet(events.AppCommanderFilterChanged),
 		},
 		func() (int32, error) {
@@ -162,7 +170,7 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 	carrierCache := NewCache(
 		bus,
 		"carrier",
-		Triggers{Journal: journal.NewEventSet(journal.EventCarrierStats)},
+		Triggers{Journal: events.NewJournalSet(testEventCarrierStats)},
 		func() (int32, error) {
 			return carrierLoads.Add(1), nil
 		},
@@ -175,7 +183,7 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 	var eventsObserved []string
 	var arrivalValueDuringHandler int32
 	bus.OnTrigger(
-		Triggers{Journal: journal.NewEventSet(journal.EventFSDJump)},
+		Triggers{Journal: events.NewJournalSet(testEventFSDJump)},
 		func(observed Triggers) {
 			eventsObserved = append(eventsObserved, "arrival_handler")
 			loadedValue, _ := arrivalCache.Get()
@@ -185,10 +193,10 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 
 	bus.SubscribeUI(events.UITargetPlan, TriggersFrom(arrivalCache))
 	bus.SubscribeUI(events.UITargetStats, TriggersFrom(arrivalCache, carrierCache).WithApp(events.AppAdjustmentsChanged))
-	bus.SubscribeUI(events.UITargetIngest, Triggers{Journal: journal.AllEvents})
+	bus.SubscribeUI(events.UITargetIngest, Triggers{Journal: testAllJournalEvents})
 
 	// FSDTarget has no projection/UI target besides UITargetIngest.
-	uiOnTarget := bus.PublishJournal(journal.NewEventSet(journal.EventFSDTarget))
+	uiOnTarget := bus.PublishJournal(events.NewJournalSet(testEventFSDTarget))
 	if !slices.Equal(uiOnTarget.Names(), []string{"ingest"}) {
 		testingContext.Fatalf("expected only ingest UI target for FSDTarget, got %v", uiOnTarget.Names())
 	}
@@ -197,7 +205,7 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 	}
 
 	// FSDJump must invalidate arrivalCache BEFORE running arrival_handler, leave carrierCache warm, and return ingest/stats/plan.
-	uiOnJump := bus.PublishJournal(journal.NewEventSet(journal.EventFSDJump))
+	uiOnJump := bus.PublishJournal(events.NewJournalSet(testEventFSDJump))
 	if len(eventsObserved) != 1 || arrivalValueDuringHandler != 2 {
 		testingContext.Fatalf("expected arrivalCache invalidated before handler (value=%d, observed=%v)", arrivalValueDuringHandler, eventsObserved)
 	}

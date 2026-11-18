@@ -1,5 +1,3 @@
-// Package journal ingests Elite Dangerous Player Journal files into SQLite and
-// tails the active journal in real time.
 package journal
 
 import (
@@ -344,34 +342,4 @@ func Vec(positionCoords []float64) (coordX, coordY, coordZ float64, hasCoords bo
 		return 0, 0, 0, false
 	}
 	return positionCoords[0], positionCoords[1], positionCoords[2], true
-}
-
-// IsPlayerShip reports whether internalShipName represents a jump-capable player
-// vessel rather than an on-foot suit, SRV, fighter, or ship-launched lander.
-func IsPlayerShip(internalShipName string) bool {
-	trimmedName := strings.TrimSpace(internalShipName)
-	if trimmedName == "" {
-		return false
-	}
-	lowercaseName := strings.ToLower(trimmedName)
-	return !strings.Contains(lowercaseName, "suit") &&
-		!strings.Contains(lowercaseName, "buggy") &&
-		!strings.Contains(lowercaseName, "srv") &&
-		!strings.Contains(lowercaseName, "fighter") &&
-		!strings.Contains(lowercaseName, "lander")
-}
-
-// FSDSynthesisBoostTier maps an FSD injection synthesis recipe name to its
-// FSDJump BoostUsed code (1 basic, 2 standard, 3 premium), or 0 for non-FSD recipes.
-func FSDSynthesisBoostTier(recipeName string) int {
-	switch strings.ToLower(strings.TrimSpace(recipeName)) {
-	case "fsd basic":
-		return 1
-	case "fsd standard":
-		return 2
-	case "fsd premium":
-		return 3
-	default:
-		return 0
-	}
 }

@@ -4,11 +4,10 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
-	"time"
 
 	"planisphere/internal/core/db"
-	"planisphere/internal/projections"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/store/modes"
 )
 
@@ -20,7 +19,7 @@ const (
 )
 
 // Transition is a ship switch that happened during a leg.
-type Transition = projections.ShipTransition
+type Transition = replay.ShipTransition
 
 // GECRef links a system to an EDAstro Galactic Exploration Catalog entry.
 type GECRef struct {
@@ -77,7 +76,7 @@ type planBuildContext struct {
 	currentWaypoint    *Row
 	playerPosition     *reference.Vec3
 	nextWaypointRowID  int64
-	shipTimeline       []projections.ShipSwitch
+	shipTimeline       []replay.ShipSwitch
 	jumpTimestamps     []string
 	modeTimeline       *modes.Timeline
 	modeList           []modes.Mode
@@ -119,56 +118,41 @@ func buildPreviousVisitMap(rows []Row) map[int64]string {
 	return previousVisitByID
 }
 
-func resolvePlanVisitCounts(queryer db.Queryer, rows []Row, proj *Projections) (map[string]int, error) {
+func resolvePlanVisitCounts(rows []Row, proj *Projections) (map[string]int, error) {
 	waypointSystems := make([]string, 0, len(rows))
-	normalizedKeys := make([]string, 0, len(rows))
 	seenKeys := make(map[string]bool, len(rows))
 	for _, rowItem := range rows {
 		if !rowItem.IsWaypoint() {
 			continue
 		}
-		normalizedKey := projections.NormalizeSystemKey(rowItem.SystemName)
+		normalizedKey := replay.NormalizeSystemKey(rowItem.SystemName)
 		if normalizedKey != "" && !seenKeys[normalizedKey] {
 			seenKeys[normalizedKey] = true
-			normalizedKeys = append(normalizedKeys, normalizedKey)
 			waypointSystems = append(waypointSystems, rowItem.SystemName)
 		}
 	}
-	if len(normalizedKeys) == 0 {
+	if len(waypointSystems) == 0 {
 		return nil, nil
 	}
-	if proj != nil && proj.VisitCounts != nil {
-		return proj.VisitCounts.CountsForSystems(waypointSystems)
-	}
-	recoveredJumps, recoverError := projections.ComputeRecoveredJumpsInRange(queryer, "", "")
-	if recoverError != nil {
-		return nil, recoverError
-	}
-	return projections.QuerySystemVisitCounts(queryer, normalizedKeys, recoveredJumps)
+	return proj.VisitCounts.CountsForSystems(waypointSystems)
 }
 
 func loadPlanShipContext(queryer db.Queryer, expeditionRecord Expedition, buildCtx *planBuildContext, proj *Projections) error {
-	var shipError, jumpError error
-	if proj != nil && proj.ShipHistory != nil {
-		if buildCtx.shipTimeline, shipError = proj.ShipHistory.Timeline(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
-			return shipError
-		}
-		buildCtx.jumpTimestamps, jumpError = proj.ShipHistory.LoadJumpTimestamps(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-		return jumpError
-	}
-	if buildCtx.shipTimeline, shipError = projections.QueryShipTimeline(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
+	var shipError error
+	if buildCtx.shipTimeline, shipError = proj.ShipHistory.Timeline(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
 		return shipError
 	}
-	recoveredJumps, recoverError := projections.ComputeRecoveredJumpsInRange(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	recoveredJumps, recoverError := proj.RecoveredJumps.InRange(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
 	if recoverError != nil {
 		return recoverError
 	}
-	buildCtx.jumpTimestamps, jumpError = projections.QueryJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, recoveredJumps)
+	var jumpError error
+	buildCtx.jumpTimestamps, jumpError = replay.QueryJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, recoveredJumps)
 	return jumpError
 }
 
 func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView, proj *Projections) (*planBuildContext, error) {
-	visitCountBySystem, visitCountsError := resolvePlanVisitCounts(queryer, rows, proj)
+	visitCountBySystem, visitCountsError := resolvePlanVisitCounts(rows, proj)
 	if visitCountsError != nil {
 		return nil, visitCountsError
 	}
@@ -191,16 +175,7 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		planView.CurrentRowID = buildCtx.currentWaypoint.ID
 	}
 
-	var (
-		playerPosition      *reference.Vec3
-		playerSystem        string
-		playerLocationError error
-	)
-	if proj != nil && proj.Arrivals != nil {
-		playerPosition, playerSystem, playerLocationError = proj.Arrivals.LatestPlayerLocation()
-	} else {
-		playerPosition, playerSystem, playerLocationError = projections.QueryLatestPlayerLocation(queryer)
-	}
+	playerPosition, playerSystem, playerLocationError := replay.QueryLatestPlayerLocation(queryer)
 	if playerLocationError != nil && !errors.Is(playerLocationError, sql.ErrNoRows) {
 		return nil, playerLocationError
 	}
@@ -278,7 +253,7 @@ func populateWaypointLegTelemetry(buildCtx *planBuildContext, rowItem Row, waypo
 	case VisitVisited:
 		rowViewItem.VisitedAtGalactic = reference.ToGalactic(rowItem.VisitedAt)
 		if afterTimestamp, ok := buildCtx.previousVisitByID[rowItem.ID]; ok && buildCtx.shipTimeline != nil {
-			rowViewItem.Transitions = projections.ExtractShipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
+			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
 			modeID := rowItem.LegModeID
 			if modeID == 0 && buildCtx.modeTimeline != nil {
 				modeID = buildCtx.modeTimeline.ModeAt(rowItem.VisitedAt)
@@ -291,7 +266,7 @@ func populateWaypointLegTelemetry(buildCtx *planBuildContext, rowItem Row, waypo
 			untilTimestamp = reference.NowISO()
 		}
 		if buildCtx.shipTimeline != nil {
-			rowViewItem.Transitions = projections.ExtractShipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, buildCtx.currentWaypoint.VisitedAt, untilTimestamp)
+			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildCtx.shipTimeline, buildCtx.jumpTimestamps, buildCtx.currentWaypoint.VisitedAt, untilTimestamp)
 		}
 		var modeID int64
 		if buildCtx.modeTimeline != nil {
@@ -317,7 +292,7 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 		if region, ok := reference.RegionAt(rowItem.X, rowItem.Y, rowItem.Z); ok {
 			rowViewItem.DetectedRegionID, rowViewItem.DetectedRegion = region.ID, region.Name
 		}
-		visitCount := buildCtx.visitCountBySystem[projections.NormalizeSystemKey(rowItem.SystemName)]
+		visitCount := buildCtx.visitCountBySystem[replay.NormalizeSystemKey(rowItem.SystemName)]
 		rowViewItem.VisitCount = visitCount
 		if visitCount > 0 && rowViewItem.Row.CoordsSource != "journal" {
 			rowViewItem.Row.CoordsSource = "journal"
@@ -370,6 +345,9 @@ func buildWaypointRowView(buildCtx *planBuildContext, rowItem Row, waypointNumbe
 
 // BuildPlan assembles the planner view for an expedition.
 func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, proj *Projections) (PlanView, error) {
+	if proj == nil || proj.VisitCounts == nil || proj.ShipHistory == nil || proj.RecoveredJumps == nil {
+		return PlanView{}, errors.New("expedition VisitCounts, ShipHistory, and RecoveredJumps projections are required")
+	}
 	expeditionRecord, getExpeditionError := Get(queryer, expeditionID)
 	if getExpeditionError != nil {
 		return PlanView{}, getExpeditionError
@@ -412,66 +390,4 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, proj
 		planView.Rows = []RowView{}
 	}
 	return planView, nil
-}
-
-// addOneSecond shifts an ISO timestamp forward by one second. Leg telemetry
-// uses half-open arrival intervals (prevVisit, rowVisit], whereas modes.SetWindow
-// stores half-open [StartsAt, EndsAt) intervals at 1-second resolution; shifting
-// both bounds maps (prevVisit, rowVisit] onto [prevVisit+1s, rowVisit+1s) and
-// (latestVisit, +inf) onto [latestVisit+1s, "") so arrival-second events stay in the arriving leg.
-func addOneSecond(isoTimestamp string) string {
-	parsedTime, parseError := reference.ParseISO(isoTimestamp)
-	if parseError != nil {
-		return isoTimestamp
-	}
-	return parsedTime.Add(time.Second).UTC().Format("2006-01-02T15:04:05Z")
-}
-
-// SetLegMode updates the single mode assigned to the leg arriving at rowID.
-// When the waypoint has been visited (after a previous visited waypoint), it
-// updates the closed time window (prevVisit, rowVisit] in mode_windows; when
-// the waypoint is the active in-progress leg, it updates the open-ended window
-// (latestVisit, +inf) so filtered expedition and all-time stats immediately
-// reflect the change.
-func SetLegMode(transaction *sql.Tx, rowID int64, modeID int64) (int64, error) {
-	targetRow, rowError := GetRow(transaction, rowID)
-	if rowError != nil {
-		return 0, rowError
-	}
-	rows, listError := ListRows(transaction, targetRow.ExpeditionID)
-	if listError != nil {
-		return targetRow.ExpeditionID, listError
-	}
-	if targetRow.VisitedAt != "" {
-		if _, updateError := UpdateRow(transaction, RowPatch{ID: rowID, LegModeID: &modeID}); updateError != nil {
-			return 0, updateError
-		}
-		previousTimestamp := ""
-		for _, candidateRow := range rows {
-			if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt < targetRow.VisitedAt && candidateRow.VisitedAt > previousTimestamp {
-				previousTimestamp = candidateRow.VisitedAt
-			}
-		}
-		if previousTimestamp != "" {
-			startISO := addOneSecond(previousTimestamp)
-			endISO := addOneSecond(targetRow.VisitedAt)
-			if endISO > startISO {
-				if windowError := modes.SetWindow(transaction, 0, modeID, startISO, endISO); windowError != nil {
-					return targetRow.ExpeditionID, windowError
-				}
-			}
-		}
-		return targetRow.ExpeditionID, nil
-	}
-
-	latestTimestamp := ""
-	for _, candidateRow := range rows {
-		if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt > latestTimestamp {
-			latestTimestamp = candidateRow.VisitedAt
-		}
-	}
-	if latestTimestamp != "" {
-		return targetRow.ExpeditionID, modes.SetWindow(transaction, 0, modeID, addOneSecond(latestTimestamp), "")
-	}
-	return targetRow.ExpeditionID, modes.Switch(transaction, modeID, "")
 }

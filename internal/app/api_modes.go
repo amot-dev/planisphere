@@ -1,12 +1,8 @@
 package app
 
 import (
-	"database/sql"
-
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
-	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
 )
 
@@ -72,7 +68,7 @@ func (app *App) GetModesState() (ModesState, error) {
 		modeState.Windows = append(modeState.Windows, ModeWindowView{
 			ID: windowItem.ID, ModeID: windowItem.ModeID, ModeName: modeItem.Name, Color: modeItem.Color, Start: windowItem.Start, End: windowItem.End,
 			StartGalactic: reference.ToGalactic(windowItem.Start), EndGalactic: reference.ToGalactic(windowItem.End),
-			Duration: expedition.Elapsed(windowItem.Start, windowItem.End),
+			Duration: reference.Elapsed(windowItem.Start, windowItem.End),
 		})
 	}
 	return modeState, nil
@@ -117,7 +113,7 @@ func (app *App) DeleteMode(id int64) error {
 // SwitchMode makes modeID the active mode from now (0 stops tracking a mode).
 func (app *App) SwitchMode(modeID int64) (ModesState, error) {
 	if switchError := app.withReadyReadLock(func() error {
-		return db.WithTx(app.db, func(transaction *sql.Tx) error { return modes.Switch(transaction, modeID, "") })
+		return modes.SwitchTx(app.db, modeID, "")
 	}); switchError != nil {
 		return ModesState{}, switchError
 	}

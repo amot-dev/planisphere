@@ -4,13 +4,12 @@ package projection
 
 import (
 	"planisphere/internal/core/events"
-	"planisphere/internal/sources/journal"
 )
 
 // Triggers pairs external Elite Dangerous journal events and internal
 // Planisphere application events that invalidate a projection or invoke a hook.
 type Triggers struct {
-	Journal journal.EventSet
+	Journal events.JournalEventSet
 	App     events.AppEventSet
 }
 
@@ -37,9 +36,9 @@ func (triggers Triggers) WithApp(items ...events.AppEvent) Triggers {
 }
 
 // WithJournal returns a copy of triggers with the provided journal events added.
-func (triggers Triggers) WithJournal(items ...journal.EventType) Triggers {
+func (triggers Triggers) WithJournal(items ...events.JournalEvent) Triggers {
 	return Triggers{
-		Journal: triggers.Journal.Union(journal.NewEventSet(items...)),
+		Journal: triggers.Journal.Union(events.NewJournalSet(items...)),
 		App:     triggers.App,
 	}
 }

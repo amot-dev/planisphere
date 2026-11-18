@@ -12,7 +12,7 @@ import (
 	"strconv"
 
 	"planisphere/internal/app"
-	"planisphere/internal/projections/stats"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
@@ -134,6 +134,7 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 	liveMetrics, _ := statsEngine.Compute(expRange, nil)
 	liveRealization, _ := statsEngine.ComputeRealization(expRange, nil)
 
+	manualAdjustments := planView.Expedition.Adjustments.ToMetrics()
 	sidebar := app.SidebarStats{
 		ExpeditionID:           planView.Expedition.ID,
 		Status:                 planView.Expedition.Status,
@@ -143,8 +144,8 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 		StartGalactic:          planView.StartGalactic,
 		EndGalactic:            planView.EndGalactic,
 		Live:                   liveMetrics,
-		Adjustments:            planView.Expedition.Adjustments,
-		Expedition:             liveMetrics.Add(planView.Expedition.Adjustments),
+		Adjustments:            manualAdjustments,
+		Expedition:             liveMetrics.Add(manualAdjustments),
 		AllJournals:            allMetrics,
 		Realization:            liveRealization,
 		AllJournalsRealization: allRealization,

@@ -10,7 +10,9 @@ import (
 
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/settings"
 )
 
 func insertJournalRow(testingContext *testing.T, database *sql.DB, timestamp, eventName, systemName, keyIdentifier, rawJSON string) {
@@ -41,19 +43,19 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 		testingContext.Fatal(scanError)
 	}
 
-	commanders, listError := journal.ListCommanders(databaseConnection)
+	commanders, listError := replay.ListCommanders(databaseConnection)
 	if listError != nil || len(commanders) != 2 {
 		testingContext.Fatalf("ListCommanders: len=%d err=%v", len(commanders), listError)
 	}
-	careerStart, _ := journal.CareerStart(databaseConnection)
+	careerStart, _ := replay.CareerStart(databaseConnection)
 	if careerStart != "2026-05-01T10:00:00Z" {
 		testingContext.Fatalf("CareerStart = %q, want 2026-05-01T10:00:00Z", careerStart)
 	}
 
-	if err := journal.SetCommanderEnabled(databaseConnection, "CmdrFirst", false); err != nil {
+	if err := settings.SetCommanderEnabled(databaseConnection, "CmdrFirst", false); err != nil {
 		testingContext.Fatal(err)
 	}
-	updatedStart, _ := journal.CareerStart(databaseConnection)
+	updatedStart, _ := replay.CareerStart(databaseConnection)
 	if updatedStart != "2026-05-02T10:00:00Z" {
 		testingContext.Fatalf("expected updated CareerStart 2026-05-02T10:00:00Z, got %q", updatedStart)
 	}
@@ -84,9 +86,9 @@ func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testi
 	if arrivalsError != nil || len(arrivals) != 2 {
 		testingContext.Fatalf("InWindow: len=%d err=%v", len(arrivals), arrivalsError)
 	}
-	_, currentSystem, locationError := systemArrivals.LatestPlayerLocation()
+	_, currentSystem, locationError := replay.QueryLatestPlayerLocation(databaseConnection)
 	if locationError != nil || currentSystem != "WaySys" {
-		testingContext.Fatalf("LatestPlayerLocation = %q err=%v", currentSystem, locationError)
+		testingContext.Fatalf("QueryLatestPlayerLocation = %q err=%v", currentSystem, locationError)
 	}
 
 	counts, countsError := visitCounts.CountsForSystems([]string{"  parkSys ", "WaySys", "UnknownSys"})
@@ -133,8 +135,7 @@ func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testi
 func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing.T) {
 	databaseConnection := openProjectionTestDB(testingContext)
 	eventBus := projection.NewBus()
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	shipHistory := projections.NewShipHistory(databaseConnection, eventBus, recoveredJumps)
+	shipHistory := projections.NewShipHistory(databaseConnection, eventBus)
 
 	// Log first in Caspian Explorer ("Siderite Skillet", ShipID 7), then in Mandalay ("Dust Devil", ShipID 9).
 	insertJournalRow(testingContext, databaseConnection, "2026-05-01T10:00:00Z", "LoadGame", "", "lg1",
@@ -148,9 +149,9 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 	insertJournalRow(testingContext, databaseConnection, "2026-05-03T10:05:00Z", "LoadGame", "", "lg-srv",
 		`{"timestamp":"2026-05-03T10:05:00Z","event":"LoadGame","Ship":"TestBuggy","Ship_Localised":"SRV Scarab","ShipID":9}`)
 
-	currentBeforeSwap, shipError := shipHistory.CurrentShip()
+	currentBeforeSwap, shipError := replay.QueryCurrentShip(databaseConnection)
 	if shipError != nil {
-		testingContext.Fatalf("CurrentShip before swap: %v", shipError)
+		testingContext.Fatalf("QueryCurrentShip before swap: %v", shipError)
 	}
 	if currentBeforeSwap != "Mandalay \u201cDust Devil\u201d" {
 		testingContext.Fatalf("CurrentShip = %q, want %q", currentBeforeSwap, "Mandalay \u201cDust Devil\u201d")
@@ -160,9 +161,9 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 	insertJournalRow(testingContext, databaseConnection, "2026-05-04T10:00:00Z", "ShipyardSwap", "", "swap1",
 		`{"timestamp":"2026-05-04T10:00:00Z","event":"ShipyardSwap","ShipType":"explorer_nx","ShipID":7,"StoreOldShip":"Mandalay","StoreShipID":9}`)
 
-	currentAfterSwap, swapShipError := shipHistory.CurrentShip()
+	currentAfterSwap, swapShipError := replay.QueryCurrentShip(databaseConnection)
 	if swapShipError != nil {
-		testingContext.Fatalf("CurrentShip after swap: %v", swapShipError)
+		testingContext.Fatalf("QueryCurrentShip after swap: %v", swapShipError)
 	}
 	if currentAfterSwap != "Caspian Explorer \u201cSiderite Skillet\u201d" {
 		testingContext.Fatalf("CurrentShip after swap = %q, want %q", currentAfterSwap, "Caspian Explorer \u201cSiderite Skillet\u201d")
@@ -173,7 +174,7 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 	if timelineError != nil {
 		testingContext.Fatalf("Timeline: %v", timelineError)
 	}
-	transitions := shipHistory.ShipsUsedOnLeg(timeline, []string{"2026-05-03T12:00:00Z", "2026-05-04T12:00:00Z"}, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z")
+	transitions := replay.ExtractShipsUsedOnLeg(timeline, []string{"2026-05-03T12:00:00Z", "2026-05-04T12:00:00Z"}, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z")
 	if len(transitions) != 2 || transitions[0].To != "Mandalay" || transitions[1].To != "Caspian Explorer" {
 		testingContext.Fatalf("unexpected leg transitions (must stay hull-only): %+v", transitions)
 	}
@@ -187,7 +188,11 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	// Without any CarrierStats, unlabelled Location matches Location/CarrierJump consistently.
 	insertJournalRow(testingContext, databaseConnection, "2026-05-01T09:00:00Z", "CarrierJump", "OriginSys", "cj0",
 		`{"timestamp":"2026-05-01T09:00:00Z","event":"CarrierJump","StarSystem":"OriginSys"}`)
-	initialLoc, initialErr := carrierState.LastLocation()
+	initialSnapshot, snapshotError := carrierState.LatestStats()
+	if snapshotError != nil {
+		testingContext.Fatalf("initial LatestStats: %v", snapshotError)
+	}
+	initialLoc, initialErr := replay.QueryCarrierLastLocation(databaseConnection, initialSnapshot)
 	if initialErr != nil || initialLoc != "OriginSys" {
 		testingContext.Fatalf("initial LastLocation = %q err=%v, want OriginSys", initialLoc, initialErr)
 	}
@@ -208,11 +213,15 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	insertJournalRow(testingContext, databaseConnection, "2026-05-02T12:10:00Z", "CarrierDepositFuel", "", "cdf-foreign",
 		`{"timestamp":"2026-05-02T12:10:00Z","event":"CarrierDepositFuel","CarrierID":3709999999,"Amount":200,"Total":999}`)
 
-	lastLoc, locError := carrierState.LastLocation()
+	ownedSnapshot, ownedSnapshotError := carrierState.LatestStats()
+	if ownedSnapshotError != nil || !ownedSnapshot.Found {
+		testingContext.Fatalf("LatestStats after CarrierStats: snapshot=%+v err=%v", ownedSnapshot, ownedSnapshotError)
+	}
+	lastLoc, locError := replay.QueryCarrierLastLocation(databaseConnection, ownedSnapshot)
 	if locError != nil || lastLoc != "OwnedCarrierSys" {
 		testingContext.Fatalf("LastLocation = %q err=%v, want OwnedCarrierSys (foreign carrier ignored)", lastLoc, locError)
 	}
-	depotInfo, depotError := carrierState.DepotInfo()
+	depotInfo, depotError := replay.QueryCarrierDepotInfo(databaseConnection, ownedSnapshot)
 	if depotError != nil {
 		testingContext.Fatalf("DepotInfo: %v", depotError)
 	}
@@ -223,7 +232,7 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	// Own carrier deposit overrides DepotTritium when timestamp >= latest CarrierStats.
 	insertJournalRow(testingContext, databaseConnection, "2026-05-02T13:00:00Z", "CarrierDepositFuel", "", "cdf-own",
 		`{"timestamp":"2026-05-02T13:00:00Z","event":"CarrierDepositFuel","CarrierID":3701199360,"Amount":150,"Total":900}`)
-	updatedDepot, updatedDepotErr := carrierState.DepotInfo()
+	updatedDepot, updatedDepotErr := replay.QueryCarrierDepotInfo(databaseConnection, ownedSnapshot)
 	if updatedDepotErr != nil || updatedDepot.DepotTritium != 900 {
 		testingContext.Fatalf("updated DepotInfo = %+v err=%v, want DepotTritium=900", updatedDepot, updatedDepotErr)
 	}

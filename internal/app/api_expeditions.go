@@ -1,14 +1,12 @@
 package app
 
 import (
-	"database/sql"
-	"strconv"
 	"strings"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
 
 // ListExpeditions returns all expeditions (newest first).
@@ -34,7 +32,7 @@ func (app *App) CreateExpedition(name, description string) (expedition.Expeditio
 		if createError != nil {
 			return createError
 		}
-		_ = db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(createdExpedition.ID, 10))
+		_ = settings.SetActiveExpeditionID(app.db, createdExpedition.ID)
 		return nil
 	}); err != nil {
 		return createdExpedition, err
@@ -53,7 +51,7 @@ func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 		if cloneError != nil {
 			return cloneError
 		}
-		return db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(clonedExpedition.ID, 10))
+		return settings.SetActiveExpeditionID(app.db, clonedExpedition.ID)
 	}); err != nil {
 		return clonedExpedition, err
 	}
@@ -92,7 +90,7 @@ func (app *App) DeleteExpedition(id int64) error {
 			return err
 		}
 		if app.activeExpeditionID() == id {
-			_ = db.SetSetting(app.db, settingActiveExpedition, "")
+			_ = settings.SetActiveExpeditionID(app.db, 0)
 		}
 		return nil
 	}); deleteError != nil {
@@ -110,7 +108,7 @@ func (app *App) SetActiveExpedition(id int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.SetSetting(app.db, settingActiveExpedition, strconv.FormatInt(id, 10))
+		return settings.SetActiveExpeditionID(app.db, id)
 	}(); err != nil {
 		return err
 	}
@@ -165,19 +163,15 @@ func (app *App) gecLookup(name string, address int64) *expedition.GECRef {
 // rowType is "waypoint" or "region"; regionID is used for region headers.
 func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID int) (expedition.Row, error) {
 	var newRow expedition.Row
-	var txError error
 	if err := func() error {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		txError = db.WithTx(app.db, func(transaction *sql.Tx) error {
-			var insertError error
-			newRow, insertError = expedition.InsertRow(transaction, expeditionID, afterRowID, rowType, regionID)
-			return insertError
-		})
-		return txError
+		var insertError error
+		newRow, insertError = expedition.InsertRowTx(app.db, expeditionID, afterRowID, rowType, regionID)
+		return insertError
 	}(); err != nil {
 		return newRow, err
 	}
@@ -239,11 +233,9 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(transaction *sql.Tx) error {
-			var setModeError error
-			expeditionID, setModeError = expedition.SetLegMode(transaction, rowID, modeID)
-			return setModeError
-		})
+		var setModeError error
+		expeditionID, setModeError = expedition.SetLegModeTx(app.db, rowID, modeID)
+		return setModeError
 	}(); err != nil {
 		return err
 	}
@@ -262,11 +254,9 @@ func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(transaction *sql.Tx) error {
-			var overrideError error
-			expeditionID, overrideError = expedition.SetCarrierArrivalOverride(transaction, rowID, arrived)
-			return overrideError
-		})
+		var overrideError error
+		expeditionID, overrideError = expedition.SetCarrierArrivalOverrideTx(app.db, rowID, arrived)
+		return overrideError
 	}(); err != nil {
 		return err
 	}
@@ -283,11 +273,9 @@ func (app *App) DeleteRow(rowID int64) error {
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
-		return db.WithTx(app.db, func(transaction *sql.Tx) error {
-			var deleteRowError error
-			expeditionID, deleteRowError = expedition.DeleteRow(transaction, rowID)
-			return deleteRowError
-		})
+		var deleteRowError error
+		expeditionID, deleteRowError = expedition.DeleteRowTx(app.db, rowID)
+		return deleteRowError
 	}(); err != nil {
 		return err
 	}
@@ -311,11 +299,9 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 		if getError != nil {
 			return getError
 		}
-		return db.WithTx(app.db, func(transaction *sql.Tx) error {
-			var moveRowError error
-			expeditionID, moveRowError = expedition.MoveRow(transaction, rowID, toIndex)
-			return moveRowError
-		})
+		var moveRowError error
+		expeditionID, moveRowError = expedition.MoveRowTx(app.db, rowID, toIndex)
+		return moveRowError
 	}(); err != nil {
 		return err
 	}
@@ -410,22 +396,15 @@ func (app *App) GetStartCandidates(expeditionID int64) (StartCandidates, error) 
 	if readyError := app.ready(); readyError != nil {
 		return StartCandidates{}, readyError
 	}
-	systemName, visits, startCandidatesError := expedition.StartCandidates(app.db, expeditionID, app.expeditionProjections())
+	systemName, visits, startCandidatesError := expedition.StartCandidates(app.db, expeditionID)
 	if visits == nil {
 		visits = []expedition.Arrival{}
 	}
 	return StartCandidates{SystemName: systemName, Visits: visits}, startCandidatesError
 }
 
-func (app *App) lifecycle(expeditionID int64, action func(transaction *sql.Tx) error) error {
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		return db.WithTx(app.db, action)
-	}(); err != nil {
+func (app *App) lifecycle(expeditionID int64, action func() error) error {
+	if err := app.withReadyReadLock(action); err != nil {
 		return err
 	}
 	app.reevaluate(expeditionID)
@@ -436,17 +415,17 @@ func (app *App) lifecycle(expeditionID int64, action func(transaction *sql.Tx) e
 // StartExpedition starts the expedition at the given visit timestamp
 // (ISO-8601 UTC) and retroactively replays history from that moment.
 func (app *App) StartExpedition(expeditionID int64, timestamp string) error {
-	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Start(transaction, expeditionID, timestamp) })
+	return app.lifecycle(expeditionID, func() error { return expedition.StartTx(app.db, expeditionID, timestamp) })
 }
 
 // CompleteExpedition ends the expedition now.
 func (app *App) CompleteExpedition(expeditionID int64) error {
-	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Complete(transaction, expeditionID, "") })
+	return app.lifecycle(expeditionID, func() error { return expedition.CompleteTx(app.db, expeditionID, "") })
 }
 
 // ReopenExpedition makes a completed expedition active again.
 func (app *App) ReopenExpedition(expeditionID int64) error {
-	return app.lifecycle(expeditionID, func(transaction *sql.Tx) error { return expedition.Reopen(transaction, expeditionID) })
+	return app.lifecycle(expeditionID, func() error { return expedition.ReopenTx(app.db, expeditionID) })
 }
 
 // GetWaypointDetails returns the expandable drawer content for a waypoint.

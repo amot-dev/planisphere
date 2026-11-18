@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/gec"
-	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 )
 
@@ -66,13 +66,13 @@ func profileArchiveStatus(
 		"Journal/ArchiveStatus",
 		"Archive",
 		"Query archive file count, total events, and first/last timestamps",
-		"journal.ArchiveStatus",
+		"replay.ArchiveStatus",
 		"events",
 		"files",
 		iterations,
 		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			status, statusError := journal.ArchiveStatus(database)
+			status, statusError := replay.ArchiveStatus(database)
 			if statusError != nil {
 				return singleExecOutcome{}, statusError
 			}
@@ -100,13 +100,13 @@ func profileListCommanders(
 		"Journal/ListCommanders",
 		"Archive",
 		"Load discovered commanders and per-commander event counts (Cold vs. Warm cache)",
-		"journal.ListCommanders",
+		"replay.ListCommanders",
 		"events",
 		"commanders",
 		iterations,
 		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			commanders, listError := journal.ListCommanders(database)
+			commanders, listError := replay.ListCommanders(database)
 			if listError != nil {
 				return singleExecOutcome{}, listError
 			}

@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,10 +21,10 @@ import (
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
-	"planisphere/internal/reference"
 	"planisphere/internal/sources/edsm"
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/settings"
 	"planisphere/internal/version"
 )
 
@@ -54,17 +52,7 @@ type EDDImportProgress struct {
 	Files   int    `json:"files"`
 }
 
-// Setting keys.
-const (
-	settingJournalDir           = "journal_dir"
-	settingJournalDebounceMs    = "journal_debounce_ms"
-	settingOnline               = "online_lookups"
-	settingActiveExpedition     = "active_expedition_id"
-	settingLastScanAt           = "last_scan_at"
-	settingSetupCompleted       = "setup_completed"
-	settingTritiumPricePerTonne = "tritium_price_per_tonne"
-	gecRefreshInterval          = 7 * 24 * time.Hour
-)
+const gecRefreshInterval = 7 * 24 * time.Hour
 
 var errorNotReady = errors.New("database is not available — check the startup error in Config")
 
@@ -427,71 +415,55 @@ func (app *App) emitEDDProgress(active bool, current, total, files int, stage st
 
 // journalDir returns the configured or default journal directory. Caller must hold app.dbMu.RLock.
 func (app *App) journalDir() string {
-	if app.db == nil {
-		return journal.DefaultJournalDir()
-	}
-	settingValue, _ := db.GetSetting(app.db, settingJournalDir)
-	if strings.TrimSpace(settingValue) == "" {
-		return journal.DefaultJournalDir()
-	}
-	return settingValue
+	return settings.JournalDir(app.db, journal.DefaultJournalDir())
 }
 
 // onlineEnabled reports whether online lookups are enabled. Caller must hold app.dbMu.RLock.
 func (app *App) onlineEnabled() bool {
-	if app.db == nil {
-		return false
-	}
-	settingValue, _ := db.GetSetting(app.db, settingOnline)
-	return settingValue != "0"
-}
-
-func (app *App) settingInt64(key string, defaultValue int64) int64 {
-	if app.db == nil {
-		return defaultValue
-	}
-	settingValue, getError := db.GetSetting(app.db, key)
-	trimmedValue := strings.TrimSpace(settingValue)
-	if getError != nil || trimmedValue == "" {
-		return defaultValue
-	}
-	parsedValue, parseError := strconv.ParseInt(trimmedValue, 10, 64)
-	if parseError != nil {
-		return defaultValue
-	}
-	return parsedValue
+	return settings.OnlineLookups(app.db)
 }
 
 // activeExpeditionID returns the currently active expedition ID. Caller must hold app.dbMu.RLock.
 func (app *App) activeExpeditionID() int64 {
-	return app.settingInt64(settingActiveExpedition, 0)
+	return settings.ActiveExpeditionID(app.db)
 }
 
 // setupCompleted reports whether initial onboarding setup has finished. Caller must hold app.dbMu.RLock.
 func (app *App) setupCompleted() bool {
-	if app.db == nil {
-		return false
-	}
-	settingValue, _ := db.GetSetting(app.db, settingSetupCompleted)
-	return settingValue == "1"
+	return settings.SetupCompleted(app.db)
 }
 
 // journalDebounceMs returns the configured or default live journal file-watcher
 // debounce delay in milliseconds, clamped to [MinDebounceDelay, MaxDebounceDelay].
 // Caller must hold app.dbMu.RLock or app.dbMu.Lock.
 func (app *App) journalDebounceMs() int {
-	defaultDebounceMilliseconds := int(journal.DefaultDebounceDelay / time.Millisecond)
-	configuredMilliseconds := app.settingInt64(settingJournalDebounceMs, int64(defaultDebounceMilliseconds))
-	clampedDuration := journal.ClampDebounceDelay(time.Duration(configuredMilliseconds) * time.Millisecond)
-	return int(clampedDuration / time.Millisecond)
+	return settings.JournalDebounceMs(app.db)
 }
 
 // tritiumPricePerTonne returns the configured or default Tritium cost in credits
 // per tonne. Caller must hold app.dbMu.RLock or app.dbMu.Lock.
 func (app *App) tritiumPricePerTonne() int64 {
-	configuredPrice := app.settingInt64(settingTritiumPricePerTonne, reference.DefaultTritiumPricePerTonne)
-	if configuredPrice < 0 {
-		return reference.DefaultTritiumPricePerTonne
-	}
-	return configuredPrice
+	return settings.TritiumPricePerTonne(app.db)
+}
+
+func (app *App) defaultDatabasePath() (string, error) {
+	return db.DefaultPath()
+}
+
+func (app *App) defaultDatabaseFilename() string {
+	return db.DefaultDBFileName
+}
+
+func (app *App) saveConfiguredDatabasePath(dbPath string) error {
+	return db.SaveConfiguredPath(dbPath)
+}
+
+func dirExists(path string) bool {
+	fileInfo, statError := os.Stat(path)
+	return statError == nil && fileInfo.IsDir()
+}
+
+func fileExists(path string) bool {
+	fileInfo, statError := os.Stat(path)
+	return statError == nil && !fileInfo.IsDir()
 }

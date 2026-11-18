@@ -1,4 +1,4 @@
-package projections
+package replay
 
 import (
 	"database/sql"
@@ -176,7 +176,7 @@ func evaluatePrimedRow(
 	previousArrival arrivalSnapshot,
 ) (primedDisconnectCandidate, bool) {
 	var loadGameEvent journal.LoadGameEvent
-	if json.Unmarshal([]byte(loadGameJSON), &loadGameEvent) != nil || !journal.IsPlayerShip(loadGameEvent.Ship) {
+	if json.Unmarshal([]byte(loadGameJSON), &loadGameEvent) != nil || !reference.IsPlayerShip(loadGameEvent.Ship) {
 		return primedDisconnectCandidate{}, false
 	}
 	if !previousArrival.valid || !locX.Valid || !locY.Valid || !locZ.Valid {

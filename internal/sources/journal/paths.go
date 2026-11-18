@@ -156,14 +156,7 @@ func discoverDefaultJournalDir() string {
 	return ""
 }
 
-// DirExists reports whether dir exists and is a directory.
-func DirExists(dir string) bool {
+func dirExists(dir string) bool {
 	fileInfo, statError := os.Stat(dir)
 	return statError == nil && fileInfo.IsDir()
-}
-
-// FileExists reports whether path exists and is a regular file.
-func FileExists(path string) bool {
-	fileInfo, statError := os.Stat(path)
-	return statError == nil && !fileInfo.IsDir()
 }

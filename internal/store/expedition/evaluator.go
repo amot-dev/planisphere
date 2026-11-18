@@ -2,18 +2,16 @@ package expedition
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 
 	"planisphere/internal/core/db"
-	"planisphere/internal/projections"
-	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/store/modes"
 )
 
 // Arrival is a journal event that placed the player in a system.
-type Arrival = projections.Arrival
+type Arrival = replay.Arrival
 
 func firstWaypoint(rows []Row) int {
 	for i := range rows {
@@ -31,99 +29,6 @@ func nextWaypointAfter(rows []Row, afterIndex int) int {
 		}
 	}
 	return -1
-}
-
-// StartCandidates lists every recorded visit to Waypoint #1's system, newest first.
-func StartCandidates(queryer db.Queryer, expeditionID int64, proj *Projections) (system string, candidates []Arrival, loadError error) {
-	rows, listError := ListRows(queryer, expeditionID)
-	if listError != nil {
-		return "", nil, listError
-	}
-	firstIndex := firstWaypoint(rows)
-	if firstIndex < 0 || strings.TrimSpace(rows[firstIndex].SystemName) == "" {
-		return "", nil, errors.New("waypoint #1 needs a system name before the expedition can start")
-	}
-	waypoint := rows[firstIndex]
-	var arrivals []Arrival
-	var arrivalsError error
-	if proj != nil && proj.Arrivals != nil {
-		arrivals, arrivalsError = proj.Arrivals.CandidatesForSystem(waypoint.SystemName, waypoint.SystemAddress)
-	} else {
-		arrivals, arrivalsError = projections.QuerySystemArrivalCandidates(queryer, waypoint.SystemName, waypoint.SystemAddress)
-	}
-	if arrivalsError != nil {
-		return waypoint.SystemName, nil, arrivalsError
-	}
-	return waypoint.SystemName, arrivals, nil
-}
-
-// Start activates the expedition with startTimestamp as the arrival at
-// Waypoint #1, then replays all journal history from that moment.
-func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error {
-	normalizedStartTimestamp, parseError := reference.NormalizeISO(startTimestamp)
-	if parseError != nil {
-		return parseError
-	}
-	rows, listError := ListRows(transaction, expeditionID)
-	if listError != nil {
-		return listError
-	}
-	if firstIndex := firstWaypoint(rows); firstIndex < 0 || rows[firstIndex].SystemName == "" {
-		return errors.New("waypoint #1 needs a system name before the expedition can start")
-	}
-	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, normalizedStartTimestamp, nil); lifecycleError != nil {
-		return lifecycleError
-	}
-	if _, resetFCError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0 WHERE expedition_id = ?`, expeditionID); resetFCError != nil {
-		return resetFCError
-	}
-	_, reevalError := Reevaluate(transaction, expeditionID)
-	return reevalError
-}
-
-// Complete ends the expedition at endTimestamp (now when empty).
-func Complete(transaction *sql.Tx, expeditionID int64, endTimestamp string) error {
-	expeditionRecord, getError := Get(transaction, expeditionID)
-	if getError != nil {
-		return getError
-	}
-	if expeditionRecord.Status != StatusActive || expeditionRecord.StartTimestamp == "" {
-		return errors.New("only a started, active expedition can be completed")
-	}
-	normalizedEndTimestamp := reference.NowISO()
-	if endTimestamp != "" {
-		var parseError error
-		if normalizedEndTimestamp, parseError = reference.NormalizeISO(endTimestamp); parseError != nil {
-			return parseError
-		}
-	}
-	if normalizedEndTimestamp <= expeditionRecord.StartTimestamp {
-		return errors.New("end must be after the expedition start")
-	}
-	if pruneError := PruneEmptyRows(transaction, expeditionID); pruneError != nil {
-		return pruneError
-	}
-	if lifecycleError := setLifecycle(transaction, expeditionID, StatusCompleted, expeditionRecord.StartTimestamp, normalizedEndTimestamp); lifecycleError != nil {
-		return lifecycleError
-	}
-	_, reevalError := Reevaluate(transaction, expeditionID)
-	return reevalError
-}
-
-// Reopen turns a completed expedition back into an active one.
-func Reopen(transaction *sql.Tx, expeditionID int64) error {
-	expeditionRecord, getError := Get(transaction, expeditionID)
-	if getError != nil {
-		return getError
-	}
-	if expeditionRecord.Status != StatusCompleted {
-		return errors.New("expedition is not completed")
-	}
-	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, expeditionRecord.StartTimestamp, nil); lifecycleError != nil {
-		return lifecycleError
-	}
-	_, reevalError := Reevaluate(transaction, expeditionID)
-	return reevalError
 }
 
 func matchesNormalizedWaypoint(rowItem *Row, normalizedRowSystem string, arrivalSystemAddress int64, normalizedArrivalSystem string) bool {
@@ -317,7 +222,7 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		return false, fmt.Errorf("load mode timeline: %w", timelineError)
 	}
 
-	arrivals, arrivalsError := projections.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	arrivals, arrivalsError := replay.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
 	if arrivalsError != nil {
 		return false, arrivalsError
 	}
@@ -325,6 +230,17 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals, modeTimeline)
 	reconcileEvaluatedRowState(rows, originalRowsByID, modeTimeline)
 	return persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
+}
+
+// ReevaluateTx runs Reevaluate inside a database transaction on dbConn.
+func ReevaluateTx(dbConn *sql.DB, expeditionID int64) (bool, error) {
+	var changed bool
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var reevalError error
+		changed, reevalError = Reevaluate(transaction, expeditionID)
+		return reevalError
+	})
+	return changed, txError
 }
 
 // ActiveExpeditionIDs returns active expeditions that need re-evaluation on new journal data.

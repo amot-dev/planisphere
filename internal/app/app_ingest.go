@@ -7,13 +7,13 @@ import (
 	"log"
 	"time"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/eddiscovery"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
 
 // runScan performs the idempotent catch-up scan of the journal directory,
@@ -57,7 +57,7 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 	}
 	app.dbMu.RLock()
 	if app.db == database {
-		if settingError := db.SetSetting(database, settingLastScanAt, reference.NowISO()); settingError != nil {
+		if settingError := settings.SetLastScanAt(database, reference.NowISO()); settingError != nil {
 			log.Printf("persist last scan timestamp: %v", settingError)
 		}
 	}
@@ -137,11 +137,7 @@ func (app *App) reevaluate(expeditionID int64) {
 	if app.db == nil {
 		return
 	}
-	txError := db.WithTx(app.db, func(transaction *sql.Tx) error {
-		_, reevalError := expedition.Reevaluate(transaction, expeditionID)
-		return reevalError
-	})
-	if txError != nil {
+	if _, txError := expedition.ReevaluateTx(app.db, expeditionID); txError != nil {
 		log.Printf("reevaluate expedition %d: %v", expeditionID, txError)
 	}
 }
@@ -155,11 +151,14 @@ func (app *App) maybeRefreshGEC() {
 	app.dbMu.RLock()
 	online := app.onlineEnabled()
 	gecCatalog := app.gec
+	var lastFetched string
+	if app.db != nil {
+		lastFetched = settings.GECFetchedAt(app.db)
+	}
 	app.dbMu.RUnlock()
 	if !online || gecCatalog == nil {
 		return
 	}
-	lastFetched := gecCatalog.LastFetched()
 	if lastFetched != "" {
 		if parsedTime, parseError := reference.ParseISO(lastFetched); parseError == nil && time.Since(parsedTime) < gecRefreshInterval && gecCatalog.Count() > 0 {
 			return
@@ -169,6 +168,13 @@ func (app *App) maybeRefreshGEC() {
 		log.Printf("gec refresh: %v", refreshError)
 		return
 	}
+	app.dbMu.RLock()
+	if app.gec == gecCatalog && app.db != nil {
+		if setError := settings.SetGECFetchedAt(app.db, reference.NowISO()); setError != nil {
+			log.Printf("persist gec refresh timestamp: %v", setError)
+		}
+	}
+	app.dbMu.RUnlock()
 	app.populateMissingPOIs()
 	app.publishApp("plan", 0, events.AppExpeditionPlanChanged)
 }
@@ -183,22 +189,17 @@ func (app *App) maybeCatchUpEDD() {
 	if database == nil || ingester == nil {
 		return
 	}
-	recovered, _ := db.GetSetting(database, "edd_history_recovered_v1")
-	if recovered != "1" {
+	recovered, alreadyDone, eddPath := settings.EDDRecoveryState(database)
+	if !recovered || alreadyDone {
 		return
 	}
-	alreadyDone, _ := db.GetSetting(database, "edd_history_disconnects_v7")
-	if alreadyDone == "1" {
-		return
-	}
-	eddPath, _ := db.GetSetting(database, "edd_db_path")
 	if eddPath == "" {
 		eddPath = eddiscovery.DiscoverDBPath()
 		if eddPath == "" {
 			eddPath = eddiscovery.DefaultDBPath()
 		}
 	}
-	if !journal.FileExists(eddPath) {
+	if !fileExists(eddPath) {
 		return
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
@@ -206,7 +207,7 @@ func (app *App) maybeCatchUpEDD() {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError == nil {
-		if settingError := db.SetSetting(database, "edd_history_disconnects_v7", "1"); settingError != nil {
+		if settingError := settings.MarkEDDDisconnectsRecovered(database); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}
 		affectedTargets := app.publishJournalEvents(importResult.Events)

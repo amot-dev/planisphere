@@ -2,11 +2,11 @@ package stats
 
 import (
 	"database/sql"
-	"fmt"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
+	replaystats "planisphere/internal/replay/stats"
 )
 
 var timeRangeExobiologyAppEvents = events.NewAppSet(
@@ -21,6 +21,7 @@ var timeRangeExobiologyAppEvents = events.NewAppSet(
 type TimeRangeExobiology struct {
 	database    *sql.DB
 	salesLedger *realization.SalesLedger
+	modeLoader  replaystats.ModeTimelineLoader
 	entries     *projection.KeyedCache[string, ExobiologyMetrics]
 }
 
@@ -29,25 +30,23 @@ func NewTimeRangeExobiology(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
+	modeLoader replaystats.ModeTimelineLoader,
 ) *TimeRangeExobiology {
-	timeRangeExo := &TimeRangeExobiology{
-		database:    dbConn,
-		salesLedger: salesLedger,
-	}
-	timeRangeExo.entries = projection.NewKeyedCache[string, ExobiologyMetrics](
-		bus,
-		"time_range_exobiology",
-		timeRangeExo.Triggers(),
-	)
-	return timeRangeExo
-}
-
-// Triggers declares the journal and application events that invalidate TimeRangeExobiology.
-func (timeRangeExo *TimeRangeExobiology) Triggers() projection.Triggers {
-	return projection.Triggers{
+	triggers := projection.Triggers{
 		Journal: exobiologyJournalEvents,
 		App:     timeRangeExobiologyAppEvents,
 	}
+	return &TimeRangeExobiology{
+		database:    dbConn,
+		salesLedger: salesLedger,
+		modeLoader:  modeLoader,
+		entries:     projection.NewKeyedCache[string, ExobiologyMetrics](bus, "TimeRangeExobiology", triggers),
+	}
+}
+
+// Triggers reports the journal and app events that invalidate TimeRangeExobiology.
+func (timeRangeExo *TimeRangeExobiology) Triggers() projection.Triggers {
+	return timeRangeExo.entries.Triggers()
 }
 
 // CachedCount returns the number of bounded range exobiology entries currently cached.
@@ -55,24 +54,24 @@ func (timeRangeExo *TimeRangeExobiology) CachedCount() int {
 	return timeRangeExo.entries.Len()
 }
 
-// Generation returns the cache invalidation generation counter.
+// Generation returns the monotonically increasing invalidation generation counter.
 func (timeRangeExo *TimeRangeExobiology) Generation() uint64 {
 	return timeRangeExo.entries.Generation()
 }
 
-// Compute returns cached or freshly evaluated exobiology metrics for timeRange and optional mode filter.
+// Compute returns Vista Genomics metrics for timeRange and filter, caching per discovery filter.
 func (timeRangeExo *TimeRangeExobiology) Compute(timeRange Range, filter *Filter) (ExobiologyMetrics, error) {
-	return timeRangeExo.computeWithPreparedFilter(timeRange, cloneUnpreparedFilter(filter))
-}
-
-func (timeRangeExo *TimeRangeExobiology) computeWithPreparedFilter(timeRange Range, preparedFilter *Filter) (ExobiologyMetrics, error) {
 	if timeRangeExo.database == nil {
-		return ExobiologyMetrics{}, fmt.Errorf("time range exobiology database is nil")
+		return ExobiologyMetrics{}, nil
 	}
-	cacheKey := buildDiscoveryStatsKey(timeRange, preparedFilter)
+	cacheKey := buildDiscoveryStatsKey(timeRange, filter)
 	return timeRangeExo.entries.GetOrLoad(cacheKey, func() (ExobiologyMetrics, error) {
-		engine := NewEngineWithProjections(timeRangeExo.database, timeRangeExo.salesLedger, nil)
-		return engine.ComputeExobiology(timeRange, preparedFilter)
+		engine := replaystats.NewEngineWithSources(
+			timeRangeExo.database,
+			timeRangeExo.salesLedger,
+			nil,
+			timeRangeExo.modeLoader,
+		)
+		return engine.ComputeExobiology(timeRange, replaystats.CloneUnprepared(filter))
 	})
 }
-

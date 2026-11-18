@@ -4,10 +4,11 @@ import (
 	"log"
 
 	"planisphere/internal/core/events"
+	"planisphere/internal/sources/releases"
 	"planisphere/internal/version"
 )
 
-var fetchLatestGitHubVersion = version.FetchLatestRelease
+var fetchLatestGitHubVersion = releases.FetchLatestRelease
 
 func (app *App) getVersionStatus() (string, bool) {
 	app.versionCheckMu.Lock()

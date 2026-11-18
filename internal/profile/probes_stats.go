@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"planisphere/internal/projections/stats"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/modes"
 )
 

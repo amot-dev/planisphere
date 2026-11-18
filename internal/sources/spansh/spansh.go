@@ -67,16 +67,16 @@ var (
 //	Calculated_Fuel = round(5 + (Distance * (UsedCapacity + DepotTritium + 25000)) / 200000)
 func ReconcileJumps(rawJumps []RawJump, capacityUsed int, depotTritium int) []RouteJump {
 	if depotTritium <= 0 {
-		depotTritium = 1000
+		depotTritium = reference.CarrierFuelTankTonnes
 	}
-	if depotTritium > 1000 {
-		depotTritium = 1000
+	if depotTritium > reference.CarrierFuelTankTonnes {
+		depotTritium = reference.CarrierFuelTankTonnes
 	}
 	if capacityUsed < 0 {
 		capacityUsed = 0
 	}
-	if capacityUsed > 60000 {
-		capacityUsed = 60000
+	if capacityUsed > reference.SquadronCarrierMaxCapacity {
+		capacityUsed = reference.SquadronCarrierMaxCapacity
 	}
 
 	var reconciledJumps []RouteJump

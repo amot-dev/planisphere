@@ -2,11 +2,11 @@ package stats
 
 import (
 	"database/sql"
-	"fmt"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
+	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 )
 
@@ -44,21 +44,22 @@ func NewCareerRealization(
 		database:    dbConn,
 		salesLedger: salesLedger,
 	}
-	careerReal.cache = projection.NewCache(
+	triggers := projection.Triggers{
+		Journal: realizationStatsJournalEvents,
+		App:     careerRealizationAppEvents,
+	}
+	careerReal.cache = projection.NewCache[RealizationBreakdown](
 		bus,
-		"career_realization",
-		careerReal.Triggers(),
+		"CareerRealization",
+		triggers,
 		careerReal.load,
 	)
 	return careerReal
 }
 
-// Triggers declares the journal and application events that invalidate CareerRealization.
+// Triggers reports the journal and app events that invalidate CareerRealization.
 func (careerReal *CareerRealization) Triggers() projection.Triggers {
-	return projection.Triggers{
-		Journal: realizationStatsJournalEvents,
-		App:     careerRealizationAppEvents,
-	}
+	return careerReal.cache.Triggers()
 }
 
 // Get returns the cached all-time realization breakdown.
@@ -66,21 +67,20 @@ func (careerReal *CareerRealization) Get() (RealizationBreakdown, error) {
 	return careerReal.cache.Get()
 }
 
-// IsValid reports whether the all-time realization breakdown is currently cached.
+// IsValid reports whether CareerRealization currently holds a warm cached value.
 func (careerReal *CareerRealization) IsValid() bool {
 	return careerReal.cache.IsValid()
 }
 
-// Generation returns the cache invalidation generation counter.
+// Generation returns the monotonically increasing invalidation generation counter.
 func (careerReal *CareerRealization) Generation() uint64 {
 	return careerReal.cache.Generation()
 }
 
 func (careerReal *CareerRealization) load() (RealizationBreakdown, error) {
 	if careerReal.database == nil {
-		return RealizationBreakdown{}, fmt.Errorf("career realization database is nil")
+		return RealizationBreakdown{}, nil
 	}
-	engine := NewEngineWithProjections(careerReal.database, careerReal.salesLedger, nil)
+	engine := replaystats.NewEngineWithSources(careerReal.database, careerReal.salesLedger, nil, nil)
 	return engine.ComputeRealization(Range{}, nil)
 }
-

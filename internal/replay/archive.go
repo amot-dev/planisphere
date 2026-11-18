@@ -1,9 +1,10 @@
-package journal
+// Package replay executes stateless chronological replay over persisted journal
+// events and serves read-only queries against the SQLite journal archive.
+package replay
 
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
@@ -61,6 +62,13 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	return status, nil
 }
 
+// FirstEventTimestamp returns the earliest ISO-8601 timestamp across enabled commanders.
+func FirstEventTimestamp(queryer db.Queryer) string {
+	var firstTimestamp sql.NullString
+	_ = queryer.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + CmdrFilterSQL).Scan(&firstTimestamp)
+	return firstTimestamp.String
+}
+
 // CareerStart returns the earliest active commander timestamp in ISO-8601 UTC
 // and Galactic Standard Time formats.
 func CareerStart(queryer db.Queryer) (string, string) {
@@ -69,10 +77,11 @@ func CareerStart(queryer db.Queryer) (string, string) {
 		`SELECT MIN(commanders.first_seen) FROM commanders WHERE commanders.enabled = 1 AND commanders.first_seen IS NOT NULL AND commanders.first_seen != ''`,
 	).Scan(&earliestSeenTimestamp)
 	if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
-		_ = queryer.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + CmdrFilterSQL).Scan(&earliestSeenTimestamp)
-	}
-	if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
-		return "", ""
+		earliestTimestamp := FirstEventTimestamp(queryer)
+		if earliestTimestamp == "" {
+			return "", ""
+		}
+		return earliestTimestamp, reference.ToGalactic(earliestTimestamp)
 	}
 	return earliestSeenTimestamp.String, reference.ToGalactic(earliestSeenTimestamp.String)
 }
@@ -93,8 +102,8 @@ type Commander struct {
 // built-in COLLATE NOCASE behavior byte-for-byte.
 func sqliteNocaseKey(value string) string {
 	hasUpperASCII := false
-	for i := 0; i < len(value); i++ {
-		if value[i] >= 'A' && value[i] <= 'Z' {
+	for index := 0; index < len(value); index++ {
+		if value[index] >= 'A' && value[index] <= 'Z' {
 			hasUpperASCII = true
 			break
 		}
@@ -103,9 +112,9 @@ func sqliteNocaseKey(value string) string {
 		return value
 	}
 	folded := []byte(value)
-	for i := range folded {
-		if folded[i] >= 'A' && folded[i] <= 'Z' {
-			folded[i] += 'a' - 'A'
+	for index := range folded {
+		if folded[index] >= 'A' && folded[index] <= 'Z' {
+			folded[index] += 'a' - 'A'
 		}
 	}
 	return string(folded)
@@ -169,19 +178,9 @@ func ListCommanders(queryer db.Queryer) ([]Commander, error) {
 	if countsError != nil {
 		return nil, countsError
 	}
-	for i := range discoveredCommanders {
-		discoveredCommanders[i].EventCount = countsByCommander[sqliteNocaseKey(discoveredCommanders[i].Name)]
+	for index := range discoveredCommanders {
+		discoveredCommanders[index].EventCount = countsByCommander[sqliteNocaseKey(discoveredCommanders[index].Name)]
 	}
 	return discoveredCommanders, nil
-}
-
-// SetCommanderEnabled toggles whether a commander's events are included in stats and plans.
-func SetCommanderEnabled(queryer db.Queryer, name string, enabled bool) error {
-	enabledFlag := 0
-	if enabled {
-		enabledFlag = 1
-	}
-	_, execError := queryer.Exec(`UPDATE commanders SET enabled = ? WHERE name = ? COLLATE NOCASE`, enabledFlag, strings.TrimSpace(name))
-	return execError
 }
 

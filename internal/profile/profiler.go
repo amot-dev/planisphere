@@ -17,8 +17,10 @@ import (
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
-	"planisphere/internal/sources/journal"
+	"planisphere/internal/replay"
+	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/modes"
 )
 
 type profileProjections struct {
@@ -43,15 +45,15 @@ func newProfileProjections(database *sql.DB) *profileProjections {
 		recoveredJumps: recoveredJumps,
 		systemArrivals: projections.NewSystemArrivals(database, bus),
 		visitCounts:    projections.NewSystemVisitCounts(database, bus, recoveredJumps),
-		shipHistory:    projections.NewShipHistory(database, bus, recoveredJumps),
+		shipHistory:    projections.NewShipHistory(database, bus),
 		salesLedger:    salesLedger,
 		careerStats:    stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
-		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps),
+		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps, modes.LoadModeLookup),
 	}
 }
 
-func (proj *profileProjections) statsEngine() *stats.Engine {
-	return stats.NewEngineWithProjections(proj.database, proj.salesLedger, proj.recoveredJumps)
+func (proj *profileProjections) statsEngine() *replaystats.Engine {
+	return replaystats.NewEngineWithSources(proj.database, proj.salesLedger, proj.recoveredJumps, modes.LoadModeLookup)
 }
 
 func (proj *profileProjections) expeditionProjections() *expedition.Projections {
@@ -331,11 +333,11 @@ func findExpeditionWindow(database *sql.DB, summary DatasetSummary) (Representat
 func countWindowEvents(database *sql.DB, afterTimestamp, untilTimestamp string) (int, int) {
 	var metricCount, realCount int
 	_ = database.QueryRow(
-		`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Scan','SAAScanComplete','ScanOrganic') AND timestamp > ? AND timestamp <= ? AND `+journal.CmdrFilterSQL,
+		`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Scan','SAAScanComplete','ScanOrganic') AND timestamp > ? AND timestamp <= ? AND `+replay.CmdrFilterSQL,
 		afterTimestamp, untilTimestamp,
 	).Scan(&metricCount)
 	_ = database.QueryRow(
-		`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Docked','Undocked','Scan','SAAScanComplete','ScanOrganic','SellExplorationData','MultiSellExplorationData','SellOrganicData','Resurrect','NpcCrewPaidWage') AND timestamp > ? AND timestamp <= ? AND `+journal.CmdrFilterSQL,
+		`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Docked','Undocked','Scan','SAAScanComplete','ScanOrganic','SellExplorationData','MultiSellExplorationData','SellOrganicData','Resurrect','NpcCrewPaidWage') AND timestamp > ? AND timestamp <= ? AND `+replay.CmdrFilterSQL,
 		afterTimestamp, untilTimestamp,
 	).Scan(&realCount)
 	return metricCount, realCount

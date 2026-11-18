@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/reference"
 	"planisphere/internal/sources/journal"
 )
 
@@ -289,16 +290,16 @@ func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
 		batchNotificationChan <- batchResult
 	})
 
-	if watcherInstance.DebounceDelay() != journal.DefaultDebounceDelay {
-		t.Fatalf("expected initial debounce %v, got %v", journal.DefaultDebounceDelay, watcherInstance.DebounceDelay())
+	if watcherInstance.DebounceDelay() != reference.DefaultDebounceDelay {
+		t.Fatalf("expected initial debounce %v, got %v", reference.DefaultDebounceDelay, watcherInstance.DebounceDelay())
 	}
 	watcherInstance.SetDebounceDelay(90 * time.Second)
-	if watcherInstance.DebounceDelay() != journal.MaxDebounceDelay {
-		t.Fatalf("expected upper-clamped debounce %v, got %v", journal.MaxDebounceDelay, watcherInstance.DebounceDelay())
+	if watcherInstance.DebounceDelay() != reference.MaxDebounceDelay {
+		t.Fatalf("expected upper-clamped debounce %v, got %v", reference.MaxDebounceDelay, watcherInstance.DebounceDelay())
 	}
 	watcherInstance.SetDebounceDelay(50 * time.Millisecond)
-	if watcherInstance.DebounceDelay() != journal.MinDebounceDelay {
-		t.Fatalf("expected lower-clamped debounce %v, got %v", journal.MinDebounceDelay, watcherInstance.DebounceDelay())
+	if watcherInstance.DebounceDelay() != reference.MinDebounceDelay {
+		t.Fatalf("expected lower-clamped debounce %v, got %v", reference.MinDebounceDelay, watcherInstance.DebounceDelay())
 	}
 
 	parentContext, cancelParentContext := context.WithCancel(context.Background())
@@ -365,73 +366,6 @@ func TestReingestFromByteZeroBackfillsUnattributedEvents(t *testing.T) {
 	if commanderName != "CmdrAlpha" {
 		t.Fatalf("expected unattributed early event to be backfilled to CmdrAlpha, got %q", commanderName)
 	}
-}
-
-func TestArchiveStatusPropagatesDisabledCommanderQueryError(t *testing.T) {
-	conn := openJournalTestDB(t)
-
-	if _, dropError := conn.Exec(`DROP TABLE commanders`); dropError != nil {
-		t.Fatal(dropError)
-	}
-
-	_, statusError := journal.ArchiveStatus(conn)
-	if statusError == nil {
-		t.Fatal("expected ArchiveStatus to fail when commanders table is missing")
-	}
-	if !strings.Contains(statusError.Error(), "check disabled commanders") {
-		t.Fatalf("expected error wrapping check disabled commanders, got %v", statusError)
-	}
-}
-
-func TestListCommandersEventCountCachingAndBackfillInvalidation(t *testing.T) {
-	conn, ingester, logFilePath := seedByteZeroBackfillFixture(
-		t,
-		"Journal.2026-04-01T120000.01.log",
-		"2026-04-01T12:00:00Z",
-		"2026-04-01T12:01:00Z",
-	)
-
-	if _, execError := conn.Exec(
-		`INSERT INTO commanders (name, fid, enabled, first_seen, last_seen)
-		 VALUES ('CmdrAlpha', 'F10', 1, '2026-04-01T12:00:00Z', '2026-04-01T12:01:00Z'),
-		        ('CmdrBeta', 'F20', 1, '2026-04-02T12:00:00Z', '2026-04-02T12:00:00Z')`,
-	); execError != nil {
-		t.Fatal(execError)
-	}
-	if _, execError := conn.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
-		 VALUES ('uid-beta', '2026-04-02T12:00:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBeta', 'other.log', '{}', '2026-04-02T12:00:00Z')`,
-	); execError != nil {
-		t.Fatal(execError)
-	}
-
-	assertCounts := func(expectedAlpha, expectedBeta int) {
-		t.Helper()
-		commanders, listError := journal.ListCommanders(conn)
-		if listError != nil {
-			t.Fatalf("ListCommanders: %v", listError)
-		}
-		if len(commanders) != 2 {
-			t.Fatalf("expected 2 commanders, got %d", len(commanders))
-		}
-		if commanders[0].Name != "CmdrAlpha" || commanders[0].EventCount != expectedAlpha {
-			t.Fatalf("expected CmdrAlpha eventCount=%d, got %+v", expectedAlpha, commanders[0])
-		}
-		if commanders[1].Name != "CmdrBeta" || commanders[1].EventCount != expectedBeta {
-			t.Fatalf("expected CmdrBeta eventCount=%d, got %+v", expectedBeta, commanders[1])
-		}
-	}
-
-	// Populate and hit the commander counts cache before backfill.
-	assertCounts(1, 1)
-	assertCounts(1, 1)
-
-	if _, ingestError := ingester.IngestFile(logFilePath); ingestError != nil {
-		t.Fatalf("IngestFile: %v", ingestError)
-	}
-
-	// MAX(id) did not increase (existing UIDs), so uncached ListCommanders surfaces the backfill immediately.
-	assertCounts(2, 1)
 }
 
 func TestParseLinePreJumpFilters(testingContext *testing.T) {

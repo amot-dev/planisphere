@@ -2,68 +2,48 @@ package expedition
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
-	"planisphere/internal/sources/journal"
+	"planisphere/internal/replay"
+	replaystats "planisphere/internal/replay/stats"
 )
 
 // WaypointDetails is the content of a waypoint's expandable drawer.
 type WaypointDetails struct {
-	RowID        int64                      `json:"rowId"`
-	Kind         string                     `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
-	Number       int                        `json:"number"`
-	From         string                     `json:"from"`
-	To           string                     `json:"to"`
-	FromGalactic string                     `json:"fromGalactic"`
-	ToGalactic   string                     `json:"toGalactic"`
-	Elapsed      string                     `json:"elapsed"`
-	PrevSystem   string                     `json:"prevSystem"`
-	Metrics      stats.Metrics              `json:"metrics"`
-	Realization  stats.RealizationBreakdown `json:"realization"`
+	RowID        int64                            `json:"rowId"`
+	Kind         string                           `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
+	Number       int                              `json:"number"`
+	From         string                           `json:"from"`
+	To           string                           `json:"to"`
+	FromGalactic string                           `json:"fromGalactic"`
+	ToGalactic   string                           `json:"toGalactic"`
+	Elapsed      string                           `json:"elapsed"`
+	PrevSystem   string                           `json:"prevSystem"`
+	Metrics      replaystats.Metrics              `json:"metrics"`
+	Realization  replaystats.RealizationBreakdown `json:"realization"`
 }
 
-func newStatsEngine(conn *sql.DB, proj *Projections) *stats.Engine {
-	if proj != nil {
-		return stats.NewEngineWithProjections(conn, proj.SalesLedger, proj.RecoveredJumps)
+func populateWindowTelemetry(proj *Projections, timeRange replaystats.Range, waypointDetails *WaypointDetails) error {
+	summary, computeError := proj.TimeRangeStats.Compute(timeRange, nil)
+	if computeError != nil {
+		return computeError
 	}
-	return stats.NewEngine(conn)
+	waypointDetails.Metrics = summary.Metrics
+	waypointDetails.Realization = summary.Realization
+	return nil
 }
 
 func populateOriginWaypointDetails(conn *sql.DB, targetRow Row, waypointDetails *WaypointDetails, proj *Projections) error {
 	waypointDetails.Kind = "origin"
 	waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, reference.ToGalactic(targetRow.VisitedAt)
-	var firstTimestamp sql.NullString
-	_ = conn.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + journal.CmdrFilterSQL).Scan(&firstTimestamp)
-	waypointDetails.From, waypointDetails.FromGalactic = firstTimestamp.String, reference.ToGalactic(firstTimestamp.String)
-
-	originRange := stats.Range{After: "", Until: targetRow.VisitedAt}
-	if proj != nil && proj.TimeRangeStats != nil {
-		originSummary, computeError := proj.TimeRangeStats.Compute(originRange, nil)
-		if computeError != nil {
-			return computeError
-		}
-		waypointDetails.Metrics = originSummary.Metrics
-		waypointDetails.Realization = originSummary.Realization
-		return nil
-	}
-
-	statsEngine := newStatsEngine(conn, proj)
-	originMetrics, computeError := statsEngine.Compute(originRange, nil)
-	if computeError != nil {
-		return computeError
-	}
-	originRealization, realizationError := statsEngine.ComputeRealization(originRange, nil)
-	if realizationError != nil {
-		return realizationError
-	}
-	waypointDetails.Metrics = originMetrics
-	waypointDetails.Realization = originRealization
-	return nil
+	firstTimestamp := replay.FirstEventTimestamp(conn)
+	waypointDetails.From, waypointDetails.FromGalactic = firstTimestamp, reference.ToGalactic(firstTimestamp)
+	return populateWindowTelemetry(proj, replaystats.Range{After: "", Until: targetRow.VisitedAt}, waypointDetails)
 }
 
-func populateLegDetails(conn *sql.DB, statsEngine *stats.Engine, targetRow Row, rows []Row, waypointDetails *WaypointDetails) error {
+func populateLegDetails(conn *sql.DB, targetRow Row, rows []Row, waypointDetails *WaypointDetails, proj *Projections) error {
 	waypointDetails.Kind = "leg"
 	// The leg starts at the visit of the waypoint visited immediately before this one.
 	afterTimestamp := ""
@@ -80,16 +60,7 @@ func populateLegDetails(conn *sql.DB, statsEngine *stats.Engine, targetRow Row, 
 	}
 	waypointDetails.From, waypointDetails.FromGalactic = afterTimestamp, reference.ToGalactic(afterTimestamp)
 	waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, reference.ToGalactic(targetRow.VisitedAt)
-
-	legRange := stats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}
-	var computeError error
-	waypointDetails.Metrics, computeError = statsEngine.Compute(legRange, nil)
-	if computeError != nil {
-		return computeError
-	}
-	var realizationError error
-	waypointDetails.Realization, realizationError = statsEngine.ComputeRealization(legRange, nil)
-	return realizationError
+	return populateWindowTelemetry(proj, replaystats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, waypointDetails)
 }
 
 func formatLegElapsed(fromTimestamp, toTimestamp string) string {
@@ -109,6 +80,9 @@ func formatLegElapsed(fromTimestamp, toTimestamp string) string {
 
 // Details computes the drawer content for a visited or active current waypoint row.
 func Details(conn *sql.DB, rowID int64, proj *Projections) (WaypointDetails, error) {
+	if proj == nil || proj.TimeRangeStats == nil {
+		return WaypointDetails{}, errors.New("expedition TimeRangeStats projection is required")
+	}
 	targetRow, rowError := GetRow(conn, rowID)
 	if rowError != nil {
 		return WaypointDetails{}, rowError
@@ -167,29 +141,12 @@ func Details(conn *sql.DB, rowID int64, proj *Projections) (WaypointDetails, err
 			return waypointDetails, originError
 		}
 	} else {
-		statsEngine := newStatsEngine(conn, proj)
-		if legError := populateLegDetails(conn, statsEngine, targetRow, rows, &waypointDetails); legError != nil {
+		if legError := populateLegDetails(conn, targetRow, rows, &waypointDetails, proj); legError != nil {
 			return waypointDetails, legError
 		}
 	}
 
 	waypointDetails.Elapsed = formatLegElapsed(waypointDetails.From, waypointDetails.To)
 	return waypointDetails, nil
-}
-
-// Elapsed returns a human label between two ISO timestamps (now when toTimestamp is empty).
-// Uses rounded days and years without hours or minutes.
-func Elapsed(fromTimestamp, toTimestamp string) string {
-	startTime, parseError := reference.ParseISO(fromTimestamp)
-	if parseError != nil {
-		return ""
-	}
-	endTime := time.Now().UTC()
-	if toTimestamp != "" {
-		if parsedTime, parseError := reference.ParseISO(toTimestamp); parseError == nil {
-			endTime = parsedTime
-		}
-	}
-	return reference.DurationDaysLabel(endTime.Sub(startTime))
 }
 

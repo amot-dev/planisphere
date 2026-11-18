@@ -23,6 +23,30 @@ const ISOLayout = "2006-01-02T15:04:05Z"
 // GalacticLayoutSuffix is appended to every in-universe timestamp.
 const GalacticLayoutSuffix = " UTC"
 
+// OdysseyReleaseTimestamp is the UTC launch date of Elite Dangerous: Odyssey
+// (19 May 2021). When evaluating synthetic or truncated event streams that
+// lack an explicit preceding LoadGame event, timestamps prior to Odyssey's
+// release never apply the +30% Odyssey mapping bonus.
+const OdysseyReleaseTimestamp = "2021-05-19T00:00:00Z"
+
+// Bounds and default duration for live journal file event debouncing.
+const (
+	MinDebounceDelay     = 300 * time.Millisecond
+	DefaultDebounceDelay = 2 * time.Second
+	MaxDebounceDelay     = 30 * time.Second
+)
+
+// ClampDebounceDelay restricts delay to [MinDebounceDelay, MaxDebounceDelay].
+func ClampDebounceDelay(delay time.Duration) time.Duration {
+	if delay < MinDebounceDelay {
+		return MinDebounceDelay
+	}
+	if delay > MaxDebounceDelay {
+		return MaxDebounceDelay
+	}
+	return delay
+}
+
 // NowISO returns the current time as a journal-style ISO-8601 UTC string.
 func NowISO() string { return time.Now().UTC().Format(ISOLayout) }
 
@@ -144,4 +168,20 @@ func DurationDaysLabel(durationVal time.Duration) string {
 		return fmt.Sprintf("%dy %dd", years, days)
 	}
 	return fmt.Sprintf("%dy", years)
+}
+
+// Elapsed returns a human label between two ISO timestamps (now when toTimestamp is empty).
+// Uses rounded days and years without hours or minutes.
+func Elapsed(fromTimestamp, toTimestamp string) string {
+	startTime, parseError := ParseISO(fromTimestamp)
+	if parseError != nil {
+		return ""
+	}
+	endTime := time.Now().UTC()
+	if toTimestamp != "" {
+		if parsedTime, parseEndError := ParseISO(toTimestamp); parseEndError == nil {
+			endTime = parsedTime
+		}
+	}
+	return DurationDaysLabel(endTime.Sub(startTime))
 }

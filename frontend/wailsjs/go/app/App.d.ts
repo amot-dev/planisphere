@@ -3,7 +3,7 @@
 import {expedition} from '../models';
 import {app} from '../models';
 import {modes} from '../models';
-import {projections} from '../models';
+import {replay} from '../models';
 import {stats} from '../models';
 
 export function AddRow(arg1:number,arg2:number,arg3:string,arg4:number):Promise<expedition.Row>;
@@ -34,7 +34,7 @@ export function DeleteRow(arg1:number):Promise<void>;
 
 export function GetActiveCarrierRoute(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
-export function GetCarrierDepotInfo():Promise<projections.CarrierDepotInfo>;
+export function GetCarrierDepotInfo():Promise<replay.CarrierDepotInfo>;
 
 export function GetCarrierLastLocation():Promise<string>;
 

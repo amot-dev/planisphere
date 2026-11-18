@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"planisphere/internal/core/db"
-	"planisphere/internal/projections/stats"
+	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
 
 func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testingContext *testing.T) {
@@ -21,10 +21,10 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		testingContext.Fatalf("write initial journal: %v", writeError)
 	}
 
-	if setSettingError := db.SetSetting(testApp.db, settingJournalDir, journalDirectory); setSettingError != nil {
+	if setSettingError := settings.SetJournalDir(testApp.db, journalDirectory); setSettingError != nil {
 		testingContext.Fatalf("set journal directory: %v", setSettingError)
 	}
-	if setSetupError := db.SetSetting(testApp.db, settingSetupCompleted, "1"); setSetupError != nil {
+	if setSetupError := settings.SetSetupCompleted(testApp.db, true); setSetupError != nil {
 		testingContext.Fatalf("set setup completed: %v", setSetupError)
 	}
 

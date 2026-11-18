@@ -103,7 +103,7 @@ func (ingester *Ingester) loadAllTrackedOffsets() (map[string]int64, error) {
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
 func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, error) {
 	var scanResult Result
-	if !DirExists(dir) {
+	if !dirExists(dir) {
 		return scanResult, fmt.Errorf("journal directory not found: %s", dir)
 	}
 	files, listError := ListJournalFiles(dir)

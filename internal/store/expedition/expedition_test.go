@@ -11,31 +11,17 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/projection"
-	"planisphere/internal/projections"
-	"planisphere/internal/projections/realization"
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
+	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/store/settings"
 )
 
 func newExpeditionProjections(databaseConnection *sql.DB) (*projection.Bus, *expedition.Projections) {
 	eventBus := projection.NewBus()
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	systemArrivals := projections.NewSystemArrivals(databaseConnection, eventBus)
-	systemVisitCounts := projections.NewSystemVisitCounts(databaseConnection, eventBus, recoveredJumps)
-	shipHistory := projections.NewShipHistory(databaseConnection, eventBus, recoveredJumps)
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
-	return eventBus, &expedition.Projections{
-		Arrivals:       systemArrivals,
-		VisitCounts:    systemVisitCounts,
-		ShipHistory:    shipHistory,
-		TimeRangeStats: timeRangeStats,
-		SalesLedger:    salesLedger,
-		RecoveredJumps: recoveredJumps,
-	}
+	return eventBus, expedition.NewProjections(databaseConnection, eventBus)
 }
 
 func openExpeditionTestDB(testingContext *testing.T) *sql.DB {
@@ -102,6 +88,7 @@ func mustInsert(t *testing.T, dbConn *sql.DB, expeditionID, afterID int64, rowTy
 
 func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	dbConn := openExpeditionTestDB(t)
+	_, proj := newExpeditionProjections(dbConn)
 	lines := []string{
 		// Pre-expedition visit to Waypoint #3 (must be ignored because it is before expedition_start_timestamp).
 		`{"timestamp":"2026-01-10T10:00:00Z","event":"FSDJump","StarSystem":"Outotz LS-K d8-3","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":45.0}`,
@@ -148,14 +135,14 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	}
 
 	// Without automatic out-of-order reordering, Beagle Point remains at #5 (future) while #3 is current.
-	initialPlan, initialPlanErr := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	initialPlan, initialPlanErr := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if initialPlanErr != nil {
 		t.Fatal(initialPlanErr)
 	}
 	if initialPlan.VisitedWaypointCount != 2 {
 		t.Fatalf("initial visited count = %d, want 2", initialPlan.VisitedWaypointCount)
 	}
-	beaglePreviews, beaglePreviewErr := expedition.ComputeRowDropPreviews(dbConn, waypoint5.ID, nil)
+	beaglePreviews, beaglePreviewErr := expedition.ComputeRowDropPreviews(dbConn, waypoint5.ID, proj)
 	if beaglePreviewErr != nil {
 		t.Fatal(beaglePreviewErr)
 	}
@@ -174,7 +161,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		t.Fatal(moveTxError)
 	}
 
-	plan, planError := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	plan, planError := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if planError != nil {
 		t.Fatal(planError)
 	}
@@ -227,11 +214,11 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		t.Fatal(modeTxError)
 	}
 
-	statsEngine := stats.NewEngine(dbConn)
+	statsEngine := replaystats.NewEngineWithSources(dbConn, nil, nil, modes.LoadModeLookup)
 	// Hide Travel jumps/Ly, but include Travel scans/exobio!
-	filtered, computeError := statsEngine.Compute(stats.Range{After: "2026-01-18T19:42:10Z"}, &stats.Filter{
+	filtered, computeError := statsEngine.Compute(replaystats.Range{After: "2026-01-18T19:42:10Z"}, &replaystats.Filter{
 		Enabled: true,
-		Modes: []stats.ModeSelection{
+		Modes: []replaystats.ModeSelection{
 			{ModeID: travelModeID, Travel: false, Discovery: true},
 		},
 	})
@@ -685,6 +672,7 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 
 func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	dbConn := openExpeditionTestDB(t)
+	_, proj := newExpeditionProjections(dbConn)
 
 	expeditionRecord, firstWaypoint := createExpeditionWithOriginRow(t, dbConn, "Route Telemetry Test", "")
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Sol', x = 0, y = 0, z = 0 WHERE id = ?`, firstWaypoint.ID); err != nil {
@@ -705,7 +693,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	// PlannedLy = 100 + 150 = 250 Ly.
 	// RemainingLy = 250 Ly.
 	// No row is next waypoint.
-	planPlanning, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	planPlanning, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +731,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	planAtOrigin, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	planAtOrigin, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -785,7 +773,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	planAfterFirstJump, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	planAfterFirstJump, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -817,7 +805,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T12:00:00Z' WHERE id = ?`, secondWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
-	planAfterSecondWaypointVisit, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	planAfterSecondWaypointVisit, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,7 +817,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET visited_at = '2026-03-01T13:00:00Z' WHERE id = ?`, thirdWaypoint.ID); err != nil {
 		t.Fatal(err)
 	}
-	planAfterFinalWaypointVisit, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, nil)
+	planAfterFinalWaypointVisit, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -896,13 +884,17 @@ func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testin
 		testingContext.Errorf("expected cached origin TotalRealized 19010800, got %d", cachedOriginDetails.Realization.TotalRealized)
 	}
 
-	// Calling Details on secondWaypoint (leg kind) without cached projections must propagate the ComputeRealization error.
-	if _, legDetailsError := expedition.Details(databaseConnection, secondWaypoint.ID, nil); legDetailsError == nil {
-		testingContext.Errorf("expected Details on leg waypoint to propagate ComputeRealization error, got nil")
+	// Calling Details without projections fails loudly (Approach B strict Bus injection).
+	if _, nilProjError := expedition.Details(databaseConnection, secondWaypoint.ID, nil); nilProjError == nil {
+		testingContext.Errorf("expected Details with nil projections to fail, got nil")
 	}
 
-	// After publishing SellExplorationData on the bus, calling Details on originWaypoint must recompute and propagate the error.
+	// After publishing SellExplorationData on the bus, calling Details on both leg and origin waypoints
+	// must invalidate SalesLedger/TimeRangeStats, recompute, and propagate the ComputeRealization error.
 	eventBus.PublishJournal(journal.NewEventSet(journal.EventSellExplorationData))
+	if _, legDetailsError := expedition.Details(databaseConnection, secondWaypoint.ID, proj); legDetailsError == nil {
+		testingContext.Errorf("expected Details on leg waypoint after cache invalidation to propagate ComputeRealization error, got nil")
+	}
 	if _, recomputedOriginError := expedition.Details(databaseConnection, originWaypoint.ID, proj); recomputedOriginError == nil {
 		testingContext.Errorf("expected Details on origin waypoint after cache invalidation to propagate ComputeRealization error, got nil")
 	}
@@ -952,6 +944,7 @@ func TestBuildPlanVisitCountAndEDSMToJournalUpgrade(testingContext *testing.T) {
 
 func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) {
 	databaseConnection := openExpeditionTestDB(testingContext)
+	_, proj := newExpeditionProjections(databaseConnection)
 
 	ingestJournalLines(testingContext, databaseConnection, []string{
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
@@ -996,7 +989,7 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 		testingContext.Fatal(overrideErr)
 	}
 
-	wp4Previews, wp4PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID, nil)
+	wp4Previews, wp4PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID, proj)
 	if wp4PrevErr != nil {
 		testingContext.Fatal(wp4PrevErr)
 	}
@@ -1005,7 +998,7 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	if wp4Previews[1].Status != expedition.DropSlotBlockedFC {
 		testingContext.Fatalf("expected wp4 drop preview at index 1 to be blocked_fc, got %+v", wp4Previews[1])
 	}
-	wp3Previews, wp3PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID, nil)
+	wp3Previews, wp3PrevErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID, proj)
 	if wp3PrevErr != nil {
 		testingContext.Fatal(wp3PrevErr)
 	}
@@ -1024,7 +1017,7 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); reevalErr != nil {
 		testingContext.Fatal(reevalErr)
 	}
-	wp3PreviewsWithUnvisited, wp3UnvisitedErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID, nil)
+	wp3PreviewsWithUnvisited, wp3UnvisitedErr := expedition.ComputeRowDropPreviews(databaseConnection, wp3.ID, proj)
 	if wp3UnvisitedErr != nil {
 		testingContext.Fatal(wp3UnvisitedErr)
 	}
@@ -1063,10 +1056,10 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	// and is automatically cleared if wp4 is manually overridden to ARRIVED.
 	spanshRouteKey := fmt.Sprintf("active_carrier_route_%d", expeditionRecord.ID)
 	spanshRouteJSON := fmt.Sprintf(`{"expeditionId":%d,"targetRowId":%d,"manualMode":false,"route":{"manualMode":false,"jumps":[{"systemName":"Sirius"}]}}`, expeditionRecord.ID, wp3.ID)
-	if setRouteError := db.SetSetting(databaseConnection, spanshRouteKey, spanshRouteJSON); setRouteError != nil {
+	if setRouteError := settings.Set(databaseConnection, spanshRouteKey, spanshRouteJSON); setRouteError != nil {
 		testingContext.Fatal(setRouteError)
 	}
-	wp4SpanshBlocked, wp4BlockedError := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID, nil)
+	wp4SpanshBlocked, wp4BlockedError := expedition.ComputeRowDropPreviews(databaseConnection, wp4.ID, proj)
 	if wp4BlockedError != nil {
 		testingContext.Fatal(wp4BlockedError)
 	}
@@ -1079,7 +1072,7 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); overrideClearError != nil {
 		testingContext.Fatal(overrideClearError)
 	}
-	persistedRoute, getRouteError := db.GetSetting(databaseConnection, spanshRouteKey)
+	persistedRoute, getRouteError := settings.Get(databaseConnection, spanshRouteKey)
 	if getRouteError != nil {
 		testingContext.Fatal(getRouteError)
 	}
@@ -1159,6 +1152,7 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 
 func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testing.T) {
 	databaseConnection := openExpeditionTestDB(testingContext)
+	_, proj := newExpeditionProjections(databaseConnection)
 
 	ingestJournalLines(testingContext, databaseConnection, []string{
 		`{"timestamp":"2026-11-17T01:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Ship_Localised":"Caspian Explorer","ShipID":36}`,
@@ -1187,7 +1181,7 @@ func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testi
 		testingContext.Fatal(startError)
 	}
 
-	planView, planError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, nil)
+	planView, planError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, proj)
 	if planError != nil {
 		testingContext.Fatal(planError)
 	}
@@ -1200,5 +1194,36 @@ func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testi
 	}
 	if destView.VisitCount != 2 {
 		testingContext.Fatalf("expected VisitCount=2 (1 FSDJump + 1 recovered disconnect jump), got %d", destView.VisitCount)
+	}
+}
+
+func TestRecordCarrierJumpAndApplyTo(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	createdExpedition, createError := expedition.Create(databaseConnection, "Carrier Stats Test", "")
+	if createError != nil {
+		testingContext.Fatal(createError)
+	}
+
+	if err := expedition.RecordCarrierJump(databaseConnection, createdExpedition.ID, 498.5, 95); err != nil {
+		testingContext.Fatalf("first RecordCarrierJump: %v", err)
+	}
+	if err := expedition.RecordCarrierJump(databaseConnection, createdExpedition.ID, 120.0, 25); err != nil {
+		testingContext.Fatalf("second RecordCarrierJump: %v", err)
+	}
+
+	reloaded, getError := expedition.Get(databaseConnection, createdExpedition.ID)
+	if getError != nil {
+		testingContext.Fatal(getError)
+	}
+	if reloaded.Adjustments.CarrierJumps != 2 || reloaded.Adjustments.CarrierDistanceLy != 618.5 ||
+		reloaded.Adjustments.TritiumUsed == nil || *reloaded.Adjustments.TritiumUsed != 120 {
+		testingContext.Fatalf("unexpected Adjustments: %+v", reloaded.Adjustments)
+	}
+
+	var combinedMetrics replaystats.Metrics
+	reloaded.Adjustments.ApplyTo(&combinedMetrics)
+	if combinedMetrics.CarrierJumps != 2 || combinedMetrics.CarrierDistanceLy != 618.5 ||
+		combinedMetrics.TritiumUsed == nil || *combinedMetrics.TritiumUsed != 120 {
+		testingContext.Fatalf("unexpected ApplyTo result: %+v", combinedMetrics)
 	}
 }

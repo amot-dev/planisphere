@@ -11,14 +11,40 @@ import (
 	"strings"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
+	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/store/modes"
 )
 
-// Projections bundles optional read-only cached projections used by planner
-// and drawer builders; nil fields fall back to direct SQLite queries.
+// CarrierStats stores manual Fleet Carrier jump, distance, and tritium totals recorded for an expedition.
+type CarrierStats struct {
+	CarrierJumps      int     `json:"carrierJumps"`
+	CarrierDistanceLy float64 `json:"carrierDistanceLy"`
+	TritiumUsed       *int    `json:"tritiumUsed"`
+}
+
+// ToMetrics converts CarrierStats into a replay/stats Metrics struct holding only carrier fields.
+func (carrierStats CarrierStats) ToMetrics() replaystats.Metrics {
+	return replaystats.Metrics{
+		CarrierJumps:      carrierStats.CarrierJumps,
+		CarrierDistanceLy: carrierStats.CarrierDistanceLy,
+		TritiumUsed:       carrierStats.TritiumUsed,
+	}
+}
+
+// ApplyTo merges CarrierStats onto targetMetrics in place.
+func (carrierStats CarrierStats) ApplyTo(targetMetrics *replaystats.Metrics) {
+	if targetMetrics == nil {
+		return
+	}
+	*targetMetrics = targetMetrics.Add(carrierStats.ToMetrics())
+}
+
+// Projections bundles the Bus-backed read-only projections required by expedition planner and drawer builders.
 type Projections struct {
 	Arrivals       *projections.SystemArrivals
 	VisitCounts    *projections.SystemVisitCounts
@@ -26,6 +52,20 @@ type Projections struct {
 	TimeRangeStats *stats.TimeRangeStats
 	SalesLedger    *realization.SalesLedger
 	RecoveredJumps *projections.RecoveredJumps
+}
+
+// NewProjections creates and registers a full suite of expedition projections on bus.
+func NewProjections(dbConn *sql.DB, bus *projection.Bus) *Projections {
+	recoveredJumps := projections.NewRecoveredJumps(dbConn, bus)
+	salesLedger := realization.NewSalesLedger(dbConn, bus)
+	return &Projections{
+		Arrivals:       projections.NewSystemArrivals(dbConn, bus),
+		VisitCounts:    projections.NewSystemVisitCounts(dbConn, bus, recoveredJumps),
+		ShipHistory:    projections.NewShipHistory(dbConn, bus),
+		TimeRangeStats: stats.NewTimeRangeStats(dbConn, bus, salesLedger, recoveredJumps, modes.LoadModeLookup),
+		SalesLedger:    salesLedger,
+		RecoveredJumps: recoveredJumps,
+	}
 }
 
 // Expedition statuses.
@@ -37,17 +77,17 @@ const (
 
 // Expedition is an expedition plan and its lifecycle state.
 type Expedition struct {
-	ID                  int64         `json:"id"`
-	Name                string        `json:"name"`
-	Description         string        `json:"description"`
-	Status              string        `json:"status"`
-	StartTimestamp      string        `json:"startTimestamp"`
-	EndTimestamp        string        `json:"endTimestamp"`
-	Adjustments         stats.Metrics `json:"adjustments"`
-	CarrierType         string        `json:"carrierType"`
-	CarrierWeeklyUpkeep int64         `json:"carrierWeeklyUpkeep"`
-	CreatedAt           string        `json:"createdAt"`
-	UpdatedAt           string        `json:"updatedAt"`
+	ID                  int64        `json:"id"`
+	Name                string       `json:"name"`
+	Description         string       `json:"description"`
+	Status              string       `json:"status"`
+	StartTimestamp      string       `json:"startTimestamp"`
+	EndTimestamp        string       `json:"endTimestamp"`
+	Adjustments         CarrierStats `json:"adjustments"`
+	CarrierType         string       `json:"carrierType"`
+	CarrierWeeklyUpkeep int64        `json:"carrierWeeklyUpkeep"`
+	CreatedAt           string       `json:"createdAt"`
+	UpdatedAt           string       `json:"updatedAt"`
 }
 
 const expeditionCols = `id, name, description, status, COALESCE(start_timestamp,''), COALESCE(end_timestamp,''),
@@ -215,53 +255,33 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 	return Get(dbConn, newExpeditionID)
 }
 
-func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTimestamp, endTimestamp any) error {
-	_, execError := queryer.Exec(`UPDATE expeditions SET status = ?, start_timestamp = ?, end_timestamp = ?, armed_at = NULL, updated_at = ? WHERE id = ?`,
-		status, startTimestamp, endTimestamp, reference.NowISO(), expeditionID)
-	return execError
-}
-
-// SaveAdjustments stores manual metric adjustments (e.g. remote carrier jumps).
-func SaveAdjustments(queryer db.Queryer, expeditionID int64, adjustmentMetrics stats.Metrics) error {
-	adjustmentsJSON, _ := json.Marshal(adjustmentMetrics)
+// SaveAdjustments stores manual Fleet Carrier jump adjustments for expeditionID.
+func SaveAdjustments(queryer db.Queryer, expeditionID int64, carrierStats CarrierStats) error {
+	adjustmentsJSON, _ := json.Marshal(carrierStats)
 	_, execError := queryer.Exec(`UPDATE expeditions SET adjustments_json = ?, updated_at = ? WHERE id = ?`, string(adjustmentsJSON), reference.NowISO(), expeditionID)
 	return execError
 }
 
-// MissingPOIRow identifies a waypoint row whose poi_name is still blank.
-type MissingPOIRow struct {
-	ID            int64
-	SystemName    string
-	SystemAddress int64
-}
-
-// ListMissingPOIRows returns all named waypoint rows without a POI label.
-func ListMissingPOIRows(queryer db.Queryer) ([]MissingPOIRow, error) {
-	databaseRows, queryError := queryer.Query(
-		`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`,
-	)
-	if queryError != nil {
-		return nil, queryError
+// RecordCarrierJump increments carrier jump count, cumulative distance, and tritium
+// consumed on expeditionID and persists the updated stats.
+func RecordCarrierJump(queryer db.Queryer, expeditionID int64, distanceLy float64, tritium int) error {
+	expeditionRecord, getError := Get(queryer, expeditionID)
+	if getError != nil {
+		return getError
 	}
-	defer databaseRows.Close()
-	var missingRows []MissingPOIRow
-	for databaseRows.Next() {
-		var rowItem MissingPOIRow
-		if scanError := databaseRows.Scan(&rowItem.ID, &rowItem.SystemName, &rowItem.SystemAddress); scanError != nil {
-			return nil, scanError
+	carrierStats := expeditionRecord.Adjustments
+	carrierStats.CarrierJumps++
+	if distanceLy > 0 {
+		carrierStats.CarrierDistanceLy += distanceLy
+	}
+	if tritium > 0 {
+		currentTritium := 0
+		if carrierStats.TritiumUsed != nil {
+			currentTritium = *carrierStats.TritiumUsed
 		}
-		missingRows = append(missingRows, rowItem)
+		nextTritium := currentTritium + tritium
+		carrierStats.TritiumUsed = &nextTritium
 	}
-	return missingRows, databaseRows.Err()
-}
-
-// SetRowPOIIfBlank stores poiName on rowID only when its poi_name column is still empty.
-func SetRowPOIIfBlank(queryer db.Queryer, rowID int64, poiName string) error {
-	_, execError := queryer.Exec(
-		`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`,
-		poiName,
-		rowID,
-	)
-	return execError
+	return SaveAdjustments(queryer, expeditionID, carrierStats)
 }
 

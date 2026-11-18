@@ -341,7 +341,7 @@ func profileStartCandidates(
 		iterations,
 		proj.invalidate,
 		func() (singleExecOutcome, error) {
-			systemName, candidates, candError := expedition.StartCandidates(database, dataset.PrimaryExpeditionID, proj.expeditionProjections())
+			systemName, candidates, candError := expedition.StartCandidates(database, dataset.PrimaryExpeditionID)
 			if candError != nil {
 				return singleExecOutcome{}, candError
 			}

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
+	"planisphere/internal/store/modes"
 )
 
 // Row types.
@@ -475,6 +477,200 @@ func moveTo[T any](items []T, fromIndex, toIndex int) []T {
 
 func touch(queryer db.Queryer, expeditionID int64) error {
 	_, execError := queryer.Exec(`UPDATE expeditions SET updated_at = ? WHERE id = ?`, reference.NowISO(), expeditionID)
+	return execError
+}
+
+// InsertRowTx inserts a row inside a database transaction on dbConn.
+func InsertRowTx(dbConn *sql.DB, expeditionID, afterRowID int64, rowType string, regionID int) (Row, error) {
+	var createdRow Row
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var insertError error
+		createdRow, insertError = InsertRow(transaction, expeditionID, afterRowID, rowType, regionID)
+		return insertError
+	})
+	return createdRow, txError
+}
+
+// DeleteRowTx removes rowID inside a database transaction on dbConn.
+func DeleteRowTx(dbConn *sql.DB, rowID int64) (int64, error) {
+	var expeditionID int64
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var deleteError error
+		expeditionID, deleteError = DeleteRow(transaction, rowID)
+		return deleteError
+	})
+	return expeditionID, txError
+}
+
+// MoveRowTx moves rowID to toIndex inside a database transaction on dbConn.
+func MoveRowTx(dbConn *sql.DB, rowID int64, toIndex int) (int64, error) {
+	var expeditionID int64
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var moveError error
+		expeditionID, moveError = MoveRow(transaction, rowID, toIndex)
+		return moveError
+	})
+	return expeditionID, txError
+}
+
+// addOneSecond shifts an ISO timestamp forward by one second. Leg telemetry
+// uses half-open arrival intervals (prevVisit, rowVisit], whereas modes.SetWindow
+// stores half-open [StartsAt, EndsAt) intervals at 1-second resolution; shifting
+// both bounds maps (prevVisit, rowVisit] onto [prevVisit+1s, rowVisit+1s) and
+// (latestVisit, +inf) onto [latestVisit+1s, "") so arrival-second events stay in the arriving leg.
+func addOneSecond(isoTimestamp string) string {
+	parsedTime, parseError := reference.ParseISO(isoTimestamp)
+	if parseError != nil {
+		return isoTimestamp
+	}
+	return parsedTime.Add(time.Second).UTC().Format("2006-01-02T15:04:05Z")
+}
+
+// SetLegMode updates the single mode assigned to the leg arriving at rowID.
+// When the waypoint has been visited (after a previous visited waypoint), it
+// updates the closed time window (prevVisit, rowVisit] in mode_windows; when
+// the waypoint is the active in-progress leg, it updates the open-ended window
+// (latestVisit, +inf) so filtered expedition and all-time stats immediately
+// reflect the change.
+func SetLegMode(transaction *sql.Tx, rowID int64, modeID int64) (int64, error) {
+	targetRow, rowError := GetRow(transaction, rowID)
+	if rowError != nil {
+		return 0, rowError
+	}
+	rows, listError := ListRows(transaction, targetRow.ExpeditionID)
+	if listError != nil {
+		return targetRow.ExpeditionID, listError
+	}
+	if targetRow.VisitedAt != "" {
+		if _, updateError := UpdateRow(transaction, RowPatch{ID: rowID, LegModeID: &modeID}); updateError != nil {
+			return 0, updateError
+		}
+		previousTimestamp := ""
+		for _, candidateRow := range rows {
+			if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt < targetRow.VisitedAt && candidateRow.VisitedAt > previousTimestamp {
+				previousTimestamp = candidateRow.VisitedAt
+			}
+		}
+		if previousTimestamp != "" {
+			startISO := addOneSecond(previousTimestamp)
+			endISO := addOneSecond(targetRow.VisitedAt)
+			if endISO > startISO {
+				if windowError := modes.SetWindow(transaction, 0, modeID, startISO, endISO); windowError != nil {
+					return targetRow.ExpeditionID, windowError
+				}
+			}
+		}
+		return targetRow.ExpeditionID, nil
+	}
+
+	latestTimestamp := ""
+	for _, candidateRow := range rows {
+		if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt > latestTimestamp {
+			latestTimestamp = candidateRow.VisitedAt
+		}
+	}
+	if latestTimestamp != "" {
+		return targetRow.ExpeditionID, modes.SetWindow(transaction, 0, modeID, addOneSecond(latestTimestamp), "")
+	}
+	return targetRow.ExpeditionID, modes.Switch(transaction, modeID, "")
+}
+
+// SetLegModeTx runs SetLegMode inside a database transaction on dbConn.
+func SetLegModeTx(dbConn *sql.DB, rowID int64, modeID int64) (int64, error) {
+	var expeditionID int64
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var setError error
+		expeditionID, setError = SetLegMode(transaction, rowID, modeID)
+		return setError
+	})
+	return expeditionID, txError
+}
+
+// SetCarrierArrivalOverride manually sets the Fleet Carrier arrival status on rowID
+// and cascades the change across preceding (when arrived is true) or subsequent
+// (when arrived is false) carrier stops so arrived stops always precede pending stops.
+func SetCarrierArrivalOverride(transaction *sql.Tx, rowID int64, arrived bool) (int64, error) {
+	targetRow, getError := GetRow(transaction, rowID)
+	if getError != nil {
+		return 0, getError
+	}
+	if !targetRow.IsWaypoint() || !targetRow.FCStop {
+		return targetRow.ExpeditionID, errors.New("row is not a designated fleet carrier stop")
+	}
+	lockedSpanshTargetRowID := readLockedSpanshTargetRowID(transaction, targetRow.ExpeditionID)
+	now := reference.NowISO()
+	if arrived {
+		if _, execError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 1, updated_at = ?
+			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1 AND position <= ?`,
+			now, targetRow.ExpeditionID, targetRow.Position); execError != nil {
+			return targetRow.ExpeditionID, execError
+		}
+		if lockedSpanshTargetRowID > 0 {
+			routedRow, routedError := GetRow(transaction, lockedSpanshTargetRowID)
+			if routedError == nil && routedRow.FCArrived {
+				if clearRouteError := ClearActiveCarrierRoute(transaction, targetRow.ExpeditionID); clearRouteError != nil {
+					return targetRow.ExpeditionID, fmt.Errorf("clear active carrier route: %w", clearRouteError)
+				}
+			}
+		}
+	} else {
+		if _, execError := transaction.Exec(`UPDATE expedition_rows SET fc_arrived = 0, updated_at = ?
+			WHERE expedition_id = ? AND row_type = 'waypoint' AND fc_stop = 1 AND position >= ?`,
+			now, targetRow.ExpeditionID, targetRow.Position); execError != nil {
+			return targetRow.ExpeditionID, execError
+		}
+	}
+	if touchError := touch(transaction, targetRow.ExpeditionID); touchError != nil {
+		return targetRow.ExpeditionID, touchError
+	}
+	return targetRow.ExpeditionID, nil
+}
+
+// SetCarrierArrivalOverrideTx runs SetCarrierArrivalOverride inside a database transaction on dbConn.
+func SetCarrierArrivalOverrideTx(dbConn *sql.DB, rowID int64, arrived bool) (int64, error) {
+	var expeditionID int64
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var overrideError error
+		expeditionID, overrideError = SetCarrierArrivalOverride(transaction, rowID, arrived)
+		return overrideError
+	})
+	return expeditionID, txError
+}
+
+// MissingPOIRow identifies a waypoint row whose poi_name is still blank.
+type MissingPOIRow struct {
+	ID            int64
+	SystemName    string
+	SystemAddress int64
+}
+
+// ListMissingPOIRows returns all named waypoint rows without a POI label.
+func ListMissingPOIRows(queryer db.Queryer) ([]MissingPOIRow, error) {
+	databaseRows, queryError := queryer.Query(
+		`SELECT id, system_name, COALESCE(system_address, 0) FROM expedition_rows WHERE row_type = 'waypoint' AND (poi_name IS NULL OR TRIM(poi_name) = '') AND system_name != ''`,
+	)
+	if queryError != nil {
+		return nil, queryError
+	}
+	defer databaseRows.Close()
+	var missingRows []MissingPOIRow
+	for databaseRows.Next() {
+		var rowItem MissingPOIRow
+		if scanError := databaseRows.Scan(&rowItem.ID, &rowItem.SystemName, &rowItem.SystemAddress); scanError != nil {
+			return nil, scanError
+		}
+		missingRows = append(missingRows, rowItem)
+	}
+	return missingRows, databaseRows.Err()
+}
+
+// SetRowPOIIfBlank stores poiName on rowID only when its poi_name column is still empty.
+func SetRowPOIIfBlank(queryer db.Queryer, rowID int64, poiName string) error {
+	_, execError := queryer.Exec(
+		`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`,
+		poiName,
+		rowID,
+	)
 	return execError
 }
 

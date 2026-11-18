@@ -184,7 +184,7 @@ export namespace app {
 	    activeExpeditionId: number;
 	    gecCount: number;
 	    gecFetchedAt: string;
-	    commanders: journal.Commander[];
+	    commanders: replay.Commander[];
 	    edDiscoveryDbPath: string;
 	    defaultEdDiscoveryDbPath: string;
 	    edDiscoveryDbExists: boolean;
@@ -214,7 +214,7 @@ export namespace app {
 	        this.activeExpeditionId = source["activeExpeditionId"];
 	        this.gecCount = source["gecCount"];
 	        this.gecFetchedAt = source["gecFetchedAt"];
-	        this.commanders = this.convertValues(source["commanders"], journal.Commander);
+	        this.commanders = this.convertValues(source["commanders"], replay.Commander);
 	        this.edDiscoveryDbPath = source["edDiscoveryDbPath"];
 	        this.defaultEdDiscoveryDbPath = source["defaultEdDiscoveryDbPath"];
 	        this.edDiscoveryDbExists = source["edDiscoveryDbExists"];
@@ -310,7 +310,7 @@ export namespace app {
 	}
 	export class StartCandidates {
 	    systemName: string;
-	    visits: projections.Arrival[];
+	    visits: replay.Arrival[];
 	
 	    static createFrom(source: any = {}) {
 	        return new StartCandidates(source);
@@ -319,7 +319,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.systemName = source["systemName"];
-	        this.visits = this.convertValues(source["visits"], projections.Arrival);
+	        this.visits = this.convertValues(source["visits"], replay.Arrival);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -467,6 +467,22 @@ export namespace expedition {
 	}
 	
 	
+	export class CarrierStats {
+	    carrierJumps: number;
+	    carrierDistanceLy: number;
+	    tritiumUsed?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.carrierJumps = source["carrierJumps"];
+	        this.carrierDistanceLy = source["carrierDistanceLy"];
+	        this.tritiumUsed = source["tritiumUsed"];
+	    }
+	}
 	export class DropSlotPreview {
 	    targetIndex: number;
 	    status: string;
@@ -492,7 +508,7 @@ export namespace expedition {
 	    status: string;
 	    startTimestamp: string;
 	    endTimestamp: string;
-	    adjustments: stats.Metrics;
+	    adjustments: CarrierStats;
 	    carrierType: string;
 	    carrierWeeklyUpkeep: number;
 	    createdAt: string;
@@ -510,7 +526,7 @@ export namespace expedition {
 	        this.status = source["status"];
 	        this.startTimestamp = source["startTimestamp"];
 	        this.endTimestamp = source["endTimestamp"];
-	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
+	        this.adjustments = this.convertValues(source["adjustments"], CarrierStats);
 	        this.carrierType = source["carrierType"];
 	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];
 	        this.createdAt = source["createdAt"];
@@ -617,7 +633,7 @@ export namespace expedition {
 	    distFromPrevLy?: number;
 	    distFromCurrentLy?: number;
 	    isNextWaypoint?: boolean;
-	    transitions: projections.ShipTransition[];
+	    transitions: replay.ShipTransition[];
 	    legModeId: number;
 	    legModeName: string;
 	    legModeColor: string;
@@ -640,7 +656,7 @@ export namespace expedition {
 	        this.distFromPrevLy = source["distFromPrevLy"];
 	        this.distFromCurrentLy = source["distFromCurrentLy"];
 	        this.isNextWaypoint = source["isNextWaypoint"];
-	        this.transitions = this.convertValues(source["transitions"], projections.ShipTransition);
+	        this.transitions = this.convertValues(source["transitions"], replay.ShipTransition);
 	        this.legModeId = source["legModeId"];
 	        this.legModeName = source["legModeName"];
 	        this.legModeColor = source["legModeColor"];
@@ -802,37 +818,6 @@ export namespace expedition {
 
 }
 
-export namespace journal {
-	
-	export class Commander {
-	    name: string;
-	    fid: string;
-	    enabled: boolean;
-	    firstSeen: string;
-	    lastSeen: string;
-	    firstGalactic: string;
-	    lastGalactic: string;
-	    eventCount: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Commander(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.fid = source["fid"];
-	        this.enabled = source["enabled"];
-	        this.firstSeen = source["firstSeen"];
-	        this.lastSeen = source["lastSeen"];
-	        this.firstGalactic = source["firstGalactic"];
-	        this.lastGalactic = source["lastGalactic"];
-	        this.eventCount = source["eventCount"];
-	    }
-	}
-
-}
-
 export namespace modes {
 	
 	export class Mode {
@@ -855,67 +840,6 @@ export namespace modes {
 	        this.color = source["color"];
 	        this.isDefault = source["isDefault"];
 	        this.sortOrder = source["sortOrder"];
-	    }
-	}
-
-}
-
-export namespace projections {
-	
-	export class Arrival {
-	    uid: string;
-	    timestamp: string;
-	    galactic: string;
-	    event: string;
-	    systemName: string;
-	    systemAddress: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Arrival(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.uid = source["uid"];
-	        this.timestamp = source["timestamp"];
-	        this.galactic = source["galactic"];
-	        this.event = source["event"];
-	        this.systemName = source["systemName"];
-	        this.systemAddress = source["systemAddress"];
-	    }
-	}
-	export class CarrierDepotInfo {
-	    usedCapacity: number;
-	    depotTritium: number;
-	    cargo: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierDepotInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.usedCapacity = source["usedCapacity"];
-	        this.depotTritium = source["depotTritium"];
-	        this.cargo = source["cargo"];
-	    }
-	}
-	export class ShipTransition {
-	    kind: string;
-	    at: string;
-	    atGalactic: string;
-	    to: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ShipTransition(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.kind = source["kind"];
-	        this.at = source["at"];
-	        this.atGalactic = source["atGalactic"];
-	        this.to = source["to"];
 	    }
 	}
 
@@ -970,6 +894,93 @@ export namespace reference {
 	        this.name = source["name"];
 	        this.adjacent = source["adjacent"];
 	        this.anchor = source["anchor"];
+	    }
+	}
+
+}
+
+export namespace replay {
+	
+	export class Arrival {
+	    uid: string;
+	    timestamp: string;
+	    galactic: string;
+	    event: string;
+	    systemName: string;
+	    systemAddress: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Arrival(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uid = source["uid"];
+	        this.timestamp = source["timestamp"];
+	        this.galactic = source["galactic"];
+	        this.event = source["event"];
+	        this.systemName = source["systemName"];
+	        this.systemAddress = source["systemAddress"];
+	    }
+	}
+	export class CarrierDepotInfo {
+	    usedCapacity: number;
+	    depotTritium: number;
+	    cargo: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierDepotInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.usedCapacity = source["usedCapacity"];
+	        this.depotTritium = source["depotTritium"];
+	        this.cargo = source["cargo"];
+	    }
+	}
+	export class Commander {
+	    name: string;
+	    fid: string;
+	    enabled: boolean;
+	    firstSeen: string;
+	    lastSeen: string;
+	    firstGalactic: string;
+	    lastGalactic: string;
+	    eventCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Commander(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.fid = source["fid"];
+	        this.enabled = source["enabled"];
+	        this.firstSeen = source["firstSeen"];
+	        this.lastSeen = source["lastSeen"];
+	        this.firstGalactic = source["firstGalactic"];
+	        this.lastGalactic = source["lastGalactic"];
+	        this.eventCount = source["eventCount"];
+	    }
+	}
+	export class ShipTransition {
+	    kind: string;
+	    at: string;
+	    atGalactic: string;
+	    to: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ShipTransition(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.at = source["at"];
+	        this.atGalactic = source["atGalactic"];
+	        this.to = source["to"];
 	    }
 	}
 

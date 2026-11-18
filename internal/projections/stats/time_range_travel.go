@@ -2,11 +2,11 @@ package stats
 
 import (
 	"database/sql"
-	"fmt"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
+	replaystats "planisphere/internal/replay/stats"
 )
 
 var timeRangeTravelAppEvents = events.NewAppSet(
@@ -21,6 +21,7 @@ var timeRangeTravelAppEvents = events.NewAppSet(
 type TimeRangeTravel struct {
 	database       *sql.DB
 	recoveredJumps *projections.RecoveredJumps
+	modeLoader     replaystats.ModeTimelineLoader
 	entries        *projection.KeyedCache[string, TravelMetrics]
 }
 
@@ -29,25 +30,23 @@ func NewTimeRangeTravel(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	recoveredJumps *projections.RecoveredJumps,
+	modeLoader replaystats.ModeTimelineLoader,
 ) *TimeRangeTravel {
-	timeRangeTravel := &TimeRangeTravel{
-		database:       dbConn,
-		recoveredJumps: recoveredJumps,
-	}
-	timeRangeTravel.entries = projection.NewKeyedCache[string, TravelMetrics](
-		bus,
-		"time_range_travel",
-		timeRangeTravel.Triggers(),
-	)
-	return timeRangeTravel
-}
-
-// Triggers declares the journal and application events that invalidate TimeRangeTravel.
-func (timeRangeTravel *TimeRangeTravel) Triggers() projection.Triggers {
-	return projection.Triggers{
+	triggers := projection.Triggers{
 		Journal: travelStatsJournalEvents,
 		App:     timeRangeTravelAppEvents,
 	}
+	return &TimeRangeTravel{
+		database:       dbConn,
+		recoveredJumps: recoveredJumps,
+		modeLoader:     modeLoader,
+		entries:        projection.NewKeyedCache[string, TravelMetrics](bus, "TimeRangeTravel", triggers),
+	}
+}
+
+// Triggers reports the journal and app events that invalidate TimeRangeTravel.
+func (timeRangeTravel *TimeRangeTravel) Triggers() projection.Triggers {
+	return timeRangeTravel.entries.Triggers()
 }
 
 // CachedCount returns the number of bounded range travel entries currently cached.
@@ -55,24 +54,24 @@ func (timeRangeTravel *TimeRangeTravel) CachedCount() int {
 	return timeRangeTravel.entries.Len()
 }
 
-// Generation returns the cache invalidation generation counter.
+// Generation returns the monotonically increasing invalidation generation counter.
 func (timeRangeTravel *TimeRangeTravel) Generation() uint64 {
 	return timeRangeTravel.entries.Generation()
 }
 
-// Compute returns cached or freshly evaluated travel metrics for timeRange and optional mode filter.
+// Compute returns Flight Operations metrics for timeRange and filter, caching per travel filter.
 func (timeRangeTravel *TimeRangeTravel) Compute(timeRange Range, filter *Filter) (TravelMetrics, error) {
-	return timeRangeTravel.computeWithPreparedFilter(timeRange, cloneUnpreparedFilter(filter))
-}
-
-func (timeRangeTravel *TimeRangeTravel) computeWithPreparedFilter(timeRange Range, preparedFilter *Filter) (TravelMetrics, error) {
 	if timeRangeTravel.database == nil {
-		return TravelMetrics{}, fmt.Errorf("time range travel database is nil")
+		return TravelMetrics{}, nil
 	}
-	cacheKey := buildTravelStatsKey(timeRange, preparedFilter)
+	cacheKey := buildTravelStatsKey(timeRange, filter)
 	return timeRangeTravel.entries.GetOrLoad(cacheKey, func() (TravelMetrics, error) {
-		engine := NewEngineWithProjections(timeRangeTravel.database, nil, timeRangeTravel.recoveredJumps)
-		return engine.ComputeTravel(timeRange, preparedFilter)
+		engine := replaystats.NewEngineWithSources(
+			timeRangeTravel.database,
+			nil,
+			timeRangeTravel.recoveredJumps,
+			timeRangeTravel.modeLoader,
+		)
+		return engine.ComputeTravel(timeRange, replaystats.CloneUnprepared(filter))
 	})
 }
-
