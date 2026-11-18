@@ -191,7 +191,7 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 			return readyError
 		}
 		var updateError error
-		changed, updateError = expedition.UpdateRow(app.db, patch)
+		changed, updateError = expedition.UpdateRowTx(app.db, patch)
 		if updateError != nil {
 			return updateError
 		}

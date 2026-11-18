@@ -1268,3 +1268,187 @@ func TestCompleteRejectsActiveCarrierRouteAndDeleteClearsRoute(testingContext *t
 		testingContext.Fatalf("expected active carrier route setting to be cleared on Delete, got %q", persistedRoute)
 	}
 }
+
+func TestUpdateRowTxRollbackAndCompletedRestrictions(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Row Guard Completed Test", "")
+	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
+	regionRow := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowRegion, 1)
+	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, regionRow.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, secondWaypoint.ID, "Colonia")
+
+	editedPOI := "Should Roll Back"
+	invalidRegionID := 999999
+	if _, updateError := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{
+		ID:       regionRow.ID,
+		POIName:  &editedPOI,
+		RegionID: &invalidRegionID,
+	}); updateError == nil {
+		testingContext.Fatalf("expected invalid RegionID to fail")
+	}
+	reloadedRegion, reloadRegionError := expedition.GetRow(databaseConnection, regionRow.ID)
+	if reloadRegionError != nil {
+		testingContext.Fatal(reloadRegionError)
+	}
+	if reloadedRegion.POIName != "" || reloadedRegion.RegionID != 1 {
+		testingContext.Fatalf("expected UpdateRowTx to roll back POIName on invalid RegionID, got %+v", reloadedRegion)
+	}
+
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z"); startError != nil {
+		testingContext.Fatal(startError)
+	}
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID, "2026-01-18T12:00:00Z"); completeError != nil {
+		testingContext.Fatal(completeError)
+	}
+
+	replacementSystem := "Beagle Point"
+	flagTrue := true
+	newRegionID := 2
+	completedRejections := []struct {
+		label string
+		patch expedition.RowPatch
+	}{
+		{"SystemName", expedition.RowPatch{ID: secondWaypoint.ID, POIName: &editedPOI, SystemName: &replacementSystem}},
+		{"FCStop", expedition.RowPatch{ID: secondWaypoint.ID, FCStop: &flagTrue}},
+		{"FCArrived", expedition.RowPatch{ID: secondWaypoint.ID, FCArrived: &flagTrue}},
+		{"RegionID", expedition.RowPatch{ID: regionRow.ID, RegionID: &newRegionID}},
+	}
+	for _, testCase := range completedRejections {
+		if _, err := expedition.UpdateRowTx(databaseConnection, testCase.patch); err == nil {
+			testingContext.Fatalf("expected completed expedition to reject %s edit", testCase.label)
+		}
+	}
+	reloadedSecond, reloadSecondError := expedition.GetRow(databaseConnection, secondWaypoint.ID)
+	if reloadSecondError != nil {
+		testingContext.Fatal(reloadSecondError)
+	}
+	if reloadedSecond.POIName != "" || reloadedSecond.SystemName != "Colonia" {
+		testingContext.Fatalf("expected rejected SystemName patch to leave POIName untouched, got %+v", reloadedSecond)
+	}
+
+	cosmeticPOI := "Jaques Station"
+	cosmeticNotes := "Final survey"
+	unchangedSystem := "Colonia"
+	systemChanged, cosmeticError := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{
+		ID:         secondWaypoint.ID,
+		POIName:    &cosmeticPOI,
+		Notes:      &cosmeticNotes,
+		SystemName: &unchangedSystem,
+	})
+	if cosmeticError != nil || systemChanged {
+		testingContext.Fatalf("expected cosmetic and unchanged updates on completed expedition to succeed without systemChanged, got changed=%v err=%v", systemChanged, cosmeticError)
+	}
+	updatedSecond, reloadUpdatedError := expedition.GetRow(databaseConnection, secondWaypoint.ID)
+	if reloadUpdatedError != nil {
+		testingContext.Fatal(reloadUpdatedError)
+	}
+	if updatedSecond.POIName != cosmeticPOI || updatedSecond.Notes != cosmeticNotes {
+		testingContext.Fatalf("expected POIName and Notes to persist on completed expedition, got %+v", updatedSecond)
+	}
+}
+
+func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-01-18T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-01-18T11:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"JumpDist":4.0}`,
+	})
+
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Active Guards Test", "")
+	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
+	visitedWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, visitedWaypoint.ID, "Alpha Centauri")
+	arrivedStopWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, visitedWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, arrivedStopWaypoint.ID, "Sirius")
+	unvisitedWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, arrivedStopWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, unvisitedWaypoint.ID, "Barnard's Star")
+	routedStopWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, unvisitedWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, routedStopWaypoint.ID, "Vega")
+	trailingWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, routedStopWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, trailingWaypoint.ID, "Altair")
+
+	flagTrue := true
+	flagFalse := false
+	for _, stopID := range []int64{originWaypoint.ID, arrivedStopWaypoint.ID, routedStopWaypoint.ID} {
+		if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: stopID, FCStop: &flagTrue}); err != nil {
+			testingContext.Fatal(err)
+		}
+	}
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z"); startError != nil {
+		testingContext.Fatal(startError)
+	}
+	if _, overrideError := expedition.SetCarrierArrivalOverrideTx(databaseConnection, arrivedStopWaypoint.ID, true); overrideError != nil {
+		testingContext.Fatal(overrideError)
+	}
+
+	spanshRoute := expedition.ActiveCarrierRouteState{
+		ExpeditionID: expeditionRecord.ID,
+		TargetRowID:  routedStopWaypoint.ID,
+		ManualMode:   false,
+		Route: expedition.CarrierRouteResult{
+			Origin:      "Sirius",
+			Destination: "Vega",
+			Jumps:       []expedition.CarrierRouteJump{{SystemName: "Vega"}},
+		},
+	}
+	if saveRouteError := expedition.SaveActiveCarrierRoute(databaseConnection, spanshRoute); saveRouteError != nil {
+		testingContext.Fatal(saveRouteError)
+	}
+
+	newSystem := "Ross 154"
+	systemGuardCases := []struct {
+		label string
+		rowID int64
+	}{
+		{"origin waypoint", originWaypoint.ID},
+		{"visited waypoint", visitedWaypoint.ID},
+		{"arrived carrier stop", arrivedStopWaypoint.ID},
+		{"active Spansh target", routedStopWaypoint.ID},
+	}
+	for _, testCase := range systemGuardCases {
+		if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: testCase.rowID, SystemName: &newSystem}); err == nil {
+			testingContext.Fatalf("expected active expedition to reject SystemName edit on %s", testCase.label)
+		}
+	}
+
+	if changed, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: unvisitedWaypoint.ID, SystemName: &newSystem}); err != nil || !changed {
+		testingContext.Fatalf("expected unvisited non-target SystemName edit to succeed, got changed=%v err=%v", changed, err)
+	}
+
+	fcGuardCases := []struct {
+		label string
+		patch expedition.RowPatch
+	}{
+		{"clear arrived FCStop", expedition.RowPatch{ID: arrivedStopWaypoint.ID, FCStop: &flagFalse}},
+		{"add FCStop before arrival frontier", expedition.RowPatch{ID: visitedWaypoint.ID, FCStop: &flagTrue}},
+		{"add FCStop before Spansh target", expedition.RowPatch{ID: unvisitedWaypoint.ID, FCStop: &flagTrue}},
+		{"clear FCStop on Spansh target", expedition.RowPatch{ID: routedStopWaypoint.ID, FCStop: &flagFalse}},
+	}
+	for _, testCase := range fcGuardCases {
+		if _, err := expedition.UpdateRowTx(databaseConnection, testCase.patch); err == nil {
+			testingContext.Fatalf("expected active expedition to reject %s", testCase.label)
+		}
+	}
+
+	if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: trailingWaypoint.ID, FCStop: &flagTrue}); err != nil {
+		testingContext.Fatalf("expected adding FCStop after Spansh target to succeed, got %v", err)
+	}
+
+	spanshRoute.ManualMode = true
+	if saveManualError := expedition.SaveActiveCarrierRoute(databaseConnection, spanshRoute); saveManualError != nil {
+		testingContext.Fatal(saveManualError)
+	}
+	if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: unvisitedWaypoint.ID, FCStop: &flagTrue}); err == nil {
+		testingContext.Fatalf("expected manual carrier route to reject adding FCStop before next pending stop")
+	}
+	if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: routedStopWaypoint.ID, FCStop: &flagFalse}); err != nil {
+		testingContext.Fatalf("expected manual carrier route to allow clearing FCStop on active manual target, got %v", err)
+	}
+
+	if _, clearOriginVisitError := databaseConnection.Exec(`UPDATE expedition_rows SET visited_at = NULL WHERE id = ?`, originWaypoint.ID); clearOriginVisitError != nil {
+		testingContext.Fatal(clearOriginVisitError)
+	}
+	if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: originWaypoint.ID, SystemName: &newSystem}); err == nil {
+		testingContext.Fatalf("expected active expedition to reject SystemName edit on unvisited origin waypoint #1")
+	}
+}

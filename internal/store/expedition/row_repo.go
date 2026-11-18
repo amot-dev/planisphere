@@ -196,12 +196,145 @@ type RowPatch struct {
 	RegionID   *int    `json:"regionId,omitempty"`
 }
 
+func validateFCStopAgainstActiveRoute(rows []Row, currentRowIndex int, activeRoute *ActiveCarrierRouteState) error {
+	isManualMode := activeRoute.ManualMode || activeRoute.Route.ManualMode || len(activeRoute.Route.Jumps) == 0
+	if !isManualMode {
+		targetIndex := -1
+		if activeRoute.TargetRowID > 0 {
+			targetIndex = indexOf(rows, activeRoute.TargetRowID)
+		}
+		if targetIndex >= 0 && currentRowIndex <= targetIndex {
+			return errors.New("fleet carrier stop cannot be changed at or before an active routed stop")
+		}
+		return nil
+	}
+	for i, rowItem := range rows {
+		if rowItem.IsWaypoint() && rowItem.FCStop && !rowItem.FCArrived {
+			if currentRowIndex < i {
+				return errors.New("fleet carrier stop cannot be changed before the active manual carrier stop")
+			}
+			break
+		}
+	}
+	return nil
+}
+
+func validateActiveSystemNameEdit(queryer db.Queryer, currentRow Row, loadRows func() ([]Row, error)) error {
+	if currentRow.VisitedAt != "" {
+		return errors.New("star system cannot be changed on a visited waypoint")
+	}
+	if currentRow.FCStop && currentRow.FCArrived {
+		return errors.New("star system cannot be changed while fleet carrier is marked arrived")
+	}
+	rows, listError := loadRows()
+	if listError != nil {
+		return listError
+	}
+	if firstWaypointIndex := firstWaypoint(rows); firstWaypointIndex >= 0 && rows[firstWaypointIndex].ID == currentRow.ID {
+		return errors.New("waypoint #1 star system cannot be changed after the expedition has started")
+	}
+	if lockedTargetID := readLockedSpanshTargetRowID(queryer, currentRow.ExpeditionID); lockedTargetID > 0 && currentRow.ID == lockedTargetID {
+		return errors.New("star system cannot be changed while fleet carrier route is active")
+	}
+	return nil
+}
+
+func validateActiveFCStopEdit(queryer db.Queryer, currentRow Row, nextFCStop bool, loadRows func() ([]Row, error)) error {
+	if !nextFCStop && currentRow.FCArrived {
+		return errors.New("arrived fleet carrier stop cannot be removed")
+	}
+	rows, listError := loadRows()
+	if listError != nil {
+		return listError
+	}
+	currentRowIndex := indexOf(rows, currentRow.ID)
+	if currentRowIndex < 0 {
+		return fmt.Errorf("row %d not found", currentRow.ID)
+	}
+	lastFCArrivedIndex := -1
+	for i, rowItem := range rows {
+		if rowItem.IsWaypoint() && rowItem.FCStop && rowItem.FCArrived {
+			lastFCArrivedIndex = i
+		}
+	}
+	if nextFCStop && currentRowIndex <= lastFCArrivedIndex {
+		return errors.New("fleet carrier stop cannot be added at or before an arrived carrier stop")
+	}
+	activeRoute, routeError := GetActiveCarrierRoute(queryer, currentRow.ExpeditionID)
+	if routeError != nil {
+		return routeError
+	}
+	if activeRoute == nil {
+		return nil
+	}
+	return validateFCStopAgainstActiveRoute(rows, currentRowIndex, activeRoute)
+}
+
+func validateRowStructuralEdits(queryer db.Queryer, currentRow Row, patch RowPatch, systemChanging bool) error {
+	if patch.RegionID != nil && currentRow.RowType == RowRegion {
+		if _, ok := reference.RegionByID(*patch.RegionID); !ok {
+			return fmt.Errorf("invalid region %d", *patch.RegionID)
+		}
+	}
+
+	regionChanging := patch.RegionID != nil && currentRow.RowType == RowRegion && *patch.RegionID != currentRow.RegionID
+	fcStopChanging := patch.FCStop != nil && *patch.FCStop != currentRow.FCStop
+	fcArrivedChanging := patch.FCArrived != nil && *patch.FCArrived != currentRow.FCArrived
+	if !regionChanging && !fcStopChanging && !fcArrivedChanging && !systemChanging {
+		return nil
+	}
+
+	expeditionRecord, expError := Get(queryer, currentRow.ExpeditionID)
+	if expError != nil {
+		return expError
+	}
+	if expeditionRecord.Status == StatusCompleted {
+		return errors.New("completed expedition structure cannot be modified")
+	}
+	if expeditionRecord.Status != StatusActive {
+		return nil
+	}
+
+	var cachedRows []Row
+	rowsLoaded := false
+	loadRows := func() ([]Row, error) {
+		if rowsLoaded {
+			return cachedRows, nil
+		}
+		loadedRows, listError := ListRows(queryer, currentRow.ExpeditionID)
+		if listError != nil {
+			return nil, listError
+		}
+		cachedRows = loadedRows
+		rowsLoaded = true
+		return cachedRows, nil
+	}
+
+	if systemChanging {
+		if systemError := validateActiveSystemNameEdit(queryer, currentRow, loadRows); systemError != nil {
+			return systemError
+		}
+	}
+	if fcStopChanging {
+		return validateActiveFCStopEdit(queryer, currentRow, *patch.FCStop, loadRows)
+	}
+	return nil
+}
+
 // UpdateRow applies a patch. systemChanged reports whether the system name
 // changed (coordinates are cleared and must be re-resolved).
 func UpdateRow(queryer db.Queryer, patch RowPatch) (systemChanged bool, updateError error) {
 	currentRow, getError := GetRow(queryer, patch.ID)
 	if getError != nil {
 		return false, getError
+	}
+	var normalizedSystemName string
+	if patch.SystemName != nil && currentRow.RowType == RowWaypoint {
+		normalizedSystemName = strings.Join(strings.Fields(*patch.SystemName), " ")
+		systemChanged = normalizedSystemName != currentRow.SystemName
+	}
+	if validationError := validateRowStructuralEdits(queryer, currentRow, patch, systemChanged); validationError != nil {
+		return false, validationError
 	}
 	now := reference.NowISO()
 	if patch.FCStop != nil {
@@ -235,31 +368,15 @@ func UpdateRow(queryer db.Queryer, patch RowPatch) (systemChanged bool, updateEr
 		}
 	}
 	if patch.RegionID != nil && currentRow.RowType == RowRegion {
-		if _, ok := reference.RegionByID(*patch.RegionID); !ok {
-			return false, fmt.Errorf("invalid region %d", *patch.RegionID)
-		}
 		if _, execError := queryer.Exec(`UPDATE expedition_rows SET region_id = ?, updated_at = ? WHERE id = ?`, *patch.RegionID, now, patch.ID); execError != nil {
 			return false, execError
 		}
 	}
-	if patch.SystemName != nil && currentRow.RowType == RowWaypoint {
-		normalizedSystemName := strings.Join(strings.Fields(*patch.SystemName), " ")
-		if normalizedSystemName != currentRow.SystemName {
-			if currentRow.FCStop && currentRow.FCArrived {
-				expeditionRecord, expError := Get(queryer, currentRow.ExpeditionID)
-				if expError != nil {
-					return false, expError
-				}
-				if expeditionRecord.Status != StatusPlanning {
-					return false, errors.New("star system cannot be changed while fleet carrier is marked arrived")
-				}
-			}
-			systemChanged = true
-			if _, execError := queryer.Exec(`UPDATE expedition_rows SET system_name = ?, system_address = NULL, edsm_id = NULL,
-				x = NULL, y = NULL, z = NULL, coords_source = '', visited_at = NULL, visit_event_uid = NULL, updated_at = ?
-				WHERE id = ?`, normalizedSystemName, now, patch.ID); execError != nil {
-				return false, execError
-			}
+	if systemChanged {
+		if _, execError := queryer.Exec(`UPDATE expedition_rows SET system_name = ?, system_address = NULL, edsm_id = NULL,
+			x = NULL, y = NULL, z = NULL, coords_source = '', visited_at = NULL, visit_event_uid = NULL, updated_at = ?
+			WHERE id = ?`, normalizedSystemName, now, patch.ID); execError != nil {
+			return false, execError
 		}
 	}
 	if touchError := touch(queryer, currentRow.ExpeditionID); touchError != nil {
@@ -489,6 +606,17 @@ func InsertRowTx(dbConn *sql.DB, expeditionID, afterRowID int64, rowType string,
 		return insertError
 	})
 	return createdRow, txError
+}
+
+// UpdateRowTx applies patch inside a database transaction on dbConn.
+func UpdateRowTx(dbConn *sql.DB, patch RowPatch) (bool, error) {
+	var systemChanged bool
+	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		var updateError error
+		systemChanged, updateError = UpdateRow(transaction, patch)
+		return updateError
+	})
+	return systemChanged, txError
 }
 
 // DeleteRowTx removes rowID inside a database transaction on dbConn.
