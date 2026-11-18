@@ -4,12 +4,13 @@ import { formatLy } from '../../utils/galacticTime'
 import { StatusBadge } from './widgets/StatusBadge'
 
 /**
- * PlannerHeaderBarProps defines the active expedition plan, route distance
- * summaries, and lifecycle action callbacks for the top bar of the planner.
+ * PlannerHeaderBarProps defines the active expedition plan, carrier plotter
+ * open state, and lifecycle action callbacks for the top bar of the planner.
  */
 export interface PlannerHeaderBarProps {
   plan: expedition.PlanView
   hasOriginWaypointSystem: boolean
+  carrierRouteOpen?: boolean
   onOpenStartModal: () => void
   onLifecycleAction: (label: string, actionFunction: () => Promise<void>) => Promise<void>
 }
@@ -21,6 +22,7 @@ export interface PlannerHeaderBarProps {
 export function PlannerHeaderBar({
   plan,
   hasOriginWaypointSystem,
+  carrierRouteOpen = false,
   onOpenStartModal,
   onLifecycleAction,
 }: PlannerHeaderBarProps) {
@@ -29,6 +31,7 @@ export function PlannerHeaderBar({
   const isActive = currentExpedition.status === 'active'
   const isCompleted = currentExpedition.status === 'completed'
   const canComplete = (plan.visitedWaypointCount ?? 0) >= 2
+  const completeDisabled = !canComplete || Boolean(carrierRouteOpen)
 
   const coveredLy =
     plan.coveredLy ??
@@ -126,19 +129,21 @@ export function PlannerHeaderBar({
           <div className="inline-flex items-center gap-1.5">
             <button
               type="button"
-              disabled={!canComplete}
+              disabled={completeDisabled}
               onClick={() =>
                 onLifecycleAction('COMPLETING EXPEDITION', () =>
                   CompleteExpedition(currentExpedition.id),
                 )
               }
               title={
-                canComplete
-                  ? undefined
-                  : 'Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete expedition in Expeditions)'
+                !canComplete
+                  ? 'Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete expedition in Expeditions)'
+                  : carrierRouteOpen
+                    ? 'Close or finish the active Fleet Carrier route before completing the expedition'
+                    : undefined
               }
               className={`ed-btn-primary ${
-                !canComplete ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
+                completeDisabled ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
               }`}
             >
               COMPLETE

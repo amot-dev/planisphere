@@ -222,7 +222,7 @@ export function NavigationTelemetrySection({
           </div>
           {viewScope !== 'allTime' ? (
             <div className="flex items-center gap-1.5">
-              {sidebarStats?.status !== 'completed' && (
+              {sidebarStats?.status === 'active' && (
                 <button
                   type="button"
                   disabled={carrierRouteOpen}

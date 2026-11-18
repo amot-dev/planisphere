@@ -1227,3 +1227,44 @@ func TestRecordCarrierJumpAndApplyTo(testingContext *testing.T) {
 		testingContext.Fatalf("unexpected ApplyTo result: %+v", combinedMetrics)
 	}
 }
+
+func TestCompleteRejectsActiveCarrierRouteAndDeleteClearsRoute(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expeditionRecord, originRow := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Route Lifecycle Guard", "")
+	setRowSystemName(testingContext, databaseConnection, originRow.ID, "Sol")
+
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2020-01-18T10:00:00Z"); startError != nil {
+		testingContext.Fatal(startError)
+	}
+	routeState := expedition.ActiveCarrierRouteState{
+		ExpeditionID: expeditionRecord.ID,
+		ManualMode:   true,
+		Route:        expedition.CarrierRouteResult{Origin: "Sol", ManualMode: true},
+	}
+	if saveRouteError := expedition.SaveActiveCarrierRoute(databaseConnection, routeState); saveRouteError != nil {
+		testingContext.Fatal(saveRouteError)
+	}
+
+	completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID, "")
+	if completeError == nil || completeError.Error() != "close or finish the active fleet carrier route before completing the expedition" {
+		testingContext.Fatalf("expected CompleteTx to reject active carrier route, got %v", completeError)
+	}
+	reloadedExpedition, reloadError := expedition.Get(databaseConnection, expeditionRecord.ID)
+	if reloadError != nil {
+		testingContext.Fatal(reloadError)
+	}
+	if reloadedExpedition.Status != expedition.StatusActive {
+		testingContext.Fatalf("expected expedition status to remain active, got %q", reloadedExpedition.Status)
+	}
+
+	if deleteError := expedition.Delete(databaseConnection, expeditionRecord.ID); deleteError != nil {
+		testingContext.Fatal(deleteError)
+	}
+	persistedRoute, getSettingError := settings.Get(databaseConnection, fmt.Sprintf("active_carrier_route_%d", expeditionRecord.ID))
+	if getSettingError != nil {
+		testingContext.Fatal(getSettingError)
+	}
+	if persistedRoute != "" {
+		testingContext.Fatalf("expected active carrier route setting to be cleared on Delete, got %q", persistedRoute)
+	}
+}

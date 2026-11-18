@@ -84,6 +84,13 @@ func Complete(transaction *sql.Tx, expeditionID int64, endTimestamp string) erro
 	if normalizedEndTimestamp <= expeditionRecord.StartTimestamp {
 		return errors.New("end must be after the expedition start")
 	}
+	activeCarrierRoute, routeError := GetActiveCarrierRoute(transaction, expeditionID)
+	if routeError != nil {
+		return routeError
+	}
+	if activeCarrierRoute != nil {
+		return errors.New("close or finish the active fleet carrier route before completing the expedition")
+	}
 	if pruneError := PruneEmptyRows(transaction, expeditionID); pruneError != nil {
 		return pruneError
 	}

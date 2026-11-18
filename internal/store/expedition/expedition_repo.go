@@ -189,10 +189,23 @@ func UpdateCarrierConfig(queryer db.Queryer, expeditionID int64, carrierType str
 	return execError
 }
 
-// Delete removes an expedition and its rows. Journal history is untouched.
+// Delete removes an expedition, its rows, and any active carrier route. Journal history is untouched.
 func Delete(queryer db.Queryer, expeditionID int64) error {
-	_, execError := queryer.Exec(`DELETE FROM expeditions WHERE id = ?`, expeditionID)
-	return execError
+	deleteExpedition := func(targetQueryer db.Queryer) error {
+		if _, execError := targetQueryer.Exec(`DELETE FROM expeditions WHERE id = ?`, expeditionID); execError != nil {
+			return execError
+		}
+		if clearError := ClearActiveCarrierRoute(targetQueryer, expeditionID); clearError != nil {
+			return clearError
+		}
+		return nil
+	}
+	if dbConn, isDB := queryer.(*sql.DB); isDB {
+		return db.WithTx(dbConn, func(transaction *sql.Tx) error {
+			return deleteExpedition(transaction)
+		})
+	}
+	return deleteExpedition(queryer)
 }
 
 // Clone creates a new expedition in planning status copying the source

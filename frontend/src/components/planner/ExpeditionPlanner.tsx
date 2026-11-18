@@ -448,6 +448,7 @@ export function ExpeditionPlanner({
       <PlannerHeaderBar
         plan={plan}
         hasOriginWaypointSystem={hasOriginWaypointSystem}
+        carrierRouteOpen={Boolean(carrierRoute.activeCarrierRoute || carrierRoute.routePrompt)}
         onOpenStartModal={onOpenStartModal}
         onLifecycleAction={handleLifecycleAction}
       />

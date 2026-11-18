@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { PlannerConfirmModal } from './PlannerConfirmModal'
+import { PlannerHeaderBar } from './PlannerHeaderBar'
 import { PlannerRouteTable } from './PlannerRouteTable'
 import { StartExpeditionModal } from './StartExpeditionModal'
 import { CarrierRouteModal } from './CarrierRouteModal'
@@ -389,6 +390,20 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(midflightHtml).toContain('>COMPLETE</button>')
     expect(midflightHtml).toMatch(/data-row-id="2"[^>]*data-last-visited="true"/)
     expect(midflightHtml).not.toMatch(/data-row-id="1"[^>]*data-last-visited="true"/)
+
+    const carrierRouteOpenHeaderHtml = renderToString(
+      createElement(PlannerHeaderBar, {
+        plan: activePlanWithSecondVisited,
+        hasOriginWaypointSystem: true,
+        carrierRouteOpen: true,
+        onOpenStartModal: () => {},
+        onLifecycleAction: async () => {},
+      }),
+    )
+    expect(carrierRouteOpenHeaderHtml).toContain(
+      'disabled="" title="Close or finish the active Fleet Carrier route before completing the expedition"',
+    )
+    expect(carrierRouteOpenHeaderHtml).toContain('opacity-40 cursor-not-allowed hover:bg-transparent')
   })
 
   it('CarrierRouteModal omits Manual Entry Mode and keeps QUERYING SPANSH... single-line', () => {
@@ -421,7 +436,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(loadingHtml).toContain('whitespace-nowrap')
   })
 
-  it('StatsSidebar renders LOG JUMP button in Expedition scope, disables it when carrierRouteOpen is true, and hides it when completed', () => {
+  it('StatsSidebar renders LOG JUMP button only in active Expedition scope and disables it when carrierRouteOpen is true', () => {
     const emptyFilter = stats.Filter.createFrom({ enabled: false, modes: [] })
     const renderStatsSidebar = (overrides: Partial<Parameters<typeof StatsSidebar>[0]> = {}) =>
       renderToString(
@@ -437,12 +452,23 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         }),
       )
 
-    const html = renderStatsSidebar()
+    expect(renderStatsSidebar()).not.toContain('LOG JUMP')
+
+    const planningHtml = renderStatsSidebar({
+      sidebarStats: app.SidebarStats.createFrom({ expeditionId: 1, status: 'planning' }),
+    })
+    expect(planningHtml).not.toContain('LOG JUMP')
+
+    const activeSidebarStats = app.SidebarStats.createFrom({ expeditionId: 1, status: 'active' })
+    const html = renderStatsSidebar({ sidebarStats: activeSidebarStats })
     expect(html).toContain('LOG JUMP')
     expect(html).not.toContain('CARRIER LOG')
     expect(html).not.toMatch(/disabled=""[^>]*>LOG JUMP/)
 
-    const openRouteHtml = renderStatsSidebar({ carrierRouteOpen: true })
+    const openRouteHtml = renderStatsSidebar({
+      sidebarStats: activeSidebarStats,
+      carrierRouteOpen: true,
+    })
     expect(openRouteHtml).toContain('Carrier routing panel is already open')
     expect(openRouteHtml).toMatch(/disabled=""[^>]*>LOG JUMP/)
 
