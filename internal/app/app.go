@@ -276,7 +276,14 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
 	app.watcher.SetDebounceDelay(time.Duration(app.journalDebounceMs()) * time.Millisecond)
-	app.resolver = edsm.NewResolver(dbConn, app.onlineEnabled)
+	app.resolver = edsm.NewResolver(dbConn, func() bool {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if app.db != dbConn {
+			return false
+		}
+		return settings.OnlineLookups(dbConn)
+	})
 	app.gec = gec.NewCatalog(dbConn)
 	app.wireProjections(dbConn)
 	app.dbMu.Unlock()
