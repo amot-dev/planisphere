@@ -220,7 +220,8 @@ func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metric
 		return nil
 	}
 	key := bodyKey{saaEvent.SystemAddress, saaEvent.BodyID}
-	if accumulator.mappedBodies[key] || !accumulator.filterSet.allow(rowItem.Timestamp, true) {
+	// Planetary ring hotspot scans log EfficiencyTarget == 0 and do not map planets.
+	if accumulator.mappedBodies[key] || !accumulator.filterSet.allow(rowItem.Timestamp, true) || saaEvent.EfficiencyTarget <= 0 {
 		return nil
 	}
 	accumulator.mappedBodies[key] = true
@@ -234,13 +235,15 @@ func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metric
 		return lookupError
 	}
 	systemPopulation := accumulator.session.SystemPopulation(saaEvent.SystemAddress)
+	bodyScan := replay.ToBodyScanWithPopulation(parentScan, systemPopulation)
+	if !bodyScan.IsValuable() || bodyScan.IsStar() {
+		return nil
+	}
 	if reference.CanExpectFirstMapped(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped) {
 		metrics.FirstMapped++
 	}
 	odysseyEnabled := accumulator.session.OdysseyAt(rowItem.Timestamp)
-	metrics.addMapping(reference.EstimateMappingIncrementBreakdown(
-		replay.ToBodyScanWithPopulation(parentScan, systemPopulation), mappingInfo, odysseyEnabled,
-	))
+	metrics.addMapping(reference.EstimateMappingIncrementBreakdown(bodyScan, mappingInfo, odysseyEnabled))
 	return nil
 }
 

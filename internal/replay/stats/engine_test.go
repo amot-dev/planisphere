@@ -376,3 +376,31 @@ func TestComputeExobiologyChronologicalScanResolution(testingContext *testing.T)
 func newEngineWithModes(queryer db.Queryer) *stats.Engine {
 	return stats.NewEngineWithSources(queryer, nil, nil, modes.LoadModeLookup)
 }
+
+func TestComputeExcludesPlanetaryRingMappings(testingContext *testing.T) {
+	journalLines := []string{
+		`{"timestamp":"2026-07-01T10:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-07-01T10:01:00Z","event":"Scan","ScanType":"Detailed","BodyName":"RingTest 1","BodyID":1,"StarSystem":"RingTest","SystemAddress":9501,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-07-01T10:02:00Z","event":"Scan","ScanType":"AutoScan","BodyName":"RingTest 1 A Ring","BodyID":2,"StarSystem":"RingTest","SystemAddress":9501,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-07-01T10:03:00Z","event":"SAAScanComplete","BodyName":"RingTest 1 A Ring","BodyID":2,"SystemAddress":9501,"ProbesUsed":1,"EfficiencyTarget":0}`,
+		`{"timestamp":"2026-07-01T10:04:00Z","event":"SAAScanComplete","BodyName":"RingTest 1 B Ring","BodyID":3,"SystemAddress":9501,"ProbesUsed":2,"EfficiencyTarget":0}`,
+		`{"timestamp":"2026-07-01T10:05:00Z","event":"SAAScanComplete","BodyName":"RingTest 1","BodyID":1,"SystemAddress":9501,"ProbesUsed":5,"EfficiencyTarget":6}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, journalLines)
+	engineInstance := newEngineWithModes(databaseConnection)
+
+	computedMetrics, computeError := engineInstance.Compute(stats.Range{}, nil)
+	if computeError != nil {
+		testingContext.Fatalf("Compute failed: %v", computeError)
+	}
+
+	planetScan := reference.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}
+	expectedScan := reference.EstimateBodyValue(planetScan, reference.MappingInfo{}, true)
+	expectedMapping := reference.EstimateMappingIncrementBreakdown(planetScan, reference.MappingInfo{Mapped: true, ProbesUsed: 5, EfficiencyTarget: 6}, true)
+	expectedTotal := expectedScan.Total + expectedMapping.Total
+
+	if computedMetrics.BodiesMapped != 1 || computedMetrics.EfficientMappings != 1 || computedMetrics.FirstMapped != 1 || computedMetrics.ScanValueTotal != expectedTotal || computedMetrics.ScanValueTotal <= 0 {
+		testingContext.Fatalf("got BodiesMapped=%d EfficientMappings=%d FirstMapped=%d ScanValueTotal=%d, want 1, 1, 1, %d",
+			computedMetrics.BodiesMapped, computedMetrics.EfficientMappings, computedMetrics.FirstMapped, computedMetrics.ScanValueTotal, expectedTotal)
+	}
+}
