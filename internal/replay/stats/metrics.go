@@ -17,18 +17,24 @@ import (
 type RealizationBreakdown = realization.Breakdown
 
 // Metrics are the tracked expedition statistics.
+//
+// EfficientMappings counts planet/moon DSS mappings meeting the probe
+// efficiency target (EfficiencyTarget > 0 and ProbesUsed <= EfficiencyTarget).
+// Scan values satisfy the 3-way additive invariant
+// ScanValueBase + ScanValueBonus + ScanValueEfficiencyBonus == ScanValueTotal,
+// where ScanValueBase and ScanValueBonus are pre-efficiency values.
 type Metrics struct {
-	DistanceLy         float64 `json:"distanceLy"`
-	ShipDistanceLy     float64 `json:"shipDistanceLy"`     // subset: hyperspace FSD jumps
-	CarrierPassengerLy float64 `json:"carrierPassengerLy"` // subset: travelled while aboard a carrier
-	Jumps              int     `json:"jumps"`
-	CarrierJumps       int     `json:"carrierJumps"`
-	CarrierDistanceLy  float64 `json:"carrierDistanceLy"`
-	TritiumUsed        *int    `json:"tritiumUsed"` // nil when N/A (not recorded or estimated)
-	JetConeBoosts      int     `json:"jetConeBoosts"`
-	PremiumBoosts      int     `json:"premiumBoosts"`
-	StandardBoosts     int     `json:"standardBoosts"`
-	BasicBoosts        int     `json:"basicBoosts"`
+	DistanceLy               float64 `json:"distanceLy"`
+	ShipDistanceLy           float64 `json:"shipDistanceLy"`     // subset: piloted hyperspace FSD jumps
+	CarrierPassengerLy       float64 `json:"carrierPassengerLy"` // subset: travelled while aboard a carrier
+	Jumps                    int     `json:"jumps"`
+	CarrierJumps             int     `json:"carrierJumps"`
+	CarrierDistanceLy        float64 `json:"carrierDistanceLy"`
+	TritiumUsed              *int    `json:"tritiumUsed"` // nil when N/A (not recorded or estimated)
+	JetConeBoosts            int     `json:"jetConeBoosts"`
+	PremiumBoosts            int     `json:"premiumBoosts"`
+	StandardBoosts           int     `json:"standardBoosts"`
+	BasicBoosts              int     `json:"basicBoosts"`
 	BodiesScanned            int     `json:"bodiesScanned"`
 	BodiesMapped             int     `json:"bodiesMapped"`
 	EfficientMappings        int     `json:"efficientMappings"`
@@ -38,11 +44,11 @@ type Metrics struct {
 	ScanValueEfficiencyBonus int64   `json:"scanValueEfficiencyBonus"`
 	FirstDiscoveries         int     `json:"firstDiscoveries"`
 	FirstMapped              int     `json:"firstMapped"`
-	OrganicSamples     int     `json:"organicSamples"`
-	OrganicValueTotal  int64   `json:"organicValueTotal"`
-	OrganicValueBase   int64   `json:"organicValueBase"`
-	OrganicValueBonus  int64   `json:"organicValueBonus"`
-	FirstLogged        int     `json:"firstLogged"`
+	OrganicSamples           int     `json:"organicSamples"`
+	OrganicValueTotal        int64   `json:"organicValueTotal"`
+	OrganicValueBase         int64   `json:"organicValueBase"`
+	OrganicValueBonus        int64   `json:"organicValueBonus"`
+	FirstLogged              int     `json:"firstLogged"`
 }
 
 // Add returns the field-wise sum of metrics and otherMetrics.
@@ -59,17 +65,17 @@ func (metrics Metrics) Add(otherMetrics Metrics) Metrics {
 		tritiumTotal = &tritiumSum
 	}
 	return Metrics{
-		DistanceLy:         metrics.DistanceLy + otherMetrics.DistanceLy,
-		ShipDistanceLy:     metrics.ShipDistanceLy + otherMetrics.ShipDistanceLy,
-		CarrierPassengerLy: metrics.CarrierPassengerLy + otherMetrics.CarrierPassengerLy,
-		Jumps:              metrics.Jumps + otherMetrics.Jumps,
-		CarrierJumps:       metrics.CarrierJumps + otherMetrics.CarrierJumps,
-		CarrierDistanceLy:  metrics.CarrierDistanceLy + otherMetrics.CarrierDistanceLy,
-		TritiumUsed:        tritiumTotal,
-		JetConeBoosts:      metrics.JetConeBoosts + otherMetrics.JetConeBoosts,
-		PremiumBoosts:      metrics.PremiumBoosts + otherMetrics.PremiumBoosts,
-		StandardBoosts:     metrics.StandardBoosts + otherMetrics.StandardBoosts,
-		BasicBoosts:        metrics.BasicBoosts + otherMetrics.BasicBoosts,
+		DistanceLy:               metrics.DistanceLy + otherMetrics.DistanceLy,
+		ShipDistanceLy:           metrics.ShipDistanceLy + otherMetrics.ShipDistanceLy,
+		CarrierPassengerLy:       metrics.CarrierPassengerLy + otherMetrics.CarrierPassengerLy,
+		Jumps:                    metrics.Jumps + otherMetrics.Jumps,
+		CarrierJumps:             metrics.CarrierJumps + otherMetrics.CarrierJumps,
+		CarrierDistanceLy:        metrics.CarrierDistanceLy + otherMetrics.CarrierDistanceLy,
+		TritiumUsed:              tritiumTotal,
+		JetConeBoosts:            metrics.JetConeBoosts + otherMetrics.JetConeBoosts,
+		PremiumBoosts:            metrics.PremiumBoosts + otherMetrics.PremiumBoosts,
+		StandardBoosts:           metrics.StandardBoosts + otherMetrics.StandardBoosts,
+		BasicBoosts:              metrics.BasicBoosts + otherMetrics.BasicBoosts,
 		BodiesScanned:            metrics.BodiesScanned + otherMetrics.BodiesScanned,
 		BodiesMapped:             metrics.BodiesMapped + otherMetrics.BodiesMapped,
 		EfficientMappings:        metrics.EfficientMappings + otherMetrics.EfficientMappings,
@@ -79,11 +85,11 @@ func (metrics Metrics) Add(otherMetrics Metrics) Metrics {
 		ScanValueEfficiencyBonus: metrics.ScanValueEfficiencyBonus + otherMetrics.ScanValueEfficiencyBonus,
 		FirstDiscoveries:         metrics.FirstDiscoveries + otherMetrics.FirstDiscoveries,
 		FirstMapped:              metrics.FirstMapped + otherMetrics.FirstMapped,
-		OrganicSamples:     metrics.OrganicSamples + otherMetrics.OrganicSamples,
-		OrganicValueTotal:  metrics.OrganicValueTotal + otherMetrics.OrganicValueTotal,
-		OrganicValueBase:   metrics.OrganicValueBase + otherMetrics.OrganicValueBase,
-		OrganicValueBonus:  metrics.OrganicValueBonus + otherMetrics.OrganicValueBonus,
-		FirstLogged:        metrics.FirstLogged + otherMetrics.FirstLogged,
+		OrganicSamples:           metrics.OrganicSamples + otherMetrics.OrganicSamples,
+		OrganicValueTotal:        metrics.OrganicValueTotal + otherMetrics.OrganicValueTotal,
+		OrganicValueBase:         metrics.OrganicValueBase + otherMetrics.OrganicValueBase,
+		OrganicValueBonus:        metrics.OrganicValueBonus + otherMetrics.OrganicValueBonus,
+		FirstLogged:              metrics.FirstLogged + otherMetrics.FirstLogged,
 	}
 }
 
@@ -158,6 +164,12 @@ func (carrierOps CarrierOpsMetrics) ApplyTo(targetMetrics *Metrics) {
 
 // CartographicsMetrics holds Universal Cartographics body scan, DSS mapping,
 // and estimated payout metrics.
+//
+// EfficientMappings counts planet/moon DSS mappings meeting the probe
+// efficiency target (EfficiencyTarget > 0 and ProbesUsed <= EfficiencyTarget).
+// Scan values satisfy the 3-way additive invariant
+// ScanValueBase + ScanValueBonus + ScanValueEfficiencyBonus == ScanValueTotal,
+// where ScanValueBase and ScanValueBonus are pre-efficiency values.
 type CartographicsMetrics struct {
 	BodiesScanned            int   `json:"bodiesScanned"`
 	BodiesMapped             int   `json:"bodiesMapped"`

@@ -1,11 +1,6 @@
 import { expedition, modes, realization as realizationModel, stats } from '../../../wailsjs/go/models'
-import {
-  formatCredits,
-  formatEfficiencyBonusLabel,
-  formatEfficiencyBonusTooltip,
-  formatInt,
-  formatLy,
-} from '../../utils/galacticTime'
+import { formatCredits, formatInt, formatLy } from '../../utils/galacticTime'
+import { CartographicsValueBreakdown } from '../common/CartographicsValueBreakdown'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
 import { LegModeDropdown } from './widgets/LegModeDropdown'
 
@@ -158,31 +153,10 @@ function WaypointValuationCards({
             {formatCredits(metrics.scanValueTotal)}
           </span>
         </div>
-        <div className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px] leading-4">
-          <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">Base Scans and Mapping</span>
-            <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
-              {formatCredits(metrics.scanValueBase)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-            <span className="truncate">First Discovered / Mapped</span>
-            <span className="font-mono-tabular text-[#00D2FF] whitespace-nowrap shrink-0">
-              +{formatCredits(metrics.scanValueBonus)}
-            </span>
-          </div>
-          <div
-            className="flex items-center justify-between gap-2 text-[#a6907c]"
-            title={formatEfficiencyBonusTooltip(metrics.efficientMappings, metrics.bodiesMapped)}
-          >
-            <span className="truncate">
-              {formatEfficiencyBonusLabel(metrics.efficientMappings, metrics.bodiesMapped)}
-            </span>
-            <span className="font-mono-tabular text-[#00D2FF] whitespace-nowrap shrink-0">
-              +{formatCredits(metrics.scanValueEfficiencyBonus)}
-            </span>
-          </div>
-        </div>
+        <CartographicsValueBreakdown
+          metrics={metrics}
+          className="mt-1.5 space-y-1 pt-1.5 border-t border-[#2e1f12] text-[11px] leading-4"
+        />
       </div>
 
       <div className="p-2.5 border border-[#3d2816] border-l-2 border-l-[#00E5A3] bg-[#120d09]">

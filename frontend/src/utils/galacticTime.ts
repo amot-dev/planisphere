@@ -104,6 +104,20 @@ export function formatInt(value: number | undefined | null): string {
   return Math.round(value ?? 0).toLocaleString('en-US')
 }
 
+function normalizeEfficiencyStats(
+  efficientMappings: number | undefined | null,
+  bodiesMapped: number | undefined | null,
+): { efficientCount: number; mappedCount: number; efficiencyPercent: number } | null {
+  const mappedCount = Math.round(bodiesMapped ?? 0)
+  if (mappedCount <= 0) return null
+  const efficientCount = Math.round(efficientMappings ?? 0)
+  return {
+    efficientCount,
+    mappedCount,
+    efficiencyPercent: (efficientCount / mappedCount) * 100,
+  }
+}
+
 /**
  * Formats the Cartographics Efficiency Bonus row label with efficient mapping
  * count and percentage when at least one body has been mapped.
@@ -112,13 +126,9 @@ export function formatEfficiencyBonusLabel(
   efficientMappings: number | undefined | null,
   bodiesMapped: number | undefined | null,
 ): string {
-  const mappedCount = Math.round(bodiesMapped ?? 0)
-  if (mappedCount <= 0) {
-    return 'Efficiency Bonus'
-  }
-  const efficientCount = Math.round(efficientMappings ?? 0)
-  const efficiencyPercent = Math.round((efficientCount / mappedCount) * 100)
-  return `Efficiency Bonus (${formatInt(efficientCount)} · ${efficiencyPercent}%)`
+  const efficiencyStats = normalizeEfficiencyStats(efficientMappings, bodiesMapped)
+  if (!efficiencyStats) return 'Efficiency Bonus'
+  return `Efficiency Bonus (${formatInt(efficiencyStats.efficientCount)} · ${Math.round(efficiencyStats.efficiencyPercent)}%)`
 }
 
 /**
@@ -129,13 +139,9 @@ export function formatEfficiencyBonusTooltip(
   efficientMappings: number | undefined | null,
   bodiesMapped: number | undefined | null,
 ): string | undefined {
-  const mappedCount = Math.round(bodiesMapped ?? 0)
-  if (mappedCount <= 0) {
-    return undefined
-  }
-  const efficientCount = Math.round(efficientMappings ?? 0)
-  const efficiencyPercent = ((efficientCount / mappedCount) * 100).toFixed(1)
-  return `${formatInt(efficientCount)} of ${formatInt(mappedCount)} mapped bodies met the DSS probe efficiency target (${efficiencyPercent}%)`
+  const efficiencyStats = normalizeEfficiencyStats(efficientMappings, bodiesMapped)
+  if (!efficiencyStats) return undefined
+  return `${formatInt(efficiencyStats.efficientCount)} of ${formatInt(efficiencyStats.mappedCount)} mapped bodies met the DSS probe efficiency target (${efficiencyStats.efficiencyPercent.toFixed(1)}%)`
 }
 
 /**

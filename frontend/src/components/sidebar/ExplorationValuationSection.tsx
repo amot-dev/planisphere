@@ -1,10 +1,6 @@
 import { realization, stats } from '../../../wailsjs/go/models'
-import {
-  formatCredits,
-  formatEfficiencyBonusLabel,
-  formatEfficiencyBonusTooltip,
-  formatInt,
-} from '../../utils/galacticTime'
+import { formatCredits, formatInt } from '../../utils/galacticTime'
+import { CartographicsValueBreakdown } from '../common/CartographicsValueBreakdown'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
 import { StatRow } from './StatRow'
 
@@ -95,37 +91,11 @@ export function ExplorationValuationSection({
               </span>
             </button>
             {scanExpanded && (
-              <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#00D2FF]/50 text-[11px]">
-                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-                  <span className="truncate">Base Scans and Mapping</span>
-                  <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
-                    {formatCredits(displayedMetrics.scanValueBase)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
-                  <span className="truncate">First Discovered / Mapped</span>
-                  <span className="font-mono-tabular text-[#00D2FF] font-bold whitespace-nowrap shrink-0">
-                    +{formatCredits(displayedMetrics.scanValueBonus)}
-                  </span>
-                </div>
-                <div
-                  className="flex items-center justify-between gap-2 text-[#a6907c]"
-                  title={formatEfficiencyBonusTooltip(
-                    displayedMetrics.efficientMappings,
-                    displayedMetrics.bodiesMapped,
-                  )}
-                >
-                  <span className="truncate">
-                    {formatEfficiencyBonusLabel(
-                      displayedMetrics.efficientMappings,
-                      displayedMetrics.bodiesMapped,
-                    )}
-                  </span>
-                  <span className="font-mono-tabular text-[#00D2FF] font-bold whitespace-nowrap shrink-0">
-                    +{formatCredits(displayedMetrics.scanValueEfficiencyBonus)}
-                  </span>
-                </div>
-              </div>
+              <CartographicsValueBreakdown
+                metrics={displayedMetrics}
+                className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#00D2FF]/50 text-[11px]"
+                boldBonuses
+              />
             )}
           </div>
 
