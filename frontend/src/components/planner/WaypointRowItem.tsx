@@ -203,11 +203,16 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   const isSystemLocked =
     isLocked || isVisited || isOriginRow || isActivelyRoutedFcStop || isFcArrivedStop
   const allowInsertWaypoint = isPlanning || index >= lastVisitedIndex
-  const allowDelete = !isOriginRow
   const canReorder = !isLocked && !isOriginRow && !isActivelyRoutedFcStop
   const activeRouteLockReason = isActivelyRoutedFcStop
     ? 'Locked while Fleet Carrier route to this waypoint is active'
     : undefined
+  const deleteDisabledReason = isOriginRow
+    ? 'Origin waypoint cannot be deleted'
+    : activeRouteLockReason
+  const reorderDisabledReason = isOriginRow
+    ? 'Origin waypoint cannot be reordered'
+    : activeRouteLockReason
   const systemLockTitle =
     activeRouteLockReason ||
     (isFcArrivedStop && !isVisited && !isOriginRow
@@ -541,38 +546,35 @@ export const WaypointRowItem = memo(function WaypointRowItem({
               <RowManipulationButtons
                 insertMenuOpen={insertMenuOpen}
                 allowInsertWaypoint={allowInsertWaypoint}
-                allowDelete={allowDelete}
-                deleteDisabledReason={activeRouteLockReason}
+                deleteDisabledReason={deleteDisabledReason}
                 onToggleInsertMenu={() => onToggleInsertMenu(row.id)}
                 onInsert={(type) => onInsert(row.id, type)}
                 onDelete={() => onDelete(row.id)}
               />
-              {!isOriginRow && (
-                <button
-                  type="button"
-                  disabled={!canReorder}
-                  draggable={canReorder}
-                  onPointerDown={() => {
-                    if (canReorder) onHoldStart?.(index)
-                  }}
-                  onPointerUp={() => onHoldEnd?.()}
-                  onDragStart={(event) => {
-                    if (canReorder) onDragStart(index, row.id, event)
-                  }}
-                  onDragEnd={onDragEnd}
-                  title={
-                    activeRouteLockReason ||
-                    'Hold to preview valid drop positions, drag to reorder waypoint'
-                  }
-                  className={`h-5 px-1.5 inline-flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed cursor-grab active:cursor-grabbing font-mono-tabular select-none border text-xs shrink-0 ${
-                    isBeingDragged
-                      ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] font-bold'
-                      : 'text-[#a6907c] hover:text-[#FF7100] border-[#2e1f12] bg-[#140e09] hover:bg-[#24180e]'
-                  }`}
-                >
-                  ⋮⋮
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={!canReorder}
+                draggable={canReorder}
+                onPointerDown={() => {
+                  if (canReorder) onHoldStart?.(index)
+                }}
+                onPointerUp={() => onHoldEnd?.()}
+                onDragStart={(event) => {
+                  if (canReorder) onDragStart(index, row.id, event)
+                }}
+                onDragEnd={onDragEnd}
+                title={
+                  reorderDisabledReason ||
+                  'Hold to preview valid drop positions, drag to reorder waypoint'
+                }
+                className={`h-5 px-1.5 inline-flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed cursor-grab active:cursor-grabbing font-mono-tabular select-none border text-xs shrink-0 ${
+                  isBeingDragged
+                    ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] font-bold'
+                    : 'text-[#a6907c] enabled:hover:text-[#FF7100] border-[#2e1f12] bg-[#140e09] enabled:hover:bg-[#24180e]'
+                }`}
+              >
+                ⋮⋮
+              </button>
             </>
           )}
         </div>

@@ -7,7 +7,6 @@ import { memo } from 'react'
 export interface RowManipulationButtonsProps {
   insertMenuOpen: boolean
   allowInsertWaypoint?: boolean
-  allowDelete?: boolean
   deleteDisabledReason?: string
   onToggleInsertMenu: () => void
   onInsert: (type: 'waypoint' | 'region') => void
@@ -21,7 +20,6 @@ export interface RowManipulationButtonsProps {
 export const RowManipulationButtons = memo(function RowManipulationButtons({
   insertMenuOpen,
   allowInsertWaypoint = true,
-  allowDelete = true,
   deleteDisabledReason,
   onToggleInsertMenu,
   onInsert,
@@ -74,17 +72,15 @@ export const RowManipulationButtons = memo(function RowManipulationButtons({
         )}
       </div>
 
-      {allowDelete && (
-        <button
-          type="button"
-          disabled={Boolean(deleteDisabledReason)}
-          onClick={onDelete}
-          title={deleteDisabledReason || 'Delete row'}
-          className="h-5 px-1.5 inline-flex items-center justify-center bg-[#140e09] hover:bg-[#ff3b2f] text-[#a6907c] hover:text-[#050506] border border-[#2e1f12] disabled:opacity-25 disabled:pointer-events-none font-mono-tabular text-xs cursor-pointer"
-        >
-          ×
-        </button>
-      )}
+      <button
+        type="button"
+        disabled={Boolean(deleteDisabledReason)}
+        onClick={onDelete}
+        title={deleteDisabledReason || 'Delete row'}
+        className="h-5 px-1.5 inline-flex items-center justify-center bg-[#140e09] enabled:hover:bg-[#ff3b2f] text-[#a6907c] enabled:hover:text-[#050506] border border-[#2e1f12] disabled:opacity-25 disabled:cursor-not-allowed font-mono-tabular text-xs cursor-pointer"
+      >
+        ×
+      </button>
     </div>
   )
 })

@@ -547,8 +547,10 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       lastVisitedIndex: 2,
     })
 
-    // Origin #1 hides drag and delete controls
+    // Origin #1 disables drag and delete controls with explanatory tooltips to preserve alignment
     expect(originHtml).toContain('title="Insert row below"')
+    expect(originHtml).toContain('disabled="" title="Origin waypoint (#1) cannot be deleted"')
+    expect(originHtml).toContain('disabled="" draggable="false" title="Origin waypoint (#1) cannot be reordered"')
     expect(originHtml).not.toContain('title="Hold to preview valid drop positions, drag to reorder waypoint"')
     expect(originHtml).not.toContain('title="Delete row"')
   })
