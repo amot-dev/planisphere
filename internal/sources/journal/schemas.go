@@ -20,6 +20,8 @@ type FSDJumpEvent struct {
 	JumpDist      float64   `json:"JumpDist"`
 	FuelUsed      float64   `json:"FuelUsed"`
 	BoostUsed     int       `json:"BoostUsed"` // 1 basic, 2 standard, 3 premium synthesis, 4 neutron/white dwarf jet cone
+	Taxi          bool      `json:"Taxi"`
+	Multicrew     bool      `json:"Multicrew"`
 }
 
 // LocationEvent is written at login / respawn (and mirrors CarrierJump).

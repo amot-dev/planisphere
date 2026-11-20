@@ -163,6 +163,9 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metric
 	if accumulator.session != nil {
 		accumulator.session.ApplyFSDJumpEvent(&jumpEvent)
 	}
+	if jumpEvent.Taxi || jumpEvent.Multicrew {
+		return
+	}
 	creditJump(rowItem.Timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)
 }
 

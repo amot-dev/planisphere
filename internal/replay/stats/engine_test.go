@@ -275,6 +275,8 @@ func TestComputeRecoversDisconnectedJumpsAcrossRangeAndFilter(testingContext *te
 	lines := []string{
 		`{"timestamp":"2026-11-17T01:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Odyssey":true}`,
 		`{"timestamp":"2026-11-17T01:05:00Z","event":"FSDJump","StarSystem":"Hypo Aeb ST-B b54-0","SystemAddress":538078878161,"StarPos":[-9894.84375,-5.5625,-7569.25],"JumpDist":81.096}`,
+		`{"timestamp":"2026-11-17T01:20:00Z","event":"FSDJump","StarSystem":"ShuttleHop","SystemAddress":900101,"StarPos":[-9890.0,-5.0,-7565.0],"JumpDist":14.5,"Taxi":true,"Population":50000}`,
+		`{"timestamp":"2026-11-17T01:25:00Z","event":"FSDJump","StarSystem":"Hypo Aeb ST-B b54-0","SystemAddress":538078878161,"StarPos":[-9894.84375,-5.5625,-7569.25],"JumpDist":14.5,"Multicrew":true}`,
 		`{"timestamp":"2026-11-17T01:40:30Z","event":"JetConeBoost","BoostValue":4.0}`,
 		`{"timestamp":"2026-11-17T01:40:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321}`,
 		`{"timestamp":"2026-11-17T01:41:42Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Odyssey":true}`,

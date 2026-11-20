@@ -169,12 +169,29 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 		testingContext.Fatalf("CurrentShip after swap = %q, want %q", currentAfterSwap, "Caspian Explorer \u201cSiderite Skillet\u201d")
 	}
 
-	// Timeline and leg transitions remain hull-only (preserving baseline display).
+	// Timeline and leg transitions remain hull-only (preserving baseline display),
+	// while QueryJumpTimestamps excludes Taxi and Multicrew FSDJump events.
+	insertJournalRow(testingContext, databaseConnection, "2026-05-03T11:00:00Z", "FSDJump", "TaxiSys", "jump-taxi",
+		`{"timestamp":"2026-05-03T11:00:00Z","event":"FSDJump","StarSystem":"TaxiSys","JumpDist":12.0,"Taxi":true}`)
+	insertJournalRow(testingContext, databaseConnection, "2026-05-03T11:30:00Z", "FSDJump", "CrewSys", "jump-crew",
+		`{"timestamp":"2026-05-03T11:30:00Z","event":"FSDJump","StarSystem":"CrewSys","JumpDist":15.0,"Multicrew":true}`)
+	insertJournalRow(testingContext, databaseConnection, "2026-05-03T12:00:00Z", "FSDJump", "PilotedOne", "jump-1",
+		`{"timestamp":"2026-05-03T12:00:00Z","event":"FSDJump","StarSystem":"PilotedOne","JumpDist":40.0}`)
+	insertJournalRow(testingContext, databaseConnection, "2026-05-04T12:00:00Z", "FSDJump", "PilotedTwo", "jump-2",
+		`{"timestamp":"2026-05-04T12:00:00Z","event":"FSDJump","StarSystem":"PilotedTwo","JumpDist":75.0}`)
+
 	timeline, timelineError := shipHistory.Timeline("2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z")
 	if timelineError != nil {
 		testingContext.Fatalf("Timeline: %v", timelineError)
 	}
-	transitions := replay.ExtractShipsUsedOnLeg(timeline, []string{"2026-05-03T12:00:00Z", "2026-05-04T12:00:00Z"}, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z")
+	jumpTimestamps, jumpQueryError := replay.QueryJumpTimestamps(databaseConnection, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z", nil)
+	if jumpQueryError != nil {
+		testingContext.Fatalf("QueryJumpTimestamps: %v", jumpQueryError)
+	}
+	if shuttleOnly := replay.ExtractShipsUsedOnLeg(timeline, jumpTimestamps, "2026-05-03T10:30:00Z", "2026-05-03T11:45:00Z"); len(shuttleOnly) != 0 {
+		testingContext.Fatalf("expected no vessels flown on shuttle/multicrew-only leg, got %+v", shuttleOnly)
+	}
+	transitions := replay.ExtractShipsUsedOnLeg(timeline, jumpTimestamps, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z")
 	if len(transitions) != 2 || transitions[0].To != "Mandalay" || transitions[1].To != "Caspian Explorer" {
 		testingContext.Fatalf("unexpected leg transitions (must stay hull-only): %+v", transitions)
 	}

@@ -10,6 +10,8 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
+const pilotedFSDJumpSQLFilter = `NOT COALESCE(json_extract(raw_json, '$.Taxi'), 0) AND NOT COALESCE(json_extract(raw_json, '$.Multicrew'), 0)`
+
 var playerShipSQLFilter = buildPlayerShipSQLFilter()
 
 func buildPlayerShipSQLFilter() string {
@@ -81,7 +83,7 @@ func QueryJumpTimestamps(
 		query += ` AND timestamp <= ?`
 		queryArgs = append(queryArgs, untilTimestamp)
 	}
-	query += ` AND ` + CmdrFilterSQL + ` ORDER BY timestamp, id`
+	query += ` AND ` + pilotedFSDJumpSQLFilter + ` AND ` + CmdrFilterSQL + ` ORDER BY timestamp, id`
 	databaseRows, queryError := queryer.Query(query, queryArgs...)
 	if queryError != nil {
 		return nil, queryError
