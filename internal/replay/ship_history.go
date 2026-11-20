@@ -70,8 +70,9 @@ func QueryShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) 
 	return appendQueriedShipSwitches(queryer, switches, query, queryArgs...)
 }
 
-// QueryJumpTimestamps loads chronological hyperspace jump timestamps in
-// [afterTimestamp, untilTimestamp], merging FSDJump rows with recovered.
+// QueryJumpTimestamps loads chronological piloted hyperspace jump timestamps in
+// [afterTimestamp, untilTimestamp], excluding Taxi and Multicrew FSDJump rows
+// and merging remaining jumps with recovered.
 func QueryJumpTimestamps(
 	queryer db.Queryer,
 	afterTimestamp, untilTimestamp string,
