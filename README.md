@@ -53,7 +53,7 @@ Whether you're taking your own carrier into the black, flying with a squadron, o
 ### Exploration Valuation and Realized Earnings
 See what your discoveries are worth as you scan them, and track what actually hits your bank account when you cash in.
 
-- **Live Cartography Estimates:** Calculates credit values for FSS body scans (`Scan`) and Horizons or Odyssey DSS surface mapping (`SAAScanComplete`) as they happen, including terraformable, First Discovery, and First Mapped bonuses.
+- **Live Cartography Estimates:** Calculates credit values for FSS body scans (`Scan`) and Horizons or Odyssey DSS surface mapping (`SAAScanComplete`) as they happen, including terraformable, First Discovery, First Mapped, and DSS probe efficiency bonuses.
 - **Live Exobiology Estimates:** Values organic species sampled in your Artemis suit (`ScanOrganic`), including the First Logged multiplier on untouched worlds.
 - **Realized Earnings Breakdown:** Compares your estimated survey value against the net credits you actually pocket at Universal Cartographics and Vista Genomics, breaking down losses from death, stolen first-discovery or first-logged bonuses, the 25 percent Fleet Carrier tariff, and hired NPC crew cuts (active or inactive).
 - **Expedition and All-Time Scopes:** Switch the telemetry sidebar between your active expedition (with flight mode filters) and all-time career totals across your entire journal archive, with travel distance broken down between ship FSD jumps and carrier passenger rides.

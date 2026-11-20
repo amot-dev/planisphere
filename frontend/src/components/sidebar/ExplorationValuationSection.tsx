@@ -1,5 +1,10 @@
 import { realization, stats } from '../../../wailsjs/go/models'
-import { formatCredits, formatInt } from '../../utils/galacticTime'
+import {
+  formatCredits,
+  formatEfficiencyBonusLabel,
+  formatEfficiencyBonusTooltip,
+  formatInt,
+} from '../../utils/galacticTime'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
 import { StatRow } from './StatRow'
 
@@ -101,6 +106,23 @@ export function ExplorationValuationSection({
                   <span className="truncate">First Discovered / Mapped</span>
                   <span className="font-mono-tabular text-[#00D2FF] font-bold whitespace-nowrap shrink-0">
                     +{formatCredits(displayedMetrics.scanValueBonus)}
+                  </span>
+                </div>
+                <div
+                  className="flex items-center justify-between gap-2 text-[#a6907c]"
+                  title={formatEfficiencyBonusTooltip(
+                    displayedMetrics.efficientMappings,
+                    displayedMetrics.bodiesMapped,
+                  )}
+                >
+                  <span className="truncate">
+                    {formatEfficiencyBonusLabel(
+                      displayedMetrics.efficientMappings,
+                      displayedMetrics.bodiesMapped,
+                    )}
+                  </span>
+                  <span className="font-mono-tabular text-[#00D2FF] font-bold whitespace-nowrap shrink-0">
+                    +{formatCredits(displayedMetrics.scanValueEfficiencyBonus)}
                   </span>
                 </div>
               </div>

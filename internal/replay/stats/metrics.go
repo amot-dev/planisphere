@@ -29,13 +29,15 @@ type Metrics struct {
 	PremiumBoosts      int     `json:"premiumBoosts"`
 	StandardBoosts     int     `json:"standardBoosts"`
 	BasicBoosts        int     `json:"basicBoosts"`
-	BodiesScanned      int     `json:"bodiesScanned"`
-	BodiesMapped       int     `json:"bodiesMapped"`
-	ScanValueTotal     int64   `json:"scanValueTotal"`
-	ScanValueBase      int64   `json:"scanValueBase"`
-	ScanValueBonus     int64   `json:"scanValueBonus"`
-	FirstDiscoveries   int     `json:"firstDiscoveries"`
-	FirstMapped        int     `json:"firstMapped"`
+	BodiesScanned            int     `json:"bodiesScanned"`
+	BodiesMapped             int     `json:"bodiesMapped"`
+	EfficientMappings        int     `json:"efficientMappings"`
+	ScanValueTotal           int64   `json:"scanValueTotal"`
+	ScanValueBase            int64   `json:"scanValueBase"`
+	ScanValueBonus           int64   `json:"scanValueBonus"`
+	ScanValueEfficiencyBonus int64   `json:"scanValueEfficiencyBonus"`
+	FirstDiscoveries         int     `json:"firstDiscoveries"`
+	FirstMapped              int     `json:"firstMapped"`
 	OrganicSamples     int     `json:"organicSamples"`
 	OrganicValueTotal  int64   `json:"organicValueTotal"`
 	OrganicValueBase   int64   `json:"organicValueBase"`
@@ -68,13 +70,15 @@ func (metrics Metrics) Add(otherMetrics Metrics) Metrics {
 		PremiumBoosts:      metrics.PremiumBoosts + otherMetrics.PremiumBoosts,
 		StandardBoosts:     metrics.StandardBoosts + otherMetrics.StandardBoosts,
 		BasicBoosts:        metrics.BasicBoosts + otherMetrics.BasicBoosts,
-		BodiesScanned:      metrics.BodiesScanned + otherMetrics.BodiesScanned,
-		BodiesMapped:       metrics.BodiesMapped + otherMetrics.BodiesMapped,
-		ScanValueTotal:     metrics.ScanValueTotal + otherMetrics.ScanValueTotal,
-		ScanValueBase:      metrics.ScanValueBase + otherMetrics.ScanValueBase,
-		ScanValueBonus:     metrics.ScanValueBonus + otherMetrics.ScanValueBonus,
-		FirstDiscoveries:   metrics.FirstDiscoveries + otherMetrics.FirstDiscoveries,
-		FirstMapped:        metrics.FirstMapped + otherMetrics.FirstMapped,
+		BodiesScanned:            metrics.BodiesScanned + otherMetrics.BodiesScanned,
+		BodiesMapped:             metrics.BodiesMapped + otherMetrics.BodiesMapped,
+		EfficientMappings:        metrics.EfficientMappings + otherMetrics.EfficientMappings,
+		ScanValueTotal:           metrics.ScanValueTotal + otherMetrics.ScanValueTotal,
+		ScanValueBase:            metrics.ScanValueBase + otherMetrics.ScanValueBase,
+		ScanValueBonus:           metrics.ScanValueBonus + otherMetrics.ScanValueBonus,
+		ScanValueEfficiencyBonus: metrics.ScanValueEfficiencyBonus + otherMetrics.ScanValueEfficiencyBonus,
+		FirstDiscoveries:         metrics.FirstDiscoveries + otherMetrics.FirstDiscoveries,
+		FirstMapped:              metrics.FirstMapped + otherMetrics.FirstMapped,
 		OrganicSamples:     metrics.OrganicSamples + otherMetrics.OrganicSamples,
 		OrganicValueTotal:  metrics.OrganicValueTotal + otherMetrics.OrganicValueTotal,
 		OrganicValueBase:   metrics.OrganicValueBase + otherMetrics.OrganicValueBase,
@@ -87,6 +91,13 @@ func (metrics *Metrics) addScan(scanValuation reference.ScanValue) {
 	metrics.ScanValueTotal += scanValuation.Total
 	metrics.ScanValueBase += scanValuation.Base
 	metrics.ScanValueBonus += scanValuation.Bonus
+}
+
+func (metrics *Metrics) addMapping(mappingValuation reference.MappingIncrementBreakdown) {
+	metrics.ScanValueTotal += mappingValuation.Total
+	metrics.ScanValueBase += mappingValuation.Base
+	metrics.ScanValueBonus += mappingValuation.Bonus
+	metrics.ScanValueEfficiencyBonus += mappingValuation.EfficiencyBonus
 }
 
 func (metrics *Metrics) addOrganic(organicValuation reference.ScanValue) {
@@ -148,25 +159,29 @@ func (carrierOps CarrierOpsMetrics) ApplyTo(targetMetrics *Metrics) {
 // CartographicsMetrics holds Universal Cartographics body scan, DSS mapping,
 // and estimated payout metrics.
 type CartographicsMetrics struct {
-	BodiesScanned    int   `json:"bodiesScanned"`
-	BodiesMapped     int   `json:"bodiesMapped"`
-	ScanValueTotal   int64 `json:"scanValueTotal"`
-	ScanValueBase    int64 `json:"scanValueBase"`
-	ScanValueBonus   int64 `json:"scanValueBonus"`
-	FirstDiscoveries int   `json:"firstDiscoveries"`
-	FirstMapped      int   `json:"firstMapped"`
+	BodiesScanned            int   `json:"bodiesScanned"`
+	BodiesMapped             int   `json:"bodiesMapped"`
+	EfficientMappings        int   `json:"efficientMappings"`
+	ScanValueTotal           int64 `json:"scanValueTotal"`
+	ScanValueBase            int64 `json:"scanValueBase"`
+	ScanValueBonus           int64 `json:"scanValueBonus"`
+	ScanValueEfficiencyBonus int64 `json:"scanValueEfficiencyBonus"`
+	FirstDiscoveries         int   `json:"firstDiscoveries"`
+	FirstMapped              int   `json:"firstMapped"`
 }
 
 // ExtractCartographicsMetrics copies Universal Cartographics fields from metrics.
 func ExtractCartographicsMetrics(metrics Metrics) CartographicsMetrics {
 	return CartographicsMetrics{
-		BodiesScanned:    metrics.BodiesScanned,
-		BodiesMapped:     metrics.BodiesMapped,
-		ScanValueTotal:   metrics.ScanValueTotal,
-		ScanValueBase:    metrics.ScanValueBase,
-		ScanValueBonus:   metrics.ScanValueBonus,
-		FirstDiscoveries: metrics.FirstDiscoveries,
-		FirstMapped:      metrics.FirstMapped,
+		BodiesScanned:            metrics.BodiesScanned,
+		BodiesMapped:             metrics.BodiesMapped,
+		EfficientMappings:        metrics.EfficientMappings,
+		ScanValueTotal:           metrics.ScanValueTotal,
+		ScanValueBase:            metrics.ScanValueBase,
+		ScanValueBonus:           metrics.ScanValueBonus,
+		ScanValueEfficiencyBonus: metrics.ScanValueEfficiencyBonus,
+		FirstDiscoveries:         metrics.FirstDiscoveries,
+		FirstMapped:              metrics.FirstMapped,
 	}
 }
 
@@ -174,9 +189,11 @@ func ExtractCartographicsMetrics(metrics Metrics) CartographicsMetrics {
 func (cartographics CartographicsMetrics) ApplyTo(targetMetrics *Metrics) {
 	targetMetrics.BodiesScanned = cartographics.BodiesScanned
 	targetMetrics.BodiesMapped = cartographics.BodiesMapped
+	targetMetrics.EfficientMappings = cartographics.EfficientMappings
 	targetMetrics.ScanValueTotal = cartographics.ScanValueTotal
 	targetMetrics.ScanValueBase = cartographics.ScanValueBase
 	targetMetrics.ScanValueBonus = cartographics.ScanValueBonus
+	targetMetrics.ScanValueEfficiencyBonus = cartographics.ScanValueEfficiencyBonus
 	targetMetrics.FirstDiscoveries = cartographics.FirstDiscoveries
 	targetMetrics.FirstMapped = cartographics.FirstMapped
 }

@@ -105,6 +105,40 @@ export function formatInt(value: number | undefined | null): string {
 }
 
 /**
+ * Formats the Cartographics Efficiency Bonus row label with efficient mapping
+ * count and percentage when at least one body has been mapped.
+ */
+export function formatEfficiencyBonusLabel(
+  efficientMappings: number | undefined | null,
+  bodiesMapped: number | undefined | null,
+): string {
+  const mappedCount = Math.round(bodiesMapped ?? 0)
+  if (mappedCount <= 0) {
+    return 'Efficiency Bonus'
+  }
+  const efficientCount = Math.round(efficientMappings ?? 0)
+  const efficiencyPercent = Math.round((efficientCount / mappedCount) * 100)
+  return `Efficiency Bonus (${formatInt(efficientCount)} · ${efficiencyPercent}%)`
+}
+
+/**
+ * Formats a hover tooltip detailing the DSS probe efficiency ratio when at
+ * least one body has been mapped.
+ */
+export function formatEfficiencyBonusTooltip(
+  efficientMappings: number | undefined | null,
+  bodiesMapped: number | undefined | null,
+): string | undefined {
+  const mappedCount = Math.round(bodiesMapped ?? 0)
+  if (mappedCount <= 0) {
+    return undefined
+  }
+  const efficientCount = Math.round(efficientMappings ?? 0)
+  const efficiencyPercent = ((efficientCount / mappedCount) * 100).toFixed(1)
+  return `${formatInt(efficientCount)} of ${formatInt(mappedCount)} mapped bodies met the DSS probe efficiency target (${efficiencyPercent}%)`
+}
+
+/**
  * Builds an Inara star system search URL for the given system name.
  */
 export function inaraSystemUrl(systemName: string): string {

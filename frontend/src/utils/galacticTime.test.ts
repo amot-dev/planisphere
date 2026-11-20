@@ -3,6 +3,8 @@ import {
   edastroGecUrl,
   edsmSystemUrl,
   formatCredits,
+  formatEfficiencyBonusLabel,
+  formatEfficiencyBonusTooltip,
   formatLoss,
   formatLy,
   fromGalacticTime,
@@ -47,6 +49,15 @@ describe('Galactic Standard Time (+1286 years)', () => {
     expect(formatLoss(0)).toBe('0 Cr')
     expect(formatLoss(undefined)).toBe('0 Cr')
     expect(formatLoss(125000)).toBe('-125,000 Cr')
+  })
+
+  it('formats DSS efficiency bonus labels and tooltips', () => {
+    expect(formatEfficiencyBonusLabel(0, 0)).toBe('Efficiency Bonus')
+    expect(formatEfficiencyBonusTooltip(0, 0)).toBeUndefined()
+    expect(formatEfficiencyBonusLabel(168, 184)).toBe('Efficiency Bonus (168 · 91%)')
+    expect(formatEfficiencyBonusTooltip(168, 184)).toBe(
+      '168 of 184 mapped bodies met the DSS probe efficiency target (91.3%)',
+    )
   })
 })
 

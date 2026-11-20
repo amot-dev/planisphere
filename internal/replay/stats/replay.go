@@ -225,6 +225,10 @@ func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metric
 	}
 	accumulator.mappedBodies[key] = true
 	metrics.BodiesMapped++
+	mappingInfo := reference.MappingInfo{Mapped: true, ProbesUsed: saaEvent.ProbesUsed, EfficiencyTarget: saaEvent.EfficiencyTarget}
+	if mappingInfo.Efficient() {
+		metrics.EfficientMappings++
+	}
 	parentScan, lookupError := accumulator.resolveParentScan(key, rowItem.Timestamp)
 	if lookupError != nil || parentScan == nil {
 		return lookupError
@@ -234,8 +238,7 @@ func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metric
 		metrics.FirstMapped++
 	}
 	odysseyEnabled := accumulator.session.OdysseyAt(rowItem.Timestamp)
-	mappingInfo := reference.MappingInfo{Mapped: true, ProbesUsed: saaEvent.ProbesUsed, EfficiencyTarget: saaEvent.EfficiencyTarget}
-	metrics.addScan(reference.EstimateMappingIncrement(
+	metrics.addMapping(reference.EstimateMappingIncrementBreakdown(
 		replay.ToBodyScanWithPopulation(parentScan, systemPopulation), mappingInfo, odysseyEnabled,
 	))
 	return nil

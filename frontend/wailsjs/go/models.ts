@@ -1050,9 +1050,11 @@ export namespace stats {
 	    basicBoosts: number;
 	    bodiesScanned: number;
 	    bodiesMapped: number;
+	    efficientMappings: number;
 	    scanValueTotal: number;
 	    scanValueBase: number;
 	    scanValueBonus: number;
+	    scanValueEfficiencyBonus: number;
 	    firstDiscoveries: number;
 	    firstMapped: number;
 	    organicSamples: number;
@@ -1080,9 +1082,11 @@ export namespace stats {
 	        this.basicBoosts = source["basicBoosts"];
 	        this.bodiesScanned = source["bodiesScanned"];
 	        this.bodiesMapped = source["bodiesMapped"];
+	        this.efficientMappings = source["efficientMappings"];
 	        this.scanValueTotal = source["scanValueTotal"];
 	        this.scanValueBase = source["scanValueBase"];
 	        this.scanValueBonus = source["scanValueBonus"];
+	        this.scanValueEfficiencyBonus = source["scanValueEfficiencyBonus"];
 	        this.firstDiscoveries = source["firstDiscoveries"];
 	        this.firstMapped = source["firstMapped"];
 	        this.organicSamples = source["organicSamples"];

@@ -205,3 +205,41 @@ func EstimateMappingIncrement(bodyScan BodyScan, mappingInfo MappingInfo, odysse
 	}
 	return EstimateBodyValue(bodyScan, mappingInfo, odyssey).Sub(EstimateBodyValue(bodyScan, MappingInfo{}, odyssey))
 }
+
+// MappingIncrementBreakdown splits the extra cartographic value from DSS
+// mapping into base mapping gain, first-discovered / first-mapped bonus gain
+// before efficiency, and the +25% probe efficiency bonus so that
+// Base + Bonus + EfficiencyBonus == Total.
+type MappingIncrementBreakdown struct {
+	Base            int64 `json:"base"`
+	Bonus           int64 `json:"bonus"`
+	EfficiencyBonus int64 `json:"efficiencyBonus"`
+	Total           int64 `json:"total"`
+}
+
+// EstimateMappingIncrementBreakdown returns the 3-way additive value breakdown
+// gained by DSS mapping a body whose FSS scan has already been valued.
+func EstimateMappingIncrementBreakdown(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool) MappingIncrementBreakdown {
+	if !mappingInfo.Mapped || bodyScan.IsStar() || !bodyScan.IsValuable() {
+		return MappingIncrementBreakdown{}
+	}
+	unmappedValue := EstimateBodyValue(bodyScan, MappingInfo{}, odyssey)
+	mappedWithoutEfficiency := EstimateBodyValue(bodyScan, MappingInfo{Mapped: true}, odyssey)
+	baseIncrement := mappedWithoutEfficiency.Base - unmappedValue.Base
+	bonusIncrement := mappedWithoutEfficiency.Bonus - unmappedValue.Bonus
+	if !mappingInfo.Efficient() {
+		return MappingIncrementBreakdown{
+			Base:  baseIncrement,
+			Bonus: bonusIncrement,
+			Total: mappedWithoutEfficiency.Total - unmappedValue.Total,
+		}
+	}
+	mappedWithEfficiency := EstimateBodyValue(bodyScan, mappingInfo, odyssey)
+	efficiencyBonus := mappedWithEfficiency.Total - mappedWithoutEfficiency.Total
+	return MappingIncrementBreakdown{
+		Base:            baseIncrement,
+		Bonus:           bonusIncrement,
+		EfficiencyBonus: efficiencyBonus,
+		Total:           mappedWithEfficiency.Total - unmappedValue.Total,
+	}
+}

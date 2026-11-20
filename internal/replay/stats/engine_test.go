@@ -237,7 +237,7 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 
 	earthlikeScan := reference.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}
 	expectedScanOnly := reference.EstimateBodyValue(earthlikeScan, reference.MappingInfo{}, true)
-	expectedMapping := reference.EstimateMappingIncrement(earthlikeScan, reference.MappingInfo{Mapped: true, ProbesUsed: 4, EfficiencyTarget: 6}, true)
+	expectedMapping := reference.EstimateMappingIncrementBreakdown(earthlikeScan, reference.MappingInfo{Mapped: true, ProbesUsed: 4, EfficiencyTarget: 6}, true)
 
 	fallbackModeFilter := &stats.Filter{
 		Enabled: true,
@@ -250,9 +250,14 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 		testingContext.Fatalf("Compute same-timestamp all-time filtered failed: %v", sameTimestampError)
 	}
 	expectedCombinedTotal := expectedScanOnly.Total + expectedMapping.Total
-	if sameTimestampMetrics.FirstMapped != 1 || sameTimestampMetrics.ScanValueTotal != expectedCombinedTotal {
-		testingContext.Fatalf("expected same-timestamp mapping to resolve parent scan (FirstMapped=1, ScanValueTotal=%d), got FirstMapped=%d ScanValueTotal=%d",
-			expectedCombinedTotal, sameTimestampMetrics.FirstMapped, sameTimestampMetrics.ScanValueTotal)
+	if sameTimestampMetrics.FirstMapped != 1 || sameTimestampMetrics.EfficientMappings != 1 || sameTimestampMetrics.ScanValueTotal != expectedCombinedTotal {
+		testingContext.Fatalf("expected same-timestamp mapping to resolve parent scan (FirstMapped=1, EfficientMappings=1, ScanValueTotal=%d), got FirstMapped=%d EfficientMappings=%d ScanValueTotal=%d",
+			expectedCombinedTotal, sameTimestampMetrics.FirstMapped, sameTimestampMetrics.EfficientMappings, sameTimestampMetrics.ScanValueTotal)
+	}
+	if sameTimestampMetrics.ScanValueEfficiencyBonus != expectedMapping.EfficiencyBonus ||
+		sameTimestampMetrics.ScanValueBase+sameTimestampMetrics.ScanValueBonus+sameTimestampMetrics.ScanValueEfficiencyBonus != sameTimestampMetrics.ScanValueTotal {
+		testingContext.Fatalf("unexpected 3-way scan value split: base=%d bonus=%d efficiency=%d total=%d (want efficiency=%d)",
+			sameTimestampMetrics.ScanValueBase, sameTimestampMetrics.ScanValueBonus, sameTimestampMetrics.ScanValueEfficiencyBonus, sameTimestampMetrics.ScanValueTotal, expectedMapping.EfficiencyBonus)
 	}
 
 	ingestTestLine(testingContext, databaseConnection,

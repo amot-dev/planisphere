@@ -64,6 +64,18 @@ func TestCartographicsValuation(t *testing.T) {
 	if mapped.Total < 3_000_000 {
 		t.Fatalf("expected mapped first-discovered ELW to exceed 3M Cr, got %d", mapped.Total)
 	}
+
+	efficientBreakdown := EstimateMappingIncrementBreakdown(elwScan, MappingInfo{Mapped: true, ProbesUsed: 5, EfficiencyTarget: 6}, true)
+	if efficientBreakdown.EfficiencyBonus <= 0 || efficientBreakdown.Total != mappingIncrement.Total {
+		t.Fatalf("unexpected efficient mapping breakdown: %+v (want total %d)", efficientBreakdown, mappingIncrement.Total)
+	}
+	if efficientBreakdown.Base+efficientBreakdown.Bonus+efficientBreakdown.EfficiencyBonus != efficientBreakdown.Total {
+		t.Fatalf("efficient breakdown components do not sum to total: %+v", efficientBreakdown)
+	}
+	inefficientBreakdown := EstimateMappingIncrementBreakdown(elwScan, MappingInfo{Mapped: true, ProbesUsed: 7, EfficiencyTarget: 6}, true)
+	if inefficientBreakdown.EfficiencyBonus != 0 || inefficientBreakdown.Base+inefficientBreakdown.Bonus != inefficientBreakdown.Total {
+		t.Fatalf("unexpected inefficient mapping breakdown: %+v", inefficientBreakdown)
+	}
 }
 
 func TestExobiologyValuation(t *testing.T) {

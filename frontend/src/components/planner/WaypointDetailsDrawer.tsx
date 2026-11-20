@@ -1,6 +1,8 @@
 import { expedition, modes, realization as realizationModel, stats } from '../../../wailsjs/go/models'
 import {
   formatCredits,
+  formatEfficiencyBonusLabel,
+  formatEfficiencyBonusTooltip,
   formatInt,
   formatLy,
 } from '../../utils/galacticTime'
@@ -167,6 +169,17 @@ function WaypointValuationCards({
             <span className="truncate">First Discovered / Mapped</span>
             <span className="font-mono-tabular text-[#00D2FF] whitespace-nowrap shrink-0">
               +{formatCredits(metrics.scanValueBonus)}
+            </span>
+          </div>
+          <div
+            className="flex items-center justify-between gap-2 text-[#a6907c]"
+            title={formatEfficiencyBonusTooltip(metrics.efficientMappings, metrics.bodiesMapped)}
+          >
+            <span className="truncate">
+              {formatEfficiencyBonusLabel(metrics.efficientMappings, metrics.bodiesMapped)}
+            </span>
+            <span className="font-mono-tabular text-[#00D2FF] whitespace-nowrap shrink-0">
+              +{formatCredits(metrics.scanValueEfficiencyBonus)}
             </span>
           </div>
         </div>
