@@ -135,12 +135,16 @@ func starValue(bodyScan BodyScan, firstDiscovery bool) float64 {
 	return math.Round(calculatedValue)
 }
 
-func planetValue(bodyScan BodyScan, firstDiscovery, mapped, firstMapped, efficient, odyssey bool) float64 {
+func planetBaseQ(bodyScan BodyScan) float64 {
 	planetKVal := planetK(bodyScan.PlanetClass, bodyScan.IsTerraformable())
 	mass := bodyScan.MassEM
 	if mass <= 0 {
 		mass = 1
 	}
+	return planetKVal + planetKVal*planetMassQ*math.Pow(mass, 0.2)
+}
+
+func planetValueFromBaseQ(baseQ float64, firstDiscovery, mapped, firstMapped, efficient, odyssey bool) float64 {
 	multiplier := 1.0
 	if mapped {
 		switch {
@@ -152,7 +156,7 @@ func planetValue(bodyScan BodyScan, firstDiscovery, mapped, firstMapped, efficie
 			multiplier = 10.0 / 3.0
 		}
 	}
-	calculatedValue := (planetKVal + planetKVal*planetMassQ*math.Pow(mass, 0.2)) * multiplier
+	calculatedValue := baseQ * multiplier
 	if mapped {
 		if odyssey {
 			calculatedValue += math.Max(calculatedValue*0.3, 555)
@@ -168,6 +172,18 @@ func planetValue(bodyScan BodyScan, firstDiscovery, mapped, firstMapped, efficie
 	return math.Round(calculatedValue)
 }
 
+func planetScanValueFromBaseQ(baseQ float64, firstDiscovery, mapped, firstMapped, efficient, odyssey bool) ScanValue {
+	base := planetValueFromBaseQ(baseQ, false, mapped, false, efficient, odyssey)
+	total := base
+	if firstDiscovery || firstMapped {
+		total = planetValueFromBaseQ(baseQ, firstDiscovery, mapped, firstMapped, efficient, odyssey)
+	}
+	if total < base {
+		total = base
+	}
+	return ScanValue{Base: int64(base), Bonus: int64(total - base), Total: int64(total)}
+}
+
 // EstimateBodyValue returns the estimated Universal Cartographics payout for a
 // body, split into Base (as if someone else had already discovered/mapped it)
 // and Bonus (first discovered / first mapped premium).
@@ -180,19 +196,20 @@ func EstimateBodyValue(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool)
 		return ScanValue{}
 	}
 	isFirstDiscovery := CanExpectFirstDiscovered(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
-	var base, total float64
 	if bodyScan.IsStar() {
-		base = starValue(bodyScan, false)
-		total = starValue(bodyScan, isFirstDiscovery)
-	} else {
-		isFirstMapped := mappingInfo.Mapped && CanExpectFirstMapped(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
-		base = planetValue(bodyScan, false, mappingInfo.Mapped, false, mappingInfo.Efficient(), odyssey)
-		total = planetValue(bodyScan, isFirstDiscovery, mappingInfo.Mapped, isFirstMapped, mappingInfo.Efficient(), odyssey)
+		base := starValue(bodyScan, false)
+		total := starValue(bodyScan, isFirstDiscovery)
+		if total < base {
+			total = base
+		}
+		return ScanValue{Base: int64(base), Bonus: int64(total - base), Total: int64(total)}
 	}
-	if total < base {
-		total = base
-	}
-	return ScanValue{Base: int64(base), Bonus: int64(total - base), Total: int64(total)}
+	isFirstMapped := mappingInfo.Mapped && CanExpectFirstMapped(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
+	return planetScanValueFromBaseQ(planetBaseQ(bodyScan), isFirstDiscovery, mappingInfo.Mapped, isFirstMapped, mappingInfo.Efficient(), odyssey)
+}
+
+func canValueMappingIncrement(bodyScan BodyScan, mappingInfo MappingInfo) bool {
+	return mappingInfo.Mapped && !bodyScan.IsStar() && bodyScan.IsValuable()
 }
 
 // EstimateMappingIncrement returns the extra value gained by DSS mapping a
@@ -200,7 +217,7 @@ func EstimateBodyValue(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool)
 // This lets scan value and mapping value be attributed to different time ranges
 // (legs) while always summing to the correct total.
 func EstimateMappingIncrement(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool) ScanValue {
-	if !mappingInfo.Mapped || bodyScan.IsStar() || !bodyScan.IsValuable() {
+	if !canValueMappingIncrement(bodyScan, mappingInfo) {
 		return ScanValue{}
 	}
 	return EstimateBodyValue(bodyScan, mappingInfo, odyssey).Sub(EstimateBodyValue(bodyScan, MappingInfo{}, odyssey))
@@ -220,26 +237,27 @@ type MappingIncrementBreakdown struct {
 // EstimateMappingIncrementBreakdown returns the 3-way additive value breakdown
 // gained by DSS mapping a body whose FSS scan has already been valued.
 func EstimateMappingIncrementBreakdown(bodyScan BodyScan, mappingInfo MappingInfo, odyssey bool) MappingIncrementBreakdown {
-	if !mappingInfo.Mapped || bodyScan.IsStar() || !bodyScan.IsValuable() {
+	if !canValueMappingIncrement(bodyScan, mappingInfo) {
 		return MappingIncrementBreakdown{}
 	}
-	unmappedValue := EstimateBodyValue(bodyScan, MappingInfo{}, odyssey)
-	mappedWithoutEfficiency := EstimateBodyValue(bodyScan, MappingInfo{Mapped: true}, odyssey)
-	baseIncrement := mappedWithoutEfficiency.Base - unmappedValue.Base
-	bonusIncrement := mappedWithoutEfficiency.Bonus - unmappedValue.Bonus
-	if !mappingInfo.Efficient() {
-		return MappingIncrementBreakdown{
-			Base:  baseIncrement,
-			Bonus: bonusIncrement,
-			Total: mappedWithoutEfficiency.Total - unmappedValue.Total,
-		}
+	baseQ := planetBaseQ(bodyScan)
+	isFirstDiscovery := CanExpectFirstDiscovered(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
+	isFirstMapped := CanExpectFirstMapped(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
+
+	unmappedValue := planetScanValueFromBaseQ(baseQ, isFirstDiscovery, false, false, false, odyssey)
+	mappedWithoutEfficiency := planetScanValueFromBaseQ(baseQ, isFirstDiscovery, true, isFirstMapped, false, odyssey)
+
+	var efficiencyBonus int64
+	totalIncrement := mappedWithoutEfficiency.Total - unmappedValue.Total
+	if mappingInfo.Efficient() {
+		mappedWithEfficiencyTotal := int64(planetValueFromBaseQ(baseQ, isFirstDiscovery, true, isFirstMapped, true, odyssey))
+		efficiencyBonus = mappedWithEfficiencyTotal - mappedWithoutEfficiency.Total
+		totalIncrement = mappedWithEfficiencyTotal - unmappedValue.Total
 	}
-	mappedWithEfficiency := EstimateBodyValue(bodyScan, mappingInfo, odyssey)
-	efficiencyBonus := mappedWithEfficiency.Total - mappedWithoutEfficiency.Total
 	return MappingIncrementBreakdown{
-		Base:            baseIncrement,
-		Bonus:           bonusIncrement,
+		Base:            mappedWithoutEfficiency.Base - unmappedValue.Base,
+		Bonus:           mappedWithoutEfficiency.Bonus - unmappedValue.Bonus,
 		EfficiencyBonus: efficiencyBonus,
-		Total:           mappedWithEfficiency.Total - unmappedValue.Total,
+		Total:           totalIncrement,
 	}
 }
