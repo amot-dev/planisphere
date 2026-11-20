@@ -473,7 +473,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
                 {!isPlanning && hasActiveCarrierRoute ? (
                   <span
-                    title="Fleet Carrier route is currently active for this waypoint in the bottom plotter."
+                    title="Fleet Carrier route is currently active for this waypoint in the bottom router."
                     className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
                   >
                     ROUTING

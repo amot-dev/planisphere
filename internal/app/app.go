@@ -37,8 +37,8 @@ const (
 
 // DataChanged tells the frontend which data to refresh.
 type DataChanged struct {
-	Scope        string   `json:"scope"` // journal | plan | modes | settings | adjustments
-	Domains      []string `json:"domains,omitempty"`
+	Scope        string   `json:"scope"`             // journal | plan | modes | settings | adjustments
+	Domains      []string `json:"domains,omitempty"` // ingest | stats | plan | modes | settings | expeditions
 	ExpeditionID int64    `json:"expeditionId"`
 }
 

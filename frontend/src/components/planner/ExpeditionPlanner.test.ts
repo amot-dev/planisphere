@@ -596,7 +596,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(manualWithStop).toContain('value="59"')
     expect(manualWithStop).toContain('MARK FC STOP ARRIVAL')
     expect(manualWithStop).toContain(
-      'Mark Fleet Carrier arrival at Colonia and close the carrier plotter',
+      'Mark Fleet Carrier arrival at Colonia and close the carrier router',
     )
     expect(manualWithStop).not.toContain('ARRIVE AT WAYPOINT')
     expect(manualWithStop).not.toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)

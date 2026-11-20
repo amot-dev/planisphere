@@ -2,8 +2,9 @@ import { ModalShell } from '../common/ModalShell'
 
 /**
  * PlannerConfirmState describes the active confirmation dialog in the expedition
- * flight planner for deleting a visited waypoint, moving an arrived carrier stop
- * past a pending stop, or manually overriding carrier arrival status.
+ * flight planner for deleting a visited waypoint or an unvisited ARRIVED carrier
+ * stop, moving an arrived carrier stop past a pending stop, or manually
+ * overriding carrier arrival status.
  */
 export type PlannerConfirmState =
   | {
@@ -43,7 +44,8 @@ export interface PlannerConfirmModalProps {
 
 /**
  * PlannerConfirmModal renders a cockpit confirmation modal for destructive
- * visited-waypoint deletions and Fleet Carrier arrival state overrides.
+ * visited-waypoint or unvisited ARRIVED carrier-stop deletions and Fleet
+ * Carrier arrival state overrides.
  */
 export function PlannerConfirmModal({
   confirmState,

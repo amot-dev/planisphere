@@ -5,7 +5,7 @@ import { StatRow } from './StatRow'
 
 /**
  * NavigationTelemetrySectionProps defines the active telemetry scope, sidebar
- * duration metadata, navigation metrics, and carrier plotter launch state.
+ * duration metadata, navigation metrics, and carrier router launch state.
  */
 export interface NavigationTelemetrySectionProps {
   viewScope: 'expedition' | 'allTime'
@@ -230,7 +230,7 @@ export function NavigationTelemetrySection({
                   title={
                     carrierRouteOpen
                       ? 'Carrier routing panel is already open'
-                      : 'Open Fleet Carrier plotter in manual jump logging mode'
+                      : 'Open Fleet Carrier router in manual jump logging mode'
                   }
                   className={`px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase tracking-wider border transition whitespace-nowrap ${
                     carrierRouteOpen

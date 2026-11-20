@@ -146,8 +146,8 @@ function CarrierPlotterHeaderBar({
       <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
         <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.14em] bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]">
           {route.carrierType === 'squadron'
-            ? 'SQUADRON CARRIER PLOTTER'
-            : 'PERSONAL CARRIER PLOTTER'}
+            ? 'SQUADRON CARRIER ROUTER'
+            : 'PERSONAL CARRIER ROUTER'}
         </span>
         <span className="font-mono-tabular font-bold text-[#F4ECE4]">
           {route.origin || '???'} <span className="text-[#a6907c]">→</span>{' '}
@@ -187,7 +187,7 @@ function CarrierPlotterHeaderBar({
           <button
             type="button"
             onClick={onCancelRoute}
-            title="Close the carrier plotter. Existing jumps remain logged in your expedition statistics."
+            title="Close the carrier router. Existing jumps remain logged in your expedition statistics."
             className="ed-btn"
           >
             CLOSE
@@ -462,7 +462,7 @@ function ManualCarrierLoggerView({
         onClick={onArrive}
         title={
           canMarkArrival
-            ? `Mark Fleet Carrier arrival at ${destinationDisplay} and close the carrier plotter`
+            ? `Mark Fleet Carrier arrival at ${destinationDisplay} and close the carrier router`
             : 'No next Fleet Carrier stop designated in the expedition plan'
         }
         className="ed-btn-cyan"

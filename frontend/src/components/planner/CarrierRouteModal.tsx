@@ -163,7 +163,7 @@ export function CarrierRouteModal({
             onClick={onClose}
             className="px-3 py-1.5 text-[#a6907c] hover:text-[#F4ECE4] uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
           >
-            Cancel
+            CANCEL
           </button>
           <button
             type="button"

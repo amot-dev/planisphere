@@ -34,8 +34,9 @@ const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
 
 /**
  * ExpeditionPlannerProps defines the active expedition plan state, journal
- * archive revision token, optimistic update handlers, lifecycle modal triggers,
- * and carrier plotter registration callbacks for the main flight planner view.
+ * archive revision token, external-link visibility settings, optimistic update
+ * handlers, lifecycle modal triggers, and carrier router registration callbacks
+ * for the main flight planner view.
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
