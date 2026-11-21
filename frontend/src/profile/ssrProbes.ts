@@ -1,18 +1,18 @@
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { app, expedition, realization, stats } from '../api/models'
-import { ExpeditionPlanner } from '../components/planner/ExpeditionPlanner'
 import {
   buildPlannerTableItems,
   computePlannerTableDimensions,
   gapToTargetIndex,
-} from '../components/planner/planTableItems'
-import { PlannerRouteTable } from '../components/planner/PlannerRouteTable'
-import { WaypointDetailsDrawer } from '../components/planner/WaypointDetailsDrawer'
-import { WaypointRowItem, type WaypointRowHandlers } from '../components/planner/WaypointRowItem'
-import { ExplorationValuationSection } from '../components/sidebar/ExplorationValuationSection'
-import { NavigationTelemetrySection } from '../components/sidebar/NavigationTelemetrySection'
-import { StatsSidebar } from '../components/sidebar/StatsSidebar'
+} from '../domain/planTableItems'
+import { WaypointDetailsDrawer } from '../features/planner/drawer/WaypointDetailsDrawer'
+import { ExpeditionPlanner } from '../features/planner/ExpeditionPlanner'
+import { PlannerRouteTable } from '../features/planner/table/PlannerRouteTable'
+import { WaypointRowItem, type WaypointRowHandlers } from '../features/planner/table/WaypointRowItem'
+import { ExplorationValuationSection } from '../features/sidebar/ExplorationValuationSection'
+import { NavigationTelemetrySection } from '../features/sidebar/NavigationTelemetrySection'
+import { StatsSidebar } from '../features/sidebar/StatsSidebar'
 import {
   makeRenderSpan,
   msToNs,
@@ -347,7 +347,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'ExpeditionPlanner (Full Route Table SSR)',
-      'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
+      'frontend/src/features/planner/ExpeditionPlanner.tsx:44',
       1,
       plan.rows.length,
       'rows',
@@ -360,7 +360,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'StatsSidebar (Expedition and All-Time Scopes SSR)',
-      'frontend/src/components/sidebar/StatsSidebar.tsx:29',
+      'frontend/src/features/sidebar/StatsSidebar.tsx:29',
       2,
       2,
       'scopes',
@@ -374,7 +374,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'PlannerRouteTable[Drag Drop-Slot Preview SSR]',
-        'frontend/src/components/planner/PlannerRouteTable.tsx:120',
+        'frontend/src/features/planner/table/PlannerRouteTable.tsx:120',
         1,
         hydrated.dropPreviews.length,
         'slots',
@@ -388,7 +388,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'WaypointRowItem[Per-Row Render Pass]',
-      'frontend/src/components/planner/WaypointRowItem.tsx:172',
+      'frontend/src/features/planner/table/WaypointRowItem.tsx:76',
       waypointCount,
       waypointCount,
       'waypoints',
@@ -401,7 +401,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'WaypointDetailsDrawer[Visited Drawers Batch]',
-      'frontend/src/components/planner/WaypointDetailsDrawer.tsx:26',
+      'frontend/src/features/planner/drawer/WaypointDetailsDrawer.tsx:31',
       visitedDetails.length,
       visitedDetails.length,
       'drawers',

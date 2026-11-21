@@ -3,8 +3,8 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from 'vitest'
 import { stats } from '../api/models'
-import { ExpeditionPlanner } from '../components/planner/ExpeditionPlanner'
-import { StatsSidebar } from '../components/sidebar/StatsSidebar'
+import { ExpeditionPlanner } from '../features/planner/ExpeditionPlanner'
+import { StatsSidebar } from '../features/sidebar/StatsSidebar'
 import {
   buildProbeRun,
   hydrateFrontendFixture,
@@ -96,7 +96,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'createRoot Mount (ExpeditionPlanner + StatsSidebar)',
-        'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
+        'frontend/src/features/planner/ExpeditionPlanner.tsx:44',
         1,
         plan.rows.length,
         'rows',
@@ -110,7 +110,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'Single-Row Copy State Update (React.memo Row Bailout)',
-        'frontend/src/components/planner/PlannerRouteTable.tsx:223',
+        'frontend/src/features/planner/table/PlannerRouteTable.tsx:223',
         1,
         plan.rows.length,
         'rows',
@@ -124,7 +124,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'Toggle Waypoint Telemetry Drawer Reconciliation',
-        'frontend/src/components/planner/useWaypointDetails.ts:37',
+        'frontend/src/features/planner/drawer/useWaypointDetails.ts:37',
         1,
         expandedDrawersCount,
         'drawer',
@@ -140,7 +140,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'StatsSidebar Scope Switch (Expedition -> All Time)',
-        'frontend/src/components/sidebar/StatsSidebar.tsx:41',
+        'frontend/src/features/sidebar/StatsSidebar.tsx:29',
         1,
         1,
         'sidebar',
@@ -153,7 +153,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'AutoExpandingTextarea 3-Phase Batch Coordinator',
-        'frontend/src/components/common/AutoExpandingTextarea.tsx:88',
+        'frontend/src/components/ui/AutoExpandingTextarea.tsx:88',
         1,
         measuredCells,
         'textareas',
@@ -211,7 +211,7 @@ function runAllFrontendProbes(
   const renderCold = buildProbeRun(
     'Cold',
     'Frontend/RenderTree',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
+    'frontend/src/features/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     1,
@@ -220,7 +220,7 @@ function runAllFrontendProbes(
   const renderWarm = buildProbeRun(
     'Warm',
     'Frontend/RenderTree',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
+    'frontend/src/features/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     warmIterations,
@@ -230,7 +230,7 @@ function runAllFrontendProbes(
   const clientCold = buildProbeRun(
     'Cold',
     'Frontend/ClientReconciliation',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
+    'frontend/src/features/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     1,
@@ -239,7 +239,7 @@ function runAllFrontendProbes(
   const clientWarm = buildProbeRun(
     'Warm',
     'Frontend/ClientReconciliation',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
+    'frontend/src/features/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     warmIterations,

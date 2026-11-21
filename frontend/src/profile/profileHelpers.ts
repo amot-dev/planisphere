@@ -1,5 +1,5 @@
 import { app, expedition, modes } from '../api/models'
-import { createTextareaResizeCoordinator } from '../components/common/AutoExpandingTextarea'
+import { createTextareaResizeCoordinator } from '../components/ui/AutoExpandingTextarea'
 
 /**
  * NodeFSModule describes the subset of node:fs methods used to read fixture JSON
