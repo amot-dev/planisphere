@@ -2,11 +2,11 @@ import { useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
 import { expedition, modes } from '../../../wailsjs/go/models'
 import type { NextCarrierStopEntry } from './carrierRouteHelpers'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
-import type { PlannerTableItem } from './plannerPlanHelpers'
+import { getWaypointLegBorderColor, type PlannerTableItem } from './plannerPlanHelpers'
 import { PlannerRegionRow } from './PlannerRegionRow'
 import { PlannerTableHeader } from './PlannerTableHeader'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
-import { getWaypointLegBorderColor, WaypointRowItem } from './WaypointRowItem'
+import { WaypointRowItem } from './WaypointRowItem'
 
 const rowStyle: CSSProperties = {
   contentVisibility: 'auto',
@@ -154,6 +154,7 @@ export function PlannerRouteTable({
     const borderMap = new Map<number, string>()
     if (isPlanning || !plan.rows?.length) return borderMap
     let followingBorderColor: string | undefined
+    // Walk plan.rows in reverse so consecutive Region Header rows inherit the leg border color of the first following waypoint.
     for (let i = plan.rows.length - 1; i >= 0; i--) {
       const candidateRowView = plan.rows[i]
       if (candidateRowView.row.rowType === 'region') {

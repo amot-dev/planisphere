@@ -78,6 +78,33 @@ export function computePlannerTableDimensions(
   return { visibleColumnCount, tableMinWidthPixels }
 }
 
+export const ORIGIN_LEG_BORDER_COLOR = '#3d2816'
+export const DEFAULT_LEG_BORDER_COLOR = '#FF7100'
+
+/**
+ * getWaypointLegBorderColor returns the left border color for a waypoint row
+ * or telemetry drawer based on visit state and leg flight mode, or undefined
+ * when the row is borderless.
+ */
+export function getWaypointLegBorderColor(
+  rowView: expedition.RowView,
+  isPlanning: boolean,
+  options?: { overrideModeColor?: string; forceOrigin?: boolean },
+): string | undefined {
+  if (isPlanning) return undefined
+  if (options?.forceOrigin) return ORIGIN_LEG_BORDER_COLOR
+  if (
+    !options?.overrideModeColor &&
+    rowView.visitState !== 'visited' &&
+    rowView.visitState !== 'current'
+  ) {
+    return undefined
+  }
+  return rowView.number === 1
+    ? ORIGIN_LEG_BORDER_COLOR
+    : options?.overrideModeColor || rowView.legModeColor || DEFAULT_LEG_BORDER_COLOR
+}
+
 function buildCollapsedVisitedItem(
   rows: expedition.RowView[],
   startIndex: number,

@@ -220,7 +220,10 @@ func EstimateMappingIncrement(bodyScan BodyScan, mappingInfo MappingInfo, odysse
 	if !canValueMappingIncrement(bodyScan, mappingInfo) {
 		return ScanValue{}
 	}
-	return EstimateBodyValue(bodyScan, mappingInfo, odyssey).Sub(EstimateBodyValue(bodyScan, MappingInfo{}, odyssey))
+	baseQ := planetBaseQ(bodyScan)
+	isFirstDiscovery := CanExpectFirstDiscovered(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
+	isFirstMapped := CanExpectFirstMapped(bodyScan.SystemPopulation, bodyScan.WasDiscovered, bodyScan.WasMapped)
+	return planetScanValueFromBaseQ(baseQ, isFirstDiscovery, true, isFirstMapped, mappingInfo.Efficient(), odyssey).Sub(planetScanValueFromBaseQ(baseQ, isFirstDiscovery, false, false, false, odyssey))
 }
 
 // MappingIncrementBreakdown splits the extra cartographic value from DSS

@@ -2,6 +2,7 @@ import { expedition, modes, realization as realizationModel, stats } from '../..
 import { formatCredits, formatInt, formatLy } from '../../utils/galacticTime'
 import { CartographicsValueBreakdown } from '../common/CartographicsValueBreakdown'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
+import { DEFAULT_LEG_BORDER_COLOR, getWaypointLegBorderColor } from './plannerPlanHelpers'
 import { LegModeDropdown } from './widgets/LegModeDropdown'
 
 /**
@@ -32,7 +33,11 @@ export function WaypointDetailsDrawer({
   onChangeMode,
 }: WaypointDetailsDrawerProps) {
   const isOrigin = details?.kind === 'origin' || rowView.number === 1
-  const drawerBorderColor = isOrigin ? '#3d2816' : modeColor || rowView.legModeColor || '#FF7100'
+  const drawerBorderColor =
+    getWaypointLegBorderColor(rowView, false, {
+      overrideModeColor: modeColor,
+      forceOrigin: isOrigin,
+    }) ?? DEFAULT_LEG_BORDER_COLOR
 
   if (loading || !details) {
     return (

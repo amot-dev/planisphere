@@ -3,6 +3,7 @@ import type React from 'react'
 import { expedition } from '../../../wailsjs/go/models'
 import { formatLy } from '../../utils/galacticTime'
 import { AutoExpandingTextarea } from '../common/AutoExpandingTextarea'
+import { getWaypointLegBorderColor } from './plannerPlanHelpers'
 import { CoordStatusIndicator } from './widgets/CoordStatusIndicator'
 import { HoverOpenInLinks } from './widgets/HoverOpenInLinks'
 import { RowManipulationButtons } from './widgets/RowManipulationButtons'
@@ -149,19 +150,6 @@ function renderTelemetryCellContent(
       {renderDistanceValue(isNext, rowView, row, playerSystem)}
     </div>
   )
-}
-
-/**
- * getWaypointLegBorderColor returns the left border color for a waypoint row
- * based on its visit state and leg flight mode, or undefined when borderless.
- */
-export function getWaypointLegBorderColor(
-  rowView: expedition.RowView,
-  isPlanning: boolean,
-): string | undefined {
-  if (isPlanning) return undefined
-  if (rowView.visitState !== 'visited' && rowView.visitState !== 'current') return undefined
-  return rowView.number === 1 ? '#3d2816' : rowView.legModeColor || '#FF7100'
 }
 
 /**
