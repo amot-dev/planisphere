@@ -684,6 +684,14 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 
 	testingContext.Setenv("ED_PLANNER_DB", seededDatabasePath)
 
+	originalFetchLatestGitHubVersion := fetchLatestGitHubVersion
+	fetchLatestGitHubVersion = func(context.Context) (string, error) {
+		return "", nil
+	}
+	testingContext.Cleanup(func() {
+		fetchLatestGitHubVersion = originalFetchLatestGitHubVersion
+	})
+
 	startupApp := New()
 	startupApp.debugMode = false
 
