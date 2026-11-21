@@ -1,4 +1,4 @@
-.PHONY: all build dev run test test-backend test-frontend typecheck profile sync-metadata clean install-frontend \
+.PHONY: all build dev run test test-backend test-frontend typecheck profile snapshot-db sync-metadata clean install-frontend \
         package-tarball package-appimage package-windows package-deb package-rpm package-arch
 
 VERSION := $(shell grep -o '"version": *"[^"]*"' app.config.json 2>/dev/null | cut -d'"' -f4)
@@ -48,14 +48,14 @@ GO_SOURCES := $(shell find internal -name "*.go" 2>/dev/null) main.go go.mod go.
 FRONTEND_SOURCES := $(shell find frontend/src -type f 2>/dev/null) frontend/index.html frontend/vite.config.ts
 
 # Synchronize metadata only when app.config.json or the generator script changes
-internal/version/version.go: app.config.json scripts/sync_metadata.go
+internal/version/version.go: app.config.json scripts/main.go scripts/sync_metadata.go
 	@echo "==> Synchronizing metadata from app.config.json..."
-	go run scripts/sync_metadata.go
+	go run ./scripts sync-metadata
 	@touch $@
 
 sync-metadata:
 	@echo "==> Synchronizing metadata from app.config.json..."
-	go run scripts/sync_metadata.go
+	go run ./scripts sync-metadata
 	@touch internal/version/version.go
 
 # Install frontend dependencies only when package manifests change or node_modules is missing
@@ -113,6 +113,12 @@ test-frontend: typecheck
 typecheck: install-frontend
 	@echo "==> Running frontend type check..."
 	(cd frontend && npm run typecheck)
+
+# Create an isolated, WAL-merged snapshot of the active database
+# Optional variables: OUT=<path> SRC=<path> (or ED_PLANNER_DB=<path>)
+snapshot-db:
+	@echo "==> Snapshotting active Planisphere database..."
+	go run ./scripts snapshot-db -out "$(OUT)" -src "$(SRC)"
 
 # Run the live data profiler against an isolated temporary snapshot of the active database
 # Optional variables: RUN=<filter> ITER=<count> SAVE=<file.json> BASELINE=<file.json> SKIP_FRONTEND=1 ED_PLANNER_DB=<path>

@@ -52,7 +52,7 @@ jobs:
 
       - name: Verify Metadata Synchronization
         run: |
-          go run scripts/sync_metadata.go
+          make sync-metadata
           if ! git diff --quiet; then
             echo "Error: Uncommitted metadata differences detected. Run 'make sync-metadata' locally and commit the changes." >&2
             git diff

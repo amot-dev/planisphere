@@ -22,24 +22,21 @@ type Config struct {
 	Repository  string `json:"repository"`
 }
 
-func main() {
+func runSyncMetadata(_ []string) error {
 	rootDir, findError := findRootDir()
 	if findError != nil {
-		fmt.Fprintf(os.Stderr, "Error locating root directory: %v\n", findError)
-		os.Exit(1)
+		return fmt.Errorf("locate root directory: %w", findError)
 	}
 
 	configPath := filepath.Join(rootDir, "app.config.json")
 	configBytes, readError := os.ReadFile(configPath)
 	if readError != nil {
-		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", configPath, readError)
-		os.Exit(1)
+		return fmt.Errorf("read %s: %w", configPath, readError)
 	}
 
 	var appConfig Config
 	if parseError := json.Unmarshal(configBytes, &appConfig); parseError != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing %s: %v\n", configPath, parseError)
-		os.Exit(1)
+		return fmt.Errorf("parse %s: %w", configPath, parseError)
 	}
 
 	if appConfig.ProductName == "" {
@@ -86,6 +83,7 @@ func main() {
 	syncNFPM(filepath.Join(rootDir, "packaging", "nfpm.yaml"), appConfig)
 
 	fmt.Printf("Metadata synchronized successfully across all project targets.\n")
+	return nil
 }
 
 func writeFileIfChanged(path string, newContent []byte, perm os.FileMode) (bool, error) {

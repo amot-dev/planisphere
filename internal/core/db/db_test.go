@@ -236,6 +236,82 @@ func TestCreateAndRemoveDebugSnapshot(testingContext *testing.T) {
 	}
 }
 
+func TestSnapshotTo(testingContext *testing.T) {
+	temporaryDirectory := testingContext.TempDir()
+	sourceDBPath := filepath.Join(temporaryDirectory, "live.db")
+	destinationPath := filepath.Join(temporaryDirectory, "nested", "snap.db")
+
+	// Keep the WAL-mode source connection open so writes sit in the WAL while snapshotting.
+	sourceConn, openSourceError := db.Open(sourceDBPath)
+	if openSourceError != nil {
+		testingContext.Fatalf("Open source DB: %v", openSourceError)
+	}
+	defer sourceConn.Close()
+
+	if setError := setSettingForTest(sourceConn, "wal_marker", "first_value"); setError != nil {
+		testingContext.Fatalf("setSettingForTest first write: %v", setError)
+	}
+
+	if snapshotError := db.SnapshotTo(sourceDBPath, destinationPath); snapshotError != nil {
+		testingContext.Fatalf("SnapshotTo initial: %v", snapshotError)
+	}
+
+	for _, sidecarSuffix := range []string{"-wal", "-shm"} {
+		if _, statError := os.Stat(destinationPath + sidecarSuffix); !os.IsNotExist(statError) {
+			testingContext.Fatalf("expected %s%s to be absent after SnapshotTo, stat err: %v", destinationPath, sidecarSuffix, statError)
+		}
+	}
+
+	readOnlyConn, openReadOnlyError := sql.Open("sqlite", "file:"+destinationPath+"?mode=ro")
+	if openReadOnlyError != nil {
+		testingContext.Fatalf("open snapshot read-only: %v", openReadOnlyError)
+	}
+	initialValue, getInitialError := getSettingForTest(readOnlyConn, "wal_marker")
+	_ = readOnlyConn.Close()
+	if getInitialError != nil {
+		testingContext.Fatalf("read initial snapshot value: %v", getInitialError)
+	}
+	if initialValue != "first_value" {
+		testingContext.Fatalf("expected wal_marker 'first_value', got %q", initialValue)
+	}
+
+	// Overwriting an existing snapshot cleanly replaces it with newer writes.
+	if setError := setSettingForTest(sourceConn, "wal_marker", "second_value"); setError != nil {
+		testingContext.Fatalf("setSettingForTest second write: %v", setError)
+	}
+	if overwriteError := db.SnapshotTo(sourceDBPath, destinationPath); overwriteError != nil {
+		testingContext.Fatalf("SnapshotTo overwrite: %v", overwriteError)
+	}
+
+	reopenedConn, reopenError := sql.Open("sqlite", "file:"+destinationPath+"?mode=ro")
+	if reopenError != nil {
+		testingContext.Fatalf("reopen overwritten snapshot: %v", reopenError)
+	}
+	updatedValue, getUpdatedError := getSettingForTest(reopenedConn, "wal_marker")
+	_ = reopenedConn.Close()
+	if getUpdatedError != nil {
+		testingContext.Fatalf("read overwritten snapshot value: %v", getUpdatedError)
+	}
+	if updatedValue != "second_value" {
+		testingContext.Fatalf("expected updated wal_marker 'second_value', got %q", updatedValue)
+	}
+
+	// Reject same-file overwrite, missing source, and empty source.
+	if samePathError := db.SnapshotTo(sourceDBPath, sourceDBPath); samePathError == nil {
+		testingContext.Fatalf("expected error when destination matches source")
+	}
+	if missingError := db.SnapshotTo(filepath.Join(temporaryDirectory, "missing.db"), destinationPath); missingError == nil {
+		testingContext.Fatalf("expected error for missing source database")
+	}
+	zeroBytePath := filepath.Join(temporaryDirectory, "zero.db")
+	if writeError := os.WriteFile(zeroBytePath, nil, 0o600); writeError != nil {
+		testingContext.Fatalf("WriteFile zeroBytePath: %v", writeError)
+	}
+	if emptyError := db.SnapshotTo(zeroBytePath, destinationPath); emptyError == nil {
+		testingContext.Fatalf("expected error for empty source database")
+	}
+}
+
 func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
 	dbConn, openError := db.Open(":memory:")
 	if openError != nil {

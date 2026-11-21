@@ -239,6 +239,10 @@ make test-frontend
 # Run frontend TypeScript typecheck
 make typecheck
 
+# Create an isolated, WAL-merged snapshot of the active database
+# Optional: OUT=<path> SRC=<path> (or ED_PLANNER_DB=<path>)
+make snapshot-db
+
 # Run the live data profiler against a temporary snapshot of the active database
 # Optional: RUN=<filter> ITER=<count> SAVE=<file.json> BASELINE=<file.json> SKIP_FRONTEND=1 ED_PLANNER_DB=<path>
 make profile
