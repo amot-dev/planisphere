@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlotCarrierRoute, RecordCarrierJump } from '../../api/backend'
 import { expedition } from '../../api/models'
 import {
@@ -183,24 +183,31 @@ export function useCarrierRoute({
     onCarrierRouteOpenChange?.(Boolean(activeCarrierRoute))
   }, [activeCarrierRoute, onCarrierRouteOpenChange])
 
-  async function openCarrierRoutePrompt(rowIndex: number, targetRow: expedition.Row) {
-    if (!plan) return
-    const [startSystem, defaults] = await Promise.all([
-      resolveCarrierStartSystem(plan, rowIndex),
-      resolveCarrierDefaults(),
-    ])
-    const defaultCarrierType: 'player' | 'squadron' =
-      plan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
-    setRoutePrompt({
-      targetRowId: targetRow.id,
-      origin: startSystem,
-      destination: (targetRow.systemName ?? '').trim(),
-      capacityUsed: String(defaults.capacity),
-      depotTritium: String(defaults.depot),
-      carrierType: defaultCarrierType,
-      loading: false,
-    })
-  }
+  const latestPlanRef = useRef(plan)
+  latestPlanRef.current = plan
+
+  const openCarrierRoutePrompt = useCallback(
+    async (rowIndex: number, targetRow: expedition.Row) => {
+      const currentPlan = latestPlanRef.current
+      if (!currentPlan) return
+      const [startSystem, defaults] = await Promise.all([
+        resolveCarrierStartSystem(currentPlan, rowIndex),
+        resolveCarrierDefaults(),
+      ])
+      const defaultCarrierType: 'player' | 'squadron' =
+        currentPlan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
+      setRoutePrompt({
+        targetRowId: targetRow.id,
+        origin: startSystem,
+        destination: (targetRow.systemName ?? '').trim(),
+        capacityUsed: String(defaults.capacity),
+        depotTritium: String(defaults.depot),
+        carrierType: defaultCarrierType,
+        loading: false,
+      })
+    },
+    [],
+  )
 
   async function handleStartCarrierRoute() {
     if (!routePrompt) return

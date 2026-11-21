@@ -1,6 +1,7 @@
 import {
   useCallback,
   useMemo,
+  useRef,
   type DragEvent,
   type HTMLAttributes,
   type MutableRefObject,
@@ -46,25 +47,27 @@ export interface CreateCachedRowDropPropsOptions {
   ) => void
 }
 
+type RowDropContextSource =
+  | CreateCachedRowDropPropsOptions
+  | { readonly current: CreateCachedRowDropPropsOptions }
+
+function isContextRef(
+  source: RowDropContextSource,
+): source is { readonly current: CreateCachedRowDropPropsOptions } {
+  return 'current' in source
+}
+
 /**
  * createCachedRowDropPropsGetter returns a row-index lookup that caches
- * drop prop objects across gap-hover updates while reading live gap state via ref.
+ * drop prop objects across plan updates, drag transitions, and gap-hover changes
+ * while reading the latest drag context via ref.
  */
-export function createCachedRowDropPropsGetter({
-  plan,
-  isPlanning,
-  isCompleted,
-  lastVisitedIndex,
-  draggedIndex,
-  dragOverGapIndexRef,
-  updateDragOverGapIndex,
-  dropSlotGaps,
-  activeDropPreviews,
-  scrollContainerRef,
-  recordDragOverClientY,
-  finishDropMove,
-}: CreateCachedRowDropPropsOptions): (rowIndex: number) => RowDropProps {
+export function createCachedRowDropPropsGetter(
+  contextSource: RowDropContextSource,
+): (rowIndex: number) => RowDropProps {
   const cachedPropsByRowIndex = new Map<number, RowDropProps>()
+  const readContext = (): CreateCachedRowDropPropsOptions =>
+    isContextRef(contextSource) ? contextSource.current : contextSource
 
   return (rowIndex: number): RowDropProps => {
     const cachedRowDropProps = cachedPropsByRowIndex.get(rowIndex)
@@ -72,47 +75,51 @@ export function createCachedRowDropPropsGetter({
 
     const rowDropProps: RowDropProps = {
       onDragOver: (event: DragEvent<HTMLTableRowElement>) => {
-        recordDragOverClientY(event.clientY)
+        const context = readContext()
+        context.recordDragOverClientY(event.clientY)
         const resolved = resolveHoverGap(
           rowIndex,
           event,
-          plan,
-          draggedIndex,
-          isPlanning,
-          isCompleted,
-          lastVisitedIndex,
-          dropSlotGaps,
-          activeDropPreviews,
+          context.plan,
+          context.draggedIndex,
+          context.isPlanning,
+          context.isCompleted,
+          context.lastVisitedIndex,
+          context.dropSlotGaps,
+          context.activeDropPreviews,
         )
         if (!resolved) {
-          if (dragOverGapIndexRef.current !== null) updateDragOverGapIndex(null)
+          if (context.dragOverGapIndexRef.current !== null) {
+            context.updateDragOverGapIndex(null)
+          }
           return
         }
         event.preventDefault()
         event.dataTransfer.dropEffect = 'move'
-        if (dragOverGapIndexRef.current !== resolved.gapIndex) {
-          updateDragOverGapIndex(resolved.gapIndex)
+        if (context.dragOverGapIndexRef.current !== resolved.gapIndex) {
+          context.updateDragOverGapIndex(resolved.gapIndex)
         }
       },
       onDrop: (event: DragEvent<HTMLTableRowElement>) => {
+        const context = readContext()
         const resolved = resolveHoverGap(
           rowIndex,
           event,
-          plan,
-          draggedIndex,
-          isPlanning,
-          isCompleted,
-          lastVisitedIndex,
-          dropSlotGaps,
-          activeDropPreviews,
+          context.plan,
+          context.draggedIndex,
+          context.isPlanning,
+          context.isCompleted,
+          context.lastVisitedIndex,
+          context.dropSlotGaps,
+          context.activeDropPreviews,
         )
-        if (!resolved || draggedIndex === null) return
+        if (!resolved || context.draggedIndex === null) return
         event.preventDefault()
-        finishDropMove(
-          draggedIndex,
+        context.finishDropMove(
+          context.draggedIndex,
           resolved.targetIndex,
           resolved.preview,
-          measureVisualTop(scrollContainerRef.current, event.currentTarget),
+          measureVisualTop(context.scrollContainerRef.current, event.currentTarget),
         )
       },
     }
@@ -130,162 +137,141 @@ export interface UsePlannerDropHandlersOptions extends CreateCachedRowDropPropsO
   dragClientYRef: MutableRefObject<number | null>
 }
 
+interface SlotDropTargetEntry {
+  targetIndex: number
+  preview: expedition.DropSlotPreview
+}
+
 /**
- * usePlannerDropHandlers provides cached per-row, historical drop-slot, and
- * scroll-container tail drop prop builders for the planner table.
+ * usePlannerDropHandlers provides lifetime-cached per-row, historical drop-slot,
+ * and scroll-container tail drop prop builders backed by a live options ref.
  */
 export function usePlannerDropHandlers(options: UsePlannerDropHandlersOptions) {
-  const {
-    plan,
-    isPlanning,
-    isCompleted,
-    lastVisitedIndex,
-    draggedIndex,
-    dragOverGapIndexRef,
-    updateDragOverGapIndex,
-    dropSlotGaps,
-    activeDropPreviews,
-    scrollContainerRef,
-    dragClientYRef,
-    recordDragOverClientY,
-    finishDropMove,
-  } = options
+  const latestOptionsRef = useRef(options)
+  latestOptionsRef.current = options
+
+  const slotTargetByGapRef = useRef<Map<number, SlotDropTargetEntry>>(new Map())
+  const cachedSlotPropsByGapRef = useRef<Map<number, RowDropProps>>(new Map())
 
   const getRowDropProps = useMemo(
-    () =>
-      createCachedRowDropPropsGetter({
-        plan,
-        isPlanning,
-        isCompleted,
-        lastVisitedIndex,
-        draggedIndex,
-        dragOverGapIndexRef,
-        updateDragOverGapIndex,
-        dropSlotGaps,
-        activeDropPreviews,
-        scrollContainerRef,
-        recordDragOverClientY,
-        finishDropMove,
-      }),
-    [
-      activeDropPreviews,
-      dragOverGapIndexRef,
-      draggedIndex,
-      dropSlotGaps,
-      finishDropMove,
-      isCompleted,
-      isPlanning,
-      lastVisitedIndex,
-      plan,
-      recordDragOverClientY,
-      scrollContainerRef,
-      updateDragOverGapIndex,
-    ],
+    () => createCachedRowDropPropsGetter(latestOptionsRef),
+    [],
   )
 
   const getSlotDropProps = useCallback(
-    (gapIndex: number, targetIndex: number, preview: expedition.DropSlotPreview) => {
-      const isAllowed =
-        !isCompleted && (preview.status === 'valid_visited' || preview.status === 'valid_unvisited')
-      return {
+    (gapIndex: number, targetIndex: number, preview: expedition.DropSlotPreview): RowDropProps => {
+      slotTargetByGapRef.current.set(gapIndex, { targetIndex, preview })
+      const existingProps = cachedSlotPropsByGapRef.current.get(gapIndex)
+      if (existingProps) {
+        return existingProps
+      }
+
+      const slotDropProps: RowDropProps = {
         onDragOver: (event: DragEvent<HTMLTableRowElement>) => {
-          recordDragOverClientY(event.clientY)
+          const context = latestOptionsRef.current
+          const slotEntry = slotTargetByGapRef.current.get(gapIndex)
+          context.recordDragOverClientY(event.clientY)
+          const isAllowed =
+            Boolean(slotEntry) &&
+            !context.isCompleted &&
+            (slotEntry!.preview.status === 'valid_visited' ||
+              slotEntry!.preview.status === 'valid_unvisited')
           if (!isAllowed) {
-            if (dragOverGapIndexRef.current !== null) updateDragOverGapIndex(null)
+            if (context.dragOverGapIndexRef.current !== null) {
+              context.updateDragOverGapIndex(null)
+            }
             return
           }
           event.preventDefault()
           event.dataTransfer.dropEffect = 'move'
-          if (dragOverGapIndexRef.current !== gapIndex) updateDragOverGapIndex(gapIndex)
+          if (context.dragOverGapIndexRef.current !== gapIndex) {
+            context.updateDragOverGapIndex(gapIndex)
+          }
         },
         onDrop: (event: DragEvent<HTMLTableRowElement>) => {
-          if (!isAllowed || draggedIndex === null) return
+          const context = latestOptionsRef.current
+          const slotEntry = slotTargetByGapRef.current.get(gapIndex)
+          const isAllowed =
+            Boolean(slotEntry) &&
+            !context.isCompleted &&
+            (slotEntry!.preview.status === 'valid_visited' ||
+              slotEntry!.preview.status === 'valid_unvisited')
+          if (!isAllowed || context.draggedIndex === null || !slotEntry) return
           event.preventDefault()
-          finishDropMove(
-            draggedIndex,
-            targetIndex,
-            preview,
-            measureVisualTop(scrollContainerRef.current, event.currentTarget),
+          context.finishDropMove(
+            context.draggedIndex,
+            slotEntry.targetIndex,
+            slotEntry.preview,
+            measureVisualTop(context.scrollContainerRef.current, event.currentTarget),
           )
         },
       }
+
+      cachedSlotPropsByGapRef.current.set(gapIndex, slotDropProps)
+      return slotDropProps
     },
-    [
-      dragOverGapIndexRef,
-      draggedIndex,
-      finishDropMove,
-      isCompleted,
-      recordDragOverClientY,
-      scrollContainerRef,
-      updateDragOverGapIndex,
-    ],
+    [],
   )
 
   const scrollContainerDropProps: HTMLAttributes<HTMLDivElement> = useMemo(
     () => ({
       onDragLeave: (event) => {
+        const context = latestOptionsRef.current
         const relatedTarget = event.relatedTarget as Node | null
-        if (!relatedTarget || !scrollContainerRef.current?.contains(relatedTarget)) {
-          dragClientYRef.current = null
+        if (!relatedTarget || !context.scrollContainerRef.current?.contains(relatedTarget)) {
+          context.dragClientYRef.current = null
         }
       },
       onDragOver: (event) => {
-        recordDragOverClientY(event.clientY)
+        const context = latestOptionsRef.current
+        context.recordDragOverClientY(event.clientY)
         const tailDrop = resolveContainerTailDrop(
           event,
-          scrollContainerRef.current,
-          plan,
-          draggedIndex,
-          isPlanning,
-          isCompleted,
-          dropSlotGaps,
-          activeDropPreviews,
+          context.scrollContainerRef.current,
+          context.plan,
+          context.draggedIndex,
+          context.isPlanning,
+          context.isCompleted,
+          context.dropSlotGaps,
+          context.activeDropPreviews,
         )
         if (!tailDrop) {
           const eventTarget = event.target as HTMLElement | null
-          if (!eventTarget?.closest('tbody') && dragOverGapIndexRef.current !== null) {
-            updateDragOverGapIndex(null)
+          if (!eventTarget?.closest('tbody') && context.dragOverGapIndexRef.current !== null) {
+            context.updateDragOverGapIndex(null)
           }
           return
         }
         event.preventDefault()
         event.dataTransfer.dropEffect = 'move'
-        if (dragOverGapIndexRef.current !== tailDrop.gapIndex) {
-          updateDragOverGapIndex(tailDrop.gapIndex)
+        if (context.dragOverGapIndexRef.current !== tailDrop.gapIndex) {
+          context.updateDragOverGapIndex(tailDrop.gapIndex)
         }
       },
       onDrop: (event) => {
+        const context = latestOptionsRef.current
         const tailDrop = resolveContainerTailDrop(
           event,
-          scrollContainerRef.current,
-          plan,
-          draggedIndex,
-          isPlanning,
-          isCompleted,
-          dropSlotGaps,
-          activeDropPreviews,
+          context.scrollContainerRef.current,
+          context.plan,
+          context.draggedIndex,
+          context.isPlanning,
+          context.isCompleted,
+          context.dropSlotGaps,
+          context.activeDropPreviews,
         )
-        if (!tailDrop || draggedIndex === null) return
+        if (!tailDrop || context.draggedIndex === null) return
         event.preventDefault()
-        finishDropMove(draggedIndex, tailDrop.targetIndex, tailDrop.preview, tailDrop.dropVisualTop)
+        context.finishDropMove(
+          context.draggedIndex,
+          tailDrop.targetIndex,
+          tailDrop.preview,
+          tailDrop.dropVisualTop,
+        )
       },
     }),
-    [
-      activeDropPreviews,
-      dragClientYRef,
-      dragOverGapIndexRef,
-      draggedIndex,
-      dropSlotGaps,
-      finishDropMove,
-      isCompleted,
-      isPlanning,
-      plan,
-      recordDragOverClientY,
-      scrollContainerRef,
-      updateDragOverGapIndex,
-    ],
+    [],
   )
 
   return { getRowDropProps, getSlotDropProps, scrollContainerDropProps }
 }
-

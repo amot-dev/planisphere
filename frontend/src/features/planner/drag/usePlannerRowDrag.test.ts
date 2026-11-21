@@ -74,25 +74,29 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
       getBoundingClientRect: () => ({ top: 0 }),
     } as unknown as HTMLDivElement
 
-    const getRowDropProps = createCachedRowDropPropsGetter({
-      plan: dragPlan,
-      isPlanning: true,
-      isCompleted: false,
-      lastVisitedIndex: -1,
-      draggedIndex: 0,
-      dragOverGapIndexRef,
-      updateDragOverGapIndex: (gapIndex) => {
-        dragOverGapIndexRef.current = gapIndex
-        gapUpdates.push(gapIndex)
+    const liveDropContextRef = {
+      current: {
+        plan: dragPlan,
+        isPlanning: true,
+        isCompleted: false,
+        lastVisitedIndex: -1,
+        draggedIndex: 0 as number | null,
+        dragOverGapIndexRef,
+        updateDragOverGapIndex: (gapIndex: number | null) => {
+          dragOverGapIndexRef.current = gapIndex
+          gapUpdates.push(gapIndex)
+        },
+        dropSlotGaps: new Set<number>(),
+        activeDropPreviews: null as expedition.DropSlotPreview[] | null,
+        scrollContainerRef: { current: scrollContainerElement },
+        recordDragOverClientY: () => {},
+        finishDropMove: (fromIndex: number, targetIndex: number) => {
+          dropMoves.push({ fromIndex, targetIndex })
+        },
       },
-      dropSlotGaps: new Set<number>(),
-      activeDropPreviews: null,
-      scrollContainerRef: { current: scrollContainerElement },
-      recordDragOverClientY: () => {},
-      finishDropMove: (fromIndex, targetIndex) => {
-        dropMoves.push({ fromIndex, targetIndex })
-      },
-    })
+    }
+
+    const getRowDropProps = createCachedRowDropPropsGetter(liveDropContextRef)
 
     const initialRowTwoProps = getRowDropProps(2)
     expect(getRowDropProps(2)).toBe(initialRowTwoProps)
@@ -122,7 +126,26 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
     initialRowTwoProps.onDrop(makeDragEvent(130))
     expect(dropMoves).toEqual([{ fromIndex: 0, targetIndex: 2 }])
 
+    // Updating plan and draggedIndex on the ref keeps the cached row dropProps identity intact.
+    liveDropContextRef.current = {
+      ...liveDropContextRef.current,
+      plan: expedition.PlanView.createFrom({ ...dragPlan }),
+      draggedIndex: 1,
+    }
+    expect(getRowDropProps(2)).toBe(initialRowTwoProps)
+    initialRowTwoProps.onDrop(makeDragEvent(130))
+    expect(dropMoves).toEqual([
+      { fromIndex: 0, targetIndex: 2 },
+      { fromIndex: 1, targetIndex: 2 },
+    ])
+
     expect((PlannerRegionRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
+    )
+    expect((PlannerCollapsedVisitedRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
+    )
+    expect((PlannerDropSlotRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
       Symbol.for('react.memo'),
     )
   })

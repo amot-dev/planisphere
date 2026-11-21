@@ -1,3 +1,5 @@
+import { memo } from 'react'
+
 /**
  * PlannerActiveLegFooterProps defines the expedition status flags and
  * row-append callback rendered below the waypoint table.
@@ -13,7 +15,7 @@ export interface PlannerActiveLegFooterProps {
  * PlannerActiveLegFooter renders the bottom Add Waypoint and Add Region Header
  * action bar and scroll spacer.
  */
-export function PlannerActiveLegFooter({
+export const PlannerActiveLegFooter = memo(function PlannerActiveLegFooter({
   isPlanning,
   isCompleted,
   hasCollapsedRows = false,
@@ -63,5 +65,5 @@ export function PlannerActiveLegFooter({
       />
     </>
   )
-}
+})
 

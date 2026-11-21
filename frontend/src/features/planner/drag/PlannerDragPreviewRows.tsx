@@ -1,4 +1,4 @@
-import type { DragEvent } from 'react'
+import { memo, type DragEvent } from 'react'
 import { expedition } from '../../../api/models'
 
 /**
@@ -20,7 +20,7 @@ export interface PlannerCollapsedVisitedRowProps {
  * PlannerCollapsedVisitedRow renders a compact summary bar replacing a run of
  * visited rows that have no valid or FC-blocked drop slots adjacent to them.
  */
-export function PlannerCollapsedVisitedRow({
+export const PlannerCollapsedVisitedRow = memo(function PlannerCollapsedVisitedRow({
   visibleColumnCount,
   waypointCount,
   regionCount,
@@ -65,7 +65,7 @@ export function PlannerCollapsedVisitedRow({
       </td>
     </tr>
   )
-}
+})
 
 /**
  * PlannerDropSlotRowProps defines the gap index, preview metadata, and drag
@@ -85,7 +85,7 @@ export interface PlannerDropSlotRowProps {
  * PlannerDropSlotRow renders a dashed-border drop target gap in the visited zone
  * (cyan for valid historical slots, orange for Fleet Carrier stop order conflicts).
  */
-export function PlannerDropSlotRow({
+export const PlannerDropSlotRow = memo(function PlannerDropSlotRow({
   gapIndex,
   visibleColumnCount,
   grabbedSystemName,
@@ -175,5 +175,5 @@ export function PlannerDropSlotRow({
       </td>
     </tr>
   )
-}
+})
 

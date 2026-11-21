@@ -2,6 +2,8 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../../api/models'
+import { ExpeditionPlanner } from '../ExpeditionPlanner'
+import { PlannerRouteTable } from '../table/PlannerRouteTable'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
 
 function createOriginRowView() {
@@ -52,8 +54,18 @@ describe('WaypointDetailsDrawer', () => {
         modeId: 10,
         modeColor: '#00D2FF',
         modesList: mockModes,
-        onChangeMode: () => {},
+        onChangeLegMode: () => {},
       }),
+    )
+
+    expect((ExpeditionPlanner as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
+    )
+    expect((PlannerRouteTable as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
+    )
+    expect((WaypointDetailsDrawer as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
     )
 
     expect(html).toContain('style="border-left-color:#00D2FF"')

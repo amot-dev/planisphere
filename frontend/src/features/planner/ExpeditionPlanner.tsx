@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expedition } from '../../api/models'
 import {
   computePlanFrontierIndices,
@@ -42,7 +42,7 @@ export interface ExpeditionPlannerProps {
  * ExpeditionPlanner renders the primary flight plan table, inline cell drafts,
  * drag-and-drop row reordering, telemetry drawers, and Fleet Carrier router.
  */
-export function ExpeditionPlanner({
+export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   plan,
   archiveRevision = '',
   externalLinkInara,
@@ -272,6 +272,13 @@ export function ExpeditionPlanner({
     ],
   )
 
+  const handleAppendRow = useCallback(
+    (rowType: 'waypoint' | 'region') => {
+      void mutations.handleInsert(0, rowType)
+    },
+    [mutations.handleInsert],
+  )
+
   if (!plan) {
     return (
       <div className="flex-1 flex items-center justify-center p-12 text-ed-text-muted font-mono-tabular uppercase tracking-widest text-xs">
@@ -323,7 +330,7 @@ export function ExpeditionPlanner({
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}
           hasCollapsedRows={rowDrag.hasCollapsedRows}
-          onAppendRow={(rowType) => void mutations.handleInsert(0, rowType)}
+          onAppendRow={handleAppendRow}
         />
       </div>
 
@@ -379,5 +386,5 @@ export function ExpeditionPlanner({
       )}
     </div>
   )
-}
+})
 

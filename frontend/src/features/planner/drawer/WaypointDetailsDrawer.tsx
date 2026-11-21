@@ -1,3 +1,4 @@
+import { memo, useCallback } from 'react'
 import { expedition, modes, realization as realizationModel, stats } from '../../../api/models'
 import { CartographicsValueBreakdown } from '../../../components/ui/CartographicsValueBreakdown'
 import { ExobiologyValueBreakdown } from '../../../components/ui/ExobiologyValueBreakdown'
@@ -23,22 +24,29 @@ export interface WaypointDetailsDrawerProps {
   modeId?: number
   modeColor?: string
   modesList?: modes.Mode[]
-  onChangeMode?: (nextModeId: number) => void
+  onChangeLegMode?: (rowId: number, nextModeId: number) => void
 }
 
 /**
  * WaypointDetailsDrawer renders the expandable row drawer displaying delta leg
  * telemetry and exploration valuations for visited and active current waypoints.
  */
-export function WaypointDetailsDrawer({
+export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
   details,
   loading,
   rowView,
   modeId,
   modeColor,
   modesList,
-  onChangeMode,
+  onChangeLegMode,
 }: WaypointDetailsDrawerProps) {
+  const rowId = rowView.row.id
+  const handleSelectMode = useCallback(
+    (nextModeId: number) => {
+      onChangeLegMode?.(rowId, nextModeId)
+    },
+    [onChangeLegMode, rowId],
+  )
   const isOrigin = details?.kind === 'origin' || rowView.number === 1
   const drawerBorderColor =
     getWaypointLegBorderColor(rowView, false, {
@@ -113,12 +121,12 @@ export function WaypointDetailsDrawer({
             </span>
           </div>
 
-          {modesList && modesList.length > 0 && onChangeMode && (
+          {modesList && modesList.length > 0 && onChangeLegMode && (
             <LegModeDropdown
               modeId={modeId || 0}
               modeColor={modeColor}
               modesList={modesList}
-              onChangeMode={onChangeMode}
+              onChangeMode={handleSelectMode}
             />
           )}
         </div>
@@ -149,7 +157,7 @@ export function WaypointDetailsDrawer({
       <WaypointValuationCards metrics={metrics} realization={realization} />
     </div>
   )
-}
+})
 
 function WaypointValuationCards({
   metrics,

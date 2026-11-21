@@ -311,7 +311,7 @@ function renderVisitedDrawersBatchHTML(hydrated: HydratedFrontendFixture): numbe
         modeId: matchingRow.legModeId,
         modeColor: matchingRow.legModeColor,
         modesList,
-        onChangeMode: noop,
+        onChangeLegMode: noop,
       }),
     ).length
   }

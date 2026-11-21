@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
-import { expedition } from '../../../api/models'
+import { memo, useCallback, useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
+import { expedition, modes } from '../../../api/models'
 import type { NextCarrierStopEntry } from '../../../domain/carrierRouting'
 import {
   computeRegionBorderColors,
@@ -18,6 +18,8 @@ const rowStyle: CSSProperties = {
   contentVisibility: 'auto',
   containIntrinsicSize: '44px',
 }
+
+const EMPTY_MODES: modes.Mode[] = []
 
 /**
  * PlannerColumnLayout defines table dimensions and optional column toggles.
@@ -117,7 +119,7 @@ export interface PlannerRouteTableProps {
  * dispatching region banners, waypoint rows, collapsed visited summaries,
  * dashed historical drop slots, and expanded leg telemetry drawers.
  */
-export function PlannerRouteTable({
+export const PlannerRouteTable = memo(function PlannerRouteTable({
   plan,
   isPlanning,
   isCompleted,
@@ -161,7 +163,7 @@ export function PlannerRouteTable({
     routedCarrierStopIndex,
     onOpenCarrierRoutePrompt,
   } = carrierState
-  const modesList = plan.modes ?? []
+  const modesList = plan.modes ?? EMPTY_MODES
 
   const rowViewById = useMemo(() => {
     const rowMap = new Map<number, expedition.RowView>()
@@ -183,6 +185,7 @@ export function PlannerRouteTable({
     insertMenuAfterId: rowActions.insertMenuAfterId,
     onSetInsertMenuAfterId: rowActions.onSetInsertMenuAfterId,
     onChangeRegion: rowActions.onChangeRegion,
+    onLegModeChange: rowActions.onLegModeChange,
     onInsert: rowActions.onInsert,
     onDeleteRow: rowActions.onDeleteRow,
     onToggleExpand: toggleExpand,
@@ -202,6 +205,7 @@ export function PlannerRouteTable({
     insertMenuAfterId: rowActions.insertMenuAfterId,
     onSetInsertMenuAfterId: rowActions.onSetInsertMenuAfterId,
     onChangeRegion: rowActions.onChangeRegion,
+    onLegModeChange: rowActions.onLegModeChange,
     onInsert: rowActions.onInsert,
     onDeleteRow: rowActions.onDeleteRow,
     onToggleExpand: toggleExpand,
@@ -264,6 +268,12 @@ export function PlannerRouteTable({
   const handleChangeRegion = useCallback(
     (rowId: number, regionId: number) =>
       latestCallbacksRef.current.onChangeRegion(rowId, regionId),
+    [],
+  )
+
+  const handleChangeLegMode = useCallback(
+    (rowId: number, nextModeId: number) =>
+      latestCallbacksRef.current.onLegModeChange(rowId, nextModeId),
     [],
   )
 
@@ -375,7 +385,7 @@ export function PlannerRouteTable({
                     modeId={rowView.legModeId}
                     modeColor={rowView.legModeColor}
                     modesList={modesList}
-                    onChangeMode={(nextModeId) => rowActions.onLegModeChange(row.id, nextModeId)}
+                    onChangeLegMode={handleChangeLegMode}
                   />
                 </td>
               </tr>
@@ -439,5 +449,5 @@ export function PlannerRouteTable({
       </tbody>
     </table>
   )
-}
+})
 

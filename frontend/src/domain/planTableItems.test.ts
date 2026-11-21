@@ -1,71 +1,114 @@
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../api/models'
-import { buildOptimisticMovedRowPlan } from './planOptimisticReducers'
+import {
+  buildOptimisticDeletedRowPlan,
+  buildOptimisticFcArrivedPlan,
+  buildOptimisticFcStopTogglePlan,
+  buildOptimisticLegModePlan,
+  buildOptimisticMovedRowPlan,
+} from './planOptimisticReducers'
 import { buildPlannerTableItems, gapToTargetIndex } from './planTableItems'
 
-function buildSamplePlan(overrides: Partial<expedition.PlanView> = {}): expedition.PlanView {
-  return expedition.PlanView.createFrom({
-    expedition: {
-      id: 7,
-      name: 'Norma Reconnaissance',
-      status: 'active',
-      startTimestamp: '3312-01-01T00:00:00Z',
-    },
-    rows: [
-      {
-        row: {
-          id: 10,
-          expeditionId: 7,
-          position: 1,
-          rowType: 'region',
-          regionId: 18,
-        },
-        number: 0,
-        visitState: 'visited',
+describe('planOptimisticReducers structural sharing', () => {
+  it('updates 1-based row positions without sortOrder, renumbers waypoints, and preserves untouched RowView identities across all reducers', () => {
+    const initialPlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: 7,
+        name: 'Norma Reconnaissance',
+        status: 'active',
+        startTimestamp: '3312-01-01T00:00:00Z',
       },
-      {
-        row: {
-          id: 11,
-          expeditionId: 7,
-          position: 2,
-          rowType: 'waypoint',
-          systemName: 'Sol',
-          visitedAt: '3312-01-01T01:00:00Z',
+      rows: [
+        {
+          row: { id: 10, expeditionId: 7, position: 1, rowType: 'region', regionId: 18 },
+          number: 0,
+          visitState: 'visited',
         },
-        number: 1,
-        legModeId: 1,
-        visitState: 'visited',
-      },
-      {
-        row: {
-          id: 12,
-          expeditionId: 7,
-          position: 3,
-          rowType: 'waypoint',
-          systemName: 'Colonia',
-          visitedAt: '3312-01-03T12:00:00Z',
+        {
+          row: {
+            id: 11,
+            expeditionId: 7,
+            position: 2,
+            rowType: 'waypoint',
+            systemName: 'Sol',
+            visitedAt: '3312-01-01T01:00:00Z',
+          },
+          number: 1,
+          legModeId: 1,
+          visitState: 'visited',
+          gec: { id: 501, name: 'Cradle of Humanity', type: 'Historical', url: '', count: 1 },
         },
-        number: 2,
-        legModeId: 1,
-        visitState: 'current',
-      },
-    ],
-    modes: [],
-    ...overrides,
-  })
-}
+        {
+          row: {
+            id: 12,
+            expeditionId: 7,
+            position: 3,
+            rowType: 'waypoint',
+            systemName: 'Colonia',
+            fcStop: true,
+            fcArrived: false,
+            visitedAt: '3312-01-03T12:00:00Z',
+          },
+          number: 2,
+          legModeId: 1,
+          visitState: 'current',
+        },
+        {
+          row: {
+            id: 13,
+            expeditionId: 7,
+            position: 4,
+            rowType: 'waypoint',
+            systemName: 'Beagle Point',
+          },
+          number: 3,
+          legModeId: 1,
+          visitState: 'future',
+        },
+      ],
+      modes: [{ id: 2, name: 'Exobiology', color: '#00E5A3', description: '', isDefault: false, sortOrder: 2 }],
+    })
 
-describe('buildOptimisticMovedRowPlan', () => {
-  it('updates 1-based row positions without sortOrder and renumbers waypoints', () => {
-    const initialPlan = buildSamplePlan()
+    // Move index 1 <-> index 2: index 0 (before span) and index 3 (after span) retain === identity.
     const reorderedPlan = buildOptimisticMovedRowPlan(initialPlan, 1, 2)
-
-    expect(reorderedPlan.rows.map((rowView) => rowView.row.id)).toEqual([10, 12, 11])
-    expect(reorderedPlan.rows.map((rowView) => rowView.row.position)).toEqual([1, 2, 3])
-    expect(reorderedPlan.rows.map((rowView) => rowView.number)).toEqual([0, 1, 2])
+    expect(reorderedPlan).toBeInstanceOf(expedition.PlanView)
+    expect(reorderedPlan.expedition).toBe(initialPlan.expedition)
+    expect(reorderedPlan.modes).toBe(initialPlan.modes)
+    expect(reorderedPlan.rows.map((rowView) => rowView.row.id)).toEqual([10, 12, 11, 13])
+    expect(reorderedPlan.rows.map((rowView) => rowView.row.position)).toEqual([1, 2, 3, 4])
+    expect(reorderedPlan.rows.map((rowView) => rowView.number)).toEqual([0, 1, 2, 3])
+    expect(reorderedPlan.rows[0]).toBe(initialPlan.rows[0])
+    expect(reorderedPlan.rows[3]).toBe(initialPlan.rows[3])
+    expect(reorderedPlan.rows[2].gec).toBe(initialPlan.rows[1].gec)
     for (const rowView of reorderedPlan.rows) {
       expect('sortOrder' in (rowView.row as unknown as Record<string, unknown>)).toBe(false)
     }
+
+    // FC stop toggle, FC arrival, and leg mode updates clone only the targeted row.
+    const fcToggledPlan = buildOptimisticFcStopTogglePlan(initialPlan, initialPlan.rows[3].row, true)
+    expect(fcToggledPlan.rows[0]).toBe(initialPlan.rows[0])
+    expect(fcToggledPlan.rows[1]).toBe(initialPlan.rows[1])
+    expect(fcToggledPlan.rows[2]).toBe(initialPlan.rows[2])
+    expect(fcToggledPlan.rows[3].row.fcStop).toBe(true)
+
+    const fcArrivedPlan = buildOptimisticFcArrivedPlan(fcToggledPlan, 12, true)
+    expect(fcArrivedPlan.rows[1]).toBe(initialPlan.rows[1])
+    expect(fcArrivedPlan.rows[3]).toBe(fcToggledPlan.rows[3])
+    expect(fcArrivedPlan.nextFcStopRowId).toBe(13)
+
+    const legModePlan = buildOptimisticLegModePlan(initialPlan, 11, 2)
+    expect(legModePlan.rows[0]).toBe(initialPlan.rows[0])
+    expect(legModePlan.rows[2]).toBe(initialPlan.rows[2])
+    expect(legModePlan.rows[1].row).toBe(initialPlan.rows[1].row)
+    expect(legModePlan.rows[1].legModeColor).toBe('#00E5A3')
+
+    // Deleting row 12 preserves rows before index 2 and only renumbers subsequent waypoints.
+    const deletedPlan = buildOptimisticDeletedRowPlan(initialPlan, 12)
+    expect(deletedPlan.rows).toHaveLength(3)
+    expect(deletedPlan.rows[0]).toBe(initialPlan.rows[0])
+    expect(deletedPlan.rows[1]).toBe(initialPlan.rows[1])
+    expect(deletedPlan.rows[2].number).toBe(2)
+    expect(deletedPlan.rows[2].row).toBe(initialPlan.rows[3].row)
   })
 })
 
