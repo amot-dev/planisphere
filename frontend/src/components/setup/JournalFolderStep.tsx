@@ -1,4 +1,4 @@
-import { app } from '../../../wailsjs/go/models'
+import { app } from '../../api/models'
 
 /**
  * JournalFolderStepProps defines the player journal directory state and

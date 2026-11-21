@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { expedition } from '../../../../wailsjs/go/models'
+import { expedition } from '../../../api/models'
 
 /**
  * CoordStatusIndicatorProps defines the waypoint row view whose stellar

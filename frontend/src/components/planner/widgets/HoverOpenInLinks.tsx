@@ -1,6 +1,6 @@
 import { memo } from 'react'
-import { OpenURL } from '../../../../wailsjs/go/app/App'
-import { expedition } from '../../../../wailsjs/go/models'
+import { openExternalUrl } from '../../../api/backend'
+import { expedition } from '../../../api/models'
 import { edsmSystemUrl, inaraSystemUrl } from '../../../utils/galacticTime'
 
 /**
@@ -82,7 +82,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            OpenURL(inaraUrl).catch(console.error)
+            openExternalUrl(inaraUrl)
           }}
           title={`Open ${systemName} on Inara (${inaraUrl})`}
           className={linkButtonClasses}
@@ -95,7 +95,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            OpenURL(edsmUrl).catch(console.error)
+            openExternalUrl(edsmUrl)
           }}
           title={`Open ${systemName} on EDSM (${edsmUrl})`}
           className={linkButtonClasses}
@@ -108,7 +108,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            OpenURL(gecEntry.url).catch(console.error)
+            openExternalUrl(gecEntry.url)
           }}
           title={`EDAstro GEC POI: ${gecEntry.name} (${gecEntry.type})`}
           className={linkButtonClasses}

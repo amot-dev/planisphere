@@ -1,15 +1,15 @@
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
-import { app, expedition, realization, stats } from '../../wailsjs/go/models'
+import { app, expedition, realization, stats } from '../api/models'
 import { ExpeditionPlanner } from '../components/planner/ExpeditionPlanner'
 import {
   buildPlannerTableItems,
   computePlannerTableDimensions,
   gapToTargetIndex,
-} from '../components/planner/plannerPlanHelpers'
+} from '../components/planner/planTableItems'
 import { PlannerRouteTable } from '../components/planner/PlannerRouteTable'
 import { WaypointDetailsDrawer } from '../components/planner/WaypointDetailsDrawer'
-import { WaypointRowItem } from '../components/planner/WaypointRowItem'
+import { WaypointRowItem, type WaypointRowHandlers } from '../components/planner/WaypointRowItem'
 import { ExplorationValuationSection } from '../components/sidebar/ExplorationValuationSection'
 import { NavigationTelemetrySection } from '../components/sidebar/NavigationTelemetrySection'
 import { StatsSidebar } from '../components/sidebar/StatsSidebar'
@@ -87,8 +87,7 @@ export function executeHydrationPass(parsedFixture: LiveFrontendFixture): {
 }
 
 function renderDragPreviewTableHTML(hydrated: HydratedFrontendFixture): string {
-  const { plan, modesList, heldRowIndex, dropPreviews, lastVisitedIndex, lastFcArrivedIndex } =
-    hydrated
+  const { plan, heldRowIndex, dropPreviews, lastVisitedIndex, lastFcArrivedIndex } = hydrated
   if (heldRowIndex < 0 || dropPreviews.length === 0) {
     return ''
   }
@@ -119,50 +118,59 @@ function renderDragPreviewTableHTML(hydrated: HydratedFrontendFixture): string {
   return renderToString(
     createElement(PlannerRouteTable, {
       plan,
-      tableItems: dragTableItems,
-      dropSlotGaps: slotGapSet.size > 0 ? slotGapSet : emptyDropSlotSet,
-      modesList,
       isPlanning,
       isCompleted,
-      lastVisitedIndex,
-      lastFcArrivedIndex,
-      visibleColumnCount,
-      tableMinWidthPixels,
-      showNotes: true,
-      showCarrierStop: true,
-      expandedRowIds: {},
-      detailsById: {},
-      loadingDetails: {},
-      copiedSystemRowId: null,
-      insertMenuAfterId: null,
-      heldOrDraggedIndex: heldRowIndex,
-      draggedIndex: heldRowIndex,
-      dragOverGapIndex: heldRowIndex + 1,
-      activeCarrierRoute: null,
-      activeCarrierTargetRowId: 0,
-      isManualCarrierRoute: false,
-      nextFcStopEntry: null,
-      routedCarrierStopIndex: -1,
-      getRowDropProps: () => ({}),
-      getSlotDropProps: () => ({ onDragOver: noop, onDrop: noop }),
-      onClearDragOverGap: noop,
-      onToggleShowNotes: noop,
-      onToggleShowCarrierStop: noop,
-      onChangeRegion: noop,
-      onSetInsertMenuAfterId: noop,
-      onInsert: noop,
-      onDeleteRow: noop,
-      onLegModeChange: noop,
-      onToggleExpand: noop,
-      onFieldBlur: noop,
-      onCopySystem: noop,
-      onToggleFcStop: noop,
-      onOverrideFcArrived: noop,
-      onOpenCarrierRoutePrompt: noop,
-      onRowHoldStart: noop,
-      onRowHoldEnd: noop,
-      onRowDragStart: noop,
-      onRowDragEnd: noop,
+      frontier: { lastVisitedIndex, lastFcArrivedIndex },
+      columns: {
+        visibleColumnCount,
+        tableMinWidthPixels,
+        showNotes: true,
+        showCarrierStop: true,
+        onToggleShowNotes: noop,
+        onToggleShowCarrierStop: noop,
+      },
+      externalLinks: {},
+      drawerState: {
+        expandedRowIds: {},
+        detailsById: {},
+        loadingDetails: {},
+        toggleExpand: noop,
+      },
+      dragState: {
+        tableItems: dragTableItems,
+        dropSlotGaps: slotGapSet.size > 0 ? slotGapSet : emptyDropSlotSet,
+        heldOrDraggedIndex: heldRowIndex,
+        draggedIndex: heldRowIndex,
+        dragOverGapIndex: heldRowIndex + 1,
+        getRowDropProps: () => ({}),
+        getSlotDropProps: () => ({ onDragOver: noop, onDrop: noop }),
+        onClearDragOverGap: noop,
+        onRowHoldStart: noop,
+        onRowHoldEnd: noop,
+        onRowDragStart: noop,
+        onRowDragEnd: noop,
+      },
+      carrierState: {
+        activeCarrierRoute: null,
+        activeCarrierTargetRowId: 0,
+        isManualCarrierRoute: false,
+        nextFcStopEntry: null,
+        routedCarrierStopIndex: -1,
+        onOpenCarrierRoutePrompt: noop,
+      },
+      rowActions: {
+        copiedSystemRowId: null,
+        insertMenuAfterId: null,
+        onSetInsertMenuAfterId: noop,
+        onChangeRegion: noop,
+        onInsert: noop,
+        onDeleteRow: noop,
+        onLegModeChange: noop,
+        onFieldBlur: noop,
+        onCopySystem: noop,
+        onToggleFcStop: noop,
+        onOverrideFcArrived: noop,
+      },
     }),
   )
 }
@@ -222,6 +230,24 @@ function renderWaypointRowsBatchHTML(hydrated: HydratedFrontendFixture): {
   const { plan, lastVisitedIndex, lastFcArrivedIndex } = hydrated
   const isPlanning = plan.expedition.status === 'planning'
   const isCompleted = plan.expedition.status === 'completed'
+  const probeExternalLinks = {
+    inara: 'always',
+    edsm: 'if_no_gec',
+    gec: 'always',
+  }
+  const probeHandlers: WaypointRowHandlers = {
+    onToggleExpand: noop,
+    onFieldBlur: noop,
+    onCopySystem: noop,
+    onToggleFcStop: noop,
+    onOverrideFcArrived: noop,
+    onOpenCarrierRoutePrompt: noop,
+    onToggleInsertMenu: noop,
+    onInsert: noop,
+    onDelete: noop,
+    onDragStart: noop,
+    onDragEnd: noop,
+  }
   let htmlLength = 0
   let waypointCount = 0
 
@@ -255,20 +281,8 @@ function renderWaypointRowsBatchHTML(hydrated: HydratedFrontendFixture): {
             lastVisitedIndex,
             rowStyle: {},
             dropProps: {},
-            externalLinkInara: 'always',
-            externalLinkEdsm: 'if_no_gec',
-            externalLinkGec: 'always',
-            onToggleExpand: noop,
-            onFieldBlur: noop,
-            onCopySystem: noop,
-            onToggleFcStop: noop,
-            onOverrideFcArrived: noop,
-            onOpenCarrierRoutePrompt: noop,
-            onToggleInsertMenu: noop,
-            onInsert: noop,
-            onDelete: noop,
-            onDragStart: noop,
-            onDragEnd: noop,
+            externalLinks: probeExternalLinks,
+            handlers: probeHandlers,
           }),
         ),
       ),
@@ -333,7 +347,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'ExpeditionPlanner (Full Route Table SSR)',
-      'frontend/src/components/planner/ExpeditionPlanner.tsx:59',
+      'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
       1,
       plan.rows.length,
       'rows',
@@ -360,7 +374,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'PlannerRouteTable[Drag Drop-Slot Preview SSR]',
-        'frontend/src/components/planner/PlannerRouteTable.tsx:92',
+        'frontend/src/components/planner/PlannerRouteTable.tsx:120',
         1,
         hydrated.dropPreviews.length,
         'slots',
@@ -374,7 +388,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'WaypointRowItem[Per-Row Render Pass]',
-      'frontend/src/components/planner/WaypointRowItem.tsx:158',
+      'frontend/src/components/planner/WaypointRowItem.tsx:172',
       waypointCount,
       waypointCount,
       'waypoints',
@@ -387,7 +401,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   children.push(
     makeRenderSpan(
       'WaypointDetailsDrawer[Visited Drawers Batch]',
-      'frontend/src/components/planner/WaypointDetailsDrawer.tsx:25',
+      'frontend/src/components/planner/WaypointDetailsDrawer.tsx:26',
       visitedDetails.length,
       visitedDetails.length,
       'drawers',

@@ -1,5 +1,5 @@
-import { OpenURL } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { openExternalUrl } from '../../api/backend'
+import { app } from '../../api/models'
 import { APP_REPOSITORY, APP_VERSION } from '../../version'
 
 /**
@@ -38,7 +38,7 @@ export function VersionIndicator({ settings }: VersionIndicatorProps) {
         href={latestReleaseUrl}
         onClick={(event) => {
           event.preventDefault()
-          OpenURL(latestReleaseUrl).catch(console.error)
+          openExternalUrl(latestReleaseUrl)
         }}
         className="inline-flex items-center gap-1.5 font-mono-tabular text-[11px] font-semibold text-[#00D2FF] hover:underline tracking-normal leading-none select-none cursor-pointer"
         title={versionTooltip}

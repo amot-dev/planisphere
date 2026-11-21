@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { app } from '../../../wailsjs/go/models'
+import { app } from '../../api/models'
 import { ExternalLinksSection } from './ExternalLinksSection'
 
 describe('ExternalLinksSection', () => {

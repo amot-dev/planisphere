@@ -38,7 +38,7 @@ func (app *App) checkLatestVersionOnStartup() {
 		app.versionCheckMu.Lock()
 		app.versionCheckFailed = true
 		app.versionCheckMu.Unlock()
-		app.publishApp("settings", 0, events.AppSettingsChanged)
+		app.publishApp(0, events.AppSettingsChanged)
 		return
 	}
 
@@ -48,6 +48,6 @@ func (app *App) checkLatestVersionOnStartup() {
 	app.versionCheckMu.Unlock()
 
 	if latestReleaseVersion != "" && latestReleaseVersion != version.Version {
-		app.publishApp("settings", 0, events.AppSettingsChanged)
+		app.publishApp(0, events.AppSettingsChanged)
 	}
 }

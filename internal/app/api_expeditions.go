@@ -37,7 +37,7 @@ func (app *App) CreateExpedition(name, description string) (expedition.Expeditio
 	}); err != nil {
 		return createdExpedition, err
 	}
-	app.publishApp("plan", createdExpedition.ID, events.AppExpeditionPlanChanged)
+	app.publishApp(createdExpedition.ID, events.AppExpeditionPlanChanged)
 	return createdExpedition, nil
 }
 
@@ -56,7 +56,7 @@ func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 		return clonedExpedition, err
 	}
 	app.kickResolution(clonedExpedition.ID, false)
-	app.publishApp("plan", clonedExpedition.ID, events.AppExpeditionPlanChanged)
+	app.publishApp(clonedExpedition.ID, events.AppExpeditionPlanChanged)
 	return clonedExpedition, nil
 }
 
@@ -67,7 +67,7 @@ func (app *App) UpdateExpedition(id int64, name, description string) error {
 	}); updateError != nil {
 		return updateError
 	}
-	app.publishApp("plan", id, events.AppExpeditionPlanChanged)
+	app.publishApp(id, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -79,7 +79,7 @@ func (app *App) UpdateExpeditionCarrierConfig(id int64, carrierType string, week
 	}); updateError != nil {
 		return updateError
 	}
-	app.publishApp("plan", id, events.AppExpeditionPlanChanged, events.AppAdjustmentsChanged)
+	app.publishApp(id, events.AppExpeditionPlanChanged, events.AppAdjustmentsChanged)
 	return nil
 }
 
@@ -110,7 +110,7 @@ func (app *App) DeleteExpedition(id int64) error {
 		return deleteError
 	}
 	if !wasActive {
-		app.emitDataChanged("expeditions", id, events.NewUITargetSet(events.UITargetExpeditions))
+		app.emitDataChanged(id, events.NewUITargetSet(events.UITargetExpeditions))
 		return nil
 	}
 	if nextActiveID > 0 {
@@ -119,7 +119,7 @@ func (app *App) DeleteExpedition(id int64) error {
 	if bus := app.currentBus(); bus != nil {
 		bus.PublishApp(events.AppSettingsChanged)
 	}
-	app.emitDataChanged("expeditions", 0, events.NewUITargetSet(events.UITargetSettings, events.UITargetExpeditions))
+	app.emitDataChanged(0, events.NewUITargetSet(events.UITargetSettings, events.UITargetExpeditions))
 	return nil
 }
 
@@ -198,7 +198,7 @@ func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID 
 	}(); err != nil {
 		return newRow, err
 	}
-	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	return newRow, nil
 }
 
@@ -239,10 +239,10 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 		if rowItem.SystemName != "" {
 			app.resolveRowAsync(rowItem, true)
 		}
-		app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+		app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 		return nil
 	}
-	app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+	app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -262,7 +262,7 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 	}(); err != nil {
 		return err
 	}
-	app.publishApp("modes", expeditionID, events.AppModesChanged, events.AppModeWindowsChanged)
+	app.publishApp(expeditionID, events.AppModesChanged, events.AppModeWindowsChanged)
 	return nil
 }
 
@@ -283,7 +283,7 @@ func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
 	}(); err != nil {
 		return err
 	}
-	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -303,7 +303,7 @@ func (app *App) DeleteRow(rowID int64) error {
 		return err
 	}
 	app.reevaluate(expeditionID)
-	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -330,10 +330,10 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 	}
 	if rowItem.RowType == expedition.RowWaypoint {
 		app.reevaluate(expeditionID)
-		app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 		return nil
 	}
-	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -430,7 +430,7 @@ func (app *App) lifecycle(expeditionID int64, action func() error) error {
 	if err := app.withReadyReadLock(action); err != nil {
 		return err
 	}
-	app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
 	return nil
 }
 

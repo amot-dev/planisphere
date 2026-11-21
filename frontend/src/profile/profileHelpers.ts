@@ -1,4 +1,4 @@
-import { app, expedition, modes } from '../../wailsjs/go/models'
+import { app, expedition, modes } from '../api/models'
 import { createTextareaResizeCoordinator } from '../components/common/AutoExpandingTextarea'
 
 /**

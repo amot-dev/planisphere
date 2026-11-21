@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { CreateMode, DeleteMode, UpdateMode } from '../../../wailsjs/go/app/App'
-import { app, modes } from '../../../wailsjs/go/models'
+import { CreateMode, DeleteMode, UpdateMode } from '../../api/backend'
+import { app, modes } from '../../api/models'
 
 /**
  * FlightModesSectionProps defines the current flight modes state and callbacks
@@ -8,7 +8,6 @@ import { app, modes } from '../../../wailsjs/go/models'
  */
 export interface FlightModesSectionProps {
   modesState: app.ModesState | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -18,7 +17,6 @@ export interface FlightModesSectionProps {
  */
 export function FlightModesSection({
   modesState,
-  onRefresh,
   onSetError,
 }: FlightModesSectionProps) {
   const [newModeName, setNewModeName] = useState('')
@@ -64,7 +62,6 @@ export function FlightModesSection({
       await CreateMode(newModeName, newModeDescription, newModeColor)
       setNewModeName('')
       setNewModeDescription('')
-      onRefresh()
     } catch (createError) {
       onSetError(String(createError))
     }
@@ -79,7 +76,6 @@ export function FlightModesSection({
     onSetError('')
     try {
       await DeleteMode(modeId)
-      onRefresh()
     } catch (deleteError) {
       onSetError(String(deleteError))
     }

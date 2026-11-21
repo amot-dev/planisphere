@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { app } from '../../../wailsjs/go/models'
+import { app, type EddImportProgress } from '../../api/models'
 import { ModalShell } from '../common/ModalShell'
 import { CommandersSection } from './CommandersSection'
 import { DatabaseArchiveSection } from './DatabaseArchiveSection'
-import { EDDiscoveryImportSection, type EddImportProgress } from './EDDiscoveryImportSection'
+import { EDDiscoveryImportSection } from './EDDiscoveryImportSection'
 import { ExternalLinksSection } from './ExternalLinksSection'
 import { FleetCarrierSection } from './FleetCarrierSection'
 import { FlightModesSection } from './FlightModesSection'
@@ -20,7 +20,6 @@ export interface SettingsModalProps {
   modesState: app.ModesState | null
   eddProgress?: EddImportProgress | null
   onClose: () => void
-  onRefresh: () => void
   onOpenSetupWizard?: () => void
 }
 
@@ -35,7 +34,6 @@ export function SettingsModal({
   modesState,
   eddProgress,
   onClose,
-  onRefresh,
   onOpenSetupWizard,
 }: SettingsModalProps) {
   const [error, setError] = useState('')
@@ -52,45 +50,38 @@ export function SettingsModal({
 
       <JournalDirectorySection
         settings={settings}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 
       <DatabaseArchiveSection
         settings={settings}
         ingestStatus={ingestStatus}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 
       <FlightModesSection
         modesState={modesState}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 
       <FleetCarrierSection
         settings={settings}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 
       <CommandersSection
         settings={settings}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 
       <EDDiscoveryImportSection
         settings={settings}
         eddProgress={eddProgress}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 
       <OnlineServicesSection
         settings={settings}
-        onRefresh={onRefresh}
         onSetError={setError}
       />
 

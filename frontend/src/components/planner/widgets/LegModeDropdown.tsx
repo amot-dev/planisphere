@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { modes } from '../../../../wailsjs/go/models'
+import { modes } from '../../../api/models'
 
 /**
  * LegModeDropdownProps defines the active flight mode metadata, available modes,

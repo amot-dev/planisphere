@@ -1,4 +1,4 @@
-import { realization, stats } from '../../../wailsjs/go/models'
+import { realization, stats } from '../../api/models'
 import { formatCredits, formatInt } from '../../utils/galacticTime'
 import { CartographicsValueBreakdown } from '../common/CartographicsValueBreakdown'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'

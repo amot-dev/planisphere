@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { SetExternalLinks } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { SetExternalLinks } from '../../api/backend'
+import { app } from '../../api/models'
 import {
   normalizeBinaryMode,
   normalizeEdsmMode,

@@ -12,10 +12,9 @@ import {
   SetDatabasePath,
   SetOnlineLookups,
   SetupConfigureJournals,
-} from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+} from '../../api/backend'
+import { app, type EddImportProgress } from '../../api/models'
 import { APP_PRODUCT_NAME, APP_VERSION } from '../../version'
-import type { EddImportProgress } from '../settings/EDDiscoveryImportSection'
 import { CommandersOnlineStep } from './CommandersOnlineStep'
 import { DatabaseLocationStep } from './DatabaseLocationStep'
 import { HistoricalImportStep } from './HistoricalImportStep'

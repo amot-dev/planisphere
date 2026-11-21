@@ -1,12 +1,18 @@
-import { useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
-import { expedition, modes } from '../../../wailsjs/go/models'
-import type { NextCarrierStopEntry } from './carrierRouteHelpers'
+import { useCallback, useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
+import { expedition } from '../../api/models'
+import type { NextCarrierStopEntry } from '../../utils/carrierRouting'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
-import { getWaypointLegBorderColor, type PlannerTableItem } from './plannerPlanHelpers'
 import { PlannerRegionRow } from './PlannerRegionRow'
 import { PlannerTableHeader } from './PlannerTableHeader'
+import {
+  computeRegionBorderColors,
+  type ExternalLinkVisibilityConfig,
+  type PlannerFrontierIndices,
+  type PlannerTableItem,
+} from './planTableItems'
+import type { WaypointDetailsState } from './useWaypointDetails'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
-import { WaypointRowItem } from './WaypointRowItem'
+import { WaypointRowItem, type WaypointRowHandlers } from './WaypointRowItem'
 
 const rowStyle: CSSProperties = {
   contentVisibility: 'auto',
@@ -14,39 +20,27 @@ const rowStyle: CSSProperties = {
 }
 
 /**
- * PlannerRouteTableProps defines the table items, column display toggles,
- * drag-and-drop state, carrier route state, and row action callbacks rendered
- * by the expedition route table.
+ * PlannerColumnLayout defines table dimensions and optional column toggles.
  */
-export interface PlannerRouteTableProps {
-  plan: expedition.PlanView
-  tableItems: PlannerTableItem[]
-  dropSlotGaps: ReadonlySet<number>
-  modesList: modes.Mode[]
-  isPlanning: boolean
-  isCompleted: boolean
-  lastVisitedIndex: number
-  lastFcArrivedIndex: number
+export interface PlannerColumnLayout {
   visibleColumnCount: number
   tableMinWidthPixels: number
   showNotes: boolean
   showCarrierStop: boolean
-  externalLinkInara?: string
-  externalLinkEdsm?: string
-  externalLinkGec?: string
-  expandedRowIds: Record<number, boolean>
-  detailsById: Record<number, expedition.WaypointDetails>
-  loadingDetails: Record<number, boolean>
-  copiedSystemRowId: number | null
-  insertMenuAfterId: number | null
+  onToggleShowNotes: () => void
+  onToggleShowCarrierStop: () => void
+}
+
+/**
+ * PlannerTableDragState bundles flattened table items, active drag/drop indices,
+ * and drag-and-drop row/slot prop builders.
+ */
+export interface PlannerTableDragState {
+  tableItems: PlannerTableItem[]
+  dropSlotGaps: ReadonlySet<number>
   heldOrDraggedIndex: number | null
   draggedIndex: number | null
   dragOverGapIndex: number | null
-  activeCarrierRoute: expedition.CarrierRouteResult | null
-  activeCarrierTargetRowId: number
-  isManualCarrierRoute: boolean
-  nextFcStopEntry: NextCarrierStopEntry | null
-  routedCarrierStopIndex: number
   getRowDropProps: (index: number) => {
     onDragOver?: (event: DragEvent<HTMLTableRowElement>) => void
     onDrop?: (event: DragEvent<HTMLTableRowElement>) => void
@@ -60,14 +54,36 @@ export interface PlannerRouteTableProps {
     onDrop: (event: DragEvent<HTMLTableRowElement>) => void
   }
   onClearDragOverGap: () => void
-  onToggleShowNotes: () => void
-  onToggleShowCarrierStop: () => void
-  onChangeRegion: (rowId: number, regionId: number) => void
+  onRowHoldStart: (index: number) => void
+  onRowHoldEnd: () => void
+  onRowDragStart: (dragRowIndex: number, dragRowId: number, event: DragEvent) => void
+  onRowDragEnd: () => void
+}
+
+/**
+ * PlannerTableCarrierState bundles active Fleet Carrier routing state and the
+ * Spansh prompt launch callback for planner rows.
+ */
+export interface PlannerTableCarrierState {
+  activeCarrierRoute: expedition.CarrierRouteResult | null
+  activeCarrierTargetRowId: number
+  isManualCarrierRoute: boolean
+  nextFcStopEntry: NextCarrierStopEntry | null
+  routedCarrierStopIndex: number
+  onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) => void
+}
+
+/**
+ * PlannerTableRowActions bundles per-row UI transient flags and mutation handlers.
+ */
+export interface PlannerTableRowActions {
+  copiedSystemRowId: number | null
+  insertMenuAfterId: number | null
   onSetInsertMenuAfterId: (rowId: number | null) => void
+  onChangeRegion: (rowId: number, regionId: number) => void
   onInsert: (afterRowId: number, rowType: 'waypoint' | 'region') => void
   onDeleteRow: (rowView: expedition.RowView) => void
   onLegModeChange: (rowId: number, modeId: number) => void
-  onToggleExpand: (rowId: number) => void
   onOriginSystemFilledChange?: (hasSystem: boolean) => void
   onFieldBlur: (
     row: expedition.Row,
@@ -76,12 +92,24 @@ export interface PlannerRouteTableProps {
   ) => void
   onCopySystem: (rowId: number, systemName: string) => void
   onToggleFcStop: (row: expedition.Row) => void
-  onOverrideFcArrived: (rowView: expedition.RowView) => void
-  onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) => void
-  onRowHoldStart: (index: number) => void
-  onRowHoldEnd: () => void
-  onRowDragStart: (dragRowIndex: number, dragRowId: number, event: DragEvent) => void
-  onRowDragEnd: () => void
+  onOverrideFcArrived?: (rowView: expedition.RowView) => void
+}
+
+/**
+ * PlannerRouteTableProps defines grouped domain models rendered by the expedition
+ * flight planner table.
+ */
+export interface PlannerRouteTableProps {
+  plan: expedition.PlanView
+  isPlanning: boolean
+  isCompleted: boolean
+  frontier: PlannerFrontierIndices
+  columns: PlannerColumnLayout
+  externalLinks: ExternalLinkVisibilityConfig
+  drawerState: WaypointDetailsState
+  dragState: PlannerTableDragState
+  carrierState: PlannerTableCarrierState
+  rowActions: PlannerTableRowActions
 }
 
 /**
@@ -91,55 +119,50 @@ export interface PlannerRouteTableProps {
  */
 export function PlannerRouteTable({
   plan,
-  tableItems,
-  dropSlotGaps,
-  modesList,
   isPlanning,
   isCompleted,
-  lastVisitedIndex,
-  lastFcArrivedIndex,
-  visibleColumnCount,
-  tableMinWidthPixels,
-  showNotes,
-  showCarrierStop,
-  externalLinkInara,
-  externalLinkEdsm,
-  externalLinkGec,
-  expandedRowIds,
-  detailsById,
-  loadingDetails,
-  copiedSystemRowId,
-  insertMenuAfterId,
-  heldOrDraggedIndex,
-  draggedIndex,
-  dragOverGapIndex,
-  activeCarrierRoute,
-  activeCarrierTargetRowId,
-  isManualCarrierRoute,
-  nextFcStopEntry,
-  routedCarrierStopIndex,
-  getRowDropProps,
-  getSlotDropProps,
-  onClearDragOverGap,
-  onToggleShowNotes,
-  onToggleShowCarrierStop,
-  onChangeRegion,
-  onSetInsertMenuAfterId,
-  onInsert,
-  onDeleteRow,
-  onLegModeChange,
-  onToggleExpand,
-  onOriginSystemFilledChange,
-  onFieldBlur,
-  onCopySystem,
-  onToggleFcStop,
-  onOverrideFcArrived,
-  onOpenCarrierRoutePrompt,
-  onRowHoldStart,
-  onRowHoldEnd,
-  onRowDragStart,
-  onRowDragEnd,
+  frontier,
+  columns,
+  externalLinks,
+  drawerState,
+  dragState,
+  carrierState,
+  rowActions,
 }: PlannerRouteTableProps) {
+  const { lastVisitedIndex, lastFcArrivedIndex } = frontier
+  const {
+    visibleColumnCount,
+    tableMinWidthPixels,
+    showNotes,
+    showCarrierStop,
+    onToggleShowNotes,
+    onToggleShowCarrierStop,
+  } = columns
+  const { expandedRowIds, detailsById, loadingDetails, toggleExpand } = drawerState
+  const {
+    tableItems,
+    dropSlotGaps,
+    heldOrDraggedIndex,
+    draggedIndex,
+    dragOverGapIndex,
+    getRowDropProps,
+    getSlotDropProps,
+    onClearDragOverGap,
+    onRowHoldStart,
+    onRowHoldEnd,
+    onRowDragStart,
+    onRowDragEnd,
+  } = dragState
+  const {
+    activeCarrierRoute,
+    activeCarrierTargetRowId,
+    isManualCarrierRoute,
+    nextFcStopEntry,
+    routedCarrierStopIndex,
+    onOpenCarrierRoutePrompt,
+  } = carrierState
+  const modesList = plan.modes ?? []
+
   const rowViewById = useMemo(() => {
     const rowMap = new Map<number, expedition.RowView>()
     for (const item of tableItems) {
@@ -150,37 +173,24 @@ export function PlannerRouteTable({
     return rowMap
   }, [tableItems])
 
-  const regionBorderColorByRowId = useMemo(() => {
-    const borderMap = new Map<number, string>()
-    if (isPlanning || !plan.rows?.length) return borderMap
-    let followingBorderColor: string | undefined
-    // Walk plan.rows in reverse so consecutive Region Header rows inherit the leg border color of the first following waypoint.
-    for (let i = plan.rows.length - 1; i >= 0; i--) {
-      const candidateRowView = plan.rows[i]
-      if (candidateRowView.row.rowType === 'region') {
-        if (followingBorderColor) {
-          borderMap.set(candidateRowView.row.id, followingBorderColor)
-        }
-      } else {
-        followingBorderColor = getWaypointLegBorderColor(candidateRowView, isPlanning)
-      }
-    }
-    return borderMap
-  }, [isPlanning, plan.rows])
+  const regionBorderColorByRowId = useMemo(
+    () => computeRegionBorderColors(plan.rows, isPlanning),
+    [isPlanning, plan.rows],
+  )
 
   const latestCallbacksRef = useRef({
     rowViewById,
-    insertMenuAfterId,
-    onSetInsertMenuAfterId,
-    onChangeRegion,
-    onInsert,
-    onDeleteRow,
-    onToggleExpand,
-    onOriginSystemFilledChange,
-    onFieldBlur,
-    onCopySystem,
-    onToggleFcStop,
-    onOverrideFcArrived,
+    insertMenuAfterId: rowActions.insertMenuAfterId,
+    onSetInsertMenuAfterId: rowActions.onSetInsertMenuAfterId,
+    onChangeRegion: rowActions.onChangeRegion,
+    onInsert: rowActions.onInsert,
+    onDeleteRow: rowActions.onDeleteRow,
+    onToggleExpand: toggleExpand,
+    onOriginSystemFilledChange: rowActions.onOriginSystemFilledChange,
+    onFieldBlur: rowActions.onFieldBlur,
+    onCopySystem: rowActions.onCopySystem,
+    onToggleFcStop: rowActions.onToggleFcStop,
+    onOverrideFcArrived: rowActions.onOverrideFcArrived,
     onOpenCarrierRoutePrompt,
     onRowHoldStart,
     onRowHoldEnd,
@@ -189,17 +199,17 @@ export function PlannerRouteTable({
   })
   latestCallbacksRef.current = {
     rowViewById,
-    insertMenuAfterId,
-    onSetInsertMenuAfterId,
-    onChangeRegion,
-    onInsert,
-    onDeleteRow,
-    onToggleExpand,
-    onOriginSystemFilledChange,
-    onFieldBlur,
-    onCopySystem,
-    onToggleFcStop,
-    onOverrideFcArrived,
+    insertMenuAfterId: rowActions.insertMenuAfterId,
+    onSetInsertMenuAfterId: rowActions.onSetInsertMenuAfterId,
+    onChangeRegion: rowActions.onChangeRegion,
+    onInsert: rowActions.onInsert,
+    onDeleteRow: rowActions.onDeleteRow,
+    onToggleExpand: toggleExpand,
+    onOriginSystemFilledChange: rowActions.onOriginSystemFilledChange,
+    onFieldBlur: rowActions.onFieldBlur,
+    onCopySystem: rowActions.onCopySystem,
+    onToggleFcStop: rowActions.onToggleFcStop,
+    onOverrideFcArrived: rowActions.onOverrideFcArrived,
     onOpenCarrierRoutePrompt,
     onRowHoldStart,
     onRowHoldEnd,
@@ -207,22 +217,11 @@ export function PlannerRouteTable({
     onRowDragEnd,
   }
 
+  const hasOverrideFcArrived = Boolean(rowActions.onOverrideFcArrived)
+
   // Keep per-row callback identities constant so memoized rows skip unaffected re-renders.
-  const stableRowHandlers = useMemo(
+  const stableRowHandlers = useMemo<WaypointRowHandlers>(
     () => ({
-      onChangeRegion: (rowId: number, regionId: number) =>
-        latestCallbacksRef.current.onChangeRegion(rowId, regionId),
-      onToggleInsertMenu: (rowId: number) => {
-        const { insertMenuAfterId: openMenuRowId, onSetInsertMenuAfterId: setMenuAfterId } =
-          latestCallbacksRef.current
-        setMenuAfterId(openMenuRowId === rowId ? null : rowId)
-      },
-      onInsert: (afterRowId: number, rowType: 'waypoint' | 'region') =>
-        latestCallbacksRef.current.onInsert(afterRowId, rowType),
-      onDelete: (rowId: number) => {
-        const targetRowView = latestCallbacksRef.current.rowViewById.get(rowId)
-        if (targetRowView) latestCallbacksRef.current.onDeleteRow(targetRowView)
-      },
       onToggleExpand: (rowId: number) => latestCallbacksRef.current.onToggleExpand(rowId),
       onOriginSystemFilledChange: (hasSystem: boolean) =>
         latestCallbacksRef.current.onOriginSystemFilledChange?.(hasSystem),
@@ -234,18 +233,40 @@ export function PlannerRouteTable({
       onCopySystem: (rowId: number, systemName: string) =>
         latestCallbacksRef.current.onCopySystem(rowId, systemName),
       onToggleFcStop: (row: expedition.Row) => latestCallbacksRef.current.onToggleFcStop(row),
-      onOverrideFcArrived: (rowView: expedition.RowView) =>
-        latestCallbacksRef.current.onOverrideFcArrived(rowView),
+      ...(hasOverrideFcArrived
+        ? {
+            onOverrideFcArrived: (rowView: expedition.RowView) =>
+              latestCallbacksRef.current.onOverrideFcArrived?.(rowView),
+          }
+        : {}),
       onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) =>
         latestCallbacksRef.current.onOpenCarrierRoutePrompt(rowIndex, targetRow),
+      onToggleInsertMenu: (rowId: number) => {
+        const { insertMenuAfterId: openMenuRowId, onSetInsertMenuAfterId: setMenuAfterId } =
+          latestCallbacksRef.current
+        setMenuAfterId(openMenuRowId === rowId ? null : rowId)
+      },
+      onInsert: (afterRowId: number, rowType: 'waypoint' | 'region') =>
+        latestCallbacksRef.current.onInsert(afterRowId, rowType),
+      onDelete: (rowId: number) => {
+        const targetRowView = latestCallbacksRef.current.rowViewById.get(rowId)
+        if (targetRowView) latestCallbacksRef.current.onDeleteRow(targetRowView)
+      },
       onHoldStart: (rowIndex: number) => latestCallbacksRef.current.onRowHoldStart(rowIndex),
       onHoldEnd: () => latestCallbacksRef.current.onRowHoldEnd(),
       onDragStart: (rowIndex: number, rowId: number, event: DragEvent) =>
         latestCallbacksRef.current.onRowDragStart(rowIndex, rowId, event),
       onDragEnd: () => latestCallbacksRef.current.onRowDragEnd(),
     }),
+    [hasOverrideFcArrived],
+  )
+
+  const handleChangeRegion = useCallback(
+    (rowId: number, regionId: number) =>
+      latestCallbacksRef.current.onChangeRegion(rowId, regionId),
     [],
   )
+
   const currentExpedition = plan.expedition
   const totalRows = plan.rows?.length ?? 0
   const heldRowView = heldOrDraggedIndex !== null ? plan.rows?.[heldOrDraggedIndex] : null
@@ -328,15 +349,15 @@ export function PlannerRouteTable({
                 bottomGapHighlight={bottomGapHighlight}
                 leftBorderColor={regionBorderColorByRowId.get(row.id)}
                 lastVisitedIndex={lastVisitedIndex}
-                insertMenuOpen={insertMenuAfterId === row.id}
+                insertMenuOpen={rowActions.insertMenuAfterId === row.id}
                 rowStyle={rowStyle}
                 dropProps={getRowDropProps(index)}
-                onChangeRegion={stableRowHandlers.onChangeRegion}
+                onChangeRegion={handleChangeRegion}
                 onToggleInsertMenu={stableRowHandlers.onToggleInsertMenu}
                 onInsert={stableRowHandlers.onInsert}
                 onDelete={stableRowHandlers.onDelete}
-                onHoldStart={stableRowHandlers.onHoldStart}
-                onHoldEnd={stableRowHandlers.onHoldEnd}
+                onHoldStart={stableRowHandlers.onHoldStart!}
+                onHoldEnd={stableRowHandlers.onHoldEnd!}
                 onDragStart={stableRowHandlers.onDragStart}
                 onDragEnd={stableRowHandlers.onDragEnd}
               />
@@ -354,7 +375,7 @@ export function PlannerRouteTable({
                     modeId={rowView.legModeId}
                     modeColor={rowView.legModeColor}
                     modesList={modesList}
-                    onChangeMode={(nextModeId) => onLegModeChange(row.id, nextModeId)}
+                    onChangeMode={(nextModeId) => rowActions.onLegModeChange(row.id, nextModeId)}
                   />
                 </td>
               </tr>
@@ -403,34 +424,15 @@ export function PlannerRouteTable({
               isNextWaypoint={isNextWaypoint}
               playerSystem={plan.playerSystem}
               hasActiveCarrierRoute={hasActiveCarrierRoute}
-              isSystemCopied={copiedSystemRowId === row.id}
-              insertMenuOpen={insertMenuAfterId === row.id}
+              isSystemCopied={rowActions.copiedSystemRowId === row.id}
+              insertMenuOpen={rowActions.insertMenuAfterId === row.id}
               lastVisitedIndex={lastVisitedIndex}
               rowStyle={rowStyle}
               dropProps={getRowDropProps(index)}
               showNotes={showNotes}
               showCarrierStop={showCarrierStop}
-              externalLinkInara={externalLinkInara}
-              externalLinkEdsm={externalLinkEdsm}
-              externalLinkGec={externalLinkGec}
-              onOriginSystemFilledChange={
-                rowView.number === 1 && onOriginSystemFilledChange
-                  ? stableRowHandlers.onOriginSystemFilledChange
-                  : undefined
-              }
-              onToggleExpand={stableRowHandlers.onToggleExpand}
-              onFieldBlur={stableRowHandlers.onFieldBlur}
-              onCopySystem={stableRowHandlers.onCopySystem}
-              onToggleFcStop={stableRowHandlers.onToggleFcStop}
-              onOverrideFcArrived={stableRowHandlers.onOverrideFcArrived}
-              onOpenCarrierRoutePrompt={stableRowHandlers.onOpenCarrierRoutePrompt}
-              onToggleInsertMenu={stableRowHandlers.onToggleInsertMenu}
-              onInsert={stableRowHandlers.onInsert}
-              onDelete={stableRowHandlers.onDelete}
-              onHoldStart={stableRowHandlers.onHoldStart}
-              onHoldEnd={stableRowHandlers.onHoldEnd}
-              onDragStart={stableRowHandlers.onDragStart}
-              onDragEnd={stableRowHandlers.onDragEnd}
+              externalLinks={externalLinks}
+              handlers={stableRowHandlers}
             />
           )
         })}

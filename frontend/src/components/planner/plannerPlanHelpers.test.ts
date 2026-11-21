@@ -1,11 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { expedition } from '../../../wailsjs/go/models'
-import {
-  buildOptimisticMovedRowPlan,
-  buildPlannerTableItems,
-  executePlanMutation,
-  gapToTargetIndex,
-} from './plannerPlanHelpers'
+import { expedition } from '../../api/models'
+import { buildOptimisticMovedRowPlan } from './planOptimisticReducers'
+import { buildPlannerTableItems, gapToTargetIndex } from './planTableItems'
+import { executePlanMutation } from './usePlanMutations'
 
 function buildSamplePlan(overrides: Partial<expedition.PlanView> = {}): expedition.PlanView {
   return expedition.PlanView.createFrom({

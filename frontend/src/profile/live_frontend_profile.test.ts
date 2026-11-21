@@ -2,7 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from 'vitest'
-import { stats } from '../../wailsjs/go/models'
+import { stats } from '../api/models'
 import { ExpeditionPlanner } from '../components/planner/ExpeditionPlanner'
 import { StatsSidebar } from '../components/sidebar/StatsSidebar'
 import {
@@ -96,7 +96,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'createRoot Mount (ExpeditionPlanner + StatsSidebar)',
-        'frontend/src/components/planner/ExpeditionPlanner.tsx:59',
+        'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
         1,
         plan.rows.length,
         'rows',
@@ -110,7 +110,7 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'Single-Row Copy State Update (React.memo Row Bailout)',
-        'frontend/src/components/planner/PlannerRouteTable.tsx:193',
+        'frontend/src/components/planner/PlannerRouteTable.tsx:223',
         1,
         plan.rows.length,
         'rows',
@@ -211,7 +211,7 @@ function runAllFrontendProbes(
   const renderCold = buildProbeRun(
     'Cold',
     'Frontend/RenderTree',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:59',
+    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     1,
@@ -220,7 +220,7 @@ function runAllFrontendProbes(
   const renderWarm = buildProbeRun(
     'Warm',
     'Frontend/RenderTree',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:59',
+    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     warmIterations,
@@ -230,7 +230,7 @@ function runAllFrontendProbes(
   const clientCold = buildProbeRun(
     'Cold',
     'Frontend/ClientReconciliation',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:59',
+    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     1,
@@ -239,7 +239,7 @@ function runAllFrontendProbes(
   const clientWarm = buildProbeRun(
     'Warm',
     'Frontend/ClientReconciliation',
-    'frontend/src/components/planner/ExpeditionPlanner.tsx:59',
+    'frontend/src/components/planner/ExpeditionPlanner.tsx:44',
     rowItemCount,
     'rows',
     warmIterations,

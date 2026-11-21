@@ -1,4 +1,4 @@
-import { app, expedition } from '../../../wailsjs/go/models'
+import { app, expedition } from '../../api/models'
 import { APP_PRODUCT_NAME, APP_TAGLINE } from '../../version'
 import { VersionIndicator } from './VersionIndicator'
 

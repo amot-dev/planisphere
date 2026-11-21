@@ -1,4 +1,4 @@
-import { realization as realizationModel } from '../../../wailsjs/go/models'
+import { realization as realizationModel } from '../../api/models'
 import { formatLoss } from '../../utils/galacticTime'
 
 /**

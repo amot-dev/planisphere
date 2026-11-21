@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { GetStartCandidates, StartExpedition } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { GetStartCandidates, StartExpedition } from '../../api/backend'
+import { app } from '../../api/models'
 import { fromGalacticTime, nowGalacticTime } from '../../utils/galacticTime'
 import { ModalShell } from '../common/ModalShell'
 
@@ -11,7 +11,6 @@ import { ModalShell } from '../common/ModalShell'
 export interface StartExpeditionModalProps {
   expeditionId: number
   onClose: () => void
-  onStarted: () => void
 }
 
 /**
@@ -21,7 +20,6 @@ export interface StartExpeditionModalProps {
 export function StartExpeditionModal({
   expeditionId,
   onClose,
-  onStarted,
 }: StartExpeditionModalProps) {
   const [candidates, setCandidates] = useState<app.StartCandidates | null>(null)
   const [selectedTimestamp, setSelectedTimestamp] = useState<string>('')
@@ -58,7 +56,6 @@ export function StartExpeditionModal({
         const isoTimestamp = fromGalacticTime(customGalactic)
         await StartExpedition(expeditionId, isoTimestamp)
       }
-      onStarted()
       onClose()
     } catch (startError) {
       setError(String(startError))

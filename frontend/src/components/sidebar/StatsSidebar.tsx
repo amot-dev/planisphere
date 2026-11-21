@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { app, realization, stats } from '../../../wailsjs/go/models'
+import { app, realization, stats } from '../../api/models'
 import { CarrierConfigModal } from './CarrierConfigModal'
 import { ExplorationValuationSection } from './ExplorationValuationSection'
 import { ModeFilterPanel } from './ModeFilterPanel'

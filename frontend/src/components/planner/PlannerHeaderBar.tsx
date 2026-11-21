@@ -1,5 +1,5 @@
-import { CompleteExpedition, ReopenExpedition } from '../../../wailsjs/go/app/App'
-import { expedition } from '../../../wailsjs/go/models'
+import { CompleteExpedition, ReopenExpedition } from '../../api/backend'
+import { expedition } from '../../api/models'
 import { formatLy } from '../../utils/galacticTime'
 import { StatusBadge } from './widgets/StatusBadge'
 

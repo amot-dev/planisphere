@@ -1,4 +1,4 @@
-import { app, modes, stats } from '../../../wailsjs/go/models'
+import { app, modes, stats } from '../../api/models'
 import { SquareCheckbox } from '../common/SquareCheckbox'
 
 /**

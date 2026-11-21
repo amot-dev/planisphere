@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { RescanJournals, SetJournalDebounceMs } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { RescanJournals, SetJournalDebounceMs } from '../../api/backend'
+import { app } from '../../api/models'
 import {
   DEFAULT_JOURNAL_DEBOUNCE_MILLISECONDS,
   JournalDebounceControl,
@@ -13,7 +13,6 @@ import {
 export interface DatabaseArchiveSectionProps {
   settings: app.Settings | null
   ingestStatus: app.IngestStatus | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -24,7 +23,6 @@ export interface DatabaseArchiveSectionProps {
 export function DatabaseArchiveSection({
   settings,
   ingestStatus,
-  onRefresh,
   onSetError,
 }: DatabaseArchiveSectionProps) {
   const [rescanning, setRescanning] = useState(false)
@@ -49,7 +47,6 @@ export function DatabaseArchiveSection({
     onSetError('')
     try {
       await SetJournalDebounceMs(milliseconds)
-      onRefresh()
     } catch (commitError) {
       onSetError(String(commitError))
     }

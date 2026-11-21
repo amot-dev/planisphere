@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { SetTritiumPricePerTonne } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { SetTritiumPricePerTonne } from '../../api/backend'
+import { app } from '../../api/models'
 
 const DEFAULT_TRITIUM_PRICE_PER_TONNE = 50000
 
@@ -10,7 +10,6 @@ const DEFAULT_TRITIUM_PRICE_PER_TONNE = 50000
  */
 export interface FleetCarrierSectionProps {
   settings: app.Settings | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -20,7 +19,6 @@ export interface FleetCarrierSectionProps {
  */
 export function FleetCarrierSection({
   settings,
-  onRefresh,
   onSetError,
 }: FleetCarrierSectionProps) {
   const configuredPrice =
@@ -43,7 +41,6 @@ export function FleetCarrierSection({
     try {
       const updatedSettings = await SetTritiumPricePerTonne(targetPrice)
       setPriceInput(String(updatedSettings.tritiumPricePerTonne || defaultPrice))
-      onRefresh()
     } catch (priceError) {
       onSetError(String(priceError))
     }

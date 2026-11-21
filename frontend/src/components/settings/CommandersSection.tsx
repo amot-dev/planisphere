@@ -1,5 +1,5 @@
-import { SetCommanderEnabled } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { SetCommanderEnabled } from '../../api/backend'
+import { app } from '../../api/models'
 import { SquareCheckbox } from '../common/SquareCheckbox'
 
 /**
@@ -8,7 +8,6 @@ import { SquareCheckbox } from '../common/SquareCheckbox'
  */
 export interface CommandersSectionProps {
   settings: app.Settings | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -18,14 +17,12 @@ export interface CommandersSectionProps {
  */
 export function CommandersSection({
   settings,
-  onRefresh,
   onSetError,
 }: CommandersSectionProps) {
   async function handleToggleCommander(commanderName: string, enabled: boolean) {
     onSetError('')
     try {
       await SetCommanderEnabled(commanderName, enabled)
-      onRefresh()
     } catch (toggleError) {
       onSetError(String(toggleError))
     }

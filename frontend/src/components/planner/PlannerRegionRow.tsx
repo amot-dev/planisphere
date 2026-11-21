@@ -1,5 +1,5 @@
 import { memo, useCallback, type CSSProperties, type DragEvent, type HTMLAttributes } from 'react'
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
 import { RegionHeaderDropdown } from './widgets/RegionHeaderDropdown'
 import { RowManipulationButtons } from './widgets/RowManipulationButtons'
 

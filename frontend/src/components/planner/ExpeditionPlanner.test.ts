@@ -11,12 +11,10 @@ import { CarrierRouteModal } from './CarrierRouteModal'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { NavigationTelemetrySection } from '../sidebar/NavigationTelemetrySection'
 import { StatsSidebar } from '../sidebar/StatsSidebar'
-import {
-  createCachedRowDropPropsGetter,
-  resolveActiveDragRowIndex,
-  stepDragAutoScroll,
-} from './usePlannerRowDrag'
-import { app, expedition, stats } from '../../../wailsjs/go/models'
+import { createCachedRowDropPropsGetter } from './usePlannerDropHandlers'
+import { resolveActiveDragRowIndex } from './useRowDropPreviewCache'
+import { stepDragAutoScroll } from './useDragViewportScroll'
+import { app, expedition, stats } from '../../api/models'
 
 describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
   const renderPlanner = (plan: expedition.PlanView | null) =>
@@ -762,7 +760,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       createElement(StartExpeditionModal, {
         expeditionId: 1,
         onClose: () => {},
-        onStarted: () => {},
       }),
     )
     expect(startModalHtml).not.toContain('Arm and Wait for First Arrival')
@@ -780,60 +777,79 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       index,
       key: `row-${rowView.row.id}`,
     }))
-    const baseTableProps = {
-      plan: routePlan,
-      tableItems,
-      dropSlotGaps: new Set<number>(),
-      modesList: [],
-      isPlanning: false,
-      isCompleted: false,
-      lastVisitedIndex: 0,
-      lastFcArrivedIndex: -1,
-      visibleColumnCount: 8,
-      tableMinWidthPixels: 1200,
-      showNotes: true,
-      showCarrierStop: true,
-      expandedRowIds: {},
-      detailsById: {},
-      loadingDetails: {},
-      copiedSystemRowId: null,
-      insertMenuAfterId: null,
-      heldOrDraggedIndex: null,
-      draggedIndex: null,
-      dragOverGapIndex: null,
-      activeCarrierRoute: expedition.CarrierRouteResult.createFrom({ origin: 'Sol', destination: 'Colonia', jumps: [] }),
+    const baseCarrierState = {
+      activeCarrierRoute: expedition.CarrierRouteResult.createFrom({
+        origin: 'Sol',
+        destination: 'Colonia',
+        jumps: [],
+      }),
       activeCarrierTargetRowId: 11,
       nextFcStopEntry: { row: routePlan.rows[1].row, index: 1 },
       routedCarrierStopIndex: 1,
-      getRowDropProps: () => ({}),
-      getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
-      onClearDragOverGap: () => {},
-      onToggleShowNotes: () => {},
-      onToggleShowCarrierStop: () => {},
-      onChangeRegion: () => {},
-      onSetInsertMenuAfterId: () => {},
-      onInsert: () => {},
-      onDeleteRow: () => {},
-      onLegModeChange: () => {},
-      onToggleExpand: () => {},
-      onFieldBlur: () => {},
-      onCopySystem: () => {},
-      onToggleFcStop: () => {},
-      onOverrideFcArrived: () => {},
       onOpenCarrierRoutePrompt: () => {},
-      onRowHoldStart: () => {},
-      onRowHoldEnd: () => {},
-      onRowDragStart: () => {},
-      onRowDragEnd: () => {},
+    }
+    const baseTableProps = {
+      plan: routePlan,
+      isPlanning: false,
+      isCompleted: false,
+      frontier: { lastVisitedIndex: 0, lastFcArrivedIndex: -1 },
+      columns: {
+        visibleColumnCount: 8,
+        tableMinWidthPixels: 1200,
+        showNotes: true,
+        showCarrierStop: true,
+        onToggleShowNotes: () => {},
+        onToggleShowCarrierStop: () => {},
+      },
+      externalLinks: {},
+      drawerState: {
+        expandedRowIds: {},
+        detailsById: {},
+        loadingDetails: {},
+        toggleExpand: () => {},
+      },
+      dragState: {
+        tableItems,
+        dropSlotGaps: new Set<number>(),
+        heldOrDraggedIndex: null,
+        draggedIndex: null,
+        dragOverGapIndex: null,
+        getRowDropProps: () => ({}),
+        getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
+        onClearDragOverGap: () => {},
+        onRowHoldStart: () => {},
+        onRowHoldEnd: () => {},
+        onRowDragStart: () => {},
+        onRowDragEnd: () => {},
+      },
+      rowActions: {
+        copiedSystemRowId: null,
+        insertMenuAfterId: null,
+        onSetInsertMenuAfterId: () => {},
+        onChangeRegion: () => {},
+        onInsert: () => {},
+        onDeleteRow: () => {},
+        onLegModeChange: () => {},
+        onFieldBlur: () => {},
+        onCopySystem: () => {},
+        onToggleFcStop: () => {},
+        onOverrideFcArrived: () => {},
+      },
     }
     const manualTableHtml = renderToString(
-      createElement(PlannerRouteTable, { ...baseTableProps, isManualCarrierRoute: true }),
+      createElement(PlannerRouteTable, {
+        ...baseTableProps,
+        carrierState: { ...baseCarrierState, isManualCarrierRoute: true },
+      }),
     )
     expect(manualTableHtml).toContain('placeholder="Star System"')
     expect(manualTableHtml).not.toContain('Locked while Fleet Carrier route to this waypoint is active')
 
     const spanshTableHtml = renderToString(
-      createElement(PlannerRouteTable, { ...baseTableProps, isManualCarrierRoute: false }),
+      createElement(PlannerRouteTable, {
+        ...baseTableProps,
+        carrierState: { ...baseCarrierState, isManualCarrierRoute: false },
+      }),
     )
     expect(spanshTableHtml).toContain('Locked while Fleet Carrier route to this waypoint is active')
   })

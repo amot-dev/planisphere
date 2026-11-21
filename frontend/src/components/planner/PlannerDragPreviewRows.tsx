@@ -1,5 +1,5 @@
 import type { DragEvent } from 'react'
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
 
 /**
  * PlannerCollapsedVisitedRowProps defines the metadata for a contiguous span of

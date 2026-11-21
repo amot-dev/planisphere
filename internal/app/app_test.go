@@ -482,7 +482,7 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 
 	// AppExpeditionBoundsChanged and AppModesChanged preserve TimeRangeStats while keeping lifetime and carrier projections valid.
-	testApp.publishApp("plan", expeditionID, events.AppExpeditionBoundsChanged, events.AppModesChanged)
+	testApp.publishApp(expeditionID, events.AppExpeditionBoundsChanged, events.AppModesChanged)
 
 	if testApp.timeRangeStats.Generation() != initialTimeRangeGen {
 		testingContext.Errorf("expected timeRangeStats generation %d after AppExpeditionBoundsChanged and AppModesChanged, got %d",
@@ -499,7 +499,7 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 
 	// AppModeWindowsChanged clears mode-filtered TimeRangeStats entries while preserving lifetime and carrier projections.
-	testApp.publishApp("modes", 0, events.AppModeWindowsChanged)
+	testApp.publishApp(0, events.AppModeWindowsChanged)
 
 	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+1 {
 		testingContext.Errorf("expected timeRangeStats generation %d after AppModeWindowsChanged, got %d",
@@ -519,7 +519,7 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	if _, statsErr := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsErr != nil {
 		testingContext.Fatalf("second GetSidebarStats: %v", statsErr)
 	}
-	testApp.publishApp("settings", 0, events.AppDatabaseSwitched)
+	testApp.publishApp(0, events.AppDatabaseSwitched)
 
 	if testApp.carrierState.Generation() != initialCarrierGen+1 || testApp.carrierState.IsValid() {
 		testingContext.Errorf("expected carrierState to invalidate on AppDatabaseSwitched")
@@ -727,8 +727,8 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 	emittedMutex.Lock()
 	defer emittedMutex.Unlock()
 	for _, changeEvent := range emittedChanges {
-		if changeEvent.Scope == "settings" {
-			testingContext.Errorf("unexpected startup %q event emitted with Scope=%q", EventDataChanged, changeEvent.Scope)
+		if slices.Contains(changeEvent.Domains, "settings") {
+			testingContext.Errorf("unexpected startup %q event emitted with Domains=%v", EventDataChanged, changeEvent.Domains)
 		}
 	}
 }
@@ -930,8 +930,8 @@ func TestDeleteActiveExpeditionSelectsSurvivingAndEmitsTargetedDomains(testingCo
 			testingContext.Fatalf("expected 1 DataChanged event, got %d (%+v)", len(capturedEvents), capturedEvents)
 		}
 		changeEvent := capturedEvents[0]
-		if changeEvent.Scope != "expeditions" || changeEvent.ExpeditionID != 0 {
-			testingContext.Fatalf("expected scope 'expeditions' and expeditionId 0, got %+v", changeEvent)
+		if changeEvent.ExpeditionID != 0 {
+			testingContext.Fatalf("expected expeditionId 0, got %+v", changeEvent)
 		}
 		if !slices.Equal(changeEvent.Domains, []string{"settings", "expeditions"}) {
 			testingContext.Fatalf("expected domains [settings expeditions], got %v", changeEvent.Domains)

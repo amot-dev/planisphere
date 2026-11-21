@@ -125,19 +125,20 @@ func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTime
 	return bus.PublishJournalSince(journalEvents, earliestTimestamp)
 }
 
-func (app *App) emitDataChanged(scope string, expeditionID int64, targets events.UITargetSet) {
+func (app *App) emitDataChanged(expeditionID int64, targets events.UITargetSet) {
+	if targets.IsEmpty() {
+		return
+	}
 	app.emit(EventDataChanged, DataChanged{
-		Scope:        scope,
 		Domains:      targets.Names(),
 		ExpeditionID: expeditionID,
 	})
 }
 
-func (app *App) publishApp(scope string, expeditionID int64, appEvents ...events.AppEvent) {
+func (app *App) publishApp(expeditionID int64, appEvents ...events.AppEvent) {
 	bus := app.currentBus()
-	var targets events.UITargetSet
-	if bus != nil {
-		targets = bus.PublishApp(appEvents...)
+	if bus == nil {
+		return
 	}
-	app.emitDataChanged(scope, expeditionID, targets)
+	app.emitDataChanged(expeditionID, bus.PublishApp(appEvents...))
 }

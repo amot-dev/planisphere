@@ -1,4 +1,4 @@
-import { stats } from '../../../wailsjs/go/models'
+import { stats } from '../../api/models'
 import {
   formatCredits,
   formatEfficiencyBonusLabel,

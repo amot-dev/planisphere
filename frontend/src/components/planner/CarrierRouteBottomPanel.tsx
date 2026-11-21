@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
 import { formatInt, formatLy } from '../../utils/galacticTime'
 
 /**

@@ -2,21 +2,8 @@ import { useEffect, useState } from 'react'
 import {
   BrowseEDDiscoveryDB,
   ImportEDDiscoveryHistory,
-} from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
-
-/**
- * EddImportProgress describes live progress events emitted while importing
- * historical journal entries from an external EDDiscovery SQLite database.
- */
-export interface EddImportProgress {
-  active: boolean
-  stage: string
-  current: number
-  total: number
-  percent: number
-  files: number
-}
+} from '../../api/backend'
+import { app, type EddImportProgress } from '../../api/models'
 
 /**
  * EDDiscoveryImportSectionProps defines the settings, live import progress,
@@ -25,7 +12,6 @@ export interface EddImportProgress {
 export interface EDDiscoveryImportSectionProps {
   settings: app.Settings | null
   eddProgress?: EddImportProgress | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -36,7 +22,6 @@ export interface EDDiscoveryImportSectionProps {
 export function EDDiscoveryImportSection({
   settings,
   eddProgress,
-  onRefresh,
   onSetError,
 }: EDDiscoveryImportSectionProps) {
   const [eddPath, setEddPath] = useState(settings?.edDiscoveryDbPath ?? '')
@@ -65,7 +50,6 @@ export function EDDiscoveryImportSection({
       setEddStatus(
         `Imported ${importedCount.toLocaleString()} historical journal events from EDDiscovery.`,
       )
-      onRefresh()
     } catch (importError) {
       onSetError(String(importError))
     } finally {

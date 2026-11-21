@@ -84,7 +84,7 @@ func (app *App) CreateMode(name, description, color string) (modes.Mode, error) 
 	}); createError != nil {
 		return modes.Mode{}, createError
 	}
-	app.publishApp("modes", 0, events.AppModesChanged)
+	app.publishApp(0, events.AppModesChanged)
 	return createdMode, nil
 }
 
@@ -95,7 +95,7 @@ func (app *App) UpdateMode(id int64, name, description, color string) error {
 	}); updateError != nil {
 		return updateError
 	}
-	app.publishApp("modes", 0, events.AppModesChanged)
+	app.publishApp(0, events.AppModesChanged)
 	return nil
 }
 
@@ -106,7 +106,7 @@ func (app *App) DeleteMode(id int64) error {
 	}); deleteError != nil {
 		return deleteError
 	}
-	app.publishApp("modes", 0, events.AppModesChanged, events.AppModeWindowsChanged)
+	app.publishApp(0, events.AppModesChanged, events.AppModeWindowsChanged)
 	return nil
 }
 
@@ -117,6 +117,6 @@ func (app *App) SwitchMode(modeID int64) (ModesState, error) {
 	}); switchError != nil {
 		return ModesState{}, switchError
 	}
-	app.publishApp("modes", 0, events.AppModesChanged, events.AppModeWindowsChanged)
+	app.publishApp(0, events.AppModesChanged, events.AppModeWindowsChanged)
 	return app.GetModesState()
 }

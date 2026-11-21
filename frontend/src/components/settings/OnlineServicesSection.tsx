@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { RefreshGEC, SetOnlineLookups } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { RefreshGEC, SetOnlineLookups } from '../../api/backend'
+import { app } from '../../api/models'
 import { SquareCheckbox } from '../common/SquareCheckbox'
 
 /**
@@ -9,7 +9,6 @@ import { SquareCheckbox } from '../common/SquareCheckbox'
  */
 export interface OnlineServicesSectionProps {
   settings: app.Settings | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -19,7 +18,6 @@ export interface OnlineServicesSectionProps {
  */
 export function OnlineServicesSection({
   settings,
-  onRefresh,
   onSetError,
 }: OnlineServicesSectionProps) {
   const [online, setOnline] = useState(settings?.onlineLookups ?? true)
@@ -38,7 +36,6 @@ export function OnlineServicesSection({
     try {
       const updatedSettings = await SetOnlineLookups(nextEnabled)
       setOnline(updatedSettings.onlineLookups)
-      onRefresh()
     } catch (toggleError) {
       setOnline(settings?.onlineLookups ?? !nextEnabled)
       onSetError(String(toggleError))
@@ -50,7 +47,6 @@ export function OnlineServicesSection({
     onSetError('')
     try {
       await RefreshGEC()
-      onRefresh()
     } catch (syncError) {
       onSetError(String(syncError))
     } finally {

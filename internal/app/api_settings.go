@@ -160,7 +160,7 @@ func (app *App) SetDatabasePath(dbPath string) (Settings, error) {
 			return Settings{}, saveError
 		}
 	}
-	app.publishApp("settings", 0, events.AppDatabaseSwitched)
+	app.publishApp(0, events.AppDatabaseSwitched)
 	return app.GetSettings()
 }
 
@@ -189,7 +189,7 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 	hasNewEvents := app.runScan()
 	app.startConfiguredWatcher()
 	if !hasNewEvents {
-		app.emitDataChanged("journal", 0, events.NewUITargetSet(events.UITargetIngest))
+		app.emitDataChanged(0, events.NewUITargetSet(events.UITargetIngest))
 	}
 	return app.GetIngestStatus()
 }
@@ -223,7 +223,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 	if shouldRefresh {
 		app.spawnBackground(app.maybeRefreshGEC)
 	}
-	app.publishApp("settings", 0, events.AppSettingsChanged)
+	app.publishApp(0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -234,7 +234,7 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 	}); toggleError != nil {
 		return Settings{}, toggleError
 	}
-	app.publishApp("journal", 0, events.AppCommanderFilterChanged)
+	app.publishApp(0, events.AppCommanderFilterChanged)
 	return app.GetSettings()
 }
 
@@ -287,10 +287,8 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	app.dbMu.RUnlock()
 
 	affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp)
-	if affectedTargets.IsEmpty() {
-		affectedTargets = events.NewUITargetSet(events.UITargetIngest)
-	}
-	app.emitDataChanged("journal", 0, affectedTargets)
+	affectedTargets = affectedTargets.Union(events.NewUITargetSet(events.UITargetIngest, events.UITargetSettings))
+	app.emitDataChanged(0, affectedTargets)
 	return importResult.LinesRead, nil
 }
 
@@ -301,6 +299,7 @@ func (app *App) SetJournalDir(dir string) (Settings, error) {
 		return Settings{}, err
 	}
 	app.spawnBackground(app.scanAndStartWatcher)
+	app.publishApp(0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -329,7 +328,7 @@ func (app *App) SetOnlineLookups(enabled bool) (Settings, error) {
 	if enabled {
 		app.spawnBackground(app.maybeRefreshGEC)
 	}
-	app.publishApp("settings", 0, events.AppSettingsChanged)
+	app.publishApp(0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -350,7 +349,7 @@ func (app *App) SetJournalDebounceMs(milliseconds int) (Settings, error) {
 	if runningWatcher != nil {
 		runningWatcher.SetDebounceDelay(clampedDuration)
 	}
-	app.publishApp("settings", 0, events.AppSettingsChanged)
+	app.publishApp(0, events.AppSettingsChanged)
 	return app.GetSettings()
 }
 
@@ -362,7 +361,7 @@ func (app *App) SetTritiumPricePerTonne(pricePerTonne int64) (Settings, error) {
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist tritium price setting: %w", saveError)
 	}
-	app.publishApp("settings", 0, events.AppSettingsChanged, events.AppAdjustmentsChanged)
+	app.publishApp(0, events.AppSettingsChanged, events.AppAdjustmentsChanged)
 	return app.GetSettings()
 }
 
@@ -374,6 +373,6 @@ func (app *App) SetExternalLinks(inaraMode, edsmMode, gecMode string) (Settings,
 	}); saveError != nil {
 		return Settings{}, fmt.Errorf("persist external link settings: %w", saveError)
 	}
-	app.publishApp("settings", 0, events.AppSettingsChanged)
+	app.publishApp(0, events.AppSettingsChanged)
 	return app.GetSettings()
 }

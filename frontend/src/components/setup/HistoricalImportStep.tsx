@@ -1,5 +1,4 @@
-import { app } from '../../../wailsjs/go/models'
-import type { EddImportProgress } from '../settings/EDDiscoveryImportSection'
+import { app, type EddImportProgress } from '../../api/models'
 
 /**
  * HistoricalImportStepProps defines the scanned journal summary, EDDiscovery

@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
-import { WaypointRowItem } from './WaypointRowItem'
+import { WaypointRowItem, type WaypointRowHandlers } from './WaypointRowItem'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
+
+const defaultRowHandlers: WaypointRowHandlers = {
+  onToggleExpand: () => {},
+  onFieldBlur: () => {},
+  onCopySystem: () => {},
+  onToggleFcStop: () => {},
+  onOpenCarrierRoutePrompt: () => {},
+  onToggleInsertMenu: () => {},
+  onInsert: () => {},
+  onDelete: () => {},
+  onDragStart: () => {},
+  onDragEnd: () => {},
+}
 
 describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () => {
   function renderRowItem(props: Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView }) {
@@ -21,16 +34,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       lastVisitedIndex: 0,
       rowStyle: {},
       dropProps: {},
-      onToggleExpand: () => {},
-      onFieldBlur: () => {},
-      onCopySystem: () => {},
-      onToggleFcStop: () => {},
-      onOpenCarrierRoutePrompt: () => {},
-      onToggleInsertMenu: () => {},
-      onInsert: () => {},
-      onDelete: () => {},
-      onDragStart: () => {},
-      onDragEnd: () => {},
+      handlers: defaultRowHandlers,
       ...props,
     }
     return renderToString(
@@ -760,7 +764,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       index: 3,
       lastFcArrivedIndex: 3,
       lastVisitedIndex: 2,
-      onOverrideFcArrived: () => {},
+      handlers: { ...defaultRowHandlers, onOverrideFcArrived: () => {} },
     })
     expect(arrivedStopHtml).not.toContain('placeholder="Star System"')
     expect(arrivedStopHtml).toContain('title="Locked while Fleet Carrier is marked arrived at this waypoint"')
@@ -857,9 +861,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     // If No GEC acts as On when GEC is Off (even when rowView.gec.url exists)
     const gecOffWithEntryHtml = renderRowItem({
       rowView: rowWithGec,
-      externalLinkInara: 'off',
-      externalLinkEdsm: 'if_no_gec',
-      externalLinkGec: 'off',
+      externalLinks: { inara: 'off', edsm: 'if_no_gec', gec: 'off' },
     })
     expect(gecOffWithEntryHtml).not.toContain('<span>INARA</span>')
     expect(gecOffWithEntryHtml).toContain('<span>EDSM</span>')
@@ -868,9 +870,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     // EDSM: on shows all three simultaneously on a GEC row; all off renders none
     const allOnHtml = renderRowItem({
       rowView: rowWithGec,
-      externalLinkInara: 'on',
-      externalLinkEdsm: 'on',
-      externalLinkGec: 'on',
+      externalLinks: { inara: 'on', edsm: 'on', gec: 'on' },
     })
     expect(allOnHtml).toContain('<span>INARA</span>')
     expect(allOnHtml).toContain('<span>EDSM</span>')
@@ -878,9 +878,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
 
     const allOffHtml = renderRowItem({
       rowView: rowWithGec,
-      externalLinkInara: 'off',
-      externalLinkEdsm: 'off',
-      externalLinkGec: 'off',
+      externalLinks: { inara: 'off', edsm: 'off', gec: 'off' },
     })
     expect(allOffHtml).not.toContain('<span>INARA</span>')
     expect(allOffHtml).not.toContain('<span>EDSM</span>')

@@ -1,6 +1,6 @@
 import type { DragEvent, MutableRefObject } from 'react'
-import { expedition } from '../../../wailsjs/go/models'
-import { gapToTargetIndex } from './plannerPlanHelpers'
+import { expedition } from '../../api/models'
+import { gapToTargetIndex } from './planTableItems'
 
 const DRAG_AUTOSCROLL_ZONE_PIXELS = 72
 const DRAG_AUTOSCROLL_MIN_SPEED = 2

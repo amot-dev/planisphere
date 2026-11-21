@@ -1,386 +1,78 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { SetActiveExpedition, SwitchMode } from '../api/backend'
+import { subscribeBackendEvents } from '../api/events'
+import { stats, type EddImportProgress } from '../api/models'
 import {
-  GetIngestStatus,
-  GetModesState,
-  GetPlan,
-  GetSettings,
-  GetSidebarStats,
-  ListExpeditions,
-  SetActiveExpedition,
-  SwitchMode,
-} from '../../wailsjs/go/app/App'
-import { app, expedition, stats } from '../../wailsjs/go/models'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
-import type { EddImportProgress } from '../components/settings/EDDiscoveryImportSection'
+  routeDataChangedEvent,
+  type DataChangedDispatchContext,
+  type SyncBootLifecycleState,
+} from './syncEventRouter'
+import { useDomainLoaders } from './useDomainLoaders'
 
-/**
- * SyncBootLifecycleState tracks the two-stage terminal boot lifecycle so early
- * Wails events do not cancel in-flight bootstrap RPCs before main paint.
- */
-export interface SyncBootLifecycleState {
-  initialBootComplete: boolean
-  bootCoreLoaded: boolean
-  pendingBootRefresh: boolean
-}
-
-/**
- * DataChangedDispatchContext supplies current synchronization state and loader
- * callbacks when routing a backend data:changed event.
- */
-export interface DataChangedDispatchContext {
-  bootState: SyncBootLifecycleState
-  currentActiveExpeditionId: number
-  currentFilter: stats.Filter
-  refreshExpeditionListOnly: () => void
-  loadIngestStatusOnly: () => Promise<unknown>
-  loadSettingsOnly: () => Promise<unknown>
-  loadModesOnly: () => Promise<unknown>
-  loadCoreState: () => Promise<{
-    settingsData: app.Settings | null
-    chosenId: number
-  }>
-  loadPlanOnly: (expeditionId: number) => Promise<void>
-  loadStatsOnly: (expeditionId: number, currentFilter: stats.Filter) => Promise<void>
-  refreshAll: () => void
-}
-
-/**
- * DataChangedPayload matches the Go app.DataChanged event payload emitted on
- * Wails 'data:changed' runtime notifications.
- */
-export interface DataChangedPayload {
-  scope?: string
-  domains?: string[]
-  expeditionId?: number
-}
-
-/**
- * routeDataChangedEvent dispatches a Wails data:changed notification without
- * interrupting an in-progress initial boot or waterfalling live journal updates.
- */
-export function routeDataChangedEvent(
-  payload: DataChangedPayload | undefined,
-  dispatchContext: DataChangedDispatchContext,
-): void {
-  if (!dispatchContext.bootState.initialBootComplete) {
-    if (dispatchContext.bootState.bootCoreLoaded) {
-      dispatchContext.bootState.pendingBootRefresh = true
-    }
-    return
-  }
-
-  const currentActive = dispatchContext.currentActiveExpeditionId
-  const eventExpeditionId = payload?.expeditionId
-
-  const domains = payload?.domains
-  if (domains && domains.length > 0) {
-    const domainSet = new Set(domains)
-    if (domainSet.has('settings') && domainSet.has('expeditions') && domainSet.has('modes')) {
-      dispatchContext.refreshAll()
-      return
-    }
-    const isTargetActive =
-      !eventExpeditionId || (currentActive > 0 && eventExpeditionId === currentActive)
-    if (domainSet.has('ingest')) {
-      void dispatchContext.loadIngestStatusOnly()
-    }
-    if (domainSet.has('settings')) {
-      void dispatchContext.loadSettingsOnly()
-    }
-    if (domainSet.has('modes')) {
-      void dispatchContext.loadModesOnly()
-    }
-    if (
-      domainSet.has('expeditions') ||
-      Boolean(eventExpeditionId && currentActive > 0 && !isTargetActive)
-    ) {
-      dispatchContext.refreshExpeditionListOnly()
-    }
-    if (domainSet.has('plan') && isTargetActive && currentActive > 0) {
-      void dispatchContext.loadPlanOnly(currentActive)
-    }
-    if (domainSet.has('stats') && currentActive > 0 && (isTargetActive || domainSet.has('modes'))) {
-      void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
-    }
-    return
-  }
-
-  if (eventExpeditionId && currentActive > 0 && eventExpeditionId !== currentActive) {
-    dispatchContext.refreshExpeditionListOnly()
-    return
-  }
-
-  const scope = payload?.scope ?? ''
-  if (scope === 'plan') {
-    if (currentActive > 0) {
-      void dispatchContext.loadPlanOnly(currentActive)
-    }
-    return
-  }
-
-  if (scope === 'adjustments') {
-    if (currentActive > 0) {
-      void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
-    }
-    return
-  }
-
-  if (scope === 'journal') {
-    void dispatchContext.loadCoreState()
-    if (currentActive > 0) {
-      void dispatchContext.loadPlanOnly(currentActive)
-      void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
-    }
-    return
-  }
-
-  dispatchContext.refreshAll()
+export {
+  routeDataChangedEvent,
+  type DataChangedDispatchContext,
+  type SyncBootLifecycleState,
 }
 
 /**
  * useBackendSync manages terminal bootstrap state, Wails IPC queries for
- * settings/expeditions/plans/telemetry, and live runtime event subscriptions.
+ * settings, expeditions, plans, and telemetry, and live runtime event subscriptions.
  */
 export function useBackendSync() {
   const [booting, setBooting] = useState<boolean>(true)
   const [busyAction, setBusyAction] = useState<string | null>('INITIALIZING TERMINAL')
-  const [statsLoading, setStatsLoading] = useState<boolean>(false)
-
-  const [settings, setSettings] = useState<app.Settings | null>(null)
-  const [ingest, setIngest] = useState<app.IngestStatus | null>(null)
-  const [modesState, setModesState] = useState<app.ModesState | null>(null)
-  const [expeditions, setExpeditions] = useState<expedition.Expedition[]>([])
-  const [activeExpeditionId, setActiveExpeditionId] = useState<number>(0)
-  const [plan, setPlan] = useState<expedition.PlanView | null>(null)
-  const [sidebarStats, setSidebarStats] = useState<app.SidebarStats | null>(null)
   const [filter, setFilter] = useState<stats.Filter>(() =>
     stats.Filter.createFrom({ enabled: false, modes: [] }),
   )
   const [eddProgress, setEddProgress] = useState<EddImportProgress | null>(null)
 
-  const activeExpeditionIdRef = useRef(0)
-  const setupCompletedRef = useRef(false)
   const bootStateRef = useRef<SyncBootLifecycleState>({
     initialBootComplete: false,
     bootCoreLoaded: false,
     pendingBootRefresh: false,
   })
-  const coreStateRequestSequenceRef = useRef(0)
   const lastEffectPlanExpeditionIdRef = useRef(0)
   const lastEffectStatsSelectionRef = useRef<{
     expeditionId: number
     filter: stats.Filter
   } | null>(null)
-  const ingestRequestSequenceRef = useRef(0)
-  const settingsRequestSequenceRef = useRef(0)
-  const modesRequestSequenceRef = useRef(0)
-  const planRequestSequenceRef = useRef(0)
-  const statsRequestSequenceRef = useRef(0)
   const filterRef = useRef(filter)
-
-  useEffect(() => {
-    activeExpeditionIdRef.current = activeExpeditionId
-  }, [activeExpeditionId])
 
   useEffect(() => {
     filterRef.current = filter
   }, [filter])
 
-  const loadIngestStatusOnly = useCallback(async () => {
-    const requestSequence = ++ingestRequestSequenceRef.current
-    try {
-      const ingestStatus = await GetIngestStatus()
-      if (requestSequence === ingestRequestSequenceRef.current) {
-        setIngest(ingestStatus)
-      }
-      return ingestStatus
-    } catch (ingestError) {
-      console.error('Failed to load ingest status:', ingestError)
-      return null
-    }
-  }, [])
+  const {
+    statsLoading,
+    settings,
+    ingest,
+    modesState,
+    setModesState,
+    expeditions,
+    activeExpeditionId,
+    setActiveExpeditionId,
+    activeExpeditionIdRef,
+    plan,
+    setPlan,
+    sidebarStats,
+    loadIngestStatusOnly,
+    loadSettingsOnly,
+    loadModesOnly,
+    refreshExpeditionListOnly,
+    loadCoreState,
+    loadPlanOnly,
+    loadStatsOnly,
+    refreshAll,
+  } = useDomainLoaders({
+    filterRef,
+    bootStateRef,
+    lastEffectPlanExpeditionIdRef,
+  })
 
-  const loadSettingsOnly = useCallback(async () => {
-    const requestSequence = ++settingsRequestSequenceRef.current
-    try {
-      const settingsData = await GetSettings()
-      if (requestSequence === settingsRequestSequenceRef.current && settingsData) {
-        setupCompletedRef.current = Boolean(settingsData.setupCompleted)
-        setSettings(settingsData)
-      }
-      return settingsData ?? null
-    } catch (settingsError) {
-      console.error('Failed to load settings:', settingsError)
-      return null
-    }
-  }, [])
-
-  const loadModesOnly = useCallback(async () => {
-    const requestSequence = ++modesRequestSequenceRef.current
-    try {
-      const modesStateData = await GetModesState()
-      if (requestSequence === modesRequestSequenceRef.current && modesStateData) {
-        setModesState(modesStateData)
-      }
-      return modesStateData ?? null
-    } catch (modesError) {
-      console.error('Failed to load modes state:', modesError)
-      return null
-    }
-  }, [])
-
-  const refreshExpeditionListOnly = useCallback(() => {
-    ListExpeditions()
-      .then((expeditionList) => {
-        const loadedList = expeditionList || []
-        setExpeditions(loadedList)
-        if (
-          activeExpeditionIdRef.current > 0 &&
-          !loadedList.some((expeditionItem) => expeditionItem.id === activeExpeditionIdRef.current)
-        ) {
-          if (loadedList.length > 0) {
-            activeExpeditionIdRef.current = loadedList[0].id
-            setActiveExpeditionId(loadedList[0].id)
-          } else {
-            activeExpeditionIdRef.current = 0
-            setActiveExpeditionId(0)
-            setPlan(null)
-            setSidebarStats(null)
-            setStatsLoading(false)
-          }
-        }
-      })
-      .catch(console.error)
-  }, [])
-
-  const loadCoreState = useCallback(async (): Promise<{
-    settingsData: app.Settings | null
-    chosenId: number
-  }> => {
-    const coreRequestSequence = ++coreStateRequestSequenceRef.current
-    const ingestRequestSequence = ++ingestRequestSequenceRef.current
-    const settingsRequestSequence = ++settingsRequestSequenceRef.current
-    const modesRequestSequence = ++modesRequestSequenceRef.current
-    try {
-      const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
-        GetSettings(),
-        GetIngestStatus(),
-        GetModesState(),
-        ListExpeditions(),
-      ])
-      if (coreRequestSequence !== coreStateRequestSequenceRef.current) {
-        return { settingsData: null, chosenId: 0 }
-      }
-      if (settingsRequestSequence === settingsRequestSequenceRef.current) {
-        setupCompletedRef.current = Boolean(settingsData.setupCompleted)
-        setSettings(settingsData)
-      }
-      if (ingestRequestSequence === ingestRequestSequenceRef.current) {
-        setIngest(ingestStatus)
-      }
-      if (modesRequestSequence === modesRequestSequenceRef.current) {
-        setModesState(modesStateData)
-      }
-
-      const loadedExpeditions = expeditionList || []
-      setExpeditions(loadedExpeditions)
-
-      let chosenId = 0
-      const currentExpeditionId = activeExpeditionIdRef.current
-      if (currentExpeditionId && loadedExpeditions.some((expeditionItem) => expeditionItem.id === currentExpeditionId)) {
-        chosenId = currentExpeditionId
-      } else if (
-        settingsData.activeExpeditionId &&
-        loadedExpeditions.some((expeditionItem) => expeditionItem.id === settingsData.activeExpeditionId)
-      ) {
-        chosenId = settingsData.activeExpeditionId
-      } else if (loadedExpeditions.length > 0) {
-        chosenId = loadedExpeditions[0].id
-      }
-
-      if (chosenId > 0) {
-        setActiveExpeditionId(chosenId)
-        activeExpeditionIdRef.current = chosenId
-      } else {
-        setActiveExpeditionId(0)
-        activeExpeditionIdRef.current = 0
-        setPlan(null)
-        setSidebarStats(null)
-        setStatsLoading(false)
-      }
-      return { settingsData, chosenId }
-    } catch (coreStateError) {
-      console.error('Failed to load core state:', coreStateError)
-      return { settingsData: null, chosenId: 0 }
-    }
-  }, [])
-
-  // Fast plan loader (< 5ms) — never blocked by sidebar telemetry computation
-  const loadPlanOnly = useCallback(async (expeditionId: number) => {
-    if (!expeditionId) return
-    const requestSequence = ++planRequestSequenceRef.current
-    try {
-      const fetchedPlan = await GetPlan(expeditionId)
-      if (
-        requestSequence === planRequestSequenceRef.current &&
-        fetchedPlan?.expedition?.id === activeExpeditionIdRef.current
-      ) {
-        setPlan(fetchedPlan)
-      }
-    } catch (loadPlanError) {
-      console.error('Failed to load expedition plan:', loadPlanError)
-    }
-  }, [])
-
-  // Asynchronous sidebar telemetry loader
-  const loadStatsOnly = useCallback(async (expeditionId: number, currentFilter: stats.Filter) => {
-    if (!expeditionId) return
-    const requestSequence = ++statsRequestSequenceRef.current
-    setStatsLoading(true)
-    try {
-      const fetchedSidebarStats = await GetSidebarStats(expeditionId, currentFilter)
-      if (
-        requestSequence === statsRequestSequenceRef.current &&
-        activeExpeditionIdRef.current === expeditionId
-      ) {
-        setSidebarStats(fetchedSidebarStats)
-      }
-    } catch (statsError) {
-      console.error('Failed to load sidebar stats:', statsError)
-    } finally {
-      if (
-        requestSequence === statsRequestSequenceRef.current &&
-        activeExpeditionIdRef.current === expeditionId
-      ) {
-        setStatsLoading(false)
-      }
-    }
-  }, [])
-
-  const refreshAll = useCallback(() => {
-    const prefetchedExpeditionId = setupCompletedRef.current ? activeExpeditionIdRef.current : 0
-    if (prefetchedExpeditionId > 0) {
-      void loadPlanOnly(prefetchedExpeditionId)
-      void loadStatsOnly(prefetchedExpeditionId, filterRef.current)
-    }
-    void loadCoreState().then(({ settingsData, chosenId }) => {
-      if (
-        !settingsData ||
-        !settingsData.setupCompleted ||
-        chosenId <= 0 ||
-        chosenId === prefetchedExpeditionId
-      ) {
-        return
-      }
-      const willTransitionEffectReload =
-        bootStateRef.current.initialBootComplete &&
-        lastEffectPlanExpeditionIdRef.current !== chosenId
-      if (!willTransitionEffectReload) {
-        void loadPlanOnly(chosenId)
-        void loadStatsOnly(chosenId, filterRef.current)
-      }
-    })
-  }, [loadCoreState, loadPlanOnly, loadStatsOnly])
+  useEffect(() => {
+    activeExpeditionIdRef.current = activeExpeditionId
+  }, [activeExpeditionId, activeExpeditionIdRef])
 
   // Initial boot sequence: load core state, active expedition plan, and sidebar
   // telemetry before dismissing the boot screen so the main cockpit UI never
@@ -423,7 +115,7 @@ export function useBackendSync() {
     }
   }, [loadCoreState, loadPlanOnly, loadStatsOnly, refreshAll])
 
-  // Load plan immediately when expedition changes after initial boot
+  // Load plan immediately when expedition changes after initial boot.
   useEffect(() => {
     if (!bootStateRef.current.initialBootComplete) return
     if (activeExpeditionId <= 0) {
@@ -437,7 +129,7 @@ export function useBackendSync() {
     void loadPlanOnly(activeExpeditionId)
   }, [activeExpeditionId, loadPlanOnly])
 
-  // Reload sidebar stats when expedition or filter changes after initial boot
+  // Reload sidebar stats when expedition or filter changes after initial boot.
   useEffect(() => {
     if (!bootStateRef.current.initialBootComplete) return
     if (activeExpeditionId <= 0) {
@@ -454,13 +146,10 @@ export function useBackendSync() {
     void loadStatsOnly(activeExpeditionId, filter)
   }, [activeExpeditionId, filter, loadStatsOnly])
 
-  // Subscribe to Wails backend events (live fsnotify journal tailing, coordinate resolution, etc.)
+  // Subscribe to Wails backend events (live fsnotify journal tailing, coordinate resolution, and mode changes).
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.runtime?.EventsOnMultiple) {
-      return
-    }
-
-    const offChanged = EventsOn('data:changed', (payload?: DataChangedPayload) => {
+    return subscribeBackendEvents({
+      onDataChanged: (payload) => {
         routeDataChangedEvent(payload, {
           bootState: bootStateRef.current,
           currentActiveExpeditionId: activeExpeditionIdRef.current,
@@ -469,25 +158,20 @@ export function useBackendSync() {
           loadIngestStatusOnly,
           loadSettingsOnly,
           loadModesOnly,
-          loadCoreState,
           loadPlanOnly,
           loadStatsOnly,
           refreshAll,
         })
-      })
-    const offIngest = EventsOn('ingest:status', () => {
-      void loadIngestStatusOnly()
+      },
+      onIngestStatus: () => {
+        void loadIngestStatusOnly()
+      },
+      onEddProgress: (progress) => {
+        setEddProgress(progress)
+      },
     })
-    const offEdd = EventsOn('edd:progress', (progress) => {
-      setEddProgress(progress)
-    })
-    return () => {
-      offChanged()
-      offIngest()
-      offEdd()
-    }
   }, [
-    loadCoreState,
+    activeExpeditionIdRef,
     loadIngestStatusOnly,
     loadModesOnly,
     loadPlanOnly,
@@ -497,20 +181,19 @@ export function useBackendSync() {
     refreshExpeditionListOnly,
   ])
 
-  const handleSelectExpedition = useCallback(async (selectedExpeditionId: number) => {
-    if (!selectedExpeditionId) return
-    setActiveExpeditionId(selectedExpeditionId)
-    activeExpeditionIdRef.current = selectedExpeditionId
-    try {
-      await SetActiveExpedition(selectedExpeditionId)
-    } catch (setActiveError) {
-      console.error('Failed to set active expedition:', setActiveError)
-    }
-    const expeditionList = await ListExpeditions()
-    if (expeditionList && expeditionList.length > 0) {
-      setExpeditions(expeditionList)
-    }
-  }, [])
+  const handleSelectExpedition = useCallback(
+    async (selectedExpeditionId: number) => {
+      if (!selectedExpeditionId) return
+      setActiveExpeditionId(selectedExpeditionId)
+      activeExpeditionIdRef.current = selectedExpeditionId
+      try {
+        await SetActiveExpedition(selectedExpeditionId)
+      } catch (setActiveError) {
+        console.error('Failed to set active expedition:', setActiveError)
+      }
+    },
+    [activeExpeditionIdRef, setActiveExpeditionId],
+  )
 
   const handleQuickSwitchMode = useCallback(
     async (modeId: number) => {
@@ -518,22 +201,18 @@ export function useBackendSync() {
       try {
         const nextModesState = await SwitchMode(modeId)
         setModesState(nextModesState)
-        if (activeExpeditionId > 0) {
-          loadPlanOnly(activeExpeditionId)
-          loadStatsOnly(activeExpeditionId, filter)
-        }
       } finally {
         setBusyAction(null)
       }
     },
-    [activeExpeditionId, filter, loadPlanOnly, loadStatsOnly],
+    [setModesState],
   )
 
   const handleRefreshPlan = useCallback(() => {
     if (activeExpeditionIdRef.current > 0) {
-      loadPlanOnly(activeExpeditionIdRef.current)
+      void loadPlanOnly(activeExpeditionIdRef.current)
     }
-  }, [loadPlanOnly])
+  }, [activeExpeditionIdRef, loadPlanOnly])
 
   const activeStatusMessage =
     busyAction ||
@@ -564,4 +243,3 @@ export function useBackendSync() {
     refreshSettings: loadSettingsOnly,
   }
 }
-

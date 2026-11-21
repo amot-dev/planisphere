@@ -35,10 +35,9 @@ const (
 	EventEDDProgress = "edd:progress" // payload: EDDImportProgress
 )
 
-// DataChanged tells the frontend which data to refresh.
+// DataChanged tells the frontend which UI domains to refresh.
 type DataChanged struct {
-	Scope        string   `json:"scope"`             // journal | plan | modes | settings | adjustments
-	Domains      []string `json:"domains,omitempty"` // ingest | stats | plan | modes | settings | expeditions
+	Domains      []string `json:"domains"` // ingest | stats | plan | modes | settings | expeditions
 	ExpeditionID int64    `json:"expeditionId"`
 }
 

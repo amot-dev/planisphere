@@ -1,8 +1,8 @@
-import { expedition, modes, realization as realizationModel, stats } from '../../../wailsjs/go/models'
+import { expedition, modes, realization as realizationModel, stats } from '../../api/models'
 import { formatCredits, formatInt, formatLy } from '../../utils/galacticTime'
 import { CartographicsValueBreakdown } from '../common/CartographicsValueBreakdown'
 import { RealizationLossBreakdown } from '../common/RealizationLossBreakdown'
-import { DEFAULT_LEG_BORDER_COLOR, getWaypointLegBorderColor } from './plannerPlanHelpers'
+import { DEFAULT_LEG_BORDER_COLOR, getWaypointLegBorderColor } from './planTableItems'
 import { LegModeDropdown } from './widgets/LegModeDropdown'
 
 /**

@@ -1,42 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  AddRow,
-  DeleteRow,
-  MoveRow,
-  OverrideCarrierStopArrival,
-  SetLegMode,
-  UpdateRow,
-} from '../../../wailsjs/go/app/App'
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
 import { useLocalStorageBoolean } from '../../hooks/useLocalStorageBoolean'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { PlannerActiveLegFooter } from './PlannerActiveLegFooter'
-import { PlannerConfirmModal, type PlannerConfirmState } from './PlannerConfirmModal'
+import { PlannerConfirmModal } from './PlannerConfirmModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
-import {
-  buildOptimisticDeletedRowPlan,
-  buildOptimisticFcArrivedPlan,
-  buildOptimisticFcStopTogglePlan,
-  buildOptimisticLegModePlan,
-  buildOptimisticMovedRowPlan,
-  computePlannerTableDimensions,
-  executePlanMutation,
-  type PlanMutationBehaviorOptions,
-} from './plannerPlanHelpers'
 import { PlannerRouteTable } from './PlannerRouteTable'
+import {
+  computePlanFrontierIndices,
+  computePlannerTableDimensions,
+  type ExternalLinkVisibilityConfig,
+} from './planTableItems'
 import { useCarrierRoute } from './useCarrierRoute'
 import { useInitialExpeditionScroll } from './useInitialExpeditionScroll'
+import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMutations'
 import { usePlannerRowDrag } from './usePlannerRowDrag'
 import { useWaypointDetails } from './useWaypointDetails'
-
-const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
 
 /**
  * ExpeditionPlannerProps defines the active expedition plan state, journal
  * archive revision token, external-link visibility settings, optimistic update
- * handlers, lifecycle modal triggers, and carrier router registration callbacks
- * for the main flight planner view.
+ * handlers, lifecycle modal triggers, and carrier router trigger count.
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
@@ -44,11 +29,11 @@ export interface ExpeditionPlannerProps {
   externalLinkInara?: string
   externalLinkEdsm?: string
   externalLinkGec?: string
+  manualPlotterRequestCount?: number
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
   onOpenStartModal: () => void
   onRefreshPlan: () => void
   onBusyChange: (busyMessage: string | null) => void
-  onRegisterManualPlotter?: (openManualPlotter: () => void) => void
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
 }
 
@@ -62,26 +47,24 @@ export function ExpeditionPlanner({
   externalLinkInara,
   externalLinkEdsm,
   externalLinkGec,
+  manualPlotterRequestCount = 0,
   onPlanOptimisticUpdate,
   onOpenStartModal,
   onRefreshPlan,
   onBusyChange,
-  onRegisterManualPlotter,
   onCarrierRouteOpenChange,
 }: ExpeditionPlannerProps) {
   const isPlanning = plan?.expedition?.status === 'planning'
   const isCompleted = plan?.expedition?.status === 'completed'
   const optimisticPlanRef = useRef<expedition.PlanView | null>(null)
   const isOptimisticPlan = plan !== null && plan === optimisticPlanRef.current
-  const { expandedRowIds, detailsById, loadingDetails, toggleExpand } = useWaypointDetails(
+  const drawerState = useWaypointDetails(
     plan,
     Boolean(isPlanning),
     archiveRevision,
     isOptimisticPlan,
   )
 
-  const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
-  const [confirmState, setConfirmState] = useState<PlannerConfirmState | null>(null)
   const [copiedSystemRowId, setCopiedSystemRowId] = useState<number | null>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -103,23 +86,10 @@ export function ExpeditionPlanner({
     setOriginHasDraftSystem(null)
   }, [firstWaypoint?.row.id, firstWaypoint?.row.systemName])
 
-  const { lastVisitedIndex, lastFcArrivedIndex } = useMemo(() => {
-    if (!plan || !plan.rows || isPlanning) {
-      return { lastVisitedIndex: -1, lastFcArrivedIndex: -1 }
-    }
-    let maxVisited = -1
-    let maxFcArrived = -1
-    ;(plan.rows ?? []).forEach((rowView, index) => {
-      if (!rowView) return
-      if (rowView.visitState === 'visited') {
-        maxVisited = index
-      }
-      if (rowView.row?.rowType === 'waypoint' && rowView.row.fcStop && rowView.row.fcArrived) {
-        maxFcArrived = index
-      }
-    })
-    return { lastVisitedIndex: maxVisited, lastFcArrivedIndex: maxFcArrived }
-  }, [plan, isPlanning])
+  const frontier = useMemo(
+    () => computePlanFrontierIndices(plan, Boolean(isPlanning)),
+    [isPlanning, plan],
+  )
 
   const applyOptimisticPlan = useCallback(
     (nextPlan: expedition.PlanView) => {
@@ -129,41 +99,37 @@ export function ExpeditionPlanner({
     [onPlanOptimisticUpdate],
   )
 
-  const runPlanMutation = useCallback(
-    (
-      busyMessage: string,
-      errorContext: string,
-      mutationAction: () => Promise<unknown>,
-      options?: PlanMutationBehaviorOptions,
-    ) =>
-      executePlanMutation(
-        busyMessage,
-        errorContext,
-        mutationAction,
-        { onBusyChange, onPlanOptimisticUpdate: applyOptimisticPlan, onRefreshPlan },
-        options,
-      ),
-    [applyOptimisticPlan, onBusyChange, onRefreshPlan],
-  )
+  const carrierContextRef = useRef<CarrierMutationLockContext>({
+    activeCarrierRoute: null,
+    isManualCarrierRoute: false,
+    routedCarrierStopIndex: -1,
+    onCancelCarrierRoute: () => {},
+  })
 
-  async function setFcArrived(rowId: number, arrived: boolean) {
-    if (!plan) return
-    await runPlanMutation(
-      'UPDATING CARRIER ARRIVAL',
-      'Failed to update carrier arrival',
-      () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, fcArrived: arrived })),
-      { optimisticPlan: buildOptimisticFcArrivedPlan(plan, rowId, arrived) },
-    )
-  }
+  const mutations = usePlanMutations({
+    plan,
+    isPlanning: Boolean(isPlanning),
+    onBusyChange,
+    applyOptimisticPlan,
+    onRefreshPlan,
+    carrierContextRef,
+  })
 
   const carrierRoute = useCarrierRoute({
     plan,
-    lastVisitedIndex,
+    lastVisitedIndex: frontier.lastVisitedIndex,
+    manualPlotterRequestCount,
     onBusyChange,
-    onSetFcArrived: setFcArrived,
-    onRegisterManualPlotter,
+    onSetFcArrived: mutations.setFcArrived,
     onCarrierRouteOpenChange,
   })
+
+  carrierContextRef.current = {
+    activeCarrierRoute: carrierRoute.activeCarrierRoute,
+    isManualCarrierRoute: carrierRoute.isManualCarrierRoute,
+    routedCarrierStopIndex: carrierRoute.routedCarrierStopIndex,
+    onCancelCarrierRoute: carrierRoute.handleCancelCarrierRoute,
+  }
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   useInitialExpeditionScroll(
@@ -171,10 +137,10 @@ export function ExpeditionPlanner({
     Boolean(plan?.expedition),
     plan?.expedition?.id,
     plan?.expedition?.status,
-    lastVisitedIndex,
+    frontier.lastVisitedIndex,
   )
 
-  function handleCopySystem(rowId: number, systemName: string) {
+  const handleCopySystem = useCallback((rowId: number, systemName: string) => {
     if (!systemName) return
     const text = systemName.trim()
     if (navigator?.clipboard?.writeText) {
@@ -193,210 +159,7 @@ export function ExpeditionPlanner({
       setCopiedSystemRowId((currentId) => (currentId === rowId ? null : currentId))
       copiedTimerRef.current = null
     }, 1500)
-  }
-
-  async function commitField(
-    row: expedition.Row,
-    field: 'systemName' | 'poiName' | 'notes',
-    value: string,
-  ) {
-    if ((row[field] ?? '') === value) return
-    await runPlanMutation(
-      'UPDATING WAYPOINT',
-      `Failed to update waypoint ${field}`,
-      () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, [field]: value })),
-      { rollbackOnError: true },
-    )
-  }
-
-  async function toggleFcStop(row: expedition.Row) {
-    if (!plan) return
-    if (carrierRoute.activeCarrierRoute && carrierRoute.routedCarrierStopIndex >= 0) {
-      const rowIndex = plan.rows.findIndex((rowView) => rowView?.row?.id === row.id)
-      if (
-        rowIndex >= 0 &&
-        (carrierRoute.isManualCarrierRoute
-          ? rowIndex < carrierRoute.routedCarrierStopIndex
-          : rowIndex <= carrierRoute.routedCarrierStopIndex)
-      ) {
-        return
-      }
-    }
-    const nextFcStop = !row.fcStop
-    await runPlanMutation(
-      'UPDATING FC STOP',
-      'Failed to toggle fleet carrier stop',
-      () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, fcStop: nextFcStop })),
-      { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop) },
-    )
-  }
-
-  function handleRequestOverrideFcArrived(rowView: expedition.RowView) {
-    if (!plan) return
-    const targetArrived = !rowView.row.fcArrived
-    const rowIndex = plan.rows.findIndex((item) => item?.row?.id === rowView.row.id)
-    let cascadedCount = 0
-    ;(plan.rows ?? []).forEach((candidateView, candidateRowIndex) => {
-      const candidateRow = candidateView?.row
-      if (!candidateRow || candidateRow.rowType !== 'waypoint' || !candidateRow.fcStop) return
-      if (targetArrived && candidateRowIndex < rowIndex && !candidateRow.fcArrived) cascadedCount++
-      if (!targetArrived && candidateRowIndex > rowIndex && candidateRow.fcArrived) cascadedCount++
-    })
-    setConfirmState({
-      kind: 'override_fc_arrival',
-      rowId: rowView.row.id,
-      waypointNumber: rowView.number,
-      systemName: rowView.row.systemName ?? '',
-      targetArrived,
-      cascadedCount,
-    })
-  }
-
-  async function handleLegModeChange(rowId: number, modeId: number) {
-    if (!plan) return
-    await runPlanMutation(
-      'UPDATING FLIGHT MODE',
-      'Failed to update leg flight mode',
-      () => SetLegMode(rowId, modeId),
-      { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId) },
-    )
-  }
-
-  async function changeRegion(rowId: number, regionId: number) {
-    await runPlanMutation(
-      'UPDATING REGION',
-      'Failed to update galactic region',
-      () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, regionId })),
-      { rollbackOnError: true },
-    )
-  }
-
-  async function handleInsert(afterRowId: number, rowType: 'waypoint' | 'region') {
-    if (!plan) return
-    setInsertMenuAfterId(null)
-    await runPlanMutation(
-      rowType === 'region' ? 'ADDING REGION HEADER' : 'ADDING WAYPOINT',
-      `Failed to insert ${rowType}`,
-      () => AddRow(plan.expedition.id, afterRowId, rowType, DEFAULT_GALACTIC_REGION_ID),
-      { rollbackOnError: true },
-    )
-  }
-
-  async function executeDeleteRow(rowId: number) {
-    if (!plan) return
-    const targetRow = plan.rows?.find((rowView) => rowView?.row?.id === rowId)?.row
-    await runPlanMutation(
-      targetRow?.rowType === 'region' ? 'REMOVING REGION HEADER' : 'REMOVING WAYPOINT',
-      'Failed to delete row',
-      () => DeleteRow(rowId),
-      { optimisticPlan: buildOptimisticDeletedRowPlan(plan, rowId) },
-    )
-  }
-
-  function handleRequestDeleteRow(rowView: expedition.RowView) {
-    if (!isPlanning && rowView.row.rowType === 'waypoint') {
-      const isVisited = rowView.visitState === 'visited'
-      const isArrivedFcStop = Boolean(rowView.row.fcStop && rowView.row.fcArrived)
-      if (isVisited || isArrivedFcStop) {
-        setConfirmState({
-          kind: 'delete_waypoint',
-          rowId: rowView.row.id,
-          waypointNumber: rowView.number,
-          systemName: rowView.row.systemName ?? '',
-          visitedAtGalactic: isVisited ? rowView.visitedAtGalactic : undefined,
-          isArrivedFcStop,
-        })
-        return
-      }
-    }
-    void executeDeleteRow(rowView.row.id)
-  }
-
-  const executeMoveRow = useCallback(
-    async (rowId: number, fromIndex: number, toIndex: number) => {
-      if (!plan) return
-      await runPlanMutation(
-        'REORDERING ROUTE',
-        'Failed to reorder route row',
-        () => MoveRow(rowId, toIndex),
-        { optimisticPlan: buildOptimisticMovedRowPlan(plan, fromIndex, toIndex) },
-      )
-    },
-    [plan, runPlanMutation],
-  )
-
-  const handleMoveRow = useCallback(
-    (
-      rowId: number,
-      fromIndex: number,
-      toIndex: number,
-      preview: expedition.DropSlotPreview | null,
-    ): boolean => {
-      if (!plan || fromIndex === toIndex || toIndex < 0 || toIndex >= plan.rows.length) return false
-      const draggedRowView = plan.rows?.[fromIndex]
-      if (!draggedRowView) return false
-      if (!isPlanning && draggedRowView.row.rowType === 'waypoint') {
-        if (preview && (preview.status === 'invalid' || preview.status === 'blocked_fc')) {
-          return false
-        }
-        if (preview?.resetsFcArrived) {
-          setConfirmState({
-            kind: 'move_reset_fc',
-            rowId,
-            fromIndex,
-            toIndex,
-            waypointNumber: draggedRowView.number,
-            systemName: draggedRowView.row.systemName ?? '',
-          })
-          return false
-        }
-      }
-      void executeMoveRow(rowId, fromIndex, toIndex)
-      return true
-    },
-    [executeMoveRow, isPlanning, plan],
-  )
-
-  async function handleConfirmModalAction() {
-    if (!confirmState) return
-    const activeConfirm = confirmState
-    setConfirmState(null)
-    if (activeConfirm.kind === 'delete_waypoint') {
-      await executeDeleteRow(activeConfirm.rowId)
-    } else if (activeConfirm.kind === 'move_reset_fc') {
-      await executeMoveRow(activeConfirm.rowId, activeConfirm.fromIndex, activeConfirm.toIndex)
-    } else if (activeConfirm.kind === 'override_fc_arrival') {
-      const shouldCloseSpanshRoute =
-        activeConfirm.targetArrived &&
-        Boolean(
-          plan &&
-            carrierRoute.activeCarrierRoute &&
-            !carrierRoute.isManualCarrierRoute &&
-            carrierRoute.routedCarrierStopIndex >= 0 &&
-            plan.rows.findIndex((item) => item?.row?.id === activeConfirm.rowId) >=
-              carrierRoute.routedCarrierStopIndex,
-        )
-      await runPlanMutation(
-        'UPDATING CARRIER ARRIVAL',
-        'Failed to override carrier arrival',
-        () => OverrideCarrierStopArrival(activeConfirm.rowId, activeConfirm.targetArrived),
-        {
-          onSuccess: () => {
-            if (shouldCloseSpanshRoute) {
-              carrierRoute.handleCancelCarrierRoute()
-            }
-          },
-          rollbackOnError: true,
-        },
-      )
-    }
-  }
-
-  async function handleLifecycleAction(label: string, actionFunction: () => Promise<void>) {
-    await runPlanMutation(label, 'Failed to update expedition lifecycle state', actionFunction, {
-      rollbackOnError: true,
-    })
-  }
+  }, [])
 
   const { visibleColumnCount, tableMinWidthPixels } = computePlannerTableDimensions(
     Boolean(isPlanning),
@@ -413,12 +176,95 @@ export function ExpeditionPlanner({
     plan,
     isPlanning: Boolean(isPlanning),
     isCompleted: Boolean(isCompleted),
-    lastVisitedIndex,
+    lastVisitedIndex: frontier.lastVisitedIndex,
     lockedSpanshTargetRowId,
-    expandedRowIds,
+    expandedRowIds: drawerState.expandedRowIds,
     scrollContainerRef,
-    onMoveRow: handleMoveRow,
+    onMoveRow: mutations.handleMoveRow,
   })
+
+  const tableColumns = useMemo(
+    () => ({
+      visibleColumnCount,
+      tableMinWidthPixels,
+      showNotes,
+      showCarrierStop,
+      onToggleShowNotes: toggleShowNotes,
+      onToggleShowCarrierStop: toggleShowCarrierStop,
+    }),
+    [
+      showCarrierStop,
+      showNotes,
+      tableMinWidthPixels,
+      toggleShowCarrierStop,
+      toggleShowNotes,
+      visibleColumnCount,
+    ],
+  )
+
+  const externalLinks = useMemo<ExternalLinkVisibilityConfig>(
+    () => ({
+      inara: externalLinkInara,
+      edsm: externalLinkEdsm,
+      gec: externalLinkGec,
+    }),
+    [externalLinkEdsm, externalLinkGec, externalLinkInara],
+  )
+
+  const dragState = useMemo(
+    () => ({
+      tableItems: rowDrag.tableItems,
+      dropSlotGaps: rowDrag.dropSlotGaps,
+      heldOrDraggedIndex: rowDrag.heldOrDraggedIndex,
+      draggedIndex: rowDrag.draggedIndex,
+      dragOverGapIndex: rowDrag.dragOverGapIndex,
+      getRowDropProps: rowDrag.getRowDropProps,
+      getSlotDropProps: rowDrag.getSlotDropProps,
+      onClearDragOverGap: rowDrag.handleClearDragOverGap,
+      onRowHoldStart: rowDrag.handleRowHoldStart,
+      onRowHoldEnd: rowDrag.handleRowHoldEnd,
+      onRowDragStart: rowDrag.handleRowDragStart,
+      onRowDragEnd: rowDrag.handleRowDragEnd,
+    }),
+    [rowDrag],
+  )
+
+  const carrierState = useMemo(
+    () => ({
+      activeCarrierRoute: carrierRoute.activeCarrierRoute,
+      activeCarrierTargetRowId: carrierRoute.activeCarrierTargetRowId,
+      isManualCarrierRoute: carrierRoute.isManualCarrierRoute,
+      nextFcStopEntry: carrierRoute.nextFcStopEntry,
+      routedCarrierStopIndex: carrierRoute.routedCarrierStopIndex,
+      onOpenCarrierRoutePrompt: carrierRoute.openCarrierRoutePrompt,
+    }),
+    [
+      carrierRoute.activeCarrierRoute,
+      carrierRoute.activeCarrierTargetRowId,
+      carrierRoute.isManualCarrierRoute,
+      carrierRoute.nextFcStopEntry,
+      carrierRoute.openCarrierRoutePrompt,
+      carrierRoute.routedCarrierStopIndex,
+    ],
+  )
+
+  const rowActions = useMemo(
+    () => ({
+      copiedSystemRowId,
+      insertMenuAfterId: mutations.insertMenuAfterId,
+      onSetInsertMenuAfterId: mutations.setInsertMenuAfterId,
+      onChangeRegion: mutations.changeRegion,
+      onInsert: mutations.handleInsert,
+      onDeleteRow: mutations.handleRequestDeleteRow,
+      onLegModeChange: mutations.handleLegModeChange,
+      onOriginSystemFilledChange: setOriginHasDraftSystem,
+      onFieldBlur: mutations.commitField,
+      onCopySystem: handleCopySystem,
+      onToggleFcStop: mutations.toggleFcStop,
+      onOverrideFcArrived: mutations.handleRequestOverrideFcArrived,
+    }),
+    [copiedSystemRowId, handleCopySystem, mutations],
+  )
 
   if (!plan) {
     return (
@@ -429,7 +275,6 @@ export function ExpeditionPlanner({
   }
 
   const currentExpedition = plan.expedition
-  const modesList = plan.modes ?? []
   const hasOriginWaypointSystem =
     originHasDraftSystem ?? Boolean((firstWaypoint?.row.systemName ?? '').trim())
 
@@ -447,7 +292,7 @@ export function ExpeditionPlanner({
         hasOriginWaypointSystem={hasOriginWaypointSystem}
         carrierRouteOpen={Boolean(carrierRoute.activeCarrierRoute || carrierRoute.routePrompt)}
         onOpenStartModal={onOpenStartModal}
-        onLifecycleAction={handleLifecycleAction}
+        onLifecycleAction={mutations.handleLifecycleAction}
       />
 
       <div
@@ -457,61 +302,22 @@ export function ExpeditionPlanner({
       >
         <PlannerRouteTable
           plan={plan}
-          tableItems={rowDrag.tableItems}
-          dropSlotGaps={rowDrag.dropSlotGaps}
-          modesList={modesList}
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}
-          lastVisitedIndex={lastVisitedIndex}
-          lastFcArrivedIndex={lastFcArrivedIndex}
-          visibleColumnCount={visibleColumnCount}
-          tableMinWidthPixels={tableMinWidthPixels}
-          showNotes={showNotes}
-          showCarrierStop={showCarrierStop}
-          externalLinkInara={externalLinkInara}
-          externalLinkEdsm={externalLinkEdsm}
-          externalLinkGec={externalLinkGec}
-          expandedRowIds={expandedRowIds}
-          detailsById={detailsById}
-          loadingDetails={loadingDetails}
-          copiedSystemRowId={copiedSystemRowId}
-          insertMenuAfterId={insertMenuAfterId}
-          heldOrDraggedIndex={rowDrag.heldOrDraggedIndex}
-          draggedIndex={rowDrag.draggedIndex}
-          dragOverGapIndex={rowDrag.dragOverGapIndex}
-          activeCarrierRoute={carrierRoute.activeCarrierRoute}
-          activeCarrierTargetRowId={carrierRoute.activeCarrierTargetRowId}
-          isManualCarrierRoute={carrierRoute.isManualCarrierRoute}
-          nextFcStopEntry={carrierRoute.nextFcStopEntry}
-          routedCarrierStopIndex={carrierRoute.routedCarrierStopIndex}
-          getRowDropProps={rowDrag.getRowDropProps}
-          getSlotDropProps={rowDrag.getSlotDropProps}
-          onClearDragOverGap={rowDrag.handleClearDragOverGap}
-          onToggleShowNotes={toggleShowNotes}
-          onToggleShowCarrierStop={toggleShowCarrierStop}
-          onChangeRegion={changeRegion}
-          onSetInsertMenuAfterId={setInsertMenuAfterId}
-          onInsert={handleInsert}
-          onDeleteRow={handleRequestDeleteRow}
-          onLegModeChange={handleLegModeChange}
-          onToggleExpand={toggleExpand}
-          onOriginSystemFilledChange={setOriginHasDraftSystem}
-          onFieldBlur={commitField}
-          onCopySystem={handleCopySystem}
-          onToggleFcStop={toggleFcStop}
-          onOverrideFcArrived={handleRequestOverrideFcArrived}
-          onOpenCarrierRoutePrompt={carrierRoute.openCarrierRoutePrompt}
-          onRowHoldStart={rowDrag.handleRowHoldStart}
-          onRowHoldEnd={rowDrag.handleRowHoldEnd}
-          onRowDragStart={rowDrag.handleRowDragStart}
-          onRowDragEnd={rowDrag.handleRowDragEnd}
+          frontier={frontier}
+          columns={tableColumns}
+          externalLinks={externalLinks}
+          drawerState={drawerState}
+          dragState={dragState}
+          carrierState={carrierState}
+          rowActions={rowActions}
         />
 
         <PlannerActiveLegFooter
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}
           hasCollapsedRows={rowDrag.hasCollapsedRows}
-          onAppendRow={(rowType) => handleInsert(0, rowType)}
+          onAppendRow={(rowType) => void mutations.handleInsert(0, rowType)}
         />
       </div>
 
@@ -558,11 +364,11 @@ export function ExpeditionPlanner({
         />
       )}
 
-      {confirmState && (
+      {mutations.confirmState && (
         <PlannerConfirmModal
-          confirmState={confirmState}
-          onConfirm={() => void handleConfirmModalAction()}
-          onCancel={() => setConfirmState(null)}
+          confirmState={mutations.confirmState}
+          onConfirm={() => void mutations.handleConfirmModalAction()}
+          onCancel={() => mutations.setConfirmState(null)}
         />
       )}
     </div>

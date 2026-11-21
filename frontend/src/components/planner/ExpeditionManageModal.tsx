@@ -4,8 +4,8 @@ import {
   CreateExpedition,
   DeleteExpedition,
   UpdateExpedition,
-} from '../../../wailsjs/go/app/App'
-import { expedition } from '../../../wailsjs/go/models'
+} from '../../api/backend'
+import { expedition } from '../../api/models'
 import { ModalShell } from '../common/ModalShell'
 
 /**
@@ -17,7 +17,6 @@ export interface ExpeditionManageModalProps {
   activeId: number
   onSelect: (id: number) => void
   onClose: () => void
-  onRefresh: () => void
 }
 
 /**
@@ -29,7 +28,6 @@ export function ExpeditionManageModal({
   activeId,
   onSelect,
   onClose,
-  onRefresh,
 }: ExpeditionManageModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -63,7 +61,6 @@ export function ExpeditionManageModal({
     return runExpeditionAction(async () => {
       await UpdateExpedition(id, editName, editDescription)
       setEditingId(null)
-      onRefresh()
     })
   }
 

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { stats } from '../../wailsjs/go/models'
+import { stats } from '../api/models'
 import {
   type DataChangedDispatchContext,
   type SyncBootLifecycleState,
   routeDataChangedEvent,
-} from './useBackendSync'
+} from './syncEventRouter'
 
 function createDispatchHarness(
   bootOverrides: Partial<SyncBootLifecycleState> = {},
@@ -15,7 +15,6 @@ function createDispatchHarness(
   const loadIngestStatusOnly = vi.fn(async () => null)
   const loadSettingsOnly = vi.fn(async () => null)
   const loadModesOnly = vi.fn(async () => null)
-  const loadCoreState = vi.fn(async () => ({ settingsData: null, chosenId: expeditionId }))
   const loadPlanOnly = vi.fn(async () => {})
   const loadStatsOnly = vi.fn(async () => {})
   const refreshAll = vi.fn()
@@ -33,7 +32,6 @@ function createDispatchHarness(
     loadIngestStatusOnly,
     loadSettingsOnly,
     loadModesOnly,
-    loadCoreState,
     loadPlanOnly,
     loadStatsOnly,
     refreshAll,
@@ -46,7 +44,6 @@ function createDispatchHarness(
     loadIngestStatusOnly,
     loadSettingsOnly,
     loadModesOnly,
-    loadCoreState,
     loadPlanOnly,
     loadStatsOnly,
     refreshAll,
@@ -58,7 +55,6 @@ describe('routeDataChangedEvent', () => {
     const {
       dispatchContext,
       refreshExpeditionListOnly,
-      loadCoreState,
       loadPlanOnly,
       loadStatsOnly,
       refreshAll,
@@ -68,11 +64,10 @@ describe('routeDataChangedEvent', () => {
       pendingBootRefresh: false,
     })
 
-    routeDataChangedEvent({ scope: 'journal', expeditionId: 0 }, dispatchContext)
+    routeDataChangedEvent({ domains: ['ingest', 'plan', 'stats'], expeditionId: 0 }, dispatchContext)
 
     expect(dispatchContext.bootState.pendingBootRefresh).toBe(false)
     expect(refreshExpeditionListOnly).not.toHaveBeenCalled()
-    expect(loadCoreState).not.toHaveBeenCalled()
     expect(loadPlanOnly).not.toHaveBeenCalled()
     expect(loadStatsOnly).not.toHaveBeenCalled()
     expect(refreshAll).not.toHaveBeenCalled()
@@ -82,7 +77,6 @@ describe('routeDataChangedEvent', () => {
     const {
       dispatchContext,
       refreshExpeditionListOnly,
-      loadCoreState,
       loadPlanOnly,
       loadStatsOnly,
       refreshAll,
@@ -92,73 +86,57 @@ describe('routeDataChangedEvent', () => {
       pendingBootRefresh: false,
     })
 
-    routeDataChangedEvent({ scope: 'plan', expeditionId: 1 }, dispatchContext)
+    routeDataChangedEvent({ domains: ['plan'], expeditionId: 1 }, dispatchContext)
 
     expect(dispatchContext.bootState.pendingBootRefresh).toBe(true)
     expect(refreshExpeditionListOnly).not.toHaveBeenCalled()
-    expect(loadCoreState).not.toHaveBeenCalled()
     expect(loadPlanOnly).not.toHaveBeenCalled()
     expect(loadStatsOnly).not.toHaveBeenCalled()
     expect(refreshAll).not.toHaveBeenCalled()
   })
 
-  it('dispatches core, plan, and stats loaders in parallel on post-boot journal updates', () => {
-    const { filter, dispatchContext, loadCoreState, loadPlanOnly, loadStatsOnly, refreshAll } =
-      createDispatchHarness()
-    loadCoreState.mockReturnValue(new Promise(() => {}))
+  it('treats missing or empty domains payloads as a strict no-op after boot', () => {
+    for (const payload of [undefined, {}, { domains: [] }]) {
+      const {
+        dispatchContext,
+        refreshExpeditionListOnly,
+        loadIngestStatusOnly,
+        loadSettingsOnly,
+        loadModesOnly,
+        loadPlanOnly,
+        loadStatsOnly,
+        refreshAll,
+      } = createDispatchHarness()
 
-    routeDataChangedEvent({ scope: 'journal', expeditionId: 0 }, dispatchContext)
+      routeDataChangedEvent(payload, dispatchContext)
 
-    expect(loadCoreState).toHaveBeenCalledTimes(1)
-    expect(loadPlanOnly).toHaveBeenCalledWith(4)
-    expect(loadStatsOnly).toHaveBeenCalledWith(4, filter)
-    expect(refreshAll).not.toHaveBeenCalled()
-  })
-
-  it('routes plan, adjustments, inactive expedition, and settings scopes cleanly after boot', () => {
-    const planHarness = createDispatchHarness()
-    routeDataChangedEvent({ scope: 'plan', expeditionId: 4 }, planHarness.dispatchContext)
-    expect(planHarness.loadPlanOnly).toHaveBeenCalledWith(4)
-    expect(planHarness.loadStatsOnly).not.toHaveBeenCalled()
-    expect(planHarness.refreshAll).not.toHaveBeenCalled()
-
-    const adjustmentsHarness = createDispatchHarness()
-    routeDataChangedEvent(
-      { scope: 'adjustments', expeditionId: 4 },
-      adjustmentsHarness.dispatchContext,
-    )
-    expect(adjustmentsHarness.loadStatsOnly).toHaveBeenCalledWith(4, adjustmentsHarness.filter)
-    expect(adjustmentsHarness.loadPlanOnly).not.toHaveBeenCalled()
-    expect(adjustmentsHarness.refreshAll).not.toHaveBeenCalled()
-
-    const inactiveHarness = createDispatchHarness()
-    routeDataChangedEvent({ scope: 'plan', expeditionId: 99 }, inactiveHarness.dispatchContext)
-    expect(inactiveHarness.refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
-    expect(inactiveHarness.loadPlanOnly).not.toHaveBeenCalled()
-
-    const settingsHarness = createDispatchHarness()
-    routeDataChangedEvent({ scope: 'settings', expeditionId: 0 }, settingsHarness.dispatchContext)
-    expect(settingsHarness.refreshAll).toHaveBeenCalledTimes(1)
+      expect(refreshExpeditionListOnly).not.toHaveBeenCalled()
+      expect(loadIngestStatusOnly).not.toHaveBeenCalled()
+      expect(loadSettingsOnly).not.toHaveBeenCalled()
+      expect(loadModesOnly).not.toHaveBeenCalled()
+      expect(loadPlanOnly).not.toHaveBeenCalled()
+      expect(loadStatsOnly).not.toHaveBeenCalled()
+      expect(refreshAll).not.toHaveBeenCalled()
+    }
   })
 
   it('routes targeted UI domains without triggering full reloads or unrelated loaders', () => {
     const ingestOnlyHarness = createDispatchHarness()
     routeDataChangedEvent(
-      { scope: 'journal', domains: ['ingest'] },
+      { domains: ['ingest'] },
       ingestOnlyHarness.dispatchContext,
     )
     expect(ingestOnlyHarness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
     expect(ingestOnlyHarness.loadSettingsOnly).not.toHaveBeenCalled()
     expect(ingestOnlyHarness.loadModesOnly).not.toHaveBeenCalled()
     expect(ingestOnlyHarness.refreshExpeditionListOnly).not.toHaveBeenCalled()
-    expect(ingestOnlyHarness.loadCoreState).not.toHaveBeenCalled()
     expect(ingestOnlyHarness.loadPlanOnly).not.toHaveBeenCalled()
     expect(ingestOnlyHarness.loadStatsOnly).not.toHaveBeenCalled()
     expect(ingestOnlyHarness.refreshAll).not.toHaveBeenCalled()
 
     const scanHarness = createDispatchHarness()
     routeDataChangedEvent(
-      { scope: 'journal', domains: ['ingest', 'stats'] },
+      { domains: ['ingest', 'stats'] },
       scanHarness.dispatchContext,
     )
     expect(scanHarness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
@@ -168,17 +146,16 @@ describe('routeDataChangedEvent', () => {
 
     const arrivalHarness = createDispatchHarness()
     routeDataChangedEvent(
-      { scope: 'journal', domains: ['ingest', 'plan', 'stats'] },
+      { domains: ['ingest', 'plan', 'stats'] },
       arrivalHarness.dispatchContext,
     )
     expect(arrivalHarness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
     expect(arrivalHarness.loadPlanOnly).toHaveBeenCalledWith(4)
     expect(arrivalHarness.loadStatsOnly).toHaveBeenCalledWith(4, arrivalHarness.filter)
-    expect(arrivalHarness.loadCoreState).not.toHaveBeenCalled()
 
     const modesHarness = createDispatchHarness()
     routeDataChangedEvent(
-      { scope: 'modes', domains: ['stats', 'plan', 'modes'] },
+      { domains: ['stats', 'plan', 'modes'] },
       modesHarness.dispatchContext,
     )
     expect(modesHarness.loadModesOnly).toHaveBeenCalledTimes(1)
@@ -188,7 +165,7 @@ describe('routeDataChangedEvent', () => {
 
     const expeditionsHarness = createDispatchHarness()
     routeDataChangedEvent(
-      { scope: 'expedition', domains: ['stats', 'expeditions'] },
+      { domains: ['stats', 'expeditions'] },
       expeditionsHarness.dispatchContext,
     )
     expect(expeditionsHarness.refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
@@ -198,7 +175,6 @@ describe('routeDataChangedEvent', () => {
     const dbSwitchHarness = createDispatchHarness()
     routeDataChangedEvent(
       {
-        scope: 'settings',
         domains: ['ingest', 'stats', 'plan', 'modes', 'settings', 'expeditions'],
       },
       dbSwitchHarness.dispatchContext,
@@ -209,7 +185,7 @@ describe('routeDataChangedEvent', () => {
 
     const dedupHarness = createDispatchHarness({}, 0)
     routeDataChangedEvent(
-      { scope: 'journal', domains: ['ingest', 'stats', 'stats', 'ingest', 'settings'] },
+      { domains: ['ingest', 'stats', 'stats', 'ingest', 'settings'] },
       dedupHarness.dispatchContext,
     )
     expect(dedupHarness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
@@ -229,7 +205,7 @@ describe('routeDataChangedEvent', () => {
     } = createDispatchHarness()
 
     routeDataChangedEvent(
-      { scope: 'settings', expeditionId: 99, domains: ['settings', 'plan'] },
+      { expeditionId: 99, domains: ['settings', 'plan'] },
       dispatchContext,
     )
 
@@ -251,7 +227,7 @@ describe('routeDataChangedEvent', () => {
     } = createDispatchHarness()
 
     routeDataChangedEvent(
-      { scope: 'expeditions', expeditionId: 0, domains: ['settings', 'expeditions'] },
+      { expeditionId: 0, domains: ['settings', 'expeditions'] },
       dispatchContext,
     )
 
@@ -262,4 +238,3 @@ describe('routeDataChangedEvent', () => {
     expect(refreshAll).not.toHaveBeenCalled()
   })
 })
-

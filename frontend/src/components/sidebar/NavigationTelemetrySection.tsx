@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { app, stats } from '../../../wailsjs/go/models'
+import { app, stats } from '../../api/models'
 import { formatCredits, formatInt, formatLy, nowGalacticTime } from '../../utils/galacticTime'
 import { StatRow } from './StatRow'
 

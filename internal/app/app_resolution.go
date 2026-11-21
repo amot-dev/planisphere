@@ -63,7 +63,7 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 				if anyCoords {
 					app.reevaluate(expeditionID)
 				}
-				app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+				app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 				lastEmit = time.Now()
 			}
 		}
@@ -72,7 +72,7 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 		if anyCoords {
 			app.reevaluate(expeditionID)
 		}
-		app.publishApp("plan", expeditionID, events.AppExpeditionPlanChanged)
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	}
 }
 
@@ -193,7 +193,7 @@ func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 			if resolvedCoords {
 				app.reevaluate(rowItem.ExpeditionID)
 			}
-			app.publishApp("plan", rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+			app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 		}
 	})
 }

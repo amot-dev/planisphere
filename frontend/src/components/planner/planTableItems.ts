@@ -1,4 +1,4 @@
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
 
 /**
  * PlannerTableItem represents a rendered row in the flattened expedition flight
@@ -28,6 +28,50 @@ export type PlannerTableItem =
       preview: expedition.DropSlotPreview
       key: string
     }
+
+/**
+ * ExternalLinkVisibilityConfig specifies the visibility modes for waypoint
+ * external star-system links across Inara, EDSM, and EDAstro GEC.
+ */
+export interface ExternalLinkVisibilityConfig {
+  inara?: string
+  edsm?: string
+  gec?: string
+}
+
+/**
+ * PlannerFrontierIndices records the latest visited waypoint and arrived
+ * Fleet Carrier stop indices inside plan.rows for chronological edit guards.
+ */
+export interface PlannerFrontierIndices {
+  lastVisitedIndex: number
+  lastFcArrivedIndex: number
+}
+
+/**
+ * computePlanFrontierIndices scans plan.rows for the furthest visited row and
+ * arrived Fleet Carrier stop when the expedition is no longer in planning mode.
+ */
+export function computePlanFrontierIndices(
+  plan: expedition.PlanView | null,
+  isPlanning: boolean,
+): PlannerFrontierIndices {
+  if (!plan?.rows || isPlanning) {
+    return { lastVisitedIndex: -1, lastFcArrivedIndex: -1 }
+  }
+  let maxVisitedIndex = -1
+  let maxFcArrivedIndex = -1
+  plan.rows.forEach((rowView, rowIndex) => {
+    if (!rowView) return
+    if (rowView.visitState === 'visited') {
+      maxVisitedIndex = rowIndex
+    }
+    if (rowView.row?.rowType === 'waypoint' && rowView.row.fcStop && rowView.row.fcArrived) {
+      maxFcArrivedIndex = rowIndex
+    }
+  })
+  return { lastVisitedIndex: maxVisitedIndex, lastFcArrivedIndex: maxFcArrivedIndex }
+}
 
 /**
  * gapToTargetIndex converts a gap position (0..rows.length, where gap g sits
@@ -103,6 +147,30 @@ export function getWaypointLegBorderColor(
   return rowView.number === 1
     ? ORIGIN_LEG_BORDER_COLOR
     : options?.overrideModeColor || rowView.legModeColor || DEFAULT_LEG_BORDER_COLOR
+}
+
+/**
+ * computeRegionBorderColors walks plan rows in reverse so each region header
+ * inherits the left leg border color of the first following waypoint row.
+ */
+export function computeRegionBorderColors(
+  rows: readonly expedition.RowView[] | undefined,
+  isPlanning: boolean,
+): Map<number, string> {
+  const borderMap = new Map<number, string>()
+  if (isPlanning || !rows?.length) return borderMap
+  let followingBorderColor: string | undefined
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const candidateRowView = rows[i]
+    if (candidateRowView.row.rowType === 'region') {
+      if (followingBorderColor) {
+        borderMap.set(candidateRowView.row.id, followingBorderColor)
+      }
+    } else {
+      followingBorderColor = getWaypointLegBorderColor(candidateRowView, isPlanning)
+    }
+  }
+  return borderMap
 }
 
 function buildCollapsedVisitedItem(
@@ -347,195 +415,3 @@ export function buildPlannerTableItems(
   })
   return items
 }
-
-function findNextUnarrivedCarrierStopRowId(rows: expedition.RowView[]): number {
-  for (const rowView of rows) {
-    if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && !rowView.row.fcArrived) {
-      return rowView.row.id
-    }
-  }
-  return 0
-}
-
-/**
- * buildOptimisticFcArrivedPlan returns an optimistic PlanView updating a
- * waypoint's Fleet Carrier arrival state and recomputing nextFcStopRowId.
- */
-export function buildOptimisticFcArrivedPlan(
-  plan: expedition.PlanView,
-  rowId: number,
-  arrived: boolean,
-): expedition.PlanView {
-  const optimisticRows = plan.rows.map((rowView) => {
-    if (rowView.row.id !== rowId) return rowView
-    return expedition.RowView.createFrom({
-      ...rowView,
-      row: { ...rowView.row, fcArrived: arrived },
-    })
-  })
-  return expedition.PlanView.createFrom({
-    ...plan,
-    rows: optimisticRows,
-    nextFcStopRowId: findNextUnarrivedCarrierStopRowId(optimisticRows),
-  })
-}
-
-/**
- * buildOptimisticFcStopTogglePlan returns an optimistic PlanView toggling a
- * waypoint's Fleet Carrier stop flag and recomputing nextFcStopRowId.
- */
-export function buildOptimisticFcStopTogglePlan(
-  plan: expedition.PlanView,
-  row: expedition.Row,
-  nextFcStop: boolean,
-): expedition.PlanView {
-  const optimisticRows = plan.rows.map((rowView) => {
-    if (rowView.row.id !== row.id) return rowView
-    return expedition.RowView.createFrom({
-      ...rowView,
-      row: {
-        ...rowView.row,
-        fcStop: nextFcStop,
-        fcArrived: nextFcStop ? rowView.row.fcArrived : false,
-      },
-    })
-  })
-  return expedition.PlanView.createFrom({
-    ...plan,
-    rows: optimisticRows,
-    nextFcStopRowId: findNextUnarrivedCarrierStopRowId(optimisticRows),
-  })
-}
-
-/**
- * buildOptimisticLegModePlan returns an optimistic PlanView assigning a flight
- * mode override to a visited waypoint leg.
- */
-export function buildOptimisticLegModePlan(
-  plan: expedition.PlanView,
-  rowId: number,
-  modeId: number,
-): expedition.PlanView {
-  const pickedMode = (plan.modes ?? []).find((mode) => mode.id === modeId)
-  const optimisticRows = plan.rows.map((rowView) => {
-    if (rowView.row.id !== rowId) return rowView
-    return expedition.RowView.createFrom({
-      ...rowView,
-      legModeId: modeId,
-      legModeName: pickedMode?.name ?? rowView.legModeName,
-      legModeColor: pickedMode?.color ?? rowView.legModeColor,
-    })
-  })
-  return expedition.PlanView.createFrom({
-    ...plan,
-    rows: optimisticRows,
-  })
-}
-
-/**
- * buildOptimisticDeletedRowPlan returns an optimistic PlanView removing a row
- * and renumbering remaining waypoints sequentially.
- */
-export function buildOptimisticDeletedRowPlan(
-  plan: expedition.PlanView,
-  rowId: number,
-): expedition.PlanView {
-  const filteredRows = plan.rows.filter((rowView) => rowView.row.id !== rowId)
-  let waypointCount = 0
-  const renumberedRows = filteredRows.map((rowView) => {
-    if (rowView.row.rowType === 'waypoint') {
-      waypointCount++
-      return expedition.RowView.createFrom({ ...rowView, number: waypointCount })
-    }
-    return rowView
-  })
-  return expedition.PlanView.createFrom({
-    ...plan,
-    rows: renumberedRows,
-    waypointCount,
-  })
-}
-
-/**
- * buildOptimisticMovedRowPlan returns an optimistic PlanView moving a row to a
- * new index and renumbering waypoint sequence numbers and row positions.
- */
-export function buildOptimisticMovedRowPlan(
-  plan: expedition.PlanView,
-  fromIndex: number,
-  toIndex: number,
-): expedition.PlanView {
-  const nextRows = [...plan.rows]
-  const [movedRow] = nextRows.splice(fromIndex, 1)
-  nextRows.splice(toIndex, 0, movedRow)
-  let waypointCount = 0
-  const renumberedRows = nextRows.map((rowView, rowIndex) => {
-    const updatedRow = expedition.Row.createFrom({
-      ...rowView.row,
-      position: rowIndex + 1,
-    })
-    if (rowView.row.rowType === 'waypoint') {
-      waypointCount++
-      return expedition.RowView.createFrom({
-        ...rowView,
-        row: updatedRow,
-        number: waypointCount,
-      })
-    }
-    return expedition.RowView.createFrom({ ...rowView, row: updatedRow })
-  })
-  return expedition.PlanView.createFrom({
-    ...plan,
-    rows: renumberedRows,
-  })
-}
-
-/**
- * PlanMutationContextCallbacks supplies the busy banner, optimistic PlanView
- * setter, and rollback refresh handler shared across planner mutations.
- */
-export interface PlanMutationContextCallbacks {
-  onBusyChange: (busyMessage: string | null) => void
-  onPlanOptimisticUpdate: (nextPlan: expedition.PlanView) => void
-  onRefreshPlan: () => void | Promise<void>
-}
-
-/**
- * PlanMutationBehaviorOptions configures optional optimistic PlanView state,
- * post-success refresh, and rollback behavior for a single planner mutation.
- */
-export interface PlanMutationBehaviorOptions {
-  optimisticPlan?: expedition.PlanView
-  onSuccess?: () => void
-  rollbackOnError?: boolean
-}
-
-/**
- * executePlanMutation applies an optional optimistic PlanView update, runs a
- * backend planner RPC under a busy status banner, and rolls back via
- * onRefreshPlan if the RPC rejects.
- */
-export async function executePlanMutation(
-  busyMessage: string,
-  errorContext: string,
-  mutationAction: () => Promise<unknown>,
-  contextCallbacks: PlanMutationContextCallbacks,
-  options?: PlanMutationBehaviorOptions,
-): Promise<void> {
-  if (options?.optimisticPlan) {
-    contextCallbacks.onPlanOptimisticUpdate(options.optimisticPlan)
-  }
-  contextCallbacks.onBusyChange(busyMessage)
-  try {
-    await mutationAction()
-    options?.onSuccess?.()
-  } catch (mutationError) {
-    console.error(`${errorContext}:`, mutationError)
-    if (options?.optimisticPlan || options?.rollbackOnError) {
-      await contextCallbacks.onRefreshPlan()
-    }
-  } finally {
-    contextCallbacks.onBusyChange(null)
-  }
-}
-

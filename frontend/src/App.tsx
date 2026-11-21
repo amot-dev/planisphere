@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { CockpitTopBar } from './components/common/CockpitTopBar'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { TerminalBootScreen } from './components/common/TerminalBootScreen'
@@ -48,15 +48,11 @@ export default function App() {
     false,
   )
 
-  const openManualPlotterRef = useRef<(() => void) | null>(null)
+  const [manualPlotterRequestCount, setManualPlotterRequestCount] = useState(0)
   const [carrierRouteOpen, setCarrierRouteOpen] = useState(false)
 
-  const handleRegisterManualPlotter = useCallback((openManualPlotter: () => void) => {
-    openManualPlotterRef.current = openManualPlotter
-  }, [])
-
   const handleLogCarrierJump = useCallback(() => {
-    openManualPlotterRef.current?.()
+    setManualPlotterRequestCount((requestCount) => requestCount + 1)
   }, [])
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
@@ -126,11 +122,11 @@ export default function App() {
             externalLinkInara={settings?.externalLinkInara}
             externalLinkEdsm={settings?.externalLinkEdsm}
             externalLinkGec={settings?.externalLinkGec}
+            manualPlotterRequestCount={manualPlotterRequestCount}
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
             onRefreshPlan={handleRefreshPlan}
             onBusyChange={setBusyAction}
-            onRegisterManualPlotter={handleRegisterManualPlotter}
             onCarrierRouteOpenChange={setCarrierRouteOpen}
           />
         </ErrorBoundary>
@@ -141,7 +137,6 @@ export default function App() {
         <StartExpeditionModal
           expeditionId={activeExpeditionId}
           onClose={() => setActiveModal(null)}
-          onStarted={refreshAll}
         />
       )}
 
@@ -152,7 +147,6 @@ export default function App() {
           modesState={modesState}
           eddProgress={eddProgress}
           onClose={() => setActiveModal(null)}
-          onRefresh={refreshAll}
           onOpenSetupWizard={() => setActiveModal('setup')}
         />
       )}
@@ -176,7 +170,6 @@ export default function App() {
           activeId={activeExpeditionId}
           onSelect={handleSelectExpedition}
           onClose={() => setActiveModal(null)}
-          onRefresh={refreshAll}
         />
       )}
     </div>

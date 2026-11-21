@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { BrowseJournalDir, SetJournalDir } from '../../../wailsjs/go/app/App'
-import { app } from '../../../wailsjs/go/models'
+import { BrowseJournalDir, SetJournalDir } from '../../api/backend'
+import { app } from '../../api/models'
 
 /**
  * JournalDirectorySectionProps defines the current settings and callbacks for
@@ -8,7 +8,6 @@ import { app } from '../../../wailsjs/go/models'
  */
 export interface JournalDirectorySectionProps {
   settings: app.Settings | null
-  onRefresh: () => void
   onSetError: (errorMessage: string) => void
 }
 
@@ -18,7 +17,6 @@ export interface JournalDirectorySectionProps {
  */
 export function JournalDirectorySection({
   settings,
-  onRefresh,
   onSetError,
 }: JournalDirectorySectionProps) {
   const [directoryPath, setDirectoryPath] = useState(settings?.journalDir ?? '')
@@ -41,7 +39,6 @@ export function JournalDirectorySection({
     try {
       const updatedSettings = await SetJournalDir(directoryPath)
       setDirectoryPath(updatedSettings.journalDir)
-      onRefresh()
     } catch (saveError) {
       onSetError(String(saveError))
     }
@@ -52,7 +49,6 @@ export function JournalDirectorySection({
     try {
       const updatedSettings = await SetJournalDir('')
       setDirectoryPath(updatedSettings.journalDir)
-      onRefresh()
     } catch (resetError) {
       onSetError(String(resetError))
     }

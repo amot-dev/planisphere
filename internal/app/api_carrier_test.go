@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"sync"
 	"testing"
 
@@ -79,13 +80,13 @@ func TestRecordCarrierJump(testingContext *testing.T) {
 		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
 	}
 
-	// Verify emitted event scope is strictly "adjustments", not "all"
+	// Verify emitted event domains include only stats and expeditions, not plan or full reloads
 	emitMu.Lock()
 	if len(emittedEvents) != 1 {
 		testingContext.Fatalf("expected 1 event, got %d", len(emittedEvents))
 	}
-	if emittedEvents[0].Scope != "adjustments" {
-		testingContext.Errorf("expected scope 'adjustments', got '%s'", emittedEvents[0].Scope)
+	if !slices.Equal(emittedEvents[0].Domains, []string{"stats", "expeditions"}) {
+		testingContext.Errorf("expected domains [stats expeditions], got %v", emittedEvents[0].Domains)
 	}
 	if emittedEvents[0].ExpeditionID != expeditionRecord.ID {
 		testingContext.Errorf("expected expeditionID %d, got %d", expeditionRecord.ID, emittedEvents[0].ExpeditionID)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { UpdateExpeditionCarrierConfig } from '../../../wailsjs/go/app/App'
+import { UpdateExpeditionCarrierConfig } from '../../api/backend'
 
 /**
  * CarrierConfigModalProps defines the expedition identifier, initial Fleet

@@ -26,7 +26,7 @@ func (app *App) runScan() bool {
 	}
 	app.emit(EventIngest, nil)
 	if hasNewEvents {
-		app.emitDataChanged("journal", 0, affectedTargets)
+		app.emitDataChanged(0, affectedTargets)
 	}
 	return hasNewEvents
 }
@@ -113,7 +113,7 @@ func (app *App) warmInitialStats() {
 // onJournalBatch runs after the live tailer stored new events.
 func (app *App) onJournalBatch(scanResult journal.Result) {
 	affectedTargets := app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
-	app.emitDataChanged("journal", 0, affectedTargets)
+	app.emitDataChanged(0, affectedTargets)
 }
 
 func (app *App) reevaluateActive() []int64 {
@@ -183,7 +183,7 @@ func (app *App) maybeRefreshGEC() {
 	}
 	app.dbMu.RUnlock()
 	app.populateMissingPOIs()
-	app.publishApp("plan", 0, events.AppExpeditionPlanChanged, events.AppSettingsChanged)
+	app.publishApp(0, events.AppExpeditionPlanChanged, events.AppSettingsChanged)
 }
 
 func (app *App) maybeCatchUpEDD() {
@@ -221,6 +221,6 @@ func (app *App) maybeCatchUpEDD() {
 		if affectedTargets.IsEmpty() {
 			affectedTargets = events.NewUITargetSet(events.UITargetIngest)
 		}
-		app.emitDataChanged("journal", 0, affectedTargets)
+		app.emitDataChanged(0, affectedTargets)
 	}
 }

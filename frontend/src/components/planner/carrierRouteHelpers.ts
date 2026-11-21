@@ -1,15 +1,5 @@
-import { GetCarrierDepotInfo, GetCarrierLastLocation } from '../../../wailsjs/go/app/App'
-import { expedition } from '../../../wailsjs/go/models'
-import { calculateCarrierJumpFuel } from '../../utils/carrierRouting'
-
-/**
- * NextCarrierStopEntry identifies the next unarrived Fleet Carrier stop row and
- * its index within the expedition plan's ordered row list.
- */
-export interface NextCarrierStopEntry {
-  row: expedition.Row
-  index: number
-}
+import { GetCarrierDepotInfo, GetCarrierLastLocation } from '../../api/backend'
+import { expedition } from '../../api/models'
 
 /**
  * resolveCarrierStartSystem determines the default starting star system for a
@@ -34,7 +24,7 @@ export async function resolveCarrierStartSystem(
   const rows = plan.rows ?? []
   const searchFrom = Math.min(upToIndex - 1, rows.length - 1)
 
-  // Fallback: most recent preceding Fleet Carrier stop in the expedition plan
+  // Fallback: most recent preceding Fleet Carrier stop in the expedition plan.
   if (!startSystem) {
     for (let i = searchFrom; i >= 0; i--) {
       const candidate = rows[i]?.row
@@ -45,7 +35,7 @@ export async function resolveCarrierStartSystem(
     }
   }
 
-  // Secondary fallback: immediately preceding waypoint in the plan
+  // Secondary fallback: immediately preceding waypoint in the plan.
   if (!startSystem) {
     for (let i = searchFrom; i >= 0; i--) {
       const candidate = rows[i]?.row
@@ -82,111 +72,3 @@ export async function resolveCarrierDefaults(): Promise<{ capacity: number; depo
   }
   return { capacity, depot }
 }
-
-/**
- * findNextCarrierStopEntry locates the next unarrived Fleet Carrier stop row
- * in the active expedition plan.
- */
-export function findNextCarrierStopEntry(
-  plan: expedition.PlanView | null,
-): NextCarrierStopEntry | null {
-  if (!plan?.rows) return null
-  if (plan.nextFcStopRowId > 0) {
-    const matchedRowIndex = plan.rows.findIndex(
-      (rowView) => rowView?.row?.id === plan.nextFcStopRowId,
-    )
-    if (
-      matchedRowIndex >= 0 &&
-      plan.rows[matchedRowIndex].row.fcStop &&
-      !plan.rows[matchedRowIndex].row.fcArrived
-    ) {
-      return { row: plan.rows[matchedRowIndex].row, index: matchedRowIndex }
-    }
-  }
-  const fallbackRowIndex = plan.rows.findIndex(
-    (rowView) =>
-      rowView?.row?.rowType === 'waypoint' &&
-      rowView.row.fcStop &&
-      !rowView.row.fcArrived,
-  )
-  if (fallbackRowIndex >= 0) {
-    return { row: plan.rows[fallbackRowIndex].row, index: fallbackRowIndex }
-  }
-  return null
-}
-
-/**
- * computeRoutedCarrierStopIndex returns the row index locked by an active
- * Spansh or manual carrier route, or -1 when no carrier route is active.
- */
-export function computeRoutedCarrierStopIndex(
-  activeCarrierRoute: expedition.CarrierRouteResult | null,
-  activeCarrierTargetRowId: number,
-  isManualCarrierRoute: boolean,
-  nextCarrierStopEntry: NextCarrierStopEntry | null,
-  rows: expedition.RowView[] | undefined,
-): number {
-  if (!activeCarrierRoute || !rows) return -1
-  if (isManualCarrierRoute) {
-    return nextCarrierStopEntry ? nextCarrierStopEntry.index : -1
-  }
-  if (activeCarrierTargetRowId > 0) {
-    const targetRowIndex = rows.findIndex(
-      (rowView) => rowView?.row?.id === activeCarrierTargetRowId,
-    )
-    if (targetRowIndex >= 0) {
-      return targetRowIndex
-    }
-  }
-  return nextCarrierStopEntry ? nextCarrierStopEntry.index : -1
-}
-
-/**
- * recalculateCarrierRouteDepotFuel updates the carrier depot level and optional
- * cargo mass, recalculating tritium burn for all remaining jumps in the route.
- */
-export function recalculateCarrierRouteDepotFuel(
-  activeCarrierRoute: expedition.CarrierRouteResult,
-  carrierJumpIndex: number,
-  newDepot: number,
-  newCapacityUsed?: number,
-): expedition.CarrierRouteResult {
-  const clampedDepot = Math.max(0, Math.min(1000, newDepot))
-  const maxCarrierCapacityTonnes = activeCarrierRoute.carrierType === 'squadron' ? 60000 : 25000
-  const updatedCapacity =
-    newCapacityUsed !== undefined
-      ? Math.max(0, Math.min(maxCarrierCapacityTonnes, newCapacityUsed))
-      : (activeCarrierRoute.capacityUsed || 0)
-
-  const currentJumps = activeCarrierRoute.jumps || []
-  const recalculatedJumps = currentJumps.map((jump, hopIndex) => {
-    if (hopIndex < carrierJumpIndex) {
-      return jump
-    }
-    const recalculatedCost = calculateCarrierJumpFuel(
-      jump.distanceLy,
-      updatedCapacity,
-      clampedDepot,
-      maxCarrierCapacityTonnes,
-    )
-    return {
-      ...jump,
-      tritiumUsed: recalculatedCost,
-      fuelInTank: clampedDepot,
-    }
-  })
-
-  const newTotalTritium = recalculatedJumps.reduce(
-    (sum, carrierJump) => sum + (carrierJump.tritiumUsed || 0),
-    0,
-  )
-
-  return expedition.CarrierRouteResult.createFrom({
-    ...activeCarrierRoute,
-    depotTritium: clampedDepot,
-    capacityUsed: updatedCapacity,
-    jumps: recalculatedJumps,
-    totalTritium: newTotalTritium,
-  })
-}
-

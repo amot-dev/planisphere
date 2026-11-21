@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GetWaypointDetails } from '../../../wailsjs/go/app/App'
-import { expedition } from '../../../wailsjs/go/models'
+import { GetWaypointDetails } from '../../api/backend'
+import { expedition } from '../../api/models'
 
 /**
  * WaypointDetailsState exposes the expanded drawer map, cached waypoint

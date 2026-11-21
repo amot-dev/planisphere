@@ -1,16 +1,44 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type React from 'react'
-import { expedition } from '../../../wailsjs/go/models'
+import { expedition } from '../../api/models'
 import { formatLy } from '../../utils/galacticTime'
 import { AutoExpandingTextarea } from '../common/AutoExpandingTextarea'
-import { getWaypointLegBorderColor } from './plannerPlanHelpers'
+import {
+  getWaypointLegBorderColor,
+  type ExternalLinkVisibilityConfig,
+} from './planTableItems'
 import { CoordStatusIndicator } from './widgets/CoordStatusIndicator'
 import { HoverOpenInLinks } from './widgets/HoverOpenInLinks'
 import { RowManipulationButtons } from './widgets/RowManipulationButtons'
 
 /**
- * WaypointRowItemProps defines the row data, interaction flags, and event
- * callbacks for a single waypoint row in the flight planner table.
+ * WaypointRowHandlers bundles reference-stable row interaction callbacks so
+ * memoized WaypointRowItem instances skip unaffected re-renders.
+ */
+export interface WaypointRowHandlers {
+  onOriginSystemFilledChange?: (hasSystem: boolean) => void
+  onToggleExpand: (id: number) => void
+  onFieldBlur: (
+    row: expedition.Row,
+    field: 'systemName' | 'poiName' | 'notes',
+    fieldValue: string,
+  ) => void
+  onCopySystem: (id: number, name: string) => void
+  onToggleFcStop: (row: expedition.Row) => void
+  onOverrideFcArrived?: (rowView: expedition.RowView) => void
+  onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void
+  onToggleInsertMenu: (id: number) => void
+  onInsert: (afterId: number, type: 'waypoint' | 'region') => void
+  onDelete: (id: number) => void
+  onHoldStart?: (index: number) => void
+  onHoldEnd?: () => void
+  onDragStart: (index: number, id: number, event: React.DragEvent) => void
+  onDragEnd: () => void
+}
+
+/**
+ * WaypointRowItemProps defines the row data, interaction flags, and shared
+ * handler references for a single waypoint row in the flight planner table.
  */
 export interface WaypointRowItemProps {
   rowView: expedition.RowView
@@ -35,23 +63,8 @@ export interface WaypointRowItemProps {
   dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
   showCarrierStop?: boolean
-  externalLinkInara?: string
-  externalLinkEdsm?: string
-  externalLinkGec?: string
-  onOriginSystemFilledChange?: (hasSystem: boolean) => void
-  onToggleExpand: (id: number) => void
-  onFieldBlur: (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', fieldValue: string) => void
-  onCopySystem: (id: number, name: string) => void
-  onToggleFcStop: (row: expedition.Row) => void
-  onOverrideFcArrived?: (rowView: expedition.RowView) => void
-  onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void
-  onToggleInsertMenu: (id: number) => void
-  onInsert: (afterId: number, type: 'waypoint' | 'region') => void
-  onDelete: (id: number) => void
-  onHoldStart?: (index: number) => void
-  onHoldEnd?: () => void
-  onDragStart: (index: number, id: number, event: React.DragEvent) => void
-  onDragEnd: () => void
+  externalLinks?: ExternalLinkVisibilityConfig
+  handlers: WaypointRowHandlers
 }
 
 function UnknownDistanceSpan({
@@ -179,23 +192,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   dropProps,
   showNotes = true,
   showCarrierStop = true,
-  externalLinkInara,
-  externalLinkEdsm,
-  externalLinkGec,
-  onOriginSystemFilledChange,
-  onToggleExpand,
-  onFieldBlur,
-  onCopySystem,
-  onToggleFcStop,
-  onOverrideFcArrived,
-  onOpenCarrierRoutePrompt,
-  onToggleInsertMenu,
-  onInsert,
-  onDelete,
-  onHoldStart,
-  onHoldEnd,
-  onDragStart,
-  onDragEnd,
+  externalLinks,
+  handlers,
 }: WaypointRowItemProps) {
   const row = rowView.row
   const isVisited = rowView.visitState === 'visited'
@@ -223,7 +221,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       : row.systemName)
   const canAddFcStop = !isLocked && !isFcStopLocked && (isPlanning || index > lastFcArrivedIndex)
   const canRemoveFcStop = !isLocked && !isFcStopLocked && (isPlanning || !row.fcArrived)
-  const canOverrideFcBadge = !isPlanning && !isLocked && !isFcStopLocked && Boolean(onOverrideFcArrived)
+  const canOverrideFcBadge =
+    !isPlanning && !isLocked && !isFcStopLocked && Boolean(handlers.onOverrideFcArrived)
 
   const hasDrawer = !isPlanning && rowView.visitState !== 'future'
   const isNext =
@@ -247,7 +246,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
   function handleBlur(fieldName: 'systemName' | 'poiName' | 'notes', fieldValue: string) {
     isEditingRef.current = false
-    onFieldBlur(row, fieldName, fieldValue)
+    handlers.onFieldBlur(row, fieldName, fieldValue)
   }
 
   const rowDropHighlightClass = isBeingDragged
@@ -288,7 +287,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             {hasDrawer && (
               <button
                 type="button"
-                onClick={() => onToggleExpand(row.id)}
+                onClick={() => handlers.onToggleExpand(row.id)}
                 aria-label="Toggle per-waypoint leg telemetry drawer"
                 className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
                   isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
@@ -350,7 +349,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 onChange={(event) => {
                   const nextValue = event.target.value
                   setDraft((previous) => ({ ...previous, systemName: nextValue }))
-                  onOriginSystemFilledChange?.(Boolean(nextValue.trim()))
+                  if (rowView.number === 1) {
+                    handlers.onOriginSystemFilledChange?.(Boolean(nextValue.trim()))
+                  }
                 }}
                 onBlur={(event) => {
                   handleBlur('systemName', event.target.value)
@@ -373,7 +374,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation()
-                  onCopySystem(row.id, row.systemName)
+                  handlers.onCopySystem(row.id, row.systemName)
                 }}
                 title={
                   isSystemCopied
@@ -444,7 +445,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 ) : canOverrideFcBadge ? (
                   <button
                     type="button"
-                    onClick={() => onOverrideFcArrived?.(rowView)}
+                    onClick={() => handlers.onOverrideFcArrived?.(rowView)}
                     title={
                       row.fcArrived
                         ? 'Carrier has arrived at this waypoint (click to override)'
@@ -489,7 +490,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                     <button
                       type="button"
                       onClick={() =>
-                        onOpenCarrierRoutePrompt(
+                        handlers.onOpenCarrierRoutePrompt(
                           index,
                           expedition.Row.createFrom({ ...row, systemName: draft.systemName }),
                         )
@@ -505,7 +506,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 {canRemoveFcStop && (
                   <button
                     type="button"
-                    onClick={() => onToggleFcStop(row)}
+                    onClick={() => handlers.onToggleFcStop(row)}
                     title="Remove Fleet Carrier stop designation"
                     className="h-5 w-4 inline-flex items-center justify-center text-xs text-[#6e5b4b] hover:text-[#ff3b2f] cursor-pointer"
                   >
@@ -516,7 +517,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             ) : canAddFcStop ? (
               <button
                 type="button"
-                onClick={() => onToggleFcStop(row)}
+                onClick={() => handlers.onToggleFcStop(row)}
                 title="Designate this waypoint as a Fleet Carrier stop"
                 className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-[#6e5b4b] hover:text-[#FF7100] border border-dashed border-[#2e1f12] hover:border-[#FF7100] bg-transparent hover:bg-[#16100b] cursor-pointer"
               >
@@ -541,9 +542,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
         <div className="h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap">
           <HoverOpenInLinks
             rowView={rowView}
-            externalLinkInara={externalLinkInara}
-            externalLinkEdsm={externalLinkEdsm}
-            externalLinkGec={externalLinkGec}
+            externalLinkInara={externalLinks?.inara}
+            externalLinkEdsm={externalLinks?.edsm}
+            externalLinkGec={externalLinks?.gec}
           />
           {!isLocked && (
             <>
@@ -551,22 +552,22 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 insertMenuOpen={insertMenuOpen}
                 allowInsertWaypoint={allowInsertWaypoint}
                 deleteDisabledReason={deleteDisabledReason}
-                onToggleInsertMenu={() => onToggleInsertMenu(row.id)}
-                onInsert={(type) => onInsert(row.id, type)}
-                onDelete={() => onDelete(row.id)}
+                onToggleInsertMenu={() => handlers.onToggleInsertMenu(row.id)}
+                onInsert={(type) => handlers.onInsert(row.id, type)}
+                onDelete={() => handlers.onDelete(row.id)}
               />
               <button
                 type="button"
                 disabled={!canReorder}
                 draggable={canReorder}
                 onPointerDown={() => {
-                  if (canReorder) onHoldStart?.(index)
+                  if (canReorder) handlers.onHoldStart?.(index)
                 }}
-                onPointerUp={() => onHoldEnd?.()}
+                onPointerUp={() => handlers.onHoldEnd?.()}
                 onDragStart={(event) => {
-                  if (canReorder) onDragStart(index, row.id, event)
+                  if (canReorder) handlers.onDragStart(index, row.id, event)
                 }}
-                onDragEnd={onDragEnd}
+                onDragEnd={handlers.onDragEnd}
                 title={
                   reorderDisabledReason ||
                   'Hold to preview valid drop positions, drag to reorder waypoint'

@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	stats "planisphere/internal/replay/stats"
@@ -35,7 +36,7 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		case EventIngest:
 			observedScanningStates = append(observedScanningStates, testApp.scanning.Load())
 		case EventDataChanged:
-			if payload, ok := data[0].(DataChanged); ok && payload.Scope == "journal" {
+			if payload, ok := data[0].(DataChanged); ok && slices.Contains(payload.Domains, "ingest") {
 				journalChangedCount++
 			}
 		}

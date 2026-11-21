@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react'
-import { GetRegionOptions } from '../../../../wailsjs/go/app/App'
-import { app } from '../../../../wailsjs/go/models'
+import { GetRegionOptions } from '../../../api/backend'
+import { app } from '../../../api/models'
 
 /**
  * RegionDropdownProps defines the current region selection and change callback
