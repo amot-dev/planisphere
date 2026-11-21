@@ -174,6 +174,10 @@ export function SetLegMode(arg1, arg2) {
   return window['go']['app']['App']['SetLegMode'](arg1, arg2);
 }
 
+export function SetLiveSyncPaused(arg1) {
+  return window['go']['app']['App']['SetLiveSyncPaused'](arg1);
+}
+
 export function SetOnlineLookups(arg1) {
   return window['go']['app']['App']['SetOnlineLookups'](arg1);
 }

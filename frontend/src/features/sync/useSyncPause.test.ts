@@ -1,24 +1,14 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { stats, type EddImportProgress } from '../../api/models'
 import { SyncStatusButton } from '../../components/ui/SyncStatusButton'
-import {
-  routeDataChangedEvent,
-  type DataChangedDispatchContext,
-  type SyncBootLifecycleState,
-} from './syncEventRouter'
-import {
-  createDeferredDispatchContext,
-  createPendingDeferredSyncState,
-  flushPendingDeferredSync,
-  hasPendingDeferredSync,
-} from './useSyncPause'
+import type { DataChangedDispatchContext } from './syncEventRouter'
+import { useSyncPause, type UseSyncPauseResult } from './useSyncPause'
 
-function createLiveDispatchHarness(
-  bootOverrides: Partial<SyncBootLifecycleState> = {},
-  expeditionId = 4,
-) {
+function createLiveDispatchHarness(expeditionId = 4) {
   const filter = stats.Filter.createFrom({ enabled: false, modes: [] })
   const refreshExpeditionListOnly = vi.fn()
   const loadIngestStatusOnly = vi.fn(async () => null)
@@ -34,7 +24,6 @@ function createLiveDispatchHarness(
       initialBootComplete: true,
       bootCoreLoaded: true,
       pendingBootRefresh: false,
-      ...bootOverrides,
     },
     currentActiveExpeditionId: expeditionId,
     currentFilter: filter,
@@ -61,124 +50,184 @@ function createLiveDispatchHarness(
   }
 }
 
-describe('deferred sync coalescing queue', () => {
-  it('coalesces repeated domain notifications into one RPC per dirty domain on flush', () => {
-    const harness = createLiveDispatchHarness()
-    const pendingState = createPendingDeferredSyncState()
-    const deferredContext = createDeferredDispatchContext(pendingState, harness.liveContext)
+function mountSyncPauseHook(
+  harness: ReturnType<typeof createLiveDispatchHarness>,
+  initialActiveStatusMessage: string | null = null,
+) {
+  const setLiveSyncPausedMock = vi.fn(async () => {})
+  window.go = {
+    app: {
+      App: {
+        SetLiveSyncPaused: setLiveSyncPausedMock,
+      },
+    },
+  }
 
-    routeDataChangedEvent({ domains: ['ingest', 'stats'] }, deferredContext)
-    routeDataChangedEvent({ domains: ['ingest', 'stats'] }, deferredContext)
-    routeDataChangedEvent({ domains: ['ingest', 'plan', 'stats'] }, deferredContext)
-    routeDataChangedEvent({ domains: ['modes'] }, deferredContext)
+  let latestResult!: UseSyncPauseResult
+  let currentStatusMessage = initialActiveStatusMessage
 
-    expect(hasPendingDeferredSync(pendingState)).toBe(true)
-    expect(harness.loadIngestStatusOnly).not.toHaveBeenCalled()
-    expect(harness.loadPlanOnly).not.toHaveBeenCalled()
-    expect(harness.loadStatsOnly).not.toHaveBeenCalled()
-    expect(harness.loadModesOnly).not.toHaveBeenCalled()
-
-    const didFlush = flushPendingDeferredSync(
-      pendingState,
-      harness.liveContext,
-      harness.applyEddProgress,
-    )
-    expect(didFlush).toBe(true)
-    expect(harness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
-    expect(harness.loadPlanOnly).toHaveBeenCalledTimes(1)
-    expect(harness.loadPlanOnly).toHaveBeenCalledWith(4)
-    expect(harness.loadStatsOnly).toHaveBeenCalledTimes(1)
-    expect(harness.loadStatsOnly).toHaveBeenCalledWith(4, harness.filter)
-    expect(harness.loadModesOnly).toHaveBeenCalledTimes(1)
-    expect(harness.loadSettingsOnly).not.toHaveBeenCalled()
-    expect(harness.refreshExpeditionListOnly).not.toHaveBeenCalled()
-    expect(harness.refreshAll).not.toHaveBeenCalled()
-
-    // Queue resets cleanly so a subsequent flush is a strict no-op.
-    expect(hasPendingDeferredSync(pendingState)).toBe(false)
-    expect(
-      flushPendingDeferredSync(pendingState, harness.liveContext, harness.applyEddProgress),
-    ).toBe(false)
-  })
-
-  it('subsumes narrower domain flags when refreshAll is queued', () => {
-    const harness = createLiveDispatchHarness()
-    const pendingState = createPendingDeferredSyncState()
-    const deferredContext = createDeferredDispatchContext(pendingState, harness.liveContext)
-
-    routeDataChangedEvent({ domains: ['ingest', 'plan', 'stats'] }, deferredContext)
-    routeDataChangedEvent(
-      { domains: ['settings', 'expeditions', 'modes'] },
-      deferredContext,
-    )
-
-    expect(
-      flushPendingDeferredSync(pendingState, harness.liveContext, harness.applyEddProgress),
-    ).toBe(true)
-    expect(harness.refreshAll).toHaveBeenCalledTimes(1)
-    expect(harness.loadIngestStatusOnly).not.toHaveBeenCalled()
-    expect(harness.loadPlanOnly).not.toHaveBeenCalled()
-    expect(harness.loadStatsOnly).not.toHaveBeenCalled()
-  })
-
-  it('preserves inactive-expedition filtering and pre-boot lifecycle guards while deferred', () => {
-    const preBootHarness = createLiveDispatchHarness({
-      initialBootComplete: false,
-      bootCoreLoaded: true,
-      pendingBootRefresh: false,
+  function HookProbe({ statusMessage }: { statusMessage: string | null }) {
+    latestResult = useSyncPause({
+      activeStatusMessage: statusMessage,
+      getLiveDispatchContext: () => harness.liveContext,
+      applyEddProgress: harness.applyEddProgress,
     })
-    const preBootPending = createPendingDeferredSyncState()
-    routeDataChangedEvent(
-      { domains: ['plan', 'stats'], expeditionId: 4 },
-      createDeferredDispatchContext(preBootPending, preBootHarness.liveContext),
-    )
-    expect(preBootHarness.liveContext.bootState.pendingBootRefresh).toBe(true)
-    expect(hasPendingDeferredSync(preBootPending)).toBe(false)
+    return null
+  }
 
-    const inactiveHarness = createLiveDispatchHarness()
-    const inactivePending = createPendingDeferredSyncState()
-    routeDataChangedEvent(
-      { expeditionId: 99, domains: ['settings', 'plan', 'stats'] },
-      createDeferredDispatchContext(inactivePending, inactiveHarness.liveContext),
-    )
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
 
-    expect(
-      flushPendingDeferredSync(
-        inactivePending,
-        inactiveHarness.liveContext,
-        inactiveHarness.applyEddProgress,
-      ),
-    ).toBe(true)
-    expect(inactiveHarness.loadSettingsOnly).toHaveBeenCalledTimes(1)
-    expect(inactiveHarness.refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
-    expect(inactiveHarness.loadPlanOnly).not.toHaveBeenCalled()
-    expect(inactiveHarness.loadStatsOnly).not.toHaveBeenCalled()
+  act(() => {
+    root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
   })
 
-  it('flushes the latest coalesced EDDiscovery progress payload and ignores empty queues', () => {
+  return {
+    setLiveSyncPausedMock,
+    getResult: () => latestResult,
+    setStatusMessage: (nextStatusMessage: string | null) => {
+      currentStatusMessage = nextStatusMessage
+      act(() => {
+        root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
+      })
+    },
+    unmount: () => {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    },
+  }
+}
+
+afterEach(() => {
+  delete window.go
+  delete document.documentElement.dataset.documentHidden
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+})
+
+describe('useSyncPause', () => {
+  it('syncs manual pause to backend while keeping explicit user mutations unblocked', () => {
     const harness = createLiveDispatchHarness()
-    const pendingState = createPendingDeferredSyncState()
+    const mounted = mountSyncPauseHook(harness)
 
-    expect(
-      flushPendingDeferredSync(pendingState, harness.liveContext, harness.applyEddProgress),
-    ).toBe(false)
+    expect(mounted.getResult().syncPauseState).toBe('active')
+    expect(mounted.getResult().isClockSuspended).toBe(false)
+    expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(false)
+    mounted.setLiveSyncPausedMock.mockClear()
 
-    const latestProgress: EddImportProgress = {
-      active: true,
-      stage: 'Importing',
-      current: 500,
-      total: 1000,
-      percent: 50,
-      files: 12,
+    act(() => {
+      mounted.getResult().handleToggleSyncPause()
+    })
+
+    expect(mounted.getResult().syncPauseState).toBe('paused')
+    expect(mounted.getResult().isClockSuspended).toBe(true)
+    expect(mounted.getResult().hasPendingSyncUpdates).toBe(false)
+    expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(true)
+
+    // Explicit user mutations (such as AddRow or SetCommanderEnabled) must still route live while PAUSED.
+    act(() => {
+      mounted.getResult().eventHandlers.onDataChanged({
+        domains: ['plan', 'expeditions'],
+        expeditionId: 4,
+      })
+      mounted.getResult().eventHandlers.onDataChanged({
+        domains: ['settings'],
+      })
+    })
+    expect(harness.loadPlanOnly).toHaveBeenCalledWith(4)
+    expect(harness.refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
+    expect(harness.loadSettingsOnly).toHaveBeenCalledTimes(1)
+
+    // Backend watcher pending notification turns the amber waiting flag on until resumed or cleared.
+    act(() => {
+      mounted.getResult().eventHandlers.onSyncPending?.(true)
+    })
+    expect(mounted.getResult().hasPendingSyncUpdates).toBe(true)
+
+    act(() => {
+      mounted.getResult().handleToggleSyncPause()
+    })
+    expect(mounted.getResult().syncPauseState).toBe('active')
+    expect(mounted.getResult().isClockSuspended).toBe(false)
+    expect(mounted.getResult().hasPendingSyncUpdates).toBe(false)
+    expect(mounted.setLiveSyncPausedMock).toHaveBeenLastCalledWith(false)
+
+    mounted.unmount()
+  })
+
+  it('drains PAUSING into PAUSED when ingest or EDDiscovery tasks finish and supports cancel', () => {
+    const harness = createLiveDispatchHarness()
+    const mounted = mountSyncPauseHook(harness, 'INGESTING JOURNALS')
+    mounted.setLiveSyncPausedMock.mockClear()
+
+    act(() => {
+      mounted.getResult().handleToggleSyncPause()
+    })
+    expect(mounted.getResult().syncPauseState).toBe('pausing')
+    expect(mounted.getResult().isClockSuspended).toBe(false)
+    expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(true)
+
+    // Completion events are never blocked during PAUSING so activeStatusMessage clears cleanly.
+    const completionProgress: EddImportProgress = {
+      active: false,
+      stage: '',
+      current: 0,
+      total: 0,
+      percent: 0,
+      files: 0,
     }
-    pendingState.hasPendingEddProgress = true
-    pendingState.latestEddProgress = latestProgress
+    act(() => {
+      mounted.getResult().eventHandlers.onIngestStatus()
+      mounted.getResult().eventHandlers.onEddProgress(completionProgress)
+    })
+    expect(harness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
+    expect(harness.applyEddProgress).toHaveBeenCalledWith(completionProgress)
 
-    expect(
-      flushPendingDeferredSync(pendingState, harness.liveContext, harness.applyEddProgress),
-    ).toBe(true)
-    expect(harness.applyEddProgress).toHaveBeenCalledTimes(1)
-    expect(harness.applyEddProgress).toHaveBeenCalledWith(latestProgress)
+    mounted.setStatusMessage(null)
+    expect(mounted.getResult().syncPauseState).toBe('paused')
+    expect(mounted.getResult().isClockSuspended).toBe(true)
+
+    // Re-enter PAUSING while busy and verify clicking again cancels back to READY.
+    act(() => {
+      mounted.getResult().handleToggleSyncPause()
+    })
+    mounted.setStatusMessage('COMPUTING TELEMETRY')
+    act(() => {
+      mounted.getResult().handleToggleSyncPause()
+    })
+    expect(mounted.getResult().syncPauseState).toBe('pausing')
+
+    act(() => {
+      mounted.getResult().handleToggleSyncPause()
+    })
+    expect(mounted.getResult().syncPauseState).toBe('active')
+    expect(mounted.setLiveSyncPausedMock).toHaveBeenLastCalledWith(false)
+
+    mounted.unmount()
+  })
+
+  it('toggles data-document-hidden for CSS animation suspension without deferring sync events', () => {
+    const harness = createLiveDispatchHarness()
+    const mounted = mountSyncPauseHook(harness)
+
+    expect(document.documentElement.dataset.documentHidden).toBe('false')
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(document.documentElement.dataset.documentHidden).toBe('true')
+    expect(mounted.getResult().syncPauseState).toBe('active')
+
+    act(() => {
+      mounted.getResult().eventHandlers.onDataChanged({ domains: ['stats'] })
+    })
+    expect(harness.loadStatsOnly).toHaveBeenCalledWith(4, harness.filter)
+
+    mounted.unmount()
+    expect(document.documentElement.dataset.documentHidden).toBeUndefined()
   })
 })
 
@@ -237,4 +286,3 @@ describe('SyncStatusButton', () => {
     )
   })
 })
-

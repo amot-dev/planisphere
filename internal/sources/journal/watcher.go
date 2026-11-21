@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,8 +21,12 @@ const reconnectInterval = 2 * time.Second
 type Watcher struct {
 	ingester        *Ingester
 	onBatch         func(Result)
+	onPending       func()
 	debounceNanos   atomic.Int64
 	debounceChanged chan struct{}
+	paused          atomic.Bool
+	pauseChanged    chan struct{}
+	clearPending    chan struct{}
 
 	opMu      sync.Mutex // serializes Start and Stop lifecycle transitions
 	mu        sync.Mutex
@@ -40,9 +45,73 @@ func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
 		ingester:        ingester,
 		onBatch:         onBatch,
 		debounceChanged: make(chan struct{}, 1),
+		pauseChanged:    make(chan struct{}, 1),
+		clearPending:    make(chan struct{}, 1),
 	}
 	watcher.debounceNanos.Store(int64(reference.DefaultDebounceDelay))
 	return watcher
+}
+
+// SetOnPending registers a callback invoked once whenever uningested journal file
+// changes accumulate while live ingestion is paused.
+func (watcher *Watcher) SetOnPending(callback func()) {
+	watcher.mu.Lock()
+	defer watcher.mu.Unlock()
+	watcher.onPending = callback
+}
+
+// Paused reports whether live journal file ingestion is currently paused.
+func (watcher *Watcher) Paused() bool {
+	return watcher.paused.Load()
+}
+
+// SetPaused pauses or resumes live journal file ingestion. While paused, detected
+// file writes accumulate in memory without reading files or writing to SQLite, and
+// flush in chronological filename order immediately when resumed.
+func (watcher *Watcher) SetPaused(paused bool) {
+	if watcher.paused.Swap(paused) == paused {
+		return
+	}
+	select {
+	case watcher.pauseChanged <- struct{}{}:
+	default:
+	}
+}
+
+// ClearPending discards any queued file paths accumulated while paused so an
+// explicit directory rescan does not leave stale pending notifications behind.
+func (watcher *Watcher) ClearPending() {
+	select {
+	case watcher.clearPending <- struct{}{}:
+	default:
+	}
+}
+
+func (watcher *Watcher) notifyPending() {
+	watcher.mu.Lock()
+	callback := watcher.onPending
+	watcher.mu.Unlock()
+	if callback != nil {
+		callback()
+	}
+}
+
+func stopTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+}
+
+func sortedPendingPaths(pending map[string]bool) []string {
+	paths := make([]string, 0, len(pending))
+	for path := range pending {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	return paths
 }
 
 // DebounceDelay returns the currently configured live file-event debounce duration.
@@ -155,7 +224,12 @@ func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{})
 	}()
 
 	tryWatch()
+	select {
+	case <-watcher.clearPending:
+	default:
+	}
 	pending := map[string]bool{}
+	pendingNotified := false
 	debounceTimer := time.NewTimer(time.Hour)
 	defer debounceTimer.Stop()
 	debounceTimer.Stop()
@@ -177,6 +251,16 @@ func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{})
 		}
 	}
 
+	flushPending := func() {
+		if len(pending) == 0 {
+			return
+		}
+		paths := sortedPendingPaths(pending)
+		pending = map[string]bool{}
+		pendingNotified = false
+		flush(paths)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -196,23 +280,41 @@ func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{})
 			}
 			if IsJournalFile(fsEvent.Name) && fsEvent.Op&(fsnotify.Write|fsnotify.Create) != 0 {
 				pending[fsEvent.Name] = true
-				debounceTimer.Reset(watcher.DebounceDelay())
+				if !(watcher.paused.Load() && pendingNotified) {
+					debounceTimer.Reset(watcher.DebounceDelay())
+				}
 			}
 		case <-watcher.debounceChanged:
-			if len(pending) > 0 {
+			if len(pending) > 0 && !(watcher.paused.Load() && pendingNotified) {
 				debounceTimer.Reset(watcher.DebounceDelay())
 			}
+		case <-watcher.pauseChanged:
+			stopTimer(debounceTimer)
+			if watcher.paused.Load() {
+				if len(pending) > 0 {
+					pendingNotified = true
+					watcher.notifyPending()
+				}
+				continue
+			}
+			flushPending()
+		case <-watcher.clearPending:
+			stopTimer(debounceTimer)
+			pending = map[string]bool{}
+			pendingNotified = false
 		case watchError, ok := <-errorChan:
 			if ok && watchError != nil {
 				log.Printf("journal: watcher error: %v", watchError)
 			}
 		case <-debounceTimer.C:
-			paths := make([]string, 0, len(pending))
-			for path := range pending {
-				paths = append(paths, path)
+			if watcher.paused.Load() {
+				if len(pending) > 0 && !pendingNotified {
+					pendingNotified = true
+					watcher.notifyPending()
+				}
+				continue
 			}
-			pending = map[string]bool{}
-			flush(paths)
+			flushPending()
 		}
 	}
 }

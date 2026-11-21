@@ -179,7 +179,7 @@ export function useBackendSync() {
   )
 
   const {
-    effectiveSyncPauseState,
+    syncPauseState,
     hasPendingSyncUpdates,
     isClockSuspended,
     handleToggleSyncPause,
@@ -243,7 +243,7 @@ export function useBackendSync() {
     setFilter,
     eddProgress,
     activeStatusMessage,
-    syncPauseState: effectiveSyncPauseState,
+    syncPauseState,
     hasPendingSyncUpdates,
     isClockSuspended,
     handleToggleSyncPause,

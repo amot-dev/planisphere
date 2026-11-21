@@ -41,6 +41,7 @@ Plan your route stop by stop without juggling external spreadsheets.
 - **Sequential Automatic Progression:** Planisphere watches your journal in the background. When you jump into the immediate next planned destination system, that waypoint is marked visited and the planner advances to the next leg, updating remaining distance to the next stop and total remaining route mileage in real time.
 - **Chronologically Bounded Route Editing:** Reorder, insert, or remove waypoints on the fly during an active expedition, slotting missed historical stops into matching journal arrival windows or moving stops back into the unvisited route plan.
 - **Per-Leg Telemetry Drawer:** Expand any visited waypoint or the active next waypoint to inspect that leg's elapsed duration, vessels jumped, distance split between ship FSD and carrier passenger travel, hyperspace jumps, scans, and leg-specific estimated vs. realized earnings. Expanding Waypoint #1 displays your pre-expedition historical baseline.
+- **Live Sync Pause:** Click the top-bar status indicator (`READY`, `BUSY`, `PAUSING`, or `PAUSED`) at any time to pause live journal ingestion and background updates while keeping route editing, configuration changes, and manual imports responsive. New journal writes are queued without disk or database churn and flagged on `PAUSED` until you click to resume and ingest them in chronological order.
 
 ### Fleet Carrier Routing
 Whether you're taking your own carrier into the black, flying with a squadron, or hitching a ride, carrier jumps are built into the planner.
@@ -209,6 +210,7 @@ Several journal edge cases cannot be reconstructed deterministically from Fronti
 - **Event-Subscribed Projection Caches**: Derived read caches register declarative triggers against typed Elite journal events and internal domain mutations on a shared invalidation bus. Journal ingestion, importer commits, and user actions compute typed event sets and invalidate only matching projections and UI domains instead of issuing database-wide refreshes.
 - **Debounced Filesystem Watcher**: The journal ingester watches the active journal directory via `fsnotify` with a configurable debounce window (`0.3s` to `30s`, `2s` default) to coalesce rapid write bursts such as FSS body scans and handle out-of-order writes safely.
 - **Single Source of Truth Config**: Versioning, product name, repository, and metadata live in `app.config.json`. The sync script (`make sync-metadata`, run automatically during builds) keeps `wails.json`, `package.json`, `package-lock.json`, `index.html`, `version.go`, `version.ts`, the Linux `.desktop` entry, and package manifests in sync.
+- **Pausable Live Watcher and Idle Animation Gating**: Toggling `PAUSED` from the top bar suspends `fsnotify` file ingestion at the backend watcher (accumulating modified `.log` paths in memory and holding unsolicited background notifications while keeping user-initiated mutations live), suspends the 60-second galactic clock timer, and flushes queued files chronologically on resume; infinite CSS HUD animations also pause automatically whenever the window is hidden.
 
 ### Commands
 

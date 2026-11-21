@@ -9,12 +9,13 @@ export interface BackendEventHandlers {
   onDataChanged: (payload?: DataChangedPayload) => void
   onIngestStatus: () => void
   onEddProgress: (progress: EddImportProgress) => void
+  onSyncPending?: (pending: boolean) => void
 }
 
 /**
  * subscribeBackendEvents registers Wails runtime event listeners for data sync,
- * journal ingestion status, and EDDiscovery import progress, returning an
- * unsubscribe cleanup callback.
+ * journal ingestion status, EDDiscovery import progress, and paused live-sync
+ * pending indicators, returning an unsubscribe cleanup callback.
  */
 export function subscribeBackendEvents(handlers: BackendEventHandlers): () => void {
   if (typeof window === 'undefined' || !window.runtime?.EventsOnMultiple) {
@@ -30,11 +31,15 @@ export function subscribeBackendEvents(handlers: BackendEventHandlers): () => vo
   const unsubscribeEdd = EventsOn('edd:progress', (progress: EddImportProgress) => {
     handlers.onEddProgress(progress)
   })
+  const unsubscribeSyncPending = EventsOn('sync:pending', (pending?: boolean) => {
+    handlers.onSyncPending?.(Boolean(pending))
+  })
 
   return () => {
     unsubscribeChanged()
     unsubscribeIngest()
     unsubscribeEdd()
+    unsubscribeSyncPending()
   }
 }
 

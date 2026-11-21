@@ -97,6 +97,12 @@ func (app *App) RescanJournals() error {
 	return nil
 }
 
+// SetLiveSyncPaused pauses or resumes background journal file tailing and
+// unsolicited background UI refresh emissions to reduce idle system load.
+func (app *App) SetLiveSyncPaused(paused bool) {
+	app.setLiveSyncPaused(paused)
+}
+
 // RefreshGEC re-downloads the EDAstro Galactic Exploration Catalog.
 func (app *App) RefreshGEC() (int, error) {
 	if !app.gecRefreshing.CompareAndSwap(false, true) {

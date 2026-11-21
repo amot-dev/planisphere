@@ -1,4 +1,4 @@
-import { OpenURL } from '../../wailsjs/go/app/App'
+import { OpenURL, SetLiveSyncPaused } from '../../wailsjs/go/app/App'
 
 export {
   AddRow,
@@ -44,6 +44,7 @@ export {
   SetJournalDebounceMs,
   SetJournalDir,
   SetLegMode,
+  SetLiveSyncPaused,
   SetOnlineLookups,
   SetTritiumPricePerTonne,
   SetupConfigureJournals,
@@ -61,5 +62,16 @@ export {
  */
 export function openExternalUrl(targetUrl: string): void {
   OpenURL(targetUrl).catch(console.error)
+}
+
+/**
+ * setLiveSyncPaused pauses or resumes backend live journal tailing and
+ * unsolicited background UI notifications when the Wails bridge is available.
+ */
+export function setLiveSyncPaused(paused: boolean): void {
+  if (typeof window === 'undefined' || !window.go?.app?.App?.SetLiveSyncPaused) {
+    return
+  }
+  SetLiveSyncPaused(paused).catch(console.error)
 }
 

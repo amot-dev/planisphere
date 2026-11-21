@@ -42,6 +42,7 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 	app.dbMu.RLock()
 	ingester := app.ingester
 	database := app.db
+	activeWatcher := app.watcher
 	dir := ""
 	if ingester != nil && database != nil {
 		dir = settings.JournalDir(database, journal.DefaultJournalDir())
@@ -49,6 +50,12 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 	app.dbMu.RUnlock()
 	if ingester == nil || database == nil {
 		return false, true, 0
+	}
+	if activeWatcher != nil {
+		activeWatcher.ClearPending()
+		if app.isLiveSyncPaused() && !app.hasDeferredTargets() {
+			app.emit(EventSyncPending, false)
+		}
 	}
 	scanResult, scanError := ingester.ScanDir(app.ctx, dir)
 	if scanError != nil {
@@ -113,7 +120,7 @@ func (app *App) warmInitialStats() {
 // onJournalBatch runs after the live tailer stored new events.
 func (app *App) onJournalBatch(scanResult journal.Result) {
 	affectedTargets := app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
-	app.emitDataChanged(0, affectedTargets)
+	app.emitBackgroundDataChanged(0, affectedTargets)
 }
 
 func (app *App) reevaluateActive() []int64 {
@@ -183,7 +190,7 @@ func (app *App) maybeRefreshGEC() {
 	}
 	app.dbMu.RUnlock()
 	app.populateMissingPOIs()
-	app.publishApp(0, events.AppExpeditionPlanChanged, events.AppSettingsChanged)
+	app.publishBackgroundApp(0, events.AppExpeditionPlanChanged, events.AppSettingsChanged)
 }
 
 func (app *App) maybeCatchUpEDD() {
@@ -221,6 +228,6 @@ func (app *App) maybeCatchUpEDD() {
 		if affectedTargets.IsEmpty() {
 			affectedTargets = events.NewUITargetSet(events.UITargetIngest)
 		}
-		app.emitDataChanged(0, affectedTargets)
+		app.emitBackgroundDataChanged(0, affectedTargets)
 	}
 }

@@ -92,6 +92,8 @@ export function SetJournalDir(arg1:string):Promise<app.Settings>;
 
 export function SetLegMode(arg1:number,arg2:number):Promise<void>;
 
+export function SetLiveSyncPaused(arg1:boolean):Promise<void>;
+
 export function SetOnlineLookups(arg1:boolean):Promise<app.Settings>;
 
 export function SetTritiumPricePerTonne(arg1:number):Promise<app.Settings>;

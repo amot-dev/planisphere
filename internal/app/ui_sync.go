@@ -142,3 +142,76 @@ func (app *App) publishApp(expeditionID int64, appEvents ...events.AppEvent) {
 	}
 	app.emitDataChanged(expeditionID, bus.PublishApp(appEvents...))
 }
+
+func (app *App) isLiveSyncPaused() bool {
+	app.syncPauseMu.Lock()
+	defer app.syncPauseMu.Unlock()
+	return app.liveSyncPaused
+}
+
+func (app *App) hasDeferredTargets() bool {
+	app.syncPauseMu.Lock()
+	defer app.syncPauseMu.Unlock()
+	return !app.deferredTargets.IsEmpty()
+}
+
+func (app *App) clearDeferredTargets() {
+	app.syncPauseMu.Lock()
+	defer app.syncPauseMu.Unlock()
+	app.deferredTargets = 0
+}
+
+func (app *App) setLiveSyncPaused(paused bool) {
+	app.dbMu.RLock()
+	activeWatcher := app.watcher
+	app.dbMu.RUnlock()
+
+	var flushedTargets events.UITargetSet
+	app.syncPauseMu.Lock()
+	app.liveSyncPaused = paused
+	if !paused {
+		flushedTargets = app.deferredTargets
+		app.deferredTargets = 0
+	}
+	app.syncPauseMu.Unlock()
+
+	if activeWatcher != nil {
+		activeWatcher.SetPaused(paused)
+	}
+	if !paused {
+		app.emit(EventSyncPending, false)
+		app.emitDataChanged(0, flushedTargets)
+	}
+}
+
+func (app *App) emitBackgroundDataChanged(expeditionID int64, targets events.UITargetSet) {
+	if targets.IsEmpty() {
+		return
+	}
+	shouldNotifyPending := false
+	shouldHold := false
+	app.syncPauseMu.Lock()
+	if app.liveSyncPaused {
+		shouldHold = true
+		wasEmpty := app.deferredTargets.IsEmpty()
+		app.deferredTargets = app.deferredTargets.Union(targets)
+		shouldNotifyPending = wasEmpty
+	}
+	app.syncPauseMu.Unlock()
+
+	if shouldHold {
+		if shouldNotifyPending {
+			app.emit(EventSyncPending, true)
+		}
+		return
+	}
+	app.emitDataChanged(expeditionID, targets)
+}
+
+func (app *App) publishBackgroundApp(expeditionID int64, appEvents ...events.AppEvent) {
+	bus := app.currentBus()
+	if bus == nil {
+		return
+	}
+	app.emitBackgroundDataChanged(expeditionID, bus.PublishApp(appEvents...))
+}

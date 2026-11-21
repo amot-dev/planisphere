@@ -17,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
@@ -33,6 +34,7 @@ const (
 	EventDataChanged = "data:changed" // payload: DataChanged
 	EventIngest      = "ingest:status"
 	EventEDDProgress = "edd:progress" // payload: EDDImportProgress
+	EventSyncPending = "sync:pending" // payload: bool
 )
 
 // DataChanged tells the frontend which UI domains to refresh.
@@ -101,6 +103,11 @@ type App struct {
 	latestVersion      string
 	versionCheckFailed bool
 	versionChecked     bool
+
+	// Live-sync pause state protected by leaf lock syncPauseMu.
+	syncPauseMu     sync.Mutex
+	liveSyncPaused  bool
+	deferredTargets events.UITargetSet
 
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
@@ -275,6 +282,11 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
 	app.watcher.SetDebounceDelay(time.Duration(settings.JournalDebounceMs(app.db)) * time.Millisecond)
+	app.watcher.SetOnPending(func() {
+		app.emit(EventSyncPending, true)
+	})
+	app.watcher.SetPaused(app.isLiveSyncPaused())
+	app.clearDeferredTargets()
 	app.resolver = edsm.NewResolver(dbConn, func() bool {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
@@ -292,6 +304,9 @@ func (app *App) openAndWireDB(dbPath string) error {
 	}
 	if previousDB != nil {
 		_ = previousDB.Close()
+		if app.isLiveSyncPaused() {
+			app.emit(EventSyncPending, false)
+		}
 	}
 	return nil
 }
