@@ -70,7 +70,8 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('py-1.5')
 
     // Chevron cell has border-l-2 and inset shadow bottom line so it never miters or clips the left border
-    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]')
+    expect(html).toContain('style="border-left-color:#FF7100"')
+    expect(html).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
 
     // Uniform 28px (h-7) on chevron, waypoint #, star system, carrier stop, telemetry, and controls
     expect(html).toContain('h-7 flex items-center justify-center') // Chevron container
@@ -212,13 +213,59 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
 
-    expect(html).toContain('border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816]')
+    expect(html).toContain('style="border-left-color:#00D2FF"')
+    expect(html).toContain('border-l-2 shadow-[inset_0_1px_0_0_#3d2816,inset_0_-1px_0_0_#24180e]')
     expect(html).not.toContain('border-l-3')
     expect(html).toContain('[VESSEL FLOWN]:')
     expect(html).toContain('Anaconda')
     expect(html).toContain('[FLIGHT MODE]:')
     expect(html).toContain('Exploration')
     expect(html).toContain('Flight mode for this leg (click to change)')
+  })
+
+  it('colors waypoint and drawer left borders by flight mode, extends to current leg, and uses muted neutral on origin', () => {
+    const originRowView = expedition.RowView.createFrom({
+      row: { id: 1, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol' },
+      number: 1,
+      visitState: 'visited',
+    })
+    const originRowHtml = renderRowItem({ rowView: originRowView, index: 0, lastVisitedIndex: 1 })
+    expect(originRowHtml).toContain('style="border-left-color:#3d2816"')
+    expect(originRowHtml).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
+
+    const originLoadingDrawerHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: null,
+        loading: true,
+        rowView: originRowView,
+      }),
+    )
+    expect(originLoadingDrawerHtml).toContain('style="border-left-color:#3d2816"')
+
+    const currentLegRowView = expedition.RowView.createFrom({
+      row: { id: 3, expeditionId: 1, rowType: 'waypoint', systemName: 'Sagittarius A*' },
+      number: 3,
+      visitState: 'current',
+      legModeId: 10,
+      legModeColor: '#00E5A3',
+    })
+    const currentLegRowHtml = renderRowItem({
+      rowView: currentLegRowView,
+      index: 2,
+      isNextWaypoint: true,
+      lastVisitedIndex: 1,
+    })
+    expect(currentLegRowHtml).toContain('style="border-left-color:#00E5A3"')
+    expect(currentLegRowHtml).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
+
+    const futureRowView = expedition.RowView.createFrom({
+      row: { id: 4, expeditionId: 1, rowType: 'waypoint', systemName: 'Beagle Point' },
+      number: 4,
+      visitState: 'future',
+      legModeColor: '#00E5A3',
+    })
+    const futureRowHtml = renderRowItem({ rowView: futureRowView, index: 3, lastVisitedIndex: 1 })
+    expect(futureRowHtml).not.toContain('border-l-2')
   })
 
   it('omits Vessel Flown and Mode toggle in WaypointDetailsDrawer for origin baseline waypoint #1', () => {
@@ -247,6 +294,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
 
+    expect(html).toContain('style="border-left-color:#3d2816"')
     expect(html).toContain('HISTORICAL BASELINE')
     expect(html).not.toContain('[VESSEL FLOWN]:')
     expect(html).not.toContain('[FLIGHT MODE]:')
@@ -379,7 +427,8 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(html).toContain('42.1 Ly')
     expect(html).not.toContain('380.5 Ly')
     expect(html).toContain('Estimated straight-line distance from player location (Merope)')
-    expect(html).toContain('title="Toggle per-waypoint leg telemetry drawer"')
+    expect(html).toContain('aria-label="Toggle per-waypoint leg telemetry drawer"')
+    expect(html).not.toContain('title="Toggle per-waypoint leg telemetry drawer"')
   })
 
   it('renders WaypointDetailsDrawer for active current leg with IN PROGRESS and TBD fallback', () => {

@@ -17,6 +17,7 @@ export interface PlannerRegionRowProps {
   isBeingDragged: boolean
   topGapHighlight?: boolean
   bottomGapHighlight?: boolean
+  leftBorderColor?: string
   lastVisitedIndex: number
   insertMenuOpen: boolean
   rowStyle: CSSProperties
@@ -45,6 +46,7 @@ export const PlannerRegionRow = memo(function PlannerRegionRow({
   isBeingDragged,
   topGapHighlight = false,
   bottomGapHighlight = false,
+  leftBorderColor,
   lastVisitedIndex,
   insertMenuOpen,
   rowStyle,
@@ -82,7 +84,15 @@ export const PlannerRegionRow = memo(function PlannerRegionRow({
       className={`group ed-header-bar ${gapHighlightClass}`}
     >
       {/* Region Name and optional MOVING badge */}
-      <td colSpan={visibleColumnCount - 1} className="px-3 py-2 border-b border-[#3a2615]">
+      <td
+        colSpan={visibleColumnCount - 1}
+        style={!isBeingDragged && leftBorderColor ? { borderLeftColor: leftBorderColor } : undefined}
+        className={`px-3 py-2 ${
+          !isBeingDragged && leftBorderColor
+            ? 'border-l-2 shadow-[inset_0_-1px_0_0_#3a2615]'
+            : 'border-b border-[#3a2615]'
+        }`}
+      >
         <div className="inline-flex items-center gap-2">
           <RegionHeaderDropdown
             expeditionId={expeditionId}

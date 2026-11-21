@@ -6,7 +6,7 @@ import type { PlannerTableItem } from './plannerPlanHelpers'
 import { PlannerRegionRow } from './PlannerRegionRow'
 import { PlannerTableHeader } from './PlannerTableHeader'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
-import { WaypointRowItem } from './WaypointRowItem'
+import { getWaypointLegBorderColor, WaypointRowItem } from './WaypointRowItem'
 
 const rowStyle: CSSProperties = {
   contentVisibility: 'auto',
@@ -149,6 +149,23 @@ export function PlannerRouteTable({
     }
     return rowMap
   }, [tableItems])
+
+  const regionBorderColorByRowId = useMemo(() => {
+    const borderMap = new Map<number, string>()
+    if (isPlanning || !plan.rows?.length) return borderMap
+    let followingBorderColor: string | undefined
+    for (let i = plan.rows.length - 1; i >= 0; i--) {
+      const candidateRowView = plan.rows[i]
+      if (candidateRowView.row.rowType === 'region') {
+        if (followingBorderColor) {
+          borderMap.set(candidateRowView.row.id, followingBorderColor)
+        }
+      } else {
+        followingBorderColor = getWaypointLegBorderColor(candidateRowView, isPlanning)
+      }
+    }
+    return borderMap
+  }, [isPlanning, plan.rows])
 
   const latestCallbacksRef = useRef({
     rowViewById,
@@ -308,6 +325,7 @@ export function PlannerRouteTable({
                 isBeingDragged={isBeingDragged}
                 topGapHighlight={topGapHighlight}
                 bottomGapHighlight={bottomGapHighlight}
+                leftBorderColor={regionBorderColorByRowId.get(row.id)}
                 lastVisitedIndex={lastVisitedIndex}
                 insertMenuOpen={insertMenuAfterId === row.id}
                 rowStyle={rowStyle}
@@ -327,7 +345,7 @@ export function PlannerRouteTable({
           if (item.kind === 'drawer') {
             return (
               <tr key={item.key} style={rowStyle}>
-                <td colSpan={visibleColumnCount} className="p-0 border-b border-[#24180e]">
+                <td colSpan={visibleColumnCount} className="p-0">
                   <WaypointDetailsDrawer
                     details={detailsById[row.id] ?? null}
                     loading={Boolean(loadingDetails[row.id])}

@@ -152,6 +152,19 @@ function renderTelemetryCellContent(
 }
 
 /**
+ * getWaypointLegBorderColor returns the left border color for a waypoint row
+ * based on its visit state and leg flight mode, or undefined when borderless.
+ */
+export function getWaypointLegBorderColor(
+  rowView: expedition.RowView,
+  isPlanning: boolean,
+): string | undefined {
+  if (isPlanning) return undefined
+  if (rowView.visitState !== 'visited' && rowView.visitState !== 'current') return undefined
+  return rowView.number === 1 ? '#3d2816' : rowView.legModeColor || '#FF7100'
+}
+
+/**
  * WaypointRowItem renders a single waypoint row inside the expedition flight
  * planner table, supporting inline editing, Fleet Carrier stop badges, and drag-reorder.
  */
@@ -199,6 +212,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   const row = rowView.row
   const isVisited = rowView.visitState === 'visited'
   const isOriginRow = !isPlanning && rowView.number === 1
+  const legBorderColor = getWaypointLegBorderColor(rowView, isPlanning)
+  const hasLegBorder = Boolean(legBorderColor)
   const isFcArrivedStop = !isPlanning && Boolean(row.fcStop && row.fcArrived)
   const isSystemLocked =
     isLocked || isVisited || isOriginRow || isActivelyRoutedFcStop || isFcArrivedStop
@@ -272,11 +287,12 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* Expand Chevron */}
       {!isPlanning && (
         <td
+          style={!isBeingDragged && hasLegBorder ? { borderLeftColor: legBorderColor } : undefined}
           className={`px-1 py-1.5 text-center align-top ${
             isBeingDragged
               ? 'border-l-2 border-l-[#FF7100] border-b border-[#24180e]'
-              : isVisited
-                ? 'border-l-2 border-l-[#FF7100] shadow-[inset_0_-1px_0_0_#24180e]'
+              : hasLegBorder
+                ? 'border-l-2 shadow-[inset_0_-1px_0_0_#24180e]'
                 : 'border-b border-[#24180e]'
           }`}
         >
@@ -285,7 +301,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
               <button
                 type="button"
                 onClick={() => onToggleExpand(row.id)}
-                title="Toggle per-waypoint leg telemetry drawer"
+                aria-label="Toggle per-waypoint leg telemetry drawer"
                 className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
                   isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
                 }`}

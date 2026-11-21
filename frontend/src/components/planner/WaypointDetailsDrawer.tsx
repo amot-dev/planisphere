@@ -31,9 +31,15 @@ export function WaypointDetailsDrawer({
   modesList,
   onChangeMode,
 }: WaypointDetailsDrawerProps) {
+  const isOrigin = details?.kind === 'origin' || rowView.number === 1
+  const drawerBorderColor = isOrigin ? '#3d2816' : modeColor || rowView.legModeColor || '#FF7100'
+
   if (loading || !details) {
     return (
-      <div className="px-6 py-3 bg-[#0b0907] border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816] text-xs text-[#FF7100] font-mono-tabular uppercase tracking-wider">
+      <div
+        style={{ borderLeftColor: drawerBorderColor }}
+        className="px-6 py-3 bg-[#0b0907] border-l-2 shadow-[inset_0_1px_0_0_#3d2816,inset_0_-1px_0_0_#24180e] text-xs text-[#FF7100] font-mono-tabular uppercase tracking-wider"
+      >
         [ COMPUTING WAYPOINT TELEMETRY... ]
       </div>
     )
@@ -41,7 +47,6 @@ export function WaypointDetailsDrawer({
 
   const metrics = details.metrics
   const realization = details.realization
-  const isOrigin = details.kind === 'origin'
 
   const shipsUsed = Array.from(
     new Set(
@@ -52,7 +57,10 @@ export function WaypointDetailsDrawer({
   )
 
   return (
-    <div className="px-6 py-4 bg-[#0b0907] border-l-2 border-l-[#FF7100] shadow-[inset_0_1px_0_0_#3d2816] text-xs space-y-3">
+    <div
+      style={{ borderLeftColor: drawerBorderColor }}
+      className="px-6 py-4 bg-[#0b0907] border-l-2 shadow-[inset_0_1px_0_0_#3d2816,inset_0_-1px_0_0_#24180e] text-xs space-y-3"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2e1f12] pb-2">
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 text-[10px] font-mono-tabular font-extrabold uppercase tracking-[0.14em] bg-[#211307] text-[#FF7100] border border-[#FF7100]">
