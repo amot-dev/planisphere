@@ -16,7 +16,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       isExpanded: false,
       isNextFcStop: false,
       hasActiveCarrierRoute: false,
-      copiedSystemRowId: null,
+      isSystemCopied: false,
       insertMenuOpen: false,
       lastVisitedIndex: 0,
       rowStyle: {},
@@ -837,6 +837,22 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(allOffHtml).not.toContain('<span>INARA</span>')
     expect(allOffHtml).not.toContain('<span>EDSM</span>')
     expect(allOffHtml).not.toContain('<span>GEC</span>')
+  })
+
+  it('toggles copy feedback styling and tooltip strictly from per-row isSystemCopied', () => {
+    const rowView = expedition.RowView.createFrom({
+      row: { id: 88, expeditionId: 1, rowType: 'waypoint', systemName: 'Sagittarius A*' },
+      number: 4,
+      visitState: 'future',
+    })
+
+    const uncopiedHtml = renderRowItem({ rowView, isSystemCopied: false })
+    expect(uncopiedHtml).toMatch(/Copy [^"]*Sagittarius A\*[^"]* to clipboard/)
+    expect(uncopiedHtml).not.toMatch(/Copied [^"]*Sagittarius A\*[^"]*!/)
+
+    const copiedHtml = renderRowItem({ rowView, isSystemCopied: true })
+    expect(copiedHtml).toMatch(/Copied [^"]*Sagittarius A\*[^"]*!/)
+    expect(copiedHtml).toContain('text-[#00D2FF]')
   })
 })
 

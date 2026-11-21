@@ -27,7 +27,7 @@ export interface WaypointRowItemProps {
   hasActiveCarrierRoute: boolean
   isNextWaypoint?: boolean
   playerSystem?: string
-  copiedSystemRowId: number | null
+  isSystemCopied: boolean
   insertMenuOpen: boolean
   lastVisitedIndex: number
   rowStyle: CSSProperties
@@ -171,7 +171,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   hasActiveCarrierRoute,
   isNextWaypoint,
   playerSystem,
-  copiedSystemRowId,
+  isSystemCopied,
   insertMenuOpen,
   lastVisitedIndex,
   rowStyle,
@@ -372,12 +372,12 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                   onCopySystem(row.id, row.systemName)
                 }}
                 title={
-                  copiedSystemRowId === row.id
+                  isSystemCopied
                     ? `Copied "${row.systemName}"!`
                     : `Copy "${row.systemName}" to clipboard`
                 }
                 className={`h-5 w-5 flex items-center justify-center hover:bg-[#1f150d] cursor-pointer shrink-0 ${
-                  copiedSystemRowId === row.id
+                  isSystemCopied
                     ? 'text-[#00D2FF]'
                     : 'text-[#6e5b4b] hover:text-[#FF7100]'
                 }`}

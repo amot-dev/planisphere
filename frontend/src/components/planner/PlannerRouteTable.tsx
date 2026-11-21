@@ -384,7 +384,7 @@ export function PlannerRouteTable({
               isNextWaypoint={isNextWaypoint}
               playerSystem={plan.playerSystem}
               hasActiveCarrierRoute={hasActiveCarrierRoute}
-              copiedSystemRowId={copiedSystemRowId}
+              isSystemCopied={copiedSystemRowId === row.id}
               insertMenuOpen={insertMenuAfterId === row.id}
               lastVisitedIndex={lastVisitedIndex}
               rowStyle={rowStyle}
