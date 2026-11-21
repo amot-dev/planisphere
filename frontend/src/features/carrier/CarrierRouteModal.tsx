@@ -45,12 +45,12 @@ export function CarrierRouteModal({
       closeDisabled={prompt.loading}
       bodyClassName="p-4 space-y-3.5 text-xs overflow-y-auto"
       footer={
-        <div className="px-4 py-3 bg-[#140e09] border-t border-[#3d2816] flex items-center justify-end gap-2 text-xs">
+        <div className="px-4 py-3 bg-ed-header border-t border-ed-border flex items-center justify-end gap-2 text-xs">
           <button
             type="button"
             disabled={prompt.loading}
             onClick={onClose}
-            className="px-3 py-1.5 text-[#a6907c] hover:text-[#F4ECE4] uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
+            className="px-3 py-1.5 text-ed-text-muted hover:text-ed-text-main uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
           >
             CANCEL
           </button>
@@ -67,7 +67,7 @@ export function CarrierRouteModal({
     >
       <div className="grid grid-cols-2 gap-2.5">
         <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-1">
             Origin System
           </label>
           <input
@@ -77,11 +77,11 @@ export function CarrierRouteModal({
               onUpdate((prev) => ({ ...prev, origin: event.target.value }))
             }
             placeholder="Origin system..."
-            className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+            className="w-full px-2.5 py-1.5 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
           />
         </div>
         <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-1">
             Destination Waypoint
           </label>
           <input
@@ -91,7 +91,7 @@ export function CarrierRouteModal({
               onUpdate((prev) => ({ ...prev, destination: event.target.value }))
             }
             placeholder="Destination system..."
-            className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+            className="w-full px-2.5 py-1.5 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
           />
         </div>
       </div>
@@ -105,7 +105,7 @@ export function CarrierRouteModal({
 
       <div className="grid grid-cols-2 gap-2.5">
         <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-1">
             Used Capacity (Tonnes, 0 – {prompt.carrierType === 'squadron' ? '60,000' : '25,000'})
           </label>
           <input
@@ -116,14 +116,14 @@ export function CarrierRouteModal({
             onChange={(event) =>
               onUpdate((prev) => ({ ...prev, capacityUsed: event.target.value }))
             }
-            className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+            className="w-full px-2.5 py-1.5 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
           />
-          <p className="text-[10px] text-[#a6907c] mt-1">
+          <p className="text-[10px] text-ed-text-muted mt-1">
             Found in Carrier Management in top right (Capacity).
           </p>
         </div>
         <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-1">
             Fuel Depot (Tonnes, 0 – 1,000)
           </label>
           <input
@@ -134,9 +134,9 @@ export function CarrierRouteModal({
             onChange={(event) =>
               onUpdate((prev) => ({ ...prev, depotTritium: event.target.value }))
             }
-            className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+            className="w-full px-2.5 py-1.5 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
           />
-          <p className="text-[10px] text-[#a6907c] mt-1">
+          <p className="text-[10px] text-ed-text-muted mt-1">
             Found in Carrier Management under Navigation Tritium Reserves.
           </p>
         </div>

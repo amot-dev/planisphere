@@ -1,5 +1,6 @@
 import { expedition } from '../api/models'
 export type { ExternalLinkVisibilityConfig } from './externalLinks'
+import { DEFAULT_LEG_BORDER_COLOR, ORIGIN_LEG_BORDER_COLOR } from './theme'
 
 /**
  * PlannerTableItem represents a rendered row in the flattened expedition flight
@@ -112,9 +113,6 @@ export function computePlannerTableDimensions(
 
   return { visibleColumnCount, tableMinWidthPixels }
 }
-
-export const ORIGIN_LEG_BORDER_COLOR = '#3d2816'
-export const DEFAULT_LEG_BORDER_COLOR = '#FF7100'
 
 /**
  * getWaypointLegBorderColor returns the left border color for a waypoint row

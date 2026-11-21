@@ -56,32 +56,32 @@ export function SpanshCarrierStepView({
     <div className="pt-2.5 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
       <div className="flex flex-wrap items-center gap-3 sm:gap-6">
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted block">
             Current System
           </span>
-          <span className="font-mono-tabular text-sm font-bold text-[#F4ECE4]">
+          <span className="font-mono-tabular text-sm font-bold text-ed-text-main">
             {currentSystem}
           </span>
         </div>
 
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted block">
             Next Carrier Jump [#{activeHopIndex + 1} OF {jumps.length}]
           </span>
           <div className="flex items-center gap-2">
-            <span className="font-mono-tabular text-sm font-extrabold text-[#FF7100]">
+            <span className="font-mono-tabular text-sm font-extrabold text-ed-amber">
               {nextHop.systemName}
             </span>
             <button
               type="button"
               onClick={() => onCopySystem(nextHop.systemName)}
               title="Copy next jump system name to clipboard"
-              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#140e09] hover:bg-[#FF7100] text-[#F4ECE4] hover:text-[#050506] border border-[#472e19] cursor-pointer"
+              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-ed-header hover:bg-ed-amber text-ed-text-main hover:text-ed-void border border-ed-border-strong cursor-pointer"
             >
               {copiedNextJump ? 'COPIED' : 'COPY'}
             </button>
             {nextHop.hasIcyRing && (
-              <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]/50">
+              <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase bg-ed-cyan-tint text-ed-cyan border border-ed-cyan/50">
                 [ICY RING]
               </span>
             )}
@@ -89,23 +89,23 @@ export function SpanshCarrierStepView({
         </div>
 
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted block">
             Next Hop Telemetry
           </span>
-          <span className="font-mono-tabular text-xs text-[#F4ECE4]">
+          <span className="font-mono-tabular text-xs text-ed-text-main">
             {formatLy(nextHop.distanceLy, 2)} ·{' '}
-            <span className="text-[#00D2FF] font-bold">{nextHop.tritiumUsed} t TRITIUM</span>
+            <span className="text-ed-cyan font-bold">{nextHop.tritiumUsed} t TRITIUM</span>
           </span>
         </div>
 
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted block">
             Fuel Depot
           </span>
           <div className="flex items-center gap-2 mt-0.5">
             <span
               className={`font-mono-tabular text-xs font-bold ${
-                isDepotInsufficient ? 'text-[#FF7100]' : 'text-[#00D2FF]'
+                isDepotInsufficient ? 'text-ed-amber' : 'text-ed-cyan'
               }`}
             >
               {formatInt(currentDepot)} / 1,000 t
@@ -118,10 +118,10 @@ export function SpanshCarrierStepView({
                 title="Refill fuel depot to 1,000 t from carrier storage and recalculate jump costs"
                 className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border cursor-pointer transition ${
                   currentDepot >= 1000
-                    ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
+                    ? 'bg-ed-surface text-ed-text-disabled border-ed-border-dim cursor-not-allowed'
                     : isDepotInsufficient
-                      ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] hover:bg-[#ff9436] font-extrabold animate-pulse'
-                      : 'bg-[#08151c] text-[#00D2FF] border-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506]'
+                      ? 'bg-ed-amber text-ed-void border-ed-amber hover:bg-ed-amber-bright font-extrabold animate-pulse'
+                      : 'bg-ed-cyan-tint text-ed-cyan border-ed-cyan hover:bg-ed-cyan hover:text-ed-void'
                 }`}
               >
                 {currentDepot >= 1000 ? 'FULL' : 'REFILL'}
@@ -131,13 +131,13 @@ export function SpanshCarrierStepView({
         </div>
 
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted block">
             Remaining to Waypoint
           </span>
-          <span className="font-mono-tabular text-xs text-[#F4ECE4]">
+          <span className="font-mono-tabular text-xs text-ed-text-main">
             {remainingJumps} {remainingJumps === 1 ? 'JUMP' : 'JUMPS'} ·{' '}
-            <span className="text-[#FF7100] font-bold">{formatLy(remainingDistanceLy, 1)}</span> ·{' '}
-            <span className="text-[#a6907c]">~{formatInt(remainingTritiumTonnes)} t</span>
+            <span className="text-ed-amber font-bold">{formatLy(remainingDistanceLy, 1)}</span> ·{' '}
+            <span className="text-ed-text-muted">~{formatInt(remainingTritiumTonnes)} t</span>
           </span>
         </div>
       </div>

@@ -57,7 +57,9 @@ describe('WaypointDetailsDrawer', () => {
     )
 
     expect(html).toContain('style="border-left-color:#00D2FF"')
-    expect(html).toContain('border-l-2 shadow-[inset_0_1px_0_0_#3d2816,inset_0_-1px_0_0_#24180e]')
+    expect(html).toContain(
+      'border-l-2 shadow-[inset_0_1px_0_0_var(--color-ed-border),inset_0_-1px_0_0_var(--color-ed-border-subtle)]',
+    )
     expect(html).not.toContain('border-l-3')
     expect(html).toContain('[VESSEL FLOWN]:')
     expect(html).toContain('Anaconda')
@@ -171,8 +173,8 @@ describe('WaypointDetailsDrawer', () => {
     expect(html).toContain('NPC Crew Payouts')
     expect(html).toContain('-1,200,000 Cr')
 
-    // Ensure the header and all six deduction values have orange text-[#FF7100] styling
-    const orangeMatches = html.match(/text-\[#FF7100\]/g)
+    // Ensure the header and all six deduction values have orange text-ed-amber styling
+    const orangeMatches = html.match(/text-ed-amber\b/g)
     expect(orangeMatches && orangeMatches.length).toBeGreaterThanOrEqual(7)
 
     // Ensure strictly no emojis anywhere in the drawer HTML
@@ -212,10 +214,10 @@ describe('WaypointDetailsDrawer', () => {
 
     expect(html).toContain('LEG #2 <span class="relative -top-px">→</span> #3 // DELTA TELEMETRY')
     expect(html).toContain(
-      'Alpha Centauri <span class="relative -top-0.5">→</span> <span class="text-[#F4ECE4] font-bold">TBD</span>',
+      'Alpha Centauri <span class="relative -top-0.5">→</span> <span class="text-ed-text-main font-bold">TBD</span>',
     )
     expect(html).toContain(
-      '3312-01-19 12:00 UTC <span class="relative -top-0.5">→</span> <span class="text-[#00D2FF] font-bold">IN PROGRESS</span>',
+      '3312-01-19 12:00 UTC <span class="relative -top-0.5">→</span> <span class="text-ed-cyan font-bold">IN PROGRESS</span>',
     )
     expect(html).toContain('[4h 15m]')
   })

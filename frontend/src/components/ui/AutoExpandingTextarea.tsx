@@ -287,7 +287,7 @@ export const AutoExpandingTextarea = memo(function AutoExpandingTextarea({
           event.currentTarget.blur()
         }
       }}
-      className={`w-full bg-transparent px-1.5 py-[3px] border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none resize-none leading-5 text-xs block min-h-[28px] ${className}`}
+      className={`w-full bg-transparent px-1.5 py-[3px] border border-transparent focus:border-ed-amber focus:bg-ed-void focus:outline-none resize-none leading-5 text-xs block min-h-[28px] ${className}`}
     />
   )
 })

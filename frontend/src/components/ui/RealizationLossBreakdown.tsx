@@ -33,9 +33,9 @@ export function RealizationLossBreakdown({
   return (
     <div className={className}>
       {LOSS_ROWS.map((lossRow) => (
-        <div key={lossRow.label} className="flex items-center justify-between gap-2 text-[#a6907c]">
+        <div key={lossRow.label} className="flex items-center justify-between gap-2 text-ed-text-muted">
           <span className="truncate">{lossRow.label}</span>
-          <span className="font-mono-tabular text-[#FF7100] whitespace-nowrap shrink-0">
+          <span className="font-mono-tabular text-ed-amber whitespace-nowrap shrink-0">
             {formatLoss(lossRow.getValue(realization))}
           </span>
         </div>

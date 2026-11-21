@@ -66,12 +66,12 @@ export const StatsSidebar = memo(function StatsSidebar({
 
   if (collapsed) {
     return (
-      <aside className="w-8 shrink-0 h-full bg-[#090705] border-r border-[#3d2816] flex flex-col items-center pt-3 select-none">
+      <aside className="w-8 shrink-0 h-full bg-ed-rail border-r border-ed-border flex flex-col items-center pt-3 select-none">
         <button
           type="button"
           onClick={onToggleCollapse}
           title="Expand Telemetry Sidebar"
-          className="h-6 w-6 flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] bg-[#140e09] border border-[#3d2816] hover:bg-[#1f150d] cursor-pointer"
+          className="h-6 w-6 flex items-center justify-center text-ed-text-muted hover:text-ed-amber bg-ed-header border border-ed-border hover:bg-ed-hover cursor-pointer"
         >
           <span>▶</span>
         </button>
@@ -80,7 +80,7 @@ export const StatsSidebar = memo(function StatsSidebar({
   }
 
   return (
-    <aside className="w-[390px] shrink-0 h-full bg-[#090705] border-r border-[#3d2816] flex flex-col overflow-hidden">
+    <aside className="w-[390px] shrink-0 h-full bg-ed-rail border-r border-ed-border flex flex-col overflow-hidden">
       <ModeFilterPanel
         modesState={modesState}
         filter={filter}
@@ -90,16 +90,16 @@ export const StatsSidebar = memo(function StatsSidebar({
       />
 
       {/* Scope Switcher */}
-      <div className="px-3.5 py-2 border-b border-[#3d2816] bg-[#0d0a07] flex items-center justify-between gap-2 text-xs">
-        <div className="inline-flex border border-[#3d2816] bg-[#050506]">
+      <div className="px-3.5 py-2 border-b border-ed-border bg-ed-card-alt flex items-center justify-between gap-2 text-xs">
+        <div className="inline-flex border border-ed-border bg-ed-void">
           <button
             type="button"
             onClick={() => setViewScope('expedition')}
             title="Show metrics recorded during the active expedition"
             className={`px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] transition cursor-pointer ${
               viewScope === 'expedition'
-                ? 'bg-[#FF7100] text-[#050506]'
-                : 'text-[#a6907c] hover:text-[#F4ECE4]'
+                ? 'bg-ed-amber text-ed-void'
+                : 'text-ed-text-muted hover:text-ed-text-main'
             }`}
           >
             Expedition
@@ -110,8 +110,8 @@ export const StatsSidebar = memo(function StatsSidebar({
             title="Show cumulative metrics across all loaded journal history"
             className={`px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] transition cursor-pointer ${
               viewScope === 'allTime'
-                ? 'bg-[#FF7100] text-[#050506]'
-                : 'text-[#a6907c] hover:text-[#F4ECE4]'
+                ? 'bg-ed-amber text-ed-void'
+                : 'text-ed-text-muted hover:text-ed-text-main'
             }`}
           >
             All Time
@@ -119,7 +119,7 @@ export const StatsSidebar = memo(function StatsSidebar({
         </div>
 
         {statsLoading && (
-          <span className="font-mono-tabular text-[10px] uppercase tracking-wider text-[#FF7100] animate-pulse">
+          <span className="font-mono-tabular text-[10px] uppercase tracking-wider text-ed-amber animate-pulse">
             SYNCING...
           </span>
         )}

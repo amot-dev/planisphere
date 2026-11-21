@@ -27,22 +27,22 @@ export function CartographicsValueBreakdown({
   className = '',
   boldBonuses = false,
 }: CartographicsValueBreakdownProps) {
-  const bonusValueClassName = `font-mono-tabular text-[#00D2FF]${boldBonuses ? ' font-bold' : ''} whitespace-nowrap shrink-0`
+  const bonusValueClassName = `font-mono-tabular text-ed-cyan${boldBonuses ? ' font-bold' : ''} whitespace-nowrap shrink-0`
 
   return (
     <div className={className}>
-      <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
         <span className="truncate">Base Scans and Mapping</span>
-        <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
+        <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
           {formatCredits(metrics.scanValueBase)}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
         <span className="truncate">First Discovered / Mapped</span>
         <span className={bonusValueClassName}>+{formatCredits(metrics.scanValueBonus)}</span>
       </div>
       <div
-        className="flex items-center justify-between gap-2 text-[#a6907c]"
+        className="flex items-center justify-between gap-2 text-ed-text-muted"
         title={formatEfficiencyBonusTooltip(metrics.efficientMappings, metrics.bodiesMapped)}
       >
         <span className="truncate">

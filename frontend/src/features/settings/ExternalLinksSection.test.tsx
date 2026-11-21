@@ -19,7 +19,7 @@ describe('ExternalLinksSection', () => {
     expect(defaultHtml).toContain('GEC')
     expect(defaultHtml).toContain('If No GEC')
     expect(defaultHtml.match(/aria-pressed="true"/g)).toHaveLength(3)
-    expect(defaultHtml.match(/bg-\[#211307\] text-\[#FF7100\] border-\[#FF7100\]/g)).toHaveLength(3)
+    expect(defaultHtml.match(/bg-ed-amber-tint text-ed-amber border-ed-amber/g)).toHaveLength(3)
   })
 
   it('highlights configured Off and On selections in amber across all three rows', () => {
@@ -36,7 +36,7 @@ describe('ExternalLinksSection', () => {
     )
 
     expect(customHtml.match(/aria-pressed="true"/g)).toHaveLength(3)
-    expect(customHtml.match(/bg-\[#211307\] text-\[#FF7100\] border-\[#FF7100\]/g)).toHaveLength(3)
+    expect(customHtml.match(/bg-ed-amber-tint text-ed-amber border-ed-amber/g)).toHaveLength(3)
   })
 })
 

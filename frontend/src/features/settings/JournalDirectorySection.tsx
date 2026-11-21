@@ -62,8 +62,8 @@ export function JournalDirectorySection({
         <span
           className={`text-[10px] font-mono-tabular font-bold uppercase px-2 py-0.5 border ${
             settings?.journalDirExists
-              ? 'bg-[#08151c] border-[#00D2FF] text-[#00D2FF]'
-              : 'bg-[#211307] border-[#FF7100] text-[#FF7100]'
+              ? 'bg-ed-cyan-tint border-ed-cyan text-ed-cyan'
+              : 'bg-ed-amber-tint border-ed-amber text-ed-amber'
           }`}
         >
           {settings?.journalDirExists ? 'FOUND' : 'NOT FOUND'}
@@ -75,7 +75,7 @@ export function JournalDirectorySection({
           type="text"
           value={directoryPath}
           onChange={(event) => setDirectoryPath(event.target.value)}
-          className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
+          className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
         />
         <button
           type="button"

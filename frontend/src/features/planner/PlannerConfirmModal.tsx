@@ -66,21 +66,21 @@ export function PlannerConfirmModal({
 
     return (
       <ModalShell title={modalTitle} subtitle={subtitle} onClose={onCancel} maxWidth="max-w-md">
-        <div className="space-y-3 text-xs text-[#d6c7b8]">
+        <div className="space-y-3 text-xs text-ed-text-body">
           {hasLoggedVisit && confirmState.isArrivedFcStop ? (
             <p>
               This waypoint has a logged visit at{' '}
-              <span className="font-mono-tabular font-bold text-[#FF7100]">
+              <span className="font-mono-tabular font-bold text-ed-amber">
                 {confirmState.visitedAtGalactic}
               </span>{' '}
               and is marked as an{' '}
-              <span className="font-mono-tabular font-bold text-[#FF7100]">ARRIVED</span> Fleet
+              <span className="font-mono-tabular font-bold text-ed-amber">ARRIVED</span> Fleet
               Carrier stop.
             </p>
           ) : hasLoggedVisit ? (
             <p>
               This waypoint has a logged visit at{' '}
-              <span className="font-mono-tabular font-bold text-[#FF7100]">
+              <span className="font-mono-tabular font-bold text-ed-amber">
                 {confirmState.visitedAtGalactic}
               </span>
               .
@@ -88,11 +88,11 @@ export function PlannerConfirmModal({
           ) : (
             <p>
               This unvisited waypoint is marked as an{' '}
-              <span className="font-mono-tabular font-bold text-[#FF7100]">ARRIVED</span> Fleet
+              <span className="font-mono-tabular font-bold text-ed-amber">ARRIVED</span> Fleet
               Carrier stop.
             </p>
           )}
-          <p className="text-[#a6907c]">
+          <p className="text-ed-text-muted">
             {hasLoggedVisit && confirmState.isArrivedFcStop
               ? 'Deleting this waypoint removes the stop from your expedition plan and merges its leg telemetry into the adjacent leg. Journal events and logged carrier jump telemetry are never deleted.'
               : hasLoggedVisit
@@ -101,7 +101,7 @@ export function PlannerConfirmModal({
           </p>
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#3d2816]">
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-ed-border">
           <button type="button" onClick={onCancel} className="ed-btn">
             CANCEL
           </button>
@@ -121,19 +121,19 @@ export function PlannerConfirmModal({
         onClose={onCancel}
         maxWidth="max-w-md"
       >
-        <div className="space-y-3 text-xs text-[#d6c7b8]">
+        <div className="space-y-3 text-xs text-ed-text-body">
           <p>
-            Moving <span className="font-mono-tabular font-bold text-[#F4ECE4]">{displaySystem}</span>{' '}
+            Moving <span className="font-mono-tabular font-bold text-ed-text-main">{displaySystem}</span>{' '}
             to this position places it after a pending Fleet Carrier stop.
           </p>
-          <p className="text-[#a6907c]">
+          <p className="text-ed-text-muted">
             Continuing will reset this waypoint's Fleet Carrier status from{' '}
-            <span className="font-mono-tabular font-bold text-[#FF7100]">ARRIVED</span> back to{' '}
-            <span className="font-mono-tabular font-bold text-[#a6907c]">PENDING</span>.
+            <span className="font-mono-tabular font-bold text-ed-amber">ARRIVED</span> back to{' '}
+            <span className="font-mono-tabular font-bold text-ed-text-muted">PENDING</span>.
           </p>
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#3d2816]">
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-ed-border">
           <button type="button" onClick={onCancel} className="ed-btn">
             CANCEL
           </button>
@@ -155,12 +155,12 @@ export function PlannerConfirmModal({
       onClose={onCancel}
       maxWidth="max-w-md"
     >
-      <div className="space-y-3 text-xs text-[#d6c7b8]">
-        <div className="p-2.5 border border-[#FF7100] bg-[#211307] text-[#F4ECE4] space-y-1">
-          <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#FF7100]">
+      <div className="space-y-3 text-xs text-ed-text-body">
+        <div className="p-2.5 border border-ed-amber bg-ed-amber-tint text-ed-text-main space-y-1">
+          <div className="text-[10px] font-extrabold uppercase tracking-wider text-ed-amber">
             Manual State Repair Override
           </div>
-          <p className="text-[11px] text-[#d6c7b8]">
+          <p className="text-[11px] text-ed-text-body">
             Fleet Carrier arrival is normally updated automatically when completing a carrier route.
             Use this manual override at your own risk only to repair out-of-sync stop status. It
             does not add or remove logged carrier jump telemetry.
@@ -168,13 +168,13 @@ export function PlannerConfirmModal({
         </div>
 
         <p>
-          Switch <span className="font-mono-tabular font-bold text-[#F4ECE4]">{displaySystem}</span>{' '}
-          from <span className="font-mono-tabular font-bold text-[#a6907c]">{currentStatusLabel}</span>{' '}
-          to <span className="font-mono-tabular font-bold text-[#FF7100]">{nextStatusLabel}</span>?
+          Switch <span className="font-mono-tabular font-bold text-ed-text-main">{displaySystem}</span>{' '}
+          from <span className="font-mono-tabular font-bold text-ed-text-muted">{currentStatusLabel}</span>{' '}
+          to <span className="font-mono-tabular font-bold text-ed-amber">{nextStatusLabel}</span>?
         </p>
 
         {confirmState.cascadedCount > 0 && (
-          <p className="text-[11px] text-[#a6907c]">
+          <p className="text-[11px] text-ed-text-muted">
             {confirmState.targetArrived
               ? `${confirmState.cascadedCount} preceding pending carrier ${
                   confirmState.cascadedCount === 1 ? 'stop' : 'stops'
@@ -186,7 +186,7 @@ export function PlannerConfirmModal({
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#3d2816]">
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-ed-border">
         <button type="button" onClick={onCancel} className="ed-btn">
           CANCEL
         </button>

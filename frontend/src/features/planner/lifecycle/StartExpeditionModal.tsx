@@ -75,23 +75,23 @@ export function StartExpeditionModal({
       onClose={onClose}
     >
       {error && (
-        <div className="p-2.5 border border-[#ff3b2f] bg-[#190909] text-[#ff4d3d]">{error}</div>
+        <div className="p-2.5 border border-ed-danger bg-ed-danger-tint text-ed-danger-text">{error}</div>
       )}
 
       <div className="space-y-3">
         {/* Option 1: Historical visits dropdown */}
-        <label className="flex items-start gap-2.5 p-3 border border-[#3d2816] bg-[#110c08] cursor-pointer">
+        <label className="flex items-start gap-2.5 p-3 border border-ed-border bg-ed-card cursor-pointer">
           <input
             type="radio"
             name="startMode"
             checked={mode === 'history'}
             onChange={() => setMode('history')}
-            className="mt-0.5 accent-[#FF7100]"
+            className="mt-0.5 accent-ed-amber"
           />
           <div className="flex-1 space-y-2">
-            <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+            <div className="font-bold uppercase tracking-wider text-ed-text-main">
               Select Recorded Visit to{' '}
-              <span className="text-[#00D2FF]">{candidates?.systemName || 'Waypoint #1'}</span>
+              <span className="text-ed-cyan">{candidates?.systemName || 'Waypoint #1'}</span>
             </div>
             {candidates && candidates.visits.length > 0 ? (
               <select
@@ -100,7 +100,7 @@ export function StartExpeditionModal({
                   setSelectedTimestamp(event.target.value)
                   setMode('history')
                 }}
-                className="w-full bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
+                className="w-full bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
               >
                 {candidates.visits.map((visit) => (
                   <option key={visit.uid} value={visit.timestamp}>
@@ -109,27 +109,27 @@ export function StartExpeditionModal({
                 ))}
               </select>
             ) : (
-              <div className="text-[#a6907c] italic">
+              <div className="text-ed-text-muted italic">
                 No historical visits to {candidates?.systemName || 'Waypoint #1'} found in journals yet.
               </div>
             )}
-            <p className="text-[11px] text-[#a6907c]">
+            <p className="text-[11px] text-ed-text-muted">
               Starts the expedition from this visit and replays subsequent journal events.
             </p>
           </div>
         </label>
 
         {/* Option 2: Custom Galactic Timestamp */}
-        <label className="flex items-start gap-2.5 p-3 border border-[#3d2816] bg-[#110c08] cursor-pointer">
+        <label className="flex items-start gap-2.5 p-3 border border-ed-border bg-ed-card cursor-pointer">
           <input
             type="radio"
             name="startMode"
             checked={mode === 'custom'}
             onChange={() => setMode('custom')}
-            className="mt-0.5 accent-[#FF7100]"
+            className="mt-0.5 accent-ed-amber"
           />
           <div className="flex-1 space-y-1.5">
-            <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+            <div className="font-bold uppercase tracking-wider text-ed-text-main">
               Custom Timestamp (33XX-MM-DD HH:mm UTC)
             </div>
             <input
@@ -141,13 +141,13 @@ export function StartExpeditionModal({
                 setMode('custom')
               }}
               placeholder="3312-01-18 19:42 UTC"
-              className="w-full bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
+              className="w-full bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
             />
           </div>
         </label>
       </div>
 
-      <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#3d2816]">
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-ed-border">
         <button
           type="button"
           disabled={busy}

@@ -43,7 +43,7 @@ function SegmentedLinkRow<ModeValue extends string>({
 }) {
   return (
     <div className="px-3 py-2 flex items-center justify-between gap-3">
-      <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">{serviceLabel}</span>
+      <span className="font-bold uppercase tracking-wider text-ed-text-main">{serviceLabel}</span>
       <div
         role="group"
         aria-label={`${serviceLabel} external link visibility`}
@@ -64,8 +64,8 @@ function SegmentedLinkRow<ModeValue extends string>({
               }}
               className={`px-2.5 py-1 text-[10px] font-mono-tabular font-bold uppercase tracking-wider border transition-colors cursor-pointer whitespace-nowrap ${
                 isSelected
-                  ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]'
-                  : 'bg-[#120d09] text-[#a6907c] border-[#2e1f12] hover:text-[#F4ECE4] hover:border-[#472e19]'
+                  ? 'bg-ed-amber-tint text-ed-amber border-ed-amber'
+                  : 'bg-ed-surface text-ed-text-muted border-ed-border-dim hover:text-ed-text-main hover:border-ed-border-strong'
               }`}
             >
               {optionItem.label}
@@ -160,7 +160,7 @@ export function ExternalLinksSection({
 
   return (
     <SettingsCard title="External Links">
-      <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#050506]">
+      <div className="divide-y divide-ed-border-subtle border border-ed-border bg-ed-void">
         <SegmentedLinkRow
           serviceLabel="Inara"
           selectedValue={inaraMode}

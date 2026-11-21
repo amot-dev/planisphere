@@ -97,11 +97,11 @@ export function deriveWaypointRowPermissions({
     !isPlanning
 
   const rowDropHighlightClass = isBeingDragged
-    ? 'bg-[#261608] *:bg-[#261608] *:shadow-[inset_0_2px_0_0_#FF7100,inset_0_-2px_0_0_#FF7100]'
+    ? 'bg-ed-amber-drag *:bg-ed-amber-drag *:shadow-[inset_0_2px_0_0_var(--color-ed-amber),inset_0_-2px_0_0_var(--color-ed-amber)]'
     : topGapHighlight
-      ? '*:shadow-[inset_0_2px_0_0_#00D2FF]'
+      ? '*:shadow-[inset_0_2px_0_0_var(--color-ed-cyan)]'
       : bottomGapHighlight
-        ? '*:shadow-[inset_0_-2px_0_0_#00D2FF]'
+        ? '*:shadow-[inset_0_-2px_0_0_var(--color-ed-cyan)]'
         : ''
 
   return {

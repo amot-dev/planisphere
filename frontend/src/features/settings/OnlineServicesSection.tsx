@@ -59,10 +59,10 @@ export function OnlineServicesSection({
     <SettingsCard title="Online Services" spacingClassName="space-y-2.5">
       <label className="flex items-center justify-between cursor-pointer">
         <div>
-          <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+          <div className="font-bold uppercase tracking-wider text-ed-text-main">
             EDSM and EDAstro GEC Online Sync
           </div>
-          <div className="text-[11px] text-[#a6907c]">
+          <div className="text-[11px] text-ed-text-muted">
             Resolves coordinates for unvisited waypoint systems and downloads the galactic POI catalog.
           </div>
         </div>
@@ -72,10 +72,10 @@ export function OnlineServicesSection({
         />
       </label>
 
-      <div className="flex items-center justify-between pt-2 border-t border-[#2e1f12]">
-        <div className="text-[11px] text-[#a6907c]">
+      <div className="flex items-center justify-between pt-2 border-t border-ed-border-dim">
+        <div className="text-[11px] text-ed-text-muted">
           POI Catalog:{' '}
-          <span className="font-mono-tabular text-[#F4ECE4] font-bold">
+          <span className="font-mono-tabular text-ed-text-main font-bold">
             {(settings?.gecCount ?? 0).toLocaleString()}
           </span>{' '}
           entries

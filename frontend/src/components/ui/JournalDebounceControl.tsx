@@ -46,18 +46,18 @@ export function JournalDebounceControl({
   }
 
   return (
-    <div className="p-2.5 bg-[#050506] border border-[#3d2816] space-y-2">
+    <div className="p-2.5 bg-ed-void border border-ed-border space-y-2">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#F4ECE4]">
+          <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-main">
             Live Watcher Debounce
           </div>
-          <div className="text-[10px] text-[#a6907c] mt-0.5">
+          <div className="text-[10px] text-ed-text-muted mt-0.5">
             Batches rapid journal writes such as FSS body scans before recomputing stats (0.3s to
             30.0s).
           </div>
         </div>
-        <span className="px-2 py-0.5 bg-[#16100b] border border-[#3d2816] font-mono-tabular text-xs font-bold text-[#F4ECE4] shrink-0">
+        <span className="px-2 py-0.5 bg-ed-control border border-ed-border font-mono-tabular text-xs font-bold text-ed-text-main shrink-0">
           {formatDebounceSeconds(draftDebounceMilliseconds)}
         </span>
       </div>
@@ -73,7 +73,7 @@ export function JournalDebounceControl({
         onPointerUp={(event) => applyAndCommitMilliseconds(Number(event.currentTarget.value))}
         onKeyUp={(event) => applyAndCommitMilliseconds(Number(event.currentTarget.value))}
         onBlur={(event) => applyAndCommitMilliseconds(Number(event.currentTarget.value))}
-        className="w-full accent-[#FF7100] cursor-pointer"
+        className="w-full accent-ed-amber cursor-pointer"
       />
 
       <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -87,8 +87,8 @@ export function JournalDebounceControl({
                 onClick={() => applyAndCommitMilliseconds(preset.milliseconds)}
                 className={`px-2 py-0.5 font-mono-tabular text-[10px] font-bold border transition-colors cursor-pointer ${
                   isActivePreset
-                    ? 'bg-[#FF7100] border-[#FF7100] text-[#050506]'
-                    : 'bg-[#110c08] border-[#3d2816] text-[#a6907c] hover:border-[#FF7100] hover:text-[#F4ECE4]'
+                    ? 'bg-ed-amber border-ed-amber text-ed-void'
+                    : 'bg-ed-card border-ed-border text-ed-text-muted hover:border-ed-amber hover:text-ed-text-main'
                 }`}
               >
                 {preset.label}

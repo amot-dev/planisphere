@@ -27,19 +27,19 @@ export function CollapsibleSectionCard({
   children,
 }: CollapsibleSectionCardProps) {
   return (
-    <div className="border border-[#3d2816] bg-[#0e0a07] overflow-hidden">
+    <div className="border border-ed-border bg-ed-card-alt overflow-hidden">
       <div
-        className={`px-2 py-1.5 bg-[#140e09] ${
-          expanded ? 'border-b border-[#3d2816]' : ''
-        } text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#F4ECE4] flex items-center justify-between`}
+        className={`px-2 py-1.5 bg-ed-header ${
+          expanded ? 'border-b border-ed-border' : ''
+        } text-[10px] font-extrabold uppercase tracking-[0.14em] text-ed-text-main flex items-center justify-between`}
       >
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={onToggle}
             title={toggleTitle}
-            className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
-              expanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
+            className={`h-5 w-5 flex items-center justify-center hover:bg-ed-hover cursor-pointer ${
+              expanded ? 'text-ed-amber' : 'text-ed-text-muted'
             }`}
           >
             <ChevronRightIcon expanded={expanded} />
@@ -48,7 +48,7 @@ export function CollapsibleSectionCard({
         </div>
         {headerActions}
       </div>
-      {expanded && <div className="divide-y divide-[#24180e]">{children}</div>}
+      {expanded && <div className="divide-y divide-ed-border-subtle">{children}</div>}
     </div>
   )
 }

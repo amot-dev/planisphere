@@ -278,7 +278,7 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
 
     // Region before Origin (#01) matches Origin muted neutral border
     expect(rowHtml(901)).toContain('style="border-left-color:#3d2816"')
-    expect(rowHtml(901)).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#3a2615]')
+    expect(rowHtml(901)).toContain('border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border)]')
 
     // Consecutive regions before visited waypoint (#02) both inherit its flight mode border
     expect(rowHtml(903)).toContain('style="border-left-color:#00D2FF"')

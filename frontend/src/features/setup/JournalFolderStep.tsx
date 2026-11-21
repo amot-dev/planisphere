@@ -32,17 +32,17 @@ export function JournalFolderStep({
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <div className="text-sm font-bold uppercase tracking-wider text-[#F4ECE4]">
+        <div className="text-sm font-bold uppercase tracking-wider text-ed-text-main">
           Journal Directory
         </div>
-        <p className="text-[11px] text-[#c7b3a1] leading-relaxed">
+        <p className="text-[11px] text-ed-text-body leading-relaxed">
           Select your Elite Dangerous journal directory to track flights, scans, and exobiology.
         </p>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="font-bold uppercase tracking-wider text-[#FF7100]">
+          <label className="font-bold uppercase tracking-wider text-ed-amber">
             Journal Directory
           </label>
           <span
@@ -59,7 +59,7 @@ export function JournalFolderStep({
             value={journalDir}
             onChange={(event) => onChangeJournalDir(event.target.value)}
             placeholder={localSettings?.defaultJournalDir || ''}
-            className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none"
+            className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-[11px] text-ed-text-main focus:border-ed-amber focus:outline-none"
           />
           <button
             type="button"
@@ -76,7 +76,7 @@ export function JournalFolderStep({
               <button
                 type="button"
                 onClick={onResetDefaultJournals}
-                className="text-[11px] text-[#FF7100] hover:underline cursor-pointer"
+                className="text-[11px] text-ed-amber hover:underline cursor-pointer"
               >
                 Reset to Default
               </button>
@@ -84,7 +84,7 @@ export function JournalFolderStep({
           )}
       </div>
 
-      <div className="p-3 border border-[#3d2816] bg-[#110c08] text-[11px] text-[#a6907c] leading-relaxed">
+      <div className="p-3 border border-ed-border bg-ed-card text-[11px] text-ed-text-muted leading-relaxed">
         Next will scan and index your existing journal files.
       </div>
     </div>

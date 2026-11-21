@@ -58,7 +58,7 @@ export function ExplorationValuationSection({
       >
         <CartographicsValueBreakdown
           metrics={displayedMetrics}
-          className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#00D2FF]/50 text-[11px]"
+          className="mt-2 pl-3.5 space-y-1 border-l-2 border-ed-cyan/50 text-[11px]"
           boldBonuses
         />
       </ExpandableMetricRow>
@@ -71,7 +71,7 @@ export function ExplorationValuationSection({
             ? `${formatInt(displayedMetrics.firstDiscoveries)} first discovered`
             : undefined
         }
-        subClass="text-[#00D2FF]"
+        subClass="text-ed-cyan"
       />
       <StatRow
         label="Bodies Mapped"
@@ -81,7 +81,7 @@ export function ExplorationValuationSection({
             ? `${formatInt(displayedMetrics.firstMapped)} first mapped`
             : undefined
         }
-        subClass="text-[#00D2FF]"
+        subClass="text-ed-cyan"
       />
 
       {/* Exobiology Value — Vista Genomics Biological Emerald */}
@@ -94,7 +94,7 @@ export function ExplorationValuationSection({
       >
         <ExobiologyValueBreakdown
           metrics={displayedMetrics}
-          className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#00E5A3]/50 text-[11px]"
+          className="mt-2 pl-3.5 space-y-1 border-l-2 border-ed-emerald/50 text-[11px]"
           boldBonuses
         />
       </ExpandableMetricRow>
@@ -108,7 +108,7 @@ export function ExplorationValuationSection({
             ? `${formatInt(displayedMetrics.firstLogged)} first-logged species`
             : undefined
         }
-        subClass="text-[#00E5A3]"
+        subClass="text-ed-emerald"
       />
 
       {/* Realized Value — Orange Realized Profit and Loss Ledger */}
@@ -121,7 +121,7 @@ export function ExplorationValuationSection({
       >
         <RealizationLossBreakdown
           realization={displayedRealization}
-          className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#FF7100]/50 text-[11px]"
+          className="mt-2 pl-3.5 space-y-1 border-l-2 border-ed-amber/50 text-[11px]"
         />
       </ExpandableMetricRow>
     </CollapsibleSectionCard>

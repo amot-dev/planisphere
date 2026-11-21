@@ -145,8 +145,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       data-last-visited={!isPlanning && index === lastVisitedIndex ? 'true' : undefined}
       className={`group align-top ${
         permissions.isVisited
-          ? 'bg-[#120e09] hover:bg-[#1b140d] text-[#F4ECE4]'
-          : 'bg-[#090705] hover:bg-[#16100b] text-[#F4ECE4]'
+          ? 'bg-ed-surface hover:bg-ed-elevated text-ed-text-main'
+          : 'bg-ed-rail hover:bg-ed-control text-ed-text-main'
       } ${permissions.rowDropHighlightClass}`}
     >
       {/* Expand Chevron */}
@@ -159,10 +159,10 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           }
           className={`px-1 py-1.5 text-center align-top ${
             isBeingDragged
-              ? 'border-l-2 border-l-[#FF7100] border-b border-[#24180e]'
+              ? 'border-l-2 border-l-ed-amber border-b border-ed-border-subtle'
               : permissions.hasLegBorder
-                ? 'border-l-2 shadow-[inset_0_-1px_0_0_#24180e]'
-                : 'border-b border-[#24180e]'
+                ? 'border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]'
+                : 'border-b border-ed-border-subtle'
           }`}
         >
           <div className="h-7 flex items-center justify-center">
@@ -171,8 +171,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 type="button"
                 onClick={() => handlers.onToggleExpand(row.id)}
                 aria-label="Toggle per-waypoint leg telemetry drawer"
-                className={`h-5 w-5 flex items-center justify-center hover:bg-[#24180e] cursor-pointer ${
-                  isExpanded ? 'text-[#FF7100]' : 'text-[#a6907c]'
+                className={`h-5 w-5 flex items-center justify-center hover:bg-ed-hover cursor-pointer ${
+                  isExpanded ? 'text-ed-amber' : 'text-ed-text-muted'
                 }`}
               >
                 <ChevronRightIcon expanded={isExpanded} />
@@ -184,26 +184,26 @@ export const WaypointRowItem = memo(function WaypointRowItem({
 
       {/* Sequential Waypoint # */}
       <td
-        className={`px-1.5 py-1.5 text-right font-mono-tabular font-bold text-[#FF7100] align-top ${
+        className={`px-1.5 py-1.5 text-right font-mono-tabular font-bold text-ed-amber align-top ${
           isPlanning && isBeingDragged
-            ? 'border-l-2 border-l-[#FF7100] border-b border-[#24180e]'
-            : 'border-b border-[#24180e]'
+            ? 'border-l-2 border-l-ed-amber border-b border-ed-border-subtle'
+            : 'border-b border-ed-border-subtle'
         }`}
       >
-        <div className="h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5">
+        <div className="h-7 flex items-center justify-end font-mono-tabular font-bold text-ed-amber text-xs leading-5">
           {String(rowView.number).padStart(2, '0')}
         </div>
       </td>
 
       {/* System Name (EDSM indicator on left + system name + copy button) */}
-      <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
+      <td className="px-3 py-1.5 align-top border-b border-ed-border-subtle">
         <div className="h-7 flex items-center gap-2 min-w-0">
           <CoordStatusIndicator rowView={rowView} />
           <div className="flex-1 min-w-0 flex items-center gap-1 h-7">
             {permissions.isSystemLocked ? (
               <span
                 title={permissions.systemLockTitle}
-                className="w-full h-7 flex items-center font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5"
+                className="w-full h-7 flex items-center font-mono-tabular font-bold text-ed-text-main px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5"
               >
                 {row.systemName || '—'}
               </span>
@@ -231,11 +231,11 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                     ;(event.target as HTMLInputElement).blur()
                   }
                 }}
-                className="w-full h-7 bg-transparent px-1.5 py-[3px] border border-transparent focus:border-[#FF7100] focus:bg-[#050506] focus:outline-none font-mono-tabular font-bold text-[#F4ECE4] placeholder:text-[#6e5b4b] select-text text-xs leading-5"
+                className="w-full h-7 bg-transparent px-1.5 py-[3px] border border-transparent focus:border-ed-amber focus:bg-ed-void focus:outline-none font-mono-tabular font-bold text-ed-text-main placeholder:text-ed-text-dim select-text text-xs leading-5"
               />
             )}
             {isBeingDragged && (
-              <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-extrabold uppercase tracking-wider bg-[#FF7100] text-[#050506] shrink-0 select-none">
+              <span className="px-1.5 py-0.5 text-[9px] font-mono-tabular font-extrabold uppercase tracking-wider bg-ed-amber text-ed-void shrink-0 select-none">
                 MOVING
               </span>
             )}
@@ -251,10 +251,10 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                     ? `Copied "${row.systemName}"!`
                     : `Copy "${row.systemName}" to clipboard`
                 }
-                className={`h-5 w-5 flex items-center justify-center hover:bg-[#1f150d] cursor-pointer shrink-0 ${
+                className={`h-5 w-5 flex items-center justify-center hover:bg-ed-hover cursor-pointer shrink-0 ${
                   isSystemCopied
-                    ? 'text-[#00D2FF]'
-                    : 'text-[#6e5b4b] hover:text-[#FF7100]'
+                    ? 'text-ed-cyan'
+                    : 'text-ed-text-dim hover:text-ed-amber'
                 }`}
               >
                 <CopyIcon />
@@ -265,7 +265,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       </td>
 
       {/* POI Name (always editable, auto-expands up to 3 lines) */}
-      <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
+      <td className="px-3 py-1.5 align-top border-b border-ed-border-subtle">
         <AutoExpandingTextarea
           value={draft.poiName}
           placeholder="POI Name"
@@ -275,13 +275,13 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           }}
           onChange={(value) => setDraft((previous) => ({ ...previous, poiName: value }))}
           onBlur={(value) => handleBlur('poiName', value)}
-          className="text-[#F4ECE4] placeholder:text-[#6e5b4b]"
+          className="text-ed-text-main placeholder:text-ed-text-dim"
         />
       </td>
 
       {/* Flight Notes (always editable, auto-expands up to 3 lines) */}
       {showNotes && (
-        <td className="px-3 py-1.5 align-top border-b border-[#24180e]">
+        <td className="px-3 py-1.5 align-top border-b border-ed-border-subtle">
           <AutoExpandingTextarea
             value={draft.notes}
             placeholder="Flight notes, reminders..."
@@ -291,7 +291,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             }}
             onChange={(value) => setDraft((previous) => ({ ...previous, notes: value }))}
             onBlur={(value) => handleBlur('notes', value)}
-            className="text-[#d6c7b8] placeholder:text-[#6e5b4b]"
+            className="text-ed-text-body placeholder:text-ed-text-dim"
           />
         </td>
       )}
@@ -324,7 +324,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       />
 
       {/* External Links + Row Manipulation + Drag Handle */}
-      <td className="w-[320px] px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-[#24180e]">
+      <td className="w-[320px] px-3 py-1.5 text-right whitespace-nowrap align-top border-b border-ed-border-subtle">
         <div className="h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap">
           <HoverOpenInLinks
             rowView={rowView}
@@ -360,8 +360,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 }
                 className={`h-5 px-1.5 inline-flex items-center justify-center disabled:opacity-25 disabled:cursor-not-allowed cursor-grab active:cursor-grabbing font-mono-tabular select-none border text-xs shrink-0 ${
                   isBeingDragged
-                    ? 'bg-[#FF7100] text-[#050506] border-[#FF7100] font-bold'
-                    : 'text-[#a6907c] enabled:hover:text-[#FF7100] border-[#2e1f12] bg-[#140e09] enabled:hover:bg-[#24180e]'
+                    ? 'bg-ed-amber text-ed-void border-ed-amber font-bold'
+                    : 'text-ed-text-muted enabled:hover:text-ed-amber border-ed-border-dim bg-ed-header enabled:hover:bg-ed-hover'
                 }`}
               >
                 ⋮⋮

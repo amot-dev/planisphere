@@ -82,7 +82,7 @@ export const CarrierRouteBottomPanel = memo(function CarrierRouteBottomPanel({
         : 1000
 
   return (
-    <div className="border-t-2 border-[#00D2FF] bg-[#0b0907] px-3 sm:px-5 py-2.5 sm:py-3 shadow-2xl text-xs">
+    <div className="border-t-2 border-ed-cyan bg-ed-panel px-3 sm:px-5 py-2.5 sm:py-3 shadow-2xl text-xs">
       <CarrierRouterHeaderBar
         route={route}
         destinationDisplay={destinationDisplay}
@@ -144,29 +144,29 @@ function CarrierRouterHeaderBar({
   onCancelRoute?: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#2e1f12]">
+    <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-ed-border-dim">
       <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-        <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.14em] bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]">
+        <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.14em] bg-ed-cyan-tint text-ed-cyan border border-ed-cyan">
           {route.carrierType === 'squadron'
             ? 'SQUADRON CARRIER ROUTER'
             : 'PERSONAL CARRIER ROUTER'}
         </span>
-        <span className="font-mono-tabular font-bold text-[#F4ECE4]">
-          {route.origin || '???'} <span className="text-[#a6907c]">→</span>{' '}
-          <span className="text-[#FF7100]">{destinationDisplay}</span>
+        <span className="font-mono-tabular font-bold text-ed-text-main">
+          {route.origin || '???'} <span className="text-ed-text-muted">→</span>{' '}
+          <span className="text-ed-amber">{destinationDisplay}</span>
         </span>
         {!manualMode && (
           <>
-            <span className="text-[11px] font-mono-tabular text-[#a6907c]">
+            <span className="text-[11px] font-mono-tabular text-ed-text-muted">
               [{formatInt(route.capacityUsed)} t USED CAP]
             </span>
-            <span className="text-[11px] font-mono-tabular text-[#00D2FF]">
+            <span className="text-[11px] font-mono-tabular text-ed-cyan">
               [{formatInt(currentDepot)} / 1,000 t DEPOT]
             </span>
           </>
         )}
         {route.error && (
-          <span className="text-[11px] text-[#FF7100] bg-[#211307] border border-[#FF7100] px-2 py-0.5 font-mono-tabular">
+          <span className="text-[11px] text-ed-amber bg-ed-amber-tint border border-ed-amber px-2 py-0.5 font-mono-tabular">
             {route.error}
           </span>
         )}

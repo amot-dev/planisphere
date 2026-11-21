@@ -1,22 +1,50 @@
 @import "tailwindcss";
 
+@theme {
+  --color-ed-void: #050506;
+  --color-ed-canvas: #070605;
+  --color-ed-rail: #090705;
+  --color-ed-panel: #0b0907;
+  --color-ed-card-alt: #0e0a07;
+  --color-ed-card: #110c08;
+  --color-ed-surface: #120d09;
+  --color-ed-header: #140e09;
+  --color-ed-control: #16100b;
+  --color-ed-elevated: #1b130c;
+  --color-ed-menu: #1c140d;
+  --color-ed-hover: #24180e;
+
+  --color-ed-border-subtle: #24180e;
+  --color-ed-border-dim: #2e1f12;
+  --color-ed-border: #3d2816;
+  --color-ed-border-strong: #472e19;
+
+  --color-ed-amber: #ff7100;
+  --color-ed-amber-bright: #ff9436;
+  --color-ed-amber-tint: #211307;
+  --color-ed-amber-drag: #261608;
+
+  --color-ed-cyan: #00d2ff;
+  --color-ed-cyan-border: #16485c;
+  --color-ed-cyan-tint: #08151c;
+
+  --color-ed-emerald: #00e5a3;
+
+  --color-ed-danger: #ff3b2f;
+  --color-ed-danger-text: #ff4d3d;
+  --color-ed-danger-border: #4d1915;
+  --color-ed-danger-tint: #190909;
+
+  --color-ed-text-main: #f4ece4;
+  --color-ed-text-body: #d6c7b8;
+  --color-ed-text-muted: #a6907c;
+  --color-ed-text-dim: #6e5b4b;
+  --color-ed-text-disabled: #554030;
+}
+
 @layer base {
   :root {
     color-scheme: dark;
-    --ed-bg-void: #050506;
-    --ed-bg-panel: #0b0907;
-    --ed-bg-surface: #120d09;
-    --ed-bg-elevated: #1b130c;
-    --ed-bg-hover: #24180e;
-    --ed-border-dim: #2b1d11;
-    --ed-border: #3d2816;
-    --ed-border-bright: #ff7100;
-    --ed-amber: #ff7100;
-    --ed-amber-bright: #ff8c24;
-    --ed-cyan: #00d2ff;
-    --ed-text-main: #f4ece4;
-    --ed-text-muted: #a6907c;
-    --ed-text-dim: #6e5b4b;
   }
 
   * {
@@ -31,8 +59,8 @@
     height: 100%;
     margin: 0;
     padding: 0;
-    background-color: #050506;
-    color: #f4ece4;
+    background-color: var(--color-ed-void);
+    color: var(--color-ed-text-main);
     font-family:
       "Rajdhani", "Bahnschrift", "Eurostile", "DIN Alternate", "Inter", "Segoe UI",
       -apple-system, BlinkMacSystemFont, sans-serif;
@@ -54,7 +82,7 @@
     -moz-appearance: none;
     appearance: none;
     padding: 0;
-    border: 1px solid var(--ed-border);
+    border: 1px solid var(--color-ed-border);
     background-color: transparent;
     cursor: pointer;
     outline: none;
@@ -81,7 +109,7 @@
   -moz-appearance: none;
   appearance: none;
   padding: 0;
-  border: 1px solid #3d2816;
+  border: 1px solid var(--color-ed-border);
   background-color: transparent;
   cursor: pointer;
   outline: none;
@@ -103,7 +131,7 @@
 }
 
 .ed-color-picker:hover {
-  border-color: #ff7100;
+  border-color: var(--color-ed-amber);
 }
 
 .select-text {
@@ -123,26 +151,26 @@
    here, as desktop WebViews (WebKitGTK) continuously re-rasterize repeating procedural patterns
    behind scroll containers during rapid scrolling, causing frame stalls. */
 .cockpit-grid-bg {
-  background-color: #050506;
+  background-color: var(--color-ed-void);
   background-image: linear-gradient(180deg, rgba(255, 113, 0, 0.05) 0%, rgba(5, 5, 6, 0) 140px);
 }
 
 /* ED Holo-HUD structural panel with left or top accent rule */
 .ed-panel {
-  background-color: #0b0907;
-  border: 1px solid #2e1f12;
+  background-color: var(--color-ed-panel);
+  border: 1px solid var(--color-ed-border-dim);
 }
 
 .ed-header-bar {
   background: linear-gradient(90deg, rgba(255, 113, 0, 0.16) 0%, rgba(18, 13, 9, 0.95) 60%);
-  border-top: 2px solid #ff7100;
-  border-bottom: 1px solid #3a2615;
+  border-top: 2px solid var(--color-ed-amber);
+  border-bottom: 1px solid var(--color-ed-border);
 }
 
 .ed-subheader-cyan {
   background: linear-gradient(90deg, rgba(0, 210, 255, 0.14) 0%, rgba(18, 13, 9, 0.95) 65%);
-  border-left: 3px solid #00d2ff;
-  border-bottom: 1px solid #1b3544;
+  border-left: 3px solid var(--color-ed-cyan);
+  border-bottom: 1px solid var(--color-ed-cyan-border);
 }
 
 /* ED Station Services button styles */
@@ -156,10 +184,10 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
-  background-color: #16100b;
-  color: #f4ece4;
-  border: 1px solid #472e19;
-  border-left: 2px solid #ff7100;
+  background-color: var(--color-ed-control);
+  color: var(--color-ed-text-main);
+  border: 1px solid var(--color-ed-border-strong);
+  border-left: 2px solid var(--color-ed-amber);
   transition:
     background-color 80ms ease,
     color 80ms ease,
@@ -168,9 +196,9 @@
 }
 
 .ed-btn:hover:not(:disabled) {
-  background-color: #ff7100;
-  color: #050506;
-  border-color: #ff7100;
+  background-color: var(--color-ed-amber);
+  color: var(--color-ed-void);
+  border-color: var(--color-ed-amber);
 }
 
 .ed-btn:disabled {
@@ -188,9 +216,9 @@
   font-weight: 800;
   letter-spacing: 0.12em;
   white-space: nowrap;
-  background-color: #ff7100;
-  color: #050506;
-  border: 1px solid #ff8c24;
+  background-color: var(--color-ed-amber);
+  color: var(--color-ed-void);
+  border: 1px solid var(--color-ed-amber-bright);
   transition:
     background-color 80ms ease,
     transform 60ms ease;
@@ -198,7 +226,7 @@
 }
 
 .ed-btn-primary:hover:not(:disabled) {
-  background-color: #ff9436;
+  background-color: var(--color-ed-amber-bright);
 }
 
 .ed-btn-primary:disabled {
@@ -216,10 +244,10 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
-  background-color: #08151c;
-  color: #00d2ff;
-  border: 1px solid #16485c;
-  border-left: 2px solid #00d2ff;
+  background-color: var(--color-ed-cyan-tint);
+  color: var(--color-ed-cyan);
+  border: 1px solid var(--color-ed-cyan-border);
+  border-left: 2px solid var(--color-ed-cyan);
   transition:
     background-color 80ms ease,
     color 80ms ease,
@@ -228,9 +256,9 @@
 }
 
 .ed-btn-cyan:hover:not(:disabled) {
-  background-color: #00d2ff;
-  color: #050506;
-  border-color: #00d2ff;
+  background-color: var(--color-ed-cyan);
+  color: var(--color-ed-void);
+  border-color: var(--color-ed-cyan);
 }
 
 .ed-btn-cyan:disabled {
@@ -248,10 +276,10 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   white-space: nowrap;
-  background-color: #190909;
-  color: #ff4d3d;
-  border: 1px solid #4d1915;
-  border-left: 2px solid #ff3b2f;
+  background-color: var(--color-ed-danger-tint);
+  color: var(--color-ed-danger-text);
+  border: 1px solid var(--color-ed-danger-border);
+  border-left: 2px solid var(--color-ed-danger);
   transition:
     background-color 80ms ease,
     color 80ms ease;
@@ -259,8 +287,8 @@
 }
 
 .ed-btn-danger:hover:not(:disabled) {
-  background-color: #ff3b2f;
-  color: #050506;
+  background-color: var(--color-ed-danger);
+  color: var(--color-ed-void);
 }
 
 /* Indeterminate HUD scan animation for loading bars */
@@ -284,15 +312,15 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #060504;
+  background: var(--color-ed-void);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3d2816;
+  background: var(--color-ed-border);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #ff7100;
+  background: var(--color-ed-amber);
 }
 
 /* Compositor scroll layer promotion:

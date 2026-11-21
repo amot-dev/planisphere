@@ -1,4 +1,10 @@
 import { memo } from 'react'
+import {
+  ED_AMBER_HEX,
+  ED_BORDER_HEX,
+  ED_CYAN_HEX,
+  ED_VOID_HEX,
+} from '../../domain/theme'
 
 /**
  * SquareCheckboxProps defines the visual appearance, checked state, and
@@ -36,22 +42,22 @@ export const SquareCheckbox = memo(function SquareCheckbox({
   checked = false,
   onChange,
   color,
-  bgFill = '#050506',
+  bgFill = ED_VOID_HEX,
   size = 'md',
   disabled = false,
   className = '',
   title,
   'aria-label': ariaLabel,
 }: SquareCheckboxProps) {
-  let borderColor = '#3d2816'
+  let borderColor = ED_BORDER_HEX
   let fillColor = 'transparent'
 
   if (checked === true) {
-    borderColor = color || '#FF7100'
-    fillColor = color || '#FF7100'
+    borderColor = color || ED_AMBER_HEX
+    fillColor = color || ED_AMBER_HEX
   } else if (checked === 'partial') {
-    borderColor = color || '#00D2FF'
-    fillColor = color || '#00D2FF'
+    borderColor = color || ED_CYAN_HEX
+    fillColor = color || ED_CYAN_HEX
   }
 
   const isInteractive = Boolean(onChange && !disabled)
@@ -105,4 +111,3 @@ export const SquareCheckbox = memo(function SquareCheckbox({
     </span>
   )
 })
-

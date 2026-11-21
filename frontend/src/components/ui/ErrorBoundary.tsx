@@ -49,33 +49,33 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="h-full w-full min-h-[300px] flex flex-col items-center justify-center p-6 bg-[#050506] text-[#F4ECE4] select-none">
-          <div className="w-full max-w-xl border border-[#4d1915] border-t-2 border-t-[#ff3b2f] bg-[#0b0907] p-6 space-y-4 shadow-2xl">
+        <div className="h-full w-full min-h-[300px] flex flex-col items-center justify-center p-6 bg-ed-void text-ed-text-main select-none">
+          <div className="w-full max-w-xl border border-ed-danger-border border-t-2 border-t-ed-danger bg-ed-panel p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-extrabold tracking-[0.2em] uppercase text-[#ff3b2f]">
+              <span className="text-xs font-extrabold tracking-[0.2em] uppercase text-ed-danger">
                 {APP_PRODUCT_NAME} // SUBSYSTEM EXCEPTION
               </span>
-              <span className="font-mono-tabular text-[11px] text-[#a6907c]">
+              <span className="font-mono-tabular text-[11px] text-ed-text-muted">
                 v{APP_VERSION}
               </span>
             </div>
 
             <div className="space-y-1">
-              <div className="text-sm font-bold uppercase tracking-wider text-[#F4ECE4]">
+              <div className="text-sm font-bold uppercase tracking-wider text-ed-text-main">
                 {this.props.fallbackTitle || 'Subsystem Failure Detected'}
               </div>
-              <div className="text-xs text-[#a6907c]">
+              <div className="text-xs text-ed-text-muted">
                 Planisphere encountered an unexpected runtime exception during rendering.
               </div>
             </div>
 
             {this.state.error && (
-              <div className="bg-[#120909] border border-[#3d1412] p-3 text-xs font-mono-tabular text-[#ff8075] overflow-auto max-h-48 break-words select-text">
+              <div className="bg-ed-danger-tint border border-ed-danger-border p-3 text-xs font-mono-tabular text-ed-danger-text overflow-auto max-h-48 break-words select-text">
                 <div className="font-bold">
                   {this.state.error.name}: {this.state.error.message}
                 </div>
                 {this.state.error.stack && (
-                  <pre className="text-[10px] text-[#a6907c] mt-2 whitespace-pre-wrap">
+                  <pre className="text-[10px] text-ed-text-muted mt-2 whitespace-pre-wrap">
                     {this.state.error.stack}
                   </pre>
                 )}

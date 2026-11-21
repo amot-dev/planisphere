@@ -45,7 +45,7 @@ export function SettingsModal({
       maxWidth="max-w-2xl"
     >
       {error && (
-        <div className="p-2.5 border border-[#ff3b2f] bg-[#190909] text-[#ff4d3d]">{error}</div>
+        <div className="p-2.5 border border-ed-danger bg-ed-danger-tint text-ed-danger-text">{error}</div>
       )}
 
       <JournalDirectorySection
@@ -91,8 +91,8 @@ export function SettingsModal({
       />
 
       {onOpenSetupWizard && (
-        <div className="flex items-center justify-between pt-2 border-t border-[#3d2816]">
-          <span className="text-[11px] text-[#a6907c]">
+        <div className="flex items-center justify-between pt-2 border-t border-ed-border">
+          <span className="text-[11px] text-ed-text-muted">
             Need to change your SQLite database file path or re-run initial onboarding?
           </span>
           <button

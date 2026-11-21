@@ -33,7 +33,7 @@ export const RowManipulationButtons = memo(function RowManipulationButtons({
           type="button"
           onClick={onToggleInsertMenu}
           title="Insert row below"
-          className="h-5 px-1.5 inline-flex items-center justify-center bg-[#140e09] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#2e1f12] font-mono-tabular font-bold text-xs cursor-pointer"
+          className="h-5 px-1.5 inline-flex items-center justify-center bg-ed-header hover:bg-ed-cyan text-ed-cyan hover:text-ed-void border border-ed-border-dim font-mono-tabular font-bold text-xs cursor-pointer"
         >
           +
         </button>
@@ -46,24 +46,24 @@ export const RowManipulationButtons = memo(function RowManipulationButtons({
               onClick={onToggleInsertMenu}
             />
             {/* Vertically stacked menu aligning to the right of the '+' button (expanding safely leftward) */}
-            <div className="absolute right-0 top-full mt-1 z-30 w-60 border border-[#FF7100] bg-[#0b0907] shadow-2xl shadow-black p-1 text-left text-xs flex flex-col whitespace-normal divide-y divide-[#24180e]">
+            <div className="absolute right-0 top-full mt-1 z-30 w-60 border border-ed-amber bg-ed-panel shadow-2xl shadow-black p-1 text-left text-xs flex flex-col whitespace-normal divide-y divide-ed-border-subtle">
               {allowInsertWaypoint ? (
                 <button
                   type="button"
                   onClick={() => onInsert('waypoint')}
-                  className="w-full px-3 py-2 text-left hover:bg-[#FF7100] hover:text-[#050506] text-[#F4ECE4] font-bold uppercase tracking-wider cursor-pointer transition-colors"
+                  className="w-full px-3 py-2 text-left hover:bg-ed-amber hover:text-ed-void text-ed-text-main font-bold uppercase tracking-wider cursor-pointer transition-colors"
                 >
                   + Insert Waypoint Below
                 </button>
               ) : (
-                <div className="px-3 py-2 text-[10px] text-[#a6907c] leading-4">
+                <div className="px-3 py-2 text-[10px] text-ed-text-muted leading-4">
                   Add new waypoints in the unvisited section and drag them into valid past slots.
                 </div>
               )}
               <button
                 type="button"
                 onClick={() => onInsert('region')}
-                className="w-full px-3 py-2 text-left hover:bg-[#FF7100] hover:text-[#050506] text-[#FF7100] font-bold uppercase tracking-wider cursor-pointer transition-colors"
+                className="w-full px-3 py-2 text-left hover:bg-ed-amber hover:text-ed-void text-ed-amber font-bold uppercase tracking-wider cursor-pointer transition-colors"
               >
                 + Insert Region Header Below
               </button>
@@ -77,7 +77,7 @@ export const RowManipulationButtons = memo(function RowManipulationButtons({
         disabled={Boolean(deleteDisabledReason)}
         onClick={onDelete}
         title={deleteDisabledReason || 'Delete row'}
-        className="h-5 px-1.5 inline-flex items-center justify-center bg-[#140e09] enabled:hover:bg-[#ff3b2f] text-[#a6907c] enabled:hover:text-[#050506] border border-[#2e1f12] disabled:opacity-25 disabled:cursor-not-allowed font-mono-tabular text-xs cursor-pointer"
+        className="h-5 px-1.5 inline-flex items-center justify-center bg-ed-header enabled:hover:bg-ed-danger text-ed-text-muted enabled:hover:text-ed-void border border-ed-border-dim disabled:opacity-25 disabled:cursor-not-allowed font-mono-tabular text-xs cursor-pointer"
       >
         ×
       </button>

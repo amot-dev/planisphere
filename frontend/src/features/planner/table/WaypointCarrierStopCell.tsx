@@ -42,14 +42,14 @@ export function WaypointCarrierStopCell({
   const row = rowView.row
 
   return (
-    <td className="px-2 py-1.5 text-center align-top border-b border-[#24180e]">
+    <td className="px-2 py-1.5 text-center align-top border-b border-ed-border-subtle">
       <div className="h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
         {row.fcStop ? (
           <>
             {isPlanning ? (
               <span
                 title="Designated Fleet Carrier Stop for this expedition"
-                className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#120d09] text-[#a6907c] border border-[#3d2816] select-none"
+                className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-ed-surface text-ed-text-muted border border-ed-border select-none"
               >
                 FC STOP
               </span>
@@ -64,8 +64,8 @@ export function WaypointCarrierStopCell({
                 }
                 className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border cursor-pointer transition-colors ${
                   row.fcArrived
-                    ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70 hover:border-[#FF7100]'
-                    : 'bg-[#120d09] text-[#a6907c] border-[#3d2816] hover:border-[#FF7100] hover:text-[#F4ECE4]'
+                    ? 'bg-ed-amber-tint text-ed-amber border-ed-amber/70 hover:border-ed-amber'
+                    : 'bg-ed-surface text-ed-text-muted border-ed-border hover:border-ed-amber hover:text-ed-text-main'
                 }`}
               >
                 {row.fcArrived ? 'ARRIVED' : 'PENDING'}
@@ -79,8 +79,8 @@ export function WaypointCarrierStopCell({
                 }
                 className={`h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider border select-none ${
                   row.fcArrived
-                    ? 'bg-[#211307] text-[#FF7100] border-[#FF7100]/70'
-                    : 'bg-[#120d09] text-[#a6907c] border-[#3d2816]'
+                    ? 'bg-ed-amber-tint text-ed-amber border-ed-amber/70'
+                    : 'bg-ed-surface text-ed-text-muted border-ed-border'
                 }`}
               >
                 {row.fcArrived ? 'ARRIVED' : 'PENDING'}
@@ -90,7 +90,7 @@ export function WaypointCarrierStopCell({
             {!isPlanning && hasActiveCarrierRoute ? (
               <span
                 title="Fleet Carrier route is currently active for this waypoint in the bottom router."
-                className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF]"
+                className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-ed-cyan-tint text-ed-cyan border border-ed-cyan"
               >
                 ROUTING
               </span>
@@ -107,7 +107,7 @@ export function WaypointCarrierStopCell({
                     )
                   }
                   title="Plot Fleet Carrier route to this next carrier stop"
-                  className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer"
+                  className="h-5 px-1.5 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-ed-cyan-tint hover:bg-ed-cyan text-ed-cyan hover:text-ed-void border border-ed-cyan cursor-pointer"
                 >
                   ROUTE
                 </button>
@@ -119,7 +119,7 @@ export function WaypointCarrierStopCell({
                 type="button"
                 onClick={() => onToggleFcStop(row)}
                 title="Remove Fleet Carrier stop designation"
-                className="h-5 w-4 inline-flex items-center justify-center text-xs text-[#6e5b4b] hover:text-[#ff3b2f] cursor-pointer"
+                className="h-5 w-4 inline-flex items-center justify-center text-xs text-ed-text-dim hover:text-ed-danger cursor-pointer"
               >
                 ×
               </button>
@@ -130,12 +130,12 @@ export function WaypointCarrierStopCell({
             type="button"
             onClick={() => onToggleFcStop(row)}
             title="Designate this waypoint as a Fleet Carrier stop"
-            className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-[#6e5b4b] hover:text-[#FF7100] border border-dashed border-[#2e1f12] hover:border-[#FF7100] bg-transparent hover:bg-[#16100b] cursor-pointer"
+            className="h-5 px-2 inline-flex items-center justify-center text-[9px] font-mono-tabular font-bold uppercase tracking-wider text-ed-text-dim hover:text-ed-amber border border-dashed border-ed-border-dim hover:border-ed-amber bg-transparent hover:bg-ed-control cursor-pointer"
           >
             + FC STOP
           </button>
         ) : (
-          <span className="h-5 inline-flex items-center justify-center text-[#6e5b4b] font-mono-tabular text-[10px]">
+          <span className="h-5 inline-flex items-center justify-center text-ed-text-dim font-mono-tabular text-[10px]">
             —
           </span>
         )}

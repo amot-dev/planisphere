@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { modes } from '../../../../api/models'
+import { ED_AMBER_HEX } from '../../../../domain/theme'
 
 /**
  * LegModeDropdownProps defines the active flight mode metadata, available modes,
@@ -31,16 +32,16 @@ export function LegModeDropdown({
         type="button"
         onClick={() => setOpen((previousOpen) => !previousOpen)}
         title="Flight mode for this leg (click to change)"
-        className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular uppercase tracking-wider border border-[#472e19] border-l-2 border-l-[#FF7100] bg-[#16100b] text-[#FF7100] hover:bg-[#24180e] transition cursor-pointer"
+        className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular uppercase tracking-wider border border-ed-border-strong border-l-2 border-l-ed-amber bg-ed-control text-ed-amber hover:bg-ed-hover transition cursor-pointer"
       >
         <span className="font-bold">[FLIGHT MODE]:</span>
         <span
           className="w-1.5 h-2.5 shrink-0"
-          style={{ backgroundColor: modeColor || currentMode?.color || '#FF7100' }}
+          style={{ backgroundColor: modeColor || currentMode?.color || ED_AMBER_HEX }}
         />
-        <span className="font-bold text-[#F4ECE4]">{currentMode?.name || 'TRAVEL'}</span>
+        <span className="font-bold text-ed-text-main">{currentMode?.name || 'TRAVEL'}</span>
         <svg
-          className={`w-3 h-3 text-[#a6907c] transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-3 h-3 text-ed-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
           viewBox="0 0 20 20"
           fill="currentColor"
         >
@@ -55,8 +56,8 @@ export function LegModeDropdown({
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 mt-1 w-48 border border-[#FF7100] bg-[#1c140d] shadow-2xl shadow-black z-40 py-1 text-xs">
-            <div className="px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider text-[#a6907c] bg-[#241a10] border-b border-[#3d2816]">
+          <div className="absolute left-0 mt-1 w-48 border border-ed-amber bg-ed-menu shadow-2xl shadow-black z-40 py-1 text-xs">
+            <div className="px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wider text-ed-text-muted bg-ed-hover border-b border-ed-border">
               Select Flight Mode
             </div>
             {modesList.map((mode) => {
@@ -71,14 +72,14 @@ export function LegModeDropdown({
                   }}
                   className={`w-full flex items-center justify-between px-3 py-1.5 text-left transition cursor-pointer ${
                     isSelected
-                      ? 'bg-[#2b190c] text-[#FF7100] font-bold'
-                      : 'text-[#F4ECE4] hover:bg-[#FF7100] hover:text-[#050506]'
+                      ? 'bg-ed-amber-tint text-ed-amber font-bold'
+                      : 'text-ed-text-main hover:bg-ed-amber hover:text-ed-void'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span
                       className="w-2 h-2 shrink-0"
-                      style={{ backgroundColor: mode.color || '#FF7100' }}
+                      style={{ backgroundColor: mode.color || ED_AMBER_HEX }}
                     />
                     <span className="font-mono-tabular uppercase tracking-wider text-[11px]">
                       {mode.name}

@@ -14,9 +14,9 @@ export interface ExpandableMetricRowProps {
 }
 
 const ACCENT_TEXT_CLASSES: Record<ExpandableMetricRowProps['accent'], string> = {
-  amber: 'text-[#FF7100]',
-  cyan: 'text-[#00D2FF]',
-  emerald: 'text-[#00E5A3]',
+  amber: 'text-ed-amber',
+  cyan: 'text-ed-cyan',
+  emerald: 'text-ed-emerald',
 }
 
 /**
@@ -41,7 +41,7 @@ export function ExpandableMetricRow({
         className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
       >
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-bold uppercase tracking-wider text-[#F4ECE4] truncate">
+          <span className="text-xs font-bold uppercase tracking-wider text-ed-text-main truncate">
             {label}
           </span>
           <span className={`text-[10px] ${accentTextClass} shrink-0`}>

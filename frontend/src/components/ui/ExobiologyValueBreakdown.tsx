@@ -21,18 +21,18 @@ export function ExobiologyValueBreakdown({
   boldBonuses = false,
 }: ExobiologyValueBreakdownProps) {
   const bonusValueClass = boldBonuses
-    ? 'font-mono-tabular text-[#00E5A3] font-bold whitespace-nowrap shrink-0'
-    : 'font-mono-tabular text-[#00E5A3] whitespace-nowrap shrink-0'
+    ? 'font-mono-tabular text-ed-emerald font-bold whitespace-nowrap shrink-0'
+    : 'font-mono-tabular text-ed-emerald whitespace-nowrap shrink-0'
 
   return (
     <div className={className}>
-      <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
         <span className="truncate">Base Organic Value</span>
-        <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
+        <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
           {formatCredits(metrics.organicValueBase)}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
         <span className="truncate">First Logged Bonus</span>
         <span className={bonusValueClass}>+{formatCredits(metrics.organicValueBonus)}</span>
       </div>

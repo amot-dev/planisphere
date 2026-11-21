@@ -22,7 +22,7 @@ function UnknownDistanceSpan({
   const hasSystemName = Boolean(systemName?.trim())
   return (
     <span
-      className="text-[#6e5b4b] uppercase text-[10px]"
+      className="text-ed-text-dim uppercase text-[10px]"
       title={hasSystemName ? unknownTitle : undefined}
     >
       {hasSystemName ? 'UNKNOWN' : '—'}
@@ -42,7 +42,7 @@ function renderDistanceValue(
         ? `Estimated straight-line distance from player location (${playerSystem})`
         : 'Estimated straight-line distance from player location'
       return (
-        <span className="text-[#00D2FF]" title={tooltip}>
+        <span className="text-ed-cyan" title={tooltip}>
           +{formatLy(rowView.distFromCurrentLy, 1)}
         </span>
       )
@@ -58,18 +58,18 @@ function renderDistanceValue(
   if (rowView.number === 1) {
     if (row.systemName?.trim()) {
       return (
-        <span className="text-[#00D2FF]" title="Starting Waypoint (Origin)">
+        <span className="text-ed-cyan" title="Starting Waypoint (Origin)">
           +0 Ly
         </span>
       )
     }
-    return <span className="text-[#6e5b4b]">—</span>
+    return <span className="text-ed-text-dim">—</span>
   }
 
   if (rowView.distFromPrevLy != null) {
     return (
       <span
-        className="text-[#00D2FF]"
+        className="text-ed-cyan"
         title="Estimated straight-line distance from previous waypoint"
       >
         +{formatLy(rowView.distFromPrevLy, 1)}
@@ -98,16 +98,16 @@ export function WaypointTelemetryCell({
   const row = rowView.row
 
   return (
-    <td className="px-3 py-1.5 align-top border-b border-[#24180e] whitespace-nowrap">
+    <td className="px-3 py-1.5 align-top border-b border-ed-border-subtle whitespace-nowrap">
       {isVisited ? (
         <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
-          <span className="font-extrabold uppercase tracking-wider text-[#FF7100] shrink-0">
+          <span className="font-extrabold uppercase tracking-wider text-ed-amber shrink-0">
             LOGGED VISIT
           </span>
-          <span className="text-[#a6907c] shrink-0">{rowView.visitedAtGalactic}</span>
+          <span className="text-ed-text-muted shrink-0">{rowView.visitedAtGalactic}</span>
         </div>
       ) : (
-        <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-[#a6907c] leading-5">
+        <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-ed-text-muted leading-5">
           {renderDistanceValue(isNext, rowView, row, playerSystem)}
         </div>
       )}

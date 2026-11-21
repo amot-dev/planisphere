@@ -22,16 +22,16 @@ export function SettingsCard({
   children,
 }: SettingsCardProps) {
   return (
-    <div className={`p-3 border border-[#3d2816] bg-[#110c08] ${spacingClassName}`}>
+    <div className={`p-3 border border-ed-border bg-ed-card ${spacingClassName}`}>
       {headerRight ? (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
+          <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-ed-amber">
             {title}
           </span>
           {headerRight}
         </div>
       ) : (
-        <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
+        <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-ed-amber">
           {title}
         </div>
       )}

@@ -73,7 +73,7 @@ export default function App() {
   // First-time setup: show the floating setup window before entering the main workspace
   if (settings && !settings.setupCompleted) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center cockpit-grid-bg text-[#F4ECE4] overflow-hidden">
+      <div className="h-screen w-screen flex flex-col items-center justify-center cockpit-grid-bg text-ed-text-main overflow-hidden">
         <SetupWizardModal
           settings={settings}
           ingestStatus={ingest}
@@ -85,7 +85,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col cockpit-grid-bg text-[#F4ECE4] overflow-hidden">
+    <div className="h-screen w-screen flex flex-col cockpit-grid-bg text-ed-text-main overflow-hidden">
       <CockpitTopBar
         sidebarCollapsed={sidebarCollapsed}
         expeditions={expeditions}

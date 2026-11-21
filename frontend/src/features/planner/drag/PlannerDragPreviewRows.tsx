@@ -54,14 +54,14 @@ export function PlannerCollapsedVisitedRow({
     <tr
       onDragOver={onDragOver}
       data-collapsed-visited="true"
-      className="bg-[#0b0806] text-[#6e5b4b] select-none"
+      className="bg-ed-panel text-ed-text-dim select-none"
     >
       <td
         colSpan={visibleColumnCount}
-        className="px-4 py-1 text-center font-mono-tabular text-[10px] tracking-wider border-b border-[#24180e] border-l-2 border-l-[#3d2816]"
+        className="px-4 py-1 text-center font-mono-tabular text-[10px] tracking-wider border-b border-ed-border-subtle border-l-2 border-l-ed-border"
       >
-        <span className="text-[#a6907c] font-bold">{`⋯ ${rangeLabel}`}</span>
-        <span className="text-[#6e5b4b]">{`${summarySuffix} ⋯`}</span>
+        <span className="text-ed-text-muted font-bold">{`⋯ ${rangeLabel}`}</span>
+        <span className="text-ed-text-dim">{`${summarySuffix} ⋯`}</span>
       </td>
     </tr>
   )
@@ -105,35 +105,35 @@ export function PlannerDropSlotRow({
         onDragOver={onDragOver}
         data-drop-gap={gapIndex}
         data-drop-status="blocked_fc"
-        className="bg-[#211307]/45 text-[#FF7100] select-none cursor-not-allowed"
+        className="bg-ed-amber-tint/45 text-ed-amber select-none cursor-not-allowed"
       >
         <td
           colSpan={leftColSpan}
-          className="px-4 py-1.5 align-middle border-y border-l border-dashed border-[#FF7100]"
+          className="px-4 py-1.5 align-middle border-y border-l border-dashed border-ed-amber"
         >
           <div className="h-6 flex items-center gap-2 font-mono-tabular text-[10px] uppercase tracking-wider">
-            <span className="font-extrabold text-[#FF7100]">CARRIER STOP ORDER CONFLICT</span>
-            <span className="text-[#d6c7b8] normal-case tracking-normal">
+            <span className="font-extrabold text-ed-amber">CARRIER STOP ORDER CONFLICT</span>
+            <span className="text-ed-text-body normal-case tracking-normal">
               Pending Fleet Carrier stop cannot precede an arrived stop
             </span>
           </div>
         </td>
-        <td className="px-3 py-1.5 align-middle whitespace-nowrap border-y border-dashed border-[#FF7100]">
+        <td className="px-3 py-1.5 align-middle whitespace-nowrap border-y border-dashed border-ed-amber">
           <div className="h-6 flex items-center font-mono-tabular text-[10px]">
-            <span className="px-1.5 py-0.5 font-extrabold uppercase tracking-wider bg-[#211307] text-[#FF7100] border border-[#FF7100]">
+            <span className="px-1.5 py-0.5 font-extrabold uppercase tracking-wider bg-ed-amber-tint text-ed-amber border border-ed-amber">
               FC STOP ORDER BLOCKED
             </span>
           </div>
         </td>
-        <td className="w-[320px] px-3 py-1.5 align-middle border-y border-r border-dashed border-[#FF7100]" />
+        <td className="w-[320px] px-3 py-1.5 align-middle border-y border-r border-dashed border-ed-amber" />
       </tr>
     )
   }
 
   const borderStyleClass = isDragTarget
-    ? 'border-solid border-[#00D2FF]'
-    : 'border-dashed border-[#00D2FF]/80'
-  const rowBgClass = isDragTarget ? 'bg-[#08151c]/90' : 'bg-[#08151c]/35 hover:bg-[#08151c]/60'
+    ? 'border-solid border-ed-cyan'
+    : 'border-dashed border-ed-cyan/80'
+  const rowBgClass = isDragTarget ? 'bg-ed-cyan-tint/90' : 'bg-ed-cyan-tint/35 hover:bg-ed-cyan-tint/60'
 
   return (
     <tr
@@ -141,18 +141,18 @@ export function PlannerDropSlotRow({
       onDrop={onDrop}
       data-drop-gap={gapIndex}
       data-drop-status={preview.status}
-      className={`${rowBgClass} text-[#00D2FF] select-none transition-colors`}
+      className={`${rowBgClass} text-ed-cyan select-none transition-colors`}
     >
       <td
         colSpan={leftColSpan}
         className={`px-4 py-1.5 align-middle border-y border-l ${borderStyleClass}`}
       >
         <div className="h-6 flex items-center gap-2 font-mono-tabular text-[10px] uppercase tracking-wider">
-          <span className="font-extrabold text-[#00D2FF]">
+          <span className="font-extrabold text-ed-cyan">
             {`+ DROP ${displaySystem} HERE`}
           </span>
           {preview.resetsFcArrived && (
-            <span className="px-1.5 py-0.5 text-[9px] font-bold bg-[#211307] text-[#FF7100] border border-[#FF7100]/70">
+            <span className="px-1.5 py-0.5 text-[9px] font-bold bg-ed-amber-tint text-ed-amber border border-ed-amber/70">
               RESETS FC TO PENDING
             </span>
           )}
@@ -160,18 +160,18 @@ export function PlannerDropSlotRow({
       </td>
       <td className={`px-3 py-1.5 align-middle whitespace-nowrap border-y ${borderStyleClass}`}>
         <div className="h-6 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px]">
-          <span className="px-1.5 py-0.5 font-extrabold uppercase tracking-wider bg-[#08151c] text-[#00D2FF] border border-[#00D2FF] shrink-0">
+          <span className="px-1.5 py-0.5 font-extrabold uppercase tracking-wider bg-ed-cyan-tint text-ed-cyan border border-ed-cyan shrink-0">
             {isUnvisitedSlot ? 'UNVISITED ROUTE' : 'LOG VISIT'}
           </span>
           {!isUnvisitedSlot && (
-            <span className="text-[#00D2FF] font-bold shrink-0">{preview.visitedAtGalactic}</span>
+            <span className="text-ed-cyan font-bold shrink-0">{preview.visitedAtGalactic}</span>
           )}
         </div>
       </td>
       <td
         className={`w-[320px] px-3 py-1.5 align-middle text-right font-mono-tabular text-[10px] uppercase tracking-wider border-y border-r ${borderStyleClass}`}
       >
-        {isDragTarget && <span className="font-bold text-[#00D2FF]">RELEASE TO DROP</span>}
+        {isDragTarget && <span className="font-bold text-ed-cyan">RELEASE TO DROP</span>}
       </td>
     </tr>
   )

@@ -35,7 +35,7 @@ export function CockpitTopBar({
   onOpenSettingsModal,
 }: CockpitTopBarProps) {
   return (
-    <header className="relative h-12 shrink-0 bg-[#0b0907] border-b border-[#3d2816] border-t-2 border-t-[#FF7100] flex items-center">
+    <header className="relative h-12 shrink-0 bg-ed-panel border-b border-ed-border border-t-2 border-t-ed-amber flex items-center">
       {/* Telemetry Sidebar Header Column */}
       <div
         className={`${
@@ -43,15 +43,15 @@ export function CockpitTopBar({
         } px-4 shrink-0 h-full flex items-center transition-all`}
       >
         <div className="flex items-center gap-2.5 shrink-0">
-          <div className="w-2 h-5 bg-[#FF7100]" />
+          <div className="w-2 h-5 bg-ed-amber" />
           <div className="leading-none">
             <div className="flex items-baseline gap-2">
-              <span className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-[#FF7100] leading-none">
+              <span className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-ed-amber leading-none">
                 {APP_PRODUCT_NAME}
               </span>
               <VersionIndicator settings={settings} />
             </div>
-            <div className="text-[9px] font-mono-tabular uppercase tracking-[0.14em] text-[#a6907c] mt-1">
+            <div className="text-[9px] font-mono-tabular uppercase tracking-[0.14em] text-ed-text-muted mt-1">
               {APP_TAGLINE}
             </div>
           </div>
@@ -74,13 +74,13 @@ export function CockpitTopBar({
             value={activeExpeditionId}
             onChange={(event) => onSelectExpedition(Number(event.target.value))}
             title="Select active expedition"
-            className="h-[30px] bg-[#140e09] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
+            className="h-[30px] bg-ed-header border border-ed-border-strong border-l-2 border-l-ed-amber px-2.5 text-xs font-bold uppercase tracking-wider text-ed-text-main focus:border-ed-amber focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
           >
             {expeditions.map((expeditionItem) => (
               <option
                 key={expeditionItem.id}
                 value={expeditionItem.id}
-                className="bg-[#0b0907] text-[#F4ECE4]"
+                className="bg-ed-panel text-ed-text-main"
               >
                 {expeditionItem.name} [{expeditionItem.status.toUpperCase()}]
               </option>
@@ -94,8 +94,8 @@ export function CockpitTopBar({
           <div
             className={`h-[30px] flex items-center gap-2 px-2.5 border font-mono-tabular text-[11px] uppercase tracking-wider ${
               activeStatusMessage
-                ? 'bg-[#211307] border-[#FF7100] text-[#FF7100]'
-                : 'bg-[#081318] border-[#16485c] text-[#00D2FF]'
+                ? 'bg-ed-amber-tint border-ed-amber text-ed-amber'
+                : 'bg-ed-cyan-tint border-ed-cyan-border text-ed-cyan'
             }`}
             title={
               activeStatusMessage
@@ -105,7 +105,7 @@ export function CockpitTopBar({
           >
             <span
               className={`w-2 h-2 ${
-                activeStatusMessage ? 'bg-[#FF7100] animate-ping' : 'bg-[#00D2FF]'
+                activeStatusMessage ? 'bg-ed-amber animate-ping' : 'bg-ed-cyan'
               }`}
             />
             <span className="font-bold">{activeStatusMessage ? 'BUSY' : 'READY'}</span>
@@ -114,12 +114,12 @@ export function CockpitTopBar({
           {ingest?.currentSystem && (
             <div
               title={`Current location: ${ingest.currentSystem}`}
-              className="h-[30px] hidden lg:flex items-center gap-1.5 px-2.5 bg-[#120d09] border border-[#2e1f12] border-l-2 border-l-[#FF7100]"
+              className="h-[30px] hidden lg:flex items-center gap-1.5 px-2.5 bg-ed-surface border border-ed-border-dim border-l-2 border-l-ed-amber"
             >
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted">
                 LOC
               </span>
-              <span className="font-mono-tabular font-bold uppercase tracking-wider text-[#F4ECE4]">
+              <span className="font-mono-tabular font-bold uppercase tracking-wider text-ed-text-main">
                 {ingest.currentSystem}
               </span>
             </div>
@@ -128,12 +128,12 @@ export function CockpitTopBar({
           {ingest?.currentShip && (
             <div
               title={`Current vessel: ${ingest.currentShip}`}
-              className="h-[30px] hidden xl:flex items-center gap-1.5 px-2.5 bg-[#120d09] border border-[#2e1f12] border-l-2 border-l-[#FF7100]"
+              className="h-[30px] hidden xl:flex items-center gap-1.5 px-2.5 bg-ed-surface border border-ed-border-dim border-l-2 border-l-ed-amber"
             >
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted">
                 VESSEL
               </span>
-              <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+              <span className="font-bold uppercase tracking-wider text-ed-text-main">
                 {ingest.currentShip}
               </span>
             </div>
@@ -152,8 +152,8 @@ export function CockpitTopBar({
 
       {/* Animated HUD activity scanline along bottom edge of header when busy */}
       {activeStatusMessage && (
-        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#1a1109] overflow-hidden">
-          <div className="w-1/3 h-full bg-[#FF7100] ed-scan-bar" />
+        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-ed-elevated overflow-hidden">
+          <div className="w-1/3 h-full bg-ed-amber ed-scan-bar" />
         </div>
       )}
     </header>

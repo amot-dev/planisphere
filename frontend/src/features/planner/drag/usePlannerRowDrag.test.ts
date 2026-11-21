@@ -153,7 +153,7 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
         ),
       ),
     )
-    expect(historicalSlotHtml).toContain('border-dashed border-[#00D2FF]/80')
+    expect(historicalSlotHtml).toContain('border-dashed border-ed-cyan/80')
     expect(historicalSlotHtml).toContain('+ DROP LP 355-65 HERE')
     expect(historicalSlotHtml).toContain('LOG VISIT')
     expect(historicalSlotHtml).toContain('3312-01-18 20:10 UTC')
@@ -181,7 +181,7 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
         ),
       ),
     )
-    expect(fcBlockedSlotHtml).toContain('border-dashed border-[#FF7100]')
+    expect(fcBlockedSlotHtml).toContain('border-dashed border-ed-amber')
     expect(fcBlockedSlotHtml).toContain('FC STOP ORDER BLOCKED')
 
     // Collapsed visited summary row

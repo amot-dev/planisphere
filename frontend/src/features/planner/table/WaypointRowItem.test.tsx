@@ -89,15 +89,15 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
 
     // Chevron cell has border-l-2 and inset shadow bottom line so it never miters or clips the left border
     expect(html).toContain('style="border-left-color:#FF7100"')
-    expect(html).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
+    expect(html).toContain('border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]')
 
     // Uniform 28px (h-7) on chevron, waypoint #, star system, carrier stop, telemetry, and controls
     expect(html).toContain('h-7 flex items-center justify-center') // Chevron container
     expect(html).toContain(
-      'h-7 flex items-center justify-end font-mono-tabular font-bold text-[#FF7100] text-xs leading-5',
+      'h-7 flex items-center justify-end font-mono-tabular font-bold text-ed-amber text-xs leading-5',
     ) // Waypoint #
     expect(html).toContain(
-      'w-full h-7 flex items-center font-mono-tabular font-bold text-[#F4ECE4] px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5',
+      'w-full h-7 flex items-center font-mono-tabular font-bold text-ed-text-main px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5',
     ) // Star system locked
     expect(html).toContain('h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap') // Carrier stop container
     expect(html).toContain(
@@ -146,7 +146,9 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     const originRowView = createOriginRowView()
     const originRowHtml = renderRowItem({ rowView: originRowView, index: 0, lastVisitedIndex: 1 })
     expect(originRowHtml).toContain('style="border-left-color:#3d2816"')
-    expect(originRowHtml).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
+    expect(originRowHtml).toContain(
+      'border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]',
+    )
 
     const currentLegRowView = expedition.RowView.createFrom({
       row: { id: 3, expeditionId: 1, rowType: 'waypoint', systemName: 'Sagittarius A*' },
@@ -162,7 +164,9 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       lastVisitedIndex: 1,
     })
     expect(currentLegRowHtml).toContain('style="border-left-color:#00E5A3"')
-    expect(currentLegRowHtml).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
+    expect(currentLegRowHtml).toContain(
+      'border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]',
+    )
 
     const futureRowView = expedition.RowView.createFrom({
       row: { id: 4, expeditionId: 1, rowType: 'waypoint', systemName: 'Beagle Point' },
@@ -384,7 +388,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       rowView: baseRow,
       topGapHighlight: true,
     })
-    expect(topGapRowHtml).toContain('*:shadow-[inset_0_2px_0_0_#00D2FF]')
+    expect(topGapRowHtml).toContain('*:shadow-[inset_0_2px_0_0_var(--color-ed-cyan)]')
     expect(topGapRowHtml).toContain('120.0 Ly')
     expect(topGapRowHtml).not.toContain('UNVISITED SLOT')
 
@@ -392,7 +396,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       rowView: baseRow,
       bottomGapHighlight: true,
     })
-    expect(bottomGapRowHtml).toContain('*:shadow-[inset_0_-2px_0_0_#00D2FF]')
+    expect(bottomGapRowHtml).toContain('*:shadow-[inset_0_-2px_0_0_var(--color-ed-cyan)]')
 
     const grabbedRowHtml = renderRowItem({
       rowView: baseRow,
@@ -400,7 +404,9 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     })
     expect(grabbedRowHtml).toContain('data-being-dragged="true"')
     expect(grabbedRowHtml).toContain('MOVING')
-    expect(grabbedRowHtml).toContain('*:shadow-[inset_0_2px_0_0_#FF7100,inset_0_-2px_0_0_#FF7100]')
+    expect(grabbedRowHtml).toContain(
+      '*:shadow-[inset_0_2px_0_0_var(--color-ed-amber),inset_0_-2px_0_0_var(--color-ed-amber)]',
+    )
   })
 
   it('toggles copy feedback styling and tooltip strictly from per-row isSystemCopied', () => {
@@ -416,6 +422,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
 
     const copiedHtml = renderRowItem({ rowView, isSystemCopied: true })
     expect(copiedHtml).toMatch(/Copied [^"]*Sagittarius A\*[^"]*!/)
-    expect(copiedHtml).toContain('text-[#00D2FF]')
+    expect(copiedHtml).toContain('text-ed-cyan')
   })
 })

@@ -40,23 +40,23 @@ export function VersionIndicator({ settings }: VersionIndicatorProps) {
           event.preventDefault()
           openExternalUrl(latestReleaseUrl)
         }}
-        className="inline-flex items-center gap-1.5 font-mono-tabular text-[11px] font-semibold text-[#00D2FF] hover:underline tracking-normal leading-none select-none cursor-pointer"
+        className="inline-flex items-center gap-1.5 font-mono-tabular text-[11px] font-semibold text-ed-cyan hover:underline tracking-normal leading-none select-none cursor-pointer"
         title={versionTooltip}
       >
         <span>v{APP_VERSION}</span>
-        <span className="w-1.5 h-1.5 bg-[#00D2FF] shrink-0" />
+        <span className="w-1.5 h-1.5 bg-ed-cyan shrink-0" />
       </a>
     )
   }
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 font-mono-tabular text-[11px] font-semibold text-[#a6907c] tracking-normal leading-none select-none"
+      className="inline-flex items-center gap-1.5 font-mono-tabular text-[11px] font-semibold text-ed-text-muted tracking-normal leading-none select-none"
       title={versionTooltip}
     >
       <span>v{APP_VERSION}</span>
       {versionCheckFailed ? (
-        <span className="w-1.5 h-1.5 border border-[#a6907c] shrink-0" />
+        <span className="w-1.5 h-1.5 border border-ed-text-muted shrink-0" />
       ) : null}
     </span>
   )

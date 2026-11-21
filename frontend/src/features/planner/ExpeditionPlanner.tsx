@@ -249,7 +249,7 @@ export function ExpeditionPlanner({
 
   if (!plan) {
     return (
-      <div className="flex-1 flex items-center justify-center p-12 text-[#a6907c] font-mono-tabular uppercase tracking-widest text-xs">
+      <div className="flex-1 flex items-center justify-center p-12 text-ed-text-muted font-mono-tabular uppercase tracking-widest text-xs">
         [ LOADING EXPEDITION... ]
       </div>
     )
@@ -266,7 +266,7 @@ export function ExpeditionPlanner({
           rowDrag.recordDragOverClientY(event.clientY)
         }
       }}
-      className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#070605]"
+      className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-ed-canvas"
     >
       <PlannerHeaderBar
         plan={plan}
@@ -279,7 +279,7 @@ export function ExpeditionPlanner({
       <div
         ref={scrollContainerRef}
         {...rowDrag.scrollContainerDropProps}
-        className="flex-1 overflow-y-auto overflow-x-auto bg-[#070605] [overflow-anchor:none]"
+        className="flex-1 overflow-y-auto overflow-x-auto bg-ed-canvas [overflow-anchor:none]"
       >
         <PlannerRouteTable
           plan={plan}

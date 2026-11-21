@@ -53,20 +53,20 @@ export function ManualCarrierLoggerView({
     <div className="pt-2.5 flex flex-wrap items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-4">
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-[#a6907c] block">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-ed-text-muted block">
             Manual Carrier Routing
           </span>
-          <span className="font-mono-tabular text-xs text-[#F4ECE4]">
+          <span className="font-mono-tabular text-xs text-ed-text-main">
             Logged this leg:{' '}
-            <span className="text-[#00D2FF] font-bold">{manualLegJumps} JUMPS</span> ·{' '}
-            <span className="text-[#FF7100] font-bold">{formatLy(manualLegDistance, 1)}</span> ·{' '}
+            <span className="text-ed-cyan font-bold">{manualLegJumps} JUMPS</span> ·{' '}
+            <span className="text-ed-amber font-bold">{formatLy(manualLegDistance, 1)}</span> ·{' '}
             <span>{formatInt(manualLegTritium)} t TRITIUM</span>
           </span>
         </div>
 
         <div className="flex items-center gap-2">
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-0.5">
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-0.5">
               Jump Distance (Ly)
             </label>
             <input
@@ -81,12 +81,12 @@ export function ManualCarrierLoggerView({
                 onChangeManualDistance(nextDistance)
               }}
               placeholder="e.g. 498.4"
-              className="w-32 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+              className="w-32 px-2.5 py-1 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-0.5">
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-0.5">
               Tritium Used (t)
             </label>
             <input
@@ -100,7 +100,7 @@ export function ManualCarrierLoggerView({
                 onChangeManualTritium(nextTritium)
               }}
               placeholder="e.g. 68"
-              className="w-28 px-2.5 py-1 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+              className="w-28 px-2.5 py-1 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
             />
           </div>
 

@@ -38,15 +38,15 @@ export function ModalShell({
   maxWidth = 'max-w-xl',
 }: ModalShellProps) {
   const isCyanAccent = accent === 'cyan'
-  const topBorderClass = isCyanAccent ? 'border-t-[#00D2FF]' : 'border-t-[#FF7100]'
-  const titleTextClass = isCyanAccent ? 'text-[#00D2FF]' : 'text-[#FF7100]'
+  const topBorderClass = isCyanAccent ? 'border-t-ed-cyan' : 'border-t-ed-amber'
+  const titleTextClass = isCyanAccent ? 'text-ed-cyan' : 'text-ed-amber'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
       <div
-        className={`w-full ${maxWidth} max-h-[90vh] flex flex-col border border-[#3d2816] border-t-2 ${topBorderClass} bg-[#0b0907] shadow-2xl overflow-hidden`}
+        className={`w-full ${maxWidth} max-h-[90vh] flex flex-col border border-ed-border border-t-2 ${topBorderClass} bg-ed-panel shadow-2xl overflow-hidden`}
       >
-        <div className="px-5 py-3.5 border-b border-[#3d2816] bg-[#140e09] flex items-center justify-between">
+        <div className="px-5 py-3.5 border-b border-ed-border bg-ed-header flex items-center justify-between">
           <div className={headerLeading ? 'flex items-center gap-2.5' : undefined}>
             {headerLeading}
             <div>
@@ -55,12 +55,12 @@ export function ModalShell({
                   {title}
                 </h3>
                 {badge && (
-                  <span className="px-1.5 py-0.5 bg-[#08151c] border border-[#00D2FF]/50 font-mono-tabular text-[10px] font-bold text-[#00D2FF]">
+                  <span className="px-1.5 py-0.5 bg-ed-cyan-tint border border-ed-cyan/50 font-mono-tabular text-[10px] font-bold text-ed-cyan">
                     {badge}
                   </span>
                 )}
               </div>
-              {subtitle && <p className="text-[11px] text-[#a6907c] mt-0.5">{subtitle}</p>}
+              {subtitle && <p className="text-[11px] text-ed-text-muted mt-0.5">{subtitle}</p>}
             </div>
           </div>
           {onClose && (
@@ -69,7 +69,7 @@ export function ModalShell({
               disabled={closeDisabled}
               title={closeTitle}
               onClick={onClose}
-              className="px-2 py-1 text-[#a6907c] hover:text-[#F4ECE4] hover:bg-[#24180e] cursor-pointer"
+              className="px-2 py-1 text-ed-text-muted hover:text-ed-text-main hover:bg-ed-hover cursor-pointer"
             >
               <span>✕</span>
             </button>

@@ -1,5 +1,11 @@
 import { useState } from 'react'
 import { SquareCheckbox } from '../../../components/ui/SquareCheckbox'
+import {
+  ED_AMBER_HEX,
+  ED_BORDER_HEX,
+  ED_TEXT_MUTED_HEX,
+  ED_VOID_HEX,
+} from '../../../domain/theme'
 
 /**
  * PlannerTableHeaderProps defines the planning-mode flag and optional column
@@ -27,33 +33,33 @@ export function PlannerTableHeader({
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
 
   return (
-    <thead className="sticky top-0 z-20 bg-[#120d09] border-b-2 border-[#FF7100]/70 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#a6907c] select-none">
+    <thead className="sticky top-0 z-20 bg-ed-surface border-b-2 border-ed-amber/70 text-[10px] font-extrabold uppercase tracking-[0.14em] text-ed-text-muted select-none">
       <tr className="align-top">
         {!isPlanning && (
           <th
-            className="w-8 px-1.5 py-2.5 text-center align-top border-b border-[#FF7100]/70"
+            className="w-8 px-1.5 py-2.5 text-center align-top border-b border-ed-amber/70"
             title="Expand Leg Telemetry"
           >
             Leg
           </th>
         )}
-        <th className="w-10 px-1.5 py-2.5 text-right font-mono-tabular align-top border-b border-[#FF7100]/70">
+        <th className="w-10 px-1.5 py-2.5 text-right font-mono-tabular align-top border-b border-ed-amber/70">
           #
         </th>
-        <th className="w-60 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Star System</th>
-        <th className="w-48 px-3 py-2.5 align-top border-b border-[#FF7100]/70">POI</th>
+        <th className="w-60 px-3 py-2.5 align-top border-b border-ed-amber/70">Star System</th>
+        <th className="w-48 px-3 py-2.5 align-top border-b border-ed-amber/70">POI</th>
         {showNotes && (
-          <th className="w-56 px-3 py-2.5 align-top border-b border-[#FF7100]/70">Flight Notes</th>
+          <th className="w-56 px-3 py-2.5 align-top border-b border-ed-amber/70">Flight Notes</th>
         )}
         {showCarrierStop && (
-          <th className="w-40 px-2 py-2.5 text-center align-top border-b border-[#FF7100]/70">
+          <th className="w-40 px-2 py-2.5 text-center align-top border-b border-ed-amber/70">
             Carrier Stop
           </th>
         )}
-        <th className="w-60 px-3 py-2.5 align-top border-b border-[#FF7100]/70">
+        <th className="w-60 px-3 py-2.5 align-top border-b border-ed-amber/70">
           Telemetry / Timestamp
         </th>
-        <th className="w-[320px] px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-[#FF7100]/70">
+        <th className="w-[320px] px-3 py-2.5 text-right whitespace-nowrap align-top border-b border-ed-amber/70">
           <div className="inline-flex items-center justify-end gap-2">
             <span>Controls</span>
             <div className="relative inline-block text-left">
@@ -75,10 +81,10 @@ export function PlannerTableHeader({
                     y="1"
                     width="14"
                     height="14"
-                    fill="#050506"
-                    stroke={columnMenuOpen ? '#FF7100' : '#3d2816'}
+                    fill={ED_VOID_HEX}
+                    stroke={columnMenuOpen ? ED_AMBER_HEX : ED_BORDER_HEX}
                     strokeWidth="1.5"
-                    className="group-hover:stroke-[#FF7100] transition-colors"
+                    className="group-hover:stroke-ed-amber transition-colors"
                   />
                   {/* Inner 4-square grid matching the 8x8 active footprint and ratio of SquareCheckbox */}
                   <rect
@@ -86,32 +92,32 @@ export function PlannerTableHeader({
                     y="4"
                     width="3.5"
                     height="3.5"
-                    fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
-                    className="group-hover:fill-[#FF7100] transition-colors"
+                    fill={columnMenuOpen ? ED_AMBER_HEX : ED_TEXT_MUTED_HEX}
+                    className="group-hover:fill-ed-amber transition-colors"
                   />
                   <rect
                     x="8.5"
                     y="4"
                     width="3.5"
                     height="3.5"
-                    fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
-                    className="group-hover:fill-[#FF7100] transition-colors"
+                    fill={columnMenuOpen ? ED_AMBER_HEX : ED_TEXT_MUTED_HEX}
+                    className="group-hover:fill-ed-amber transition-colors"
                   />
                   <rect
                     x="4"
                     y="8.5"
                     width="3.5"
                     height="3.5"
-                    fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
-                    className="group-hover:fill-[#FF7100] transition-colors"
+                    fill={columnMenuOpen ? ED_AMBER_HEX : ED_TEXT_MUTED_HEX}
+                    className="group-hover:fill-ed-amber transition-colors"
                   />
                   <rect
                     x="8.5"
                     y="8.5"
                     width="3.5"
                     height="3.5"
-                    fill={columnMenuOpen ? '#FF7100' : '#a6907c'}
-                    className="group-hover:fill-[#FF7100] transition-colors"
+                    fill={columnMenuOpen ? ED_AMBER_HEX : ED_TEXT_MUTED_HEX}
+                    className="group-hover:fill-ed-amber transition-colors"
                   />
                 </svg>
               </button>
@@ -121,25 +127,25 @@ export function PlannerTableHeader({
                     className="fixed inset-0 z-30 cursor-default"
                     onClick={() => setColumnMenuOpen(false)}
                   />
-                  <div className="absolute right-0 top-full mt-1 w-48 border border-[#FF7100] bg-[#140e09] shadow-2xl shadow-black z-40 p-2.5 text-left text-xs space-y-2 font-normal">
-                    <div className="text-[9px] font-extrabold uppercase tracking-wider text-[#a6907c] pb-1 border-b border-[#2e1f12]">
+                  <div className="absolute right-0 top-full mt-1 w-48 border border-ed-amber bg-ed-header shadow-2xl shadow-black z-40 p-2.5 text-left text-xs space-y-2 font-normal">
+                    <div className="text-[9px] font-extrabold uppercase tracking-wider text-ed-text-muted pb-1 border-b border-ed-border-dim">
                       Visible Columns
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer text-[#F4ECE4] hover:text-[#FF7100] py-0.5 select-none">
+                    <label className="flex items-center gap-2 cursor-pointer text-ed-text-main hover:text-ed-amber py-0.5 select-none">
                       <SquareCheckbox
                         checked={showCarrierStop}
                         onChange={onToggleShowCarrierStop}
                         size="sm"
-                        color="#FF7100"
+                        color={ED_AMBER_HEX}
                       />
                       <span className="text-[11px] font-mono-tabular uppercase">Carrier Stop</span>
                     </label>
-                    <label className="flex items-center gap-2 cursor-pointer text-[#F4ECE4] hover:text-[#FF7100] py-0.5 select-none">
+                    <label className="flex items-center gap-2 cursor-pointer text-ed-text-main hover:text-ed-amber py-0.5 select-none">
                       <SquareCheckbox
                         checked={showNotes}
                         onChange={onToggleShowNotes}
                         size="sm"
-                        color="#FF7100"
+                        color={ED_AMBER_HEX}
                       />
                       <span className="text-[11px] font-mono-tabular uppercase">Flight Notes</span>
                     </label>

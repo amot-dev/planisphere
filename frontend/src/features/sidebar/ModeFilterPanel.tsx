@@ -79,20 +79,20 @@ export function ModeFilterPanel({
   }
 
   return (
-    <div className="p-3 border-b border-[#3d2816] bg-[#110c08] space-y-2">
+    <div className="p-3 border-b border-ed-border bg-ed-card space-y-2">
       {/* Live Mode Quick Switcher */}
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c] shrink-0">
+        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted shrink-0">
           Flight Mode
         </span>
         <select
           value={activeModeId}
           onChange={(event) => onQuickSwitchMode(Number(event.target.value))}
           title="Current flight mode (logs newly recorded jumps and scans to this flight mode)"
-          className="flex-1 bg-[#050506] border border-[#472e19] border-l-2 border-l-[#FF7100] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none cursor-pointer"
+          className="flex-1 bg-ed-void border border-ed-border-strong border-l-2 border-l-ed-amber px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-ed-text-main focus:border-ed-amber focus:outline-none cursor-pointer"
         >
           {modeList.map((mode) => (
-            <option key={mode.id} value={mode.id} className="bg-[#0b0907] text-[#F4ECE4]">
+            <option key={mode.id} value={mode.id} className="bg-ed-panel text-ed-text-main">
               {mode.name}
             </option>
           ))}
@@ -102,7 +102,7 @@ export function ModeFilterPanel({
             type="button"
             onClick={onToggleCollapse}
             title="Collapse Telemetry Sidebar"
-            className="h-[26px] w-[26px] flex items-center justify-center text-[#a6907c] hover:text-[#FF7100] bg-[#140e09] border border-[#3d2816] hover:bg-[#1f150d] cursor-pointer shrink-0"
+            className="h-[26px] w-[26px] flex items-center justify-center text-ed-text-muted hover:text-ed-amber bg-ed-header border border-ed-border hover:bg-ed-hover cursor-pointer shrink-0"
           >
             <span>◀</span>
           </button>
@@ -110,8 +110,8 @@ export function ModeFilterPanel({
       </div>
 
       {/* Mode Filter Checkboxes (Tri-state: All -> Scans Only -> Off) */}
-      <div className="space-y-1.5 pt-1.5 border-t border-[#2e1f12]">
-        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c]">
+      <div className="space-y-1.5 pt-1.5 border-t border-ed-border-dim">
+        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
           <span title="Filter sidebar metrics by which flight mode was active when events were logged">
             Telemetry Filter
           </span>
@@ -119,7 +119,7 @@ export function ModeFilterPanel({
             <button
               type="button"
               onClick={resetAllModes}
-              className="text-[#FF7100] hover:underline cursor-pointer"
+              className="text-ed-amber hover:underline cursor-pointer"
               title="Include all flight modes in sidebar metrics"
             >
               [Reset]
@@ -140,10 +140,10 @@ export function ModeFilterPanel({
                 onClick={() => cycleModeSelection(mode.id)}
                 className={`flex items-center gap-2 px-2 py-1 border text-xs cursor-pointer transition select-none text-left ${
                   isFull
-                    ? 'bg-[#18110b] border-[#472e19] border-l-2 border-l-[#FF7100] text-[#F4ECE4]'
+                    ? 'bg-ed-control border-ed-border-strong border-l-2 border-l-ed-amber text-ed-text-main'
                     : isPartial
-                      ? 'bg-[#08151c] border-[#00D2FF]/60 border-l-2 border-l-[#00D2FF] text-[#F4ECE4]'
-                      : 'bg-[#060504] border-[#24180e] text-[#6e5b4b] opacity-60 hover:opacity-100'
+                      ? 'bg-ed-cyan-tint border-ed-cyan/60 border-l-2 border-l-ed-cyan text-ed-text-main'
+                      : 'bg-ed-void border-ed-border-subtle text-ed-text-dim opacity-60 hover:opacity-100'
                 }`}
               >
                 {/* Tri-state indicator badge */}
@@ -165,17 +165,17 @@ export function ModeFilterPanel({
         </div>
 
         {/* Tri-state explanation */}
-        <div className="pt-1.5 border-t border-[#24180e] text-[10px] text-[#a6907c] leading-tight">
+        <div className="pt-1.5 border-t border-ed-border-subtle text-[10px] text-ed-text-muted leading-tight">
           <div className="flex items-center gap-2 font-mono-tabular text-[9px]">
-            <span className="inline-flex items-center gap-1 text-[#FF7100] font-bold">
+            <span className="inline-flex items-center gap-1 text-ed-amber font-bold">
               <SquareCheckbox checked={true} size="xs" /> ALL DATA
             </span>
             <span>·</span>
-            <span className="inline-flex items-center gap-1 text-[#00D2FF] font-bold">
+            <span className="inline-flex items-center gap-1 text-ed-cyan font-bold">
               <SquareCheckbox checked="partial" size="xs" /> SCANS ONLY
             </span>
             <span>·</span>
-            <span className="inline-flex items-center gap-1 text-[#6e5b4b]">
+            <span className="inline-flex items-center gap-1 text-ed-text-dim">
               <SquareCheckbox checked={false} size="xs" /> OFF
             </span>
           </div>

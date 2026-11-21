@@ -57,12 +57,12 @@ export function FleetCarrierSection({
     <SettingsCard
       title="Fleet Carrier Cost Valuation"
       headerRight={
-        <span className="text-[10px] font-mono-tabular font-bold uppercase px-2 py-0.5 border bg-[#16100b] border-[#3d2816] text-[#F4ECE4]">
+        <span className="text-[10px] font-mono-tabular font-bold uppercase px-2 py-0.5 border bg-ed-control border-ed-border text-ed-text-main">
           {configuredPrice.toLocaleString()} Cr / t
         </span>
       }
     >
-      <div className="text-[11px] text-[#a6907c]">
+      <div className="text-[11px] text-ed-text-muted">
         Estimated market price per tonne of Tritium used when calculating Expedition Carrier Cost
         (defaults to {defaultPrice.toLocaleString()} Cr/t).
       </div>
@@ -75,7 +75,7 @@ export function FleetCarrierSection({
           aria-label="Tritium Price per Tonne (Cr)"
           value={priceInput}
           onChange={(event) => setPriceInput(event.target.value)}
-          className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
+          className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
         />
         <button
           type="button"

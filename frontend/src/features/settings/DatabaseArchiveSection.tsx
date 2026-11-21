@@ -66,23 +66,23 @@ export function DatabaseArchiveSection({
       }
     >
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono-tabular text-xs">
-        <div className="p-2 bg-[#050506] border border-[#3d2816]">
-          <div className="text-[10px] uppercase text-[#a6907c]">Tracked Files</div>
-          <div className="text-sm font-bold text-[#F4ECE4]">
+        <div className="p-2 bg-ed-void border border-ed-border">
+          <div className="text-[10px] uppercase text-ed-text-muted">Tracked Files</div>
+          <div className="text-sm font-bold text-ed-text-main">
             {ingestStatus?.filesTracked ?? 0}
           </div>
         </div>
-        <div className="p-2 bg-[#050506] border border-[#3d2816]">
-          <div className="text-[10px] uppercase text-[#a6907c]">Stored Events</div>
-          <div className="text-sm font-bold text-[#F4ECE4]">
+        <div className="p-2 bg-ed-void border border-ed-border">
+          <div className="text-[10px] uppercase text-ed-text-muted">Stored Events</div>
+          <div className="text-sm font-bold text-ed-text-main">
             {(ingestStatus?.eventsStored ?? 0).toLocaleString()}
           </div>
         </div>
-        <div className="p-2 bg-[#050506] border border-[#3d2816]">
-          <div className="text-[10px] uppercase text-[#a6907c]">Live Watcher</div>
+        <div className="p-2 bg-ed-void border border-ed-border">
+          <div className="text-[10px] uppercase text-ed-text-muted">Live Watcher</div>
           <div
             className={`text-sm font-bold ${
-              ingestStatus?.watcherActive ? 'text-[#00D2FF]' : 'text-[#a6907c]'
+              ingestStatus?.watcherActive ? 'text-ed-cyan' : 'text-ed-text-muted'
             }`}
           >
             {ingestStatus?.watcherActive ? 'ACTIVE' : 'STANDBY'}
@@ -98,9 +98,9 @@ export function DatabaseArchiveSection({
         }
         onCommitDebounceMilliseconds={handleCommitDebounceMilliseconds}
       />
-      <div className="text-[11px] text-[#a6907c] font-mono-tabular flex items-center justify-between">
+      <div className="text-[11px] text-ed-text-muted font-mono-tabular flex items-center justify-between">
         <span>Database Path:</span>
-        <span className="text-[#F4ECE4] font-bold">{settings?.dbPath}</span>
+        <span className="text-ed-text-main font-bold">{settings?.dbPath}</span>
       </div>
     </SettingsCard>
   )

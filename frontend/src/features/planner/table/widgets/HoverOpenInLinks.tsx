@@ -38,7 +38,7 @@ export const HoverOpenInLinks = memo(function HoverOpenInLinks({
   if (!showInara && !showEdsm && !showGec) return null
 
   const linkButtonClasses =
-    'h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#16485c] hover:border-[#00D2FF] cursor-pointer transition-colors'
+    'h-5 px-1.5 inline-flex items-center justify-center whitespace-nowrap text-[9px] font-mono-tabular font-bold uppercase tracking-wider bg-ed-cyan-tint hover:bg-ed-cyan text-ed-cyan hover:text-ed-void border border-ed-cyan-border hover:border-ed-cyan cursor-pointer transition-colors'
 
   const inaraUrl = showInara ? inaraSystemUrl(systemName) : ''
   const edsmUrl = showEdsm ? edsmSystemUrl(systemName) : ''

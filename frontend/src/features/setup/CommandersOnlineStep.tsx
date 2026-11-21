@@ -35,14 +35,14 @@ export function CommandersOnlineStep({
       {/* Commander Selection (always shown even if 0 or 1 CMDR) */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="font-bold uppercase tracking-wider text-[#FF7100]">
+          <label className="font-bold uppercase tracking-wider text-ed-amber">
             Commander Selection
           </label>
-          <span className="font-mono-tabular text-[10px] text-[#a6907c]">
+          <span className="font-mono-tabular text-[10px] text-ed-text-muted">
             {localSettings?.commanders?.length ?? 0} DISCOVERED
           </span>
         </div>
-        <p className="text-[11px] text-[#a6907c] leading-relaxed">
+        <p className="text-[11px] text-ed-text-muted leading-relaxed">
           Select which Commanders to include in tracking and telemetry:
         </p>
 
@@ -51,7 +51,7 @@ export function CommandersOnlineStep({
             {localSettings.commanders.map((commander) => (
               <label
                 key={commander.name}
-                className="flex items-center justify-between p-2.5 border border-[#3d2816] bg-[#110c08] cursor-pointer hover:border-[#6e4726]"
+                className="flex items-center justify-between p-2.5 border border-ed-border bg-ed-card cursor-pointer hover:border-ed-border-strong"
               >
                 <div className="flex items-center gap-2.5">
                   <SquareCheckbox
@@ -59,10 +59,10 @@ export function CommandersOnlineStep({
                     onChange={(checked) => onToggleCommander(commander.name, checked)}
                   />
                   <div>
-                    <div className="font-bold text-[#F4ECE4] tracking-wider">
+                    <div className="font-bold text-ed-text-main tracking-wider">
                       CMDR {commander.name}
                     </div>
-                    <div className="text-[10px] font-mono-tabular text-[#a6907c]">
+                    <div className="text-[10px] font-mono-tabular text-ed-text-muted">
                       {commander.eventCount.toLocaleString()} journal events
                     </div>
                   </div>
@@ -78,7 +78,7 @@ export function CommandersOnlineStep({
             ))}
           </div>
         ) : (
-          <div className="p-3 border border-[#3d2816] bg-[#110c08] text-[11px] text-[#a6907c] italic">
+          <div className="p-3 border border-ed-border bg-ed-card text-[11px] text-ed-text-muted italic">
             No Commanders found in journals yet. Any Commander detected in future logs will be
             enabled automatically.
           </div>
@@ -86,7 +86,7 @@ export function CommandersOnlineStep({
       </div>
 
       {/* EDSM / GEC Online Sync */}
-      <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-3">
+      <div className="p-3 border border-ed-border bg-ed-card space-y-3">
         <label className="flex items-start gap-2.5 cursor-pointer">
           <SquareCheckbox
             checked={onlineLookups}
@@ -94,19 +94,19 @@ export function CommandersOnlineStep({
             className="mt-0.5"
           />
           <div className="flex-1">
-            <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+            <div className="font-bold uppercase tracking-wider text-ed-text-main">
               EDSM and EDAstro GEC Online Sync
             </div>
-            <p className="text-[11px] text-[#a6907c] mt-0.5 leading-relaxed">
+            <p className="text-[11px] text-ed-text-muted mt-0.5 leading-relaxed">
               Resolves coordinates for unvisited waypoint systems and downloads the
               galactic POI catalog.
             </p>
           </div>
         </label>
-        <div className="flex items-center justify-between pt-2 border-t border-[#2b1d11]">
-          <div className="text-[11px] font-mono-tabular text-[#a6907c]">
+        <div className="flex items-center justify-between pt-2 border-t border-ed-border-dim">
+          <div className="text-[11px] font-mono-tabular text-ed-text-muted">
             POI Catalog:{' '}
-            <span className="text-[#F4ECE4] font-bold">
+            <span className="text-ed-text-main font-bold">
               {(gecSyncedCount ?? localSettings?.gecCount ?? 0).toLocaleString()}
             </span>{' '}
             entries

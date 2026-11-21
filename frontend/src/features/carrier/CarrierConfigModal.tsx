@@ -57,12 +57,12 @@ export function CarrierConfigModal({
       closeDisabled={saving}
       bodyClassName="p-4 space-y-3.5 text-xs overflow-y-auto"
       footer={
-        <div className="px-4 py-3 bg-[#140e09] border-t border-[#3d2816] flex items-center justify-end gap-2 text-xs">
+        <div className="px-4 py-3 bg-ed-header border-t border-ed-border flex items-center justify-end gap-2 text-xs">
           <button
             type="button"
             disabled={saving}
             onClick={onClose}
-            className="px-3 py-1.5 text-[#a6907c] hover:text-[#F4ECE4] uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
+            className="px-3 py-1.5 text-ed-text-muted hover:text-ed-text-main uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
           >
             CANCEL
           </button>
@@ -78,7 +78,7 @@ export function CarrierConfigModal({
       }
     >
       {errorMessage && (
-        <div className="p-2 border border-[#ff3b2f] bg-[#190909] text-[#ff4d3d]">
+        <div className="p-2 border border-ed-danger bg-ed-danger-tint text-ed-danger-text">
           {errorMessage}
         </div>
       )}
@@ -92,7 +92,7 @@ export function CarrierConfigModal({
       <div>
         <label
           htmlFor="expedition-carrier-weekly-upkeep"
-          className="block text-[10px] font-bold uppercase tracking-wider text-[#a6907c] mb-1"
+          className="block text-[10px] font-bold uppercase tracking-wider text-ed-text-muted mb-1"
         >
           Weekly Upkeep (Cr / Week)
         </label>
@@ -103,9 +103,9 @@ export function CarrierConfigModal({
           step={50000}
           value={weeklyUpkeepInput}
           onChange={(event) => setWeeklyUpkeepInput(event.target.value)}
-          className="w-full px-2.5 py-1.5 bg-[#050506] border border-[#3d2816] font-mono-tabular text-[#F4ECE4] focus:border-[#00D2FF] focus:outline-none"
+          className="w-full px-2.5 py-1.5 bg-ed-void border border-ed-border font-mono-tabular text-ed-text-main focus:border-ed-cyan focus:outline-none"
         />
-        <p className="text-[10px] text-[#a6907c] mt-1">
+        <p className="text-[10px] text-ed-text-muted mt-1">
           Found in Carrier Management under Budget. Continuously pro-rated across the
           expedition duration (set to 0 if no carrier upkeep applies).
         </p>

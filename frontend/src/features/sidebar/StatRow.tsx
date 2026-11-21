@@ -26,10 +26,10 @@ export function StatRow({
     <div className="px-2.5 py-2 flex items-center justify-between gap-2">
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold text-[#F4ECE4] truncate">{label}</span>
+          <span className="text-xs font-semibold text-ed-text-main truncate">{label}</span>
         </div>
         {sub && (
-          <div className={`text-[10px] font-mono-tabular ${subClass ? subClass : 'text-[#a6907c]'}`}>
+          <div className={`text-[10px] font-mono-tabular ${subClass ? subClass : 'text-ed-text-muted'}`}>
             {sub}
           </div>
         )}
@@ -39,10 +39,10 @@ export function StatRow({
           valueClass
             ? valueClass
             : accent === 'amber'
-              ? 'text-[#FF7100]'
+              ? 'text-ed-amber'
               : accent === 'cyan'
-                ? 'text-[#00D2FF]'
-                : 'text-[#F4ECE4]'
+                ? 'text-ed-cyan'
+                : 'text-ed-text-main'
         }`}
       >
         {value}

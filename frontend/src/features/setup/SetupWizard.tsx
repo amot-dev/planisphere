@@ -52,7 +52,7 @@ export function SetupWizardModal({
       onClose={onClose}
       closeDisabled={wizard.isBusy}
       closeTitle="Close setup wizard"
-      headerLeading={<div className="w-2 h-4 bg-[#FF7100]" />}
+      headerLeading={<div className="w-2 h-4 bg-ed-amber" />}
       bodyClassName="p-5 space-y-4 text-xs min-h-[310px] max-h-[70vh] overflow-y-auto"
       footer={
         <SetupWizardFooter
@@ -66,7 +66,7 @@ export function SetupWizardModal({
       }
     >
       {wizard.error && (
-        <div className="p-2.5 border border-[#ff3b2f] bg-[#190909] text-[#ff4d3d] text-[11px]">
+        <div className="p-2.5 border border-ed-danger bg-ed-danger-tint text-ed-danger-text text-[11px]">
           {wizard.error}
         </div>
       )}
@@ -143,7 +143,7 @@ function SetupWizardFooter({
   onNext: () => void
 }) {
   return (
-    <div className="px-5 py-3 border-t border-[#3d2816] bg-[#140e09] flex items-center justify-between">
+    <div className="px-5 py-3 border-t border-ed-border bg-ed-header flex items-center justify-between">
       <div className="w-28">
         {step > 0 && (
           <button
@@ -174,10 +174,10 @@ function SetupWizardFooter({
               title={STEP_TITLES[stepIndex]}
               className={`transition-all rounded-full ${
                 isCurrent
-                  ? 'w-2.5 h-2.5 bg-[#FF7100] shadow-[0_0_8px_#FF7100]'
+                  ? 'w-2.5 h-2.5 bg-ed-amber shadow-[0_0_8px_var(--color-ed-amber)]'
                   : isCompleted
-                    ? 'w-2 h-2 bg-[#FF7100]/60 hover:bg-[#FF7100] cursor-pointer'
-                    : 'w-2 h-2 bg-[#3d2816] cursor-default'
+                    ? 'w-2 h-2 bg-ed-amber/60 hover:bg-ed-amber cursor-pointer'
+                    : 'w-2 h-2 bg-ed-border cursor-default'
               }`}
             />
           )

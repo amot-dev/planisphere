@@ -49,32 +49,32 @@ export function HistoricalImportStep({
   return (
     <div className="space-y-4">
       {/* Oldest Journal Summary Banner */}
-      <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-1.5">
+      <div className="p-3 border border-ed-border bg-ed-card space-y-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#00D2FF]">
+          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-cyan">
             Local Journal Scan Summary
           </span>
-          <span className="font-mono-tabular text-[11px] text-[#a6907c]">
+          <span className="font-mono-tabular text-[11px] text-ed-text-muted">
             {localIngest?.filesTracked ?? 0} files ·{' '}
             {(localIngest?.eventsStored ?? 0).toLocaleString()} events
           </span>
         </div>
         {firstEventIso ? (
           <div className="space-y-0.5">
-            <div className="text-[11px] text-[#a6907c]">
+            <div className="text-[11px] text-ed-text-muted">
               Oldest journal entry found in directory:
             </div>
-            <div className="font-mono-tabular text-xs font-bold text-[#F4ECE4]">
+            <div className="font-mono-tabular text-xs font-bold text-ed-text-main">
               {firstEventUtcDisplay}
               {firstEventGalacticDisplay && (
-                <span className="text-[#FF7100] ml-2">
+                <span className="text-ed-amber ml-2">
                   ({firstEventGalacticDisplay})
                 </span>
               )}
             </div>
           </div>
         ) : (
-          <div className="text-[11px] text-[#ffb000]">
+          <div className="text-[11px] text-ed-amber">
             No local <span className="font-mono-tabular">.log</span> events were found in the
             selected journal directory yet.
           </div>
@@ -83,7 +83,7 @@ export function HistoricalImportStep({
 
       {/* Prompt: Do you expect older journal entries? */}
       <div className="space-y-2">
-        <div className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+        <div className="font-bold uppercase tracking-wider text-ed-text-main">
           Do you have older journal history in EDDiscovery?
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -92,8 +92,8 @@ export function HistoricalImportStep({
             onClick={() => onChangeExpectOlderJournals(false)}
             className={`p-2.5 text-left border cursor-pointer transition-colors ${
               !expectOlderJournals
-                ? 'border-[#FF7100] bg-[#1f1309] text-[#F4ECE4]'
-                : 'border-[#3d2816] bg-[#110c08] text-[#a6907c] hover:border-[#6e4726]'
+                ? 'border-ed-amber bg-ed-amber-tint text-ed-text-main'
+                : 'border-ed-border bg-ed-card text-ed-text-muted hover:border-ed-border-strong'
             }`}
           >
             <div className="font-bold uppercase tracking-wider text-[11px]">
@@ -105,8 +105,8 @@ export function HistoricalImportStep({
             onClick={() => onChangeExpectOlderJournals(true)}
             className={`p-2.5 text-left border cursor-pointer transition-colors ${
               expectOlderJournals
-                ? 'border-[#FF7100] bg-[#1f1309] text-[#F4ECE4]'
-                : 'border-[#3d2816] bg-[#110c08] text-[#a6907c] hover:border-[#6e4726]'
+                ? 'border-ed-amber bg-ed-amber-tint text-ed-text-main'
+                : 'border-ed-border bg-ed-card text-ed-text-muted hover:border-ed-border-strong'
             }`}
           >
             <div className="font-bold uppercase tracking-wider text-[11px]">
@@ -118,15 +118,15 @@ export function HistoricalImportStep({
 
       {/* Explanation and EDDiscovery path when Yes is selected */}
       {expectOlderJournals ? (
-        <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-3">
-          <p className="text-[11px] text-[#c7b3a1] leading-relaxed">
+        <div className="p-3 border border-ed-border bg-ed-card space-y-3">
+          <p className="text-[11px] text-ed-text-body leading-relaxed">
             Import missing historical journal events from an existing{' '}
-            <span className="font-mono-tabular text-[#F4ECE4]">EDDUser.sqlite</span> database.
+            <span className="font-mono-tabular text-ed-text-main">EDDUser.sqlite</span> database.
           </p>
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-[#FF7100]">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-ed-amber">
                 EDDiscovery Database Path
               </label>
               {localSettings?.edDiscoveryDbExists && (
@@ -139,7 +139,7 @@ export function HistoricalImportStep({
                 value={eddPath}
                 onChange={(event) => onChangeEddPath(event.target.value)}
                 placeholder={localSettings?.defaultEdDiscoveryDbPath || 'EDDUser.sqlite'}
-                className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none"
+                className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-[11px] text-ed-text-main focus:border-ed-amber focus:outline-none"
               />
               <button
                 type="button"
@@ -164,7 +164,7 @@ export function HistoricalImportStep({
                   <button
                     type="button"
                     onClick={onResetDefaultEdd}
-                    className="text-[10px] text-[#FF7100] hover:underline cursor-pointer"
+                    className="text-[10px] text-ed-amber hover:underline cursor-pointer"
                   >
                     Reset to Default
                   </button>
@@ -174,16 +174,16 @@ export function HistoricalImportStep({
 
           {eddProgress?.active && (
             <div className="space-y-1 pt-1">
-              <div className="flex items-center justify-between text-[10px] font-mono-tabular text-[#00D2FF]">
+              <div className="flex items-center justify-between text-[10px] font-mono-tabular text-ed-cyan">
                 <span>{eddProgress.stage}</span>
                 <span>
                   {eddProgress.percent}% ({eddProgress.current.toLocaleString()} /{' '}
                   {eddProgress.total.toLocaleString()})
                 </span>
               </div>
-              <div className="w-full h-1.5 bg-[#050506] border border-[#3d2816] overflow-hidden">
+              <div className="w-full h-1.5 bg-ed-void border border-ed-border overflow-hidden">
                 <div
-                  className="h-full bg-[#FF7100] transition-all duration-150"
+                  className="h-full bg-ed-amber transition-all duration-150"
                   style={{ width: `${eddProgress.percent}%` }}
                 />
               </div>
@@ -191,16 +191,16 @@ export function HistoricalImportStep({
           )}
 
           {eddImportedCount !== null && !eddProgress?.active && (
-            <div className="text-[11px] font-mono-tabular text-[#22e584]">
+            <div className="text-[11px] font-mono-tabular text-ed-emerald">
               Imported {eddImportedCount.toLocaleString()} historical journal events from
               EDDiscovery.
             </div>
           )}
         </div>
       ) : (
-        <div className="p-3 border border-[#3d2816] bg-[#110c08] text-[11px] text-[#a6907c] leading-relaxed">
+        <div className="p-3 border border-ed-border bg-ed-card text-[11px] text-ed-text-muted leading-relaxed">
           You can always import historical journals from EDDiscovery later under{' '}
-          <span className="text-[#F4ECE4] font-semibold">Config</span>.
+          <span className="text-ed-text-main font-semibold">Config</span>.
         </div>
       )}
     </div>

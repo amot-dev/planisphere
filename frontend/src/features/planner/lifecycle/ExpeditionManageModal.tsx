@@ -86,12 +86,12 @@ export function ExpeditionManageModal({
       onClose={onClose}
     >
       {errorMessage && (
-        <div className="p-2.5 border border-[#ff3b2f] bg-[#190909] text-[#ff4d3d]">
+        <div className="p-2.5 border border-ed-danger bg-ed-danger-tint text-ed-danger-text">
           {errorMessage}
         </div>
       )}
-      <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-2">
-        <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-[#FF7100]">
+      <div className="p-3 border border-ed-border bg-ed-card space-y-2">
+        <div className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-ed-amber">
           + Create New Expedition
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -100,14 +100,14 @@ export function ExpeditionManageModal({
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Expedition Name (e.g. Colonia and Sagittarius A*)"
-            className="bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 text-[#F4ECE4]"
+            className="bg-ed-void border border-ed-border px-2.5 py-1.5 text-ed-text-main"
           />
           <input
             type="text"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Optional description..."
-            className="bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 text-[#F4ECE4]"
+            className="bg-ed-void border border-ed-border px-2.5 py-1.5 text-ed-text-main"
           />
         </div>
         <div className="flex justify-end">
@@ -121,7 +121,7 @@ export function ExpeditionManageModal({
         </div>
       </div>
 
-      <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#110c08]">
+      <div className="divide-y divide-ed-border-subtle border border-ed-border bg-ed-card">
         {expeditions.map((expeditionItem) => (
           <div key={expeditionItem.id} className="p-2.5 flex items-center justify-between gap-2">
             {editingId === expeditionItem.id ? (
@@ -130,13 +130,13 @@ export function ExpeditionManageModal({
                   type="text"
                   value={editName}
                   onChange={(event) => setEditName(event.target.value)}
-                  className="bg-[#050506] border border-[#3d2816] px-2 py-1 text-[#F4ECE4]"
+                  className="bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
                 />
                 <input
                   type="text"
                   value={editDescription}
                   onChange={(event) => setEditDescription(event.target.value)}
-                  className="flex-1 bg-[#050506] border border-[#3d2816] px-2 py-1 text-[#F4ECE4]"
+                  className="flex-1 bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
                 />
                 <button
                   type="button"
@@ -159,23 +159,23 @@ export function ExpeditionManageModal({
                   <div className="flex items-center gap-2">
                     <span
                       className={`font-bold uppercase tracking-wider ${
-                        expeditionItem.id === activeId ? 'text-[#FF7100]' : 'text-[#F4ECE4]'
+                        expeditionItem.id === activeId ? 'text-ed-amber' : 'text-ed-text-main'
                       }`}
                     >
                       {expeditionItem.name}
                     </span>
-                    <span className="text-[9px] font-mono-tabular uppercase px-1.5 py-0.5 bg-[#16100b] border border-[#3d2816] text-[#a6907c]">
+                    <span className="text-[9px] font-mono-tabular uppercase px-1.5 py-0.5 bg-ed-control border border-ed-border text-ed-text-muted">
                       {expeditionItem.status}
                     </span>
                   </div>
                   {expeditionItem.description && (
-                    <div className="text-[11px] text-[#a6907c]">{expeditionItem.description}</div>
+                    <div className="text-[11px] text-ed-text-muted">{expeditionItem.description}</div>
                   )}
                 </button>
                 <div className="flex items-center gap-1.5">
                   {confirmDeleteId === expeditionItem.id ? (
                     <>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#ff4d3d] mr-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-ed-danger-text mr-1">
                         Delete expedition?
                       </span>
                       <button

@@ -33,21 +33,21 @@ export function CommandersSection({
     <SettingsCard
       title="Commanders"
       headerRight={
-        <span className="text-[10px] text-[#a6907c]">
+        <span className="text-[10px] text-ed-text-muted">
           Select commanders to track
         </span>
       }
     >
       {(settings?.commanders ?? []).length === 0 ? (
-        <div className="text-[#6e5b4b] font-mono-tabular uppercase py-1 text-[10px]">
+        <div className="text-ed-text-dim font-mono-tabular uppercase py-1 text-[10px]">
           No commanders detected yet.
         </div>
       ) : (
-        <div className="divide-y divide-[#24180e] border border-[#3d2816] bg-[#050506]">
+        <div className="divide-y divide-ed-border-subtle border border-ed-border bg-ed-void">
           {(settings?.commanders ?? []).map((commanderItem) => (
             <label
               key={commanderItem.name}
-              className="px-3 py-2 flex items-center justify-between gap-3 cursor-pointer hover:bg-[#16100b]"
+              className="px-3 py-2 flex items-center justify-between gap-3 cursor-pointer hover:bg-ed-control"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <SquareCheckbox
@@ -55,12 +55,12 @@ export function CommandersSection({
                   onChange={(checked) => handleToggleCommander(commanderItem.name, checked)}
                 />
                 <div className="min-w-0">
-                  <span className="font-bold uppercase tracking-wider text-[#F4ECE4]">
+                  <span className="font-bold uppercase tracking-wider text-ed-text-main">
                     CMDR {commanderItem.name}
                   </span>
                 </div>
               </div>
-              <span className="font-mono-tabular text-xs font-bold text-[#F4ECE4] shrink-0">
+              <span className="font-mono-tabular text-xs font-bold text-ed-text-main shrink-0">
                 {commanderItem.eventCount.toLocaleString()} events
               </span>
             </label>

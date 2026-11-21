@@ -28,20 +28,20 @@ export function DatabaseLocationStep({
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <div className="text-sm font-bold uppercase tracking-wider text-[#F4ECE4]">
+        <div className="text-sm font-bold uppercase tracking-wider text-ed-text-main">
           Database Location
         </div>
-        <p className="text-[11px] text-[#c7b3a1] leading-relaxed">
+        <p className="text-[11px] text-ed-text-body leading-relaxed">
           {APP_PRODUCT_NAME} stores your expeditions, flight mode timelines, star coordinates, and
           journal history in a local SQLite database.
         </p>
       </div>
 
-      <div className="p-3 border border-[#3d2816] bg-[#110c08] space-y-1">
-        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#00D2FF]">
+      <div className="p-3 border border-ed-border bg-ed-card space-y-1">
+        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-cyan">
           Filesize
         </div>
-        <p className="text-[11px] text-[#a6907c] leading-relaxed">
+        <p className="text-[11px] text-ed-text-muted leading-relaxed">
           Expected size is ~10–50 MB for typical use, or ~100–300+ MB with years of
           historical logs and the POI catalog.
         </p>
@@ -49,10 +49,10 @@ export function DatabaseLocationStep({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="font-bold uppercase tracking-wider text-[#FF7100]">
+          <label className="font-bold uppercase tracking-wider text-ed-amber">
             Database Path
           </label>
-          <span className="text-[10px] font-mono-tabular text-[#a6907c]">
+          <span className="text-[10px] font-mono-tabular text-ed-text-muted">
             SQLite (.db)
           </span>
         </div>
@@ -62,7 +62,7 @@ export function DatabaseLocationStep({
             value={dbPath}
             onChange={(event) => onChangeDbPath(event.target.value)}
             placeholder={defaultDbPath || `${APP_BINARY_NAME}.db`}
-            className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] focus:border-[#FF7100] focus:outline-none"
+            className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-[11px] text-ed-text-main focus:border-ed-amber focus:outline-none"
           />
           <button
             type="button"
@@ -78,7 +78,7 @@ export function DatabaseLocationStep({
             <button
               type="button"
               onClick={onResetDefaultDb}
-              className="text-[11px] text-[#FF7100] hover:underline cursor-pointer"
+              className="text-[11px] text-ed-amber hover:underline cursor-pointer"
             >
               Reset to Default
             </button>

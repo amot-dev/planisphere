@@ -60,7 +60,7 @@ export function EDDiscoveryImportSection({
 
   return (
     <SettingsCard title="Historical Journal Import (EDDiscovery)">
-      <p className="text-[11px] text-[#a6907c]">
+      <p className="text-[11px] text-ed-text-muted">
         Import past journal history from an existing EDDiscovery database.
       </p>
       <div className="flex items-center gap-2">
@@ -69,7 +69,7 @@ export function EDDiscoveryImportSection({
           value={eddPath}
           onChange={(event) => setEddPath(event.target.value)}
           placeholder="Path to EDDUser.sqlite..."
-          className="flex-1 bg-[#050506] border border-[#3d2816] px-2.5 py-1.5 font-mono-tabular text-xs text-[#F4ECE4]"
+          className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
         />
         <button
           type="button"
@@ -90,24 +90,24 @@ export function EDDiscoveryImportSection({
       {(eddBusy || eddProgress?.active) && (
         <div className="space-y-1.5 pt-1">
           <div className="flex items-center justify-between text-[11px] font-mono-tabular">
-            <span className="text-[#00D2FF]">
+            <span className="text-ed-cyan">
               {eddProgress?.stage || 'Reading database...'}
             </span>
-            <span className="text-[#F4ECE4] font-bold">
+            <span className="text-ed-text-main font-bold">
               {eddProgress && eddProgress.total > 0
                 ? `${eddProgress.percent}% (${eddProgress.current.toLocaleString()} / ${eddProgress.total.toLocaleString()} events)`
                 : 'Preparing...'}
             </span>
           </div>
-          <div className="w-full h-2 bg-[#050506] border border-[#3d2816] overflow-hidden">
+          <div className="w-full h-2 bg-ed-void border border-ed-border overflow-hidden">
             <div
-              className="h-full bg-[#00D2FF] transition-all duration-150"
+              className="h-full bg-ed-cyan transition-all duration-150"
               style={{ width: `${eddProgress?.total ? Math.max(2, eddProgress.percent) : 15}%` }}
             />
           </div>
         </div>
       )}
-      {eddStatus && <div className="text-[11px] text-[#00D2FF] font-mono-tabular">{eddStatus}</div>}
+      {eddStatus && <div className="text-[11px] text-ed-cyan font-mono-tabular">{eddStatus}</div>}
     </SettingsCard>
   )
 }

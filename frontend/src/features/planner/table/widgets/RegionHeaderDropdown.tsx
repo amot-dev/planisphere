@@ -51,7 +51,7 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
 
   if (locked) {
     return (
-      <span className="text-sm font-extrabold tracking-[0.12em] uppercase text-[#FF7100]">
+      <span className="text-sm font-extrabold tracking-[0.12em] uppercase text-ed-amber">
         {regionName || 'SELECT REGION'}
       </span>
     )
@@ -62,7 +62,7 @@ export const RegionHeaderDropdown = memo(function RegionHeaderDropdown({
       <button
         type="button"
         onClick={() => setOpen((previousOpen) => !previousOpen)}
-        className="inline-flex items-center gap-1.5 text-sm font-extrabold tracking-[0.12em] uppercase text-[#FF7100] hover:text-[#ff9436] cursor-pointer"
+        className="inline-flex items-center gap-1.5 text-sm font-extrabold tracking-[0.12em] uppercase text-ed-amber hover:text-ed-amber-bright cursor-pointer"
         title="Click to switch Region"
       >
         <span>{regionName || 'SELECT REGION'}</span>
@@ -116,13 +116,13 @@ function RegionDropdownMenu({
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose} />
-      <div className="absolute left-0 mt-1.5 w-80 max-h-96 overflow-y-auto z-40 border border-[#FF7100] bg-[#1c140d] shadow-2xl shadow-black text-xs">
+      <div className="absolute left-0 mt-1.5 w-80 max-h-96 overflow-y-auto z-40 border border-ed-amber bg-ed-menu shadow-2xl shadow-black text-xs">
         {regionOptions && regionOptions.suggestedRegionId > 0 && suggestedOption && (
-          <div className="p-2 border-b border-[#3d2816] bg-[#241a10]">
+          <div className="p-2 border-b border-ed-border bg-ed-hover">
             <button
               type="button"
               onClick={() => onSelectRegion(regionOptions.suggestedRegionId)}
-              className="w-full text-left px-2 py-1 bg-[#08151c] border border-[#00D2FF] text-[#00D2FF] hover:bg-[#00D2FF] hover:text-[#050506] font-bold uppercase tracking-wider transition cursor-pointer"
+              className="w-full text-left px-2 py-1 bg-ed-cyan-tint border border-ed-cyan text-ed-cyan hover:bg-ed-cyan hover:text-ed-void font-bold uppercase tracking-wider transition cursor-pointer"
             >
               Suggested from next waypoint: {suggestedOption.name}
             </button>
@@ -131,7 +131,7 @@ function RegionDropdownMenu({
 
         {adjacentList.length > 0 && (
           <div>
-            <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#FF7100] bg-[#2b190c] border-b border-[#3d2816]">
+            <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-ed-amber bg-ed-amber-tint border-b border-ed-border">
               Adjacent to {regionOptions?.anchorName} ({adjacentList.length})
             </div>
             {adjacentList.map((region) => (
@@ -139,14 +139,14 @@ function RegionDropdownMenu({
                 key={region.id}
                 type="button"
                 onClick={() => onSelectRegion(region.id)}
-                className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-[#FF7100] hover:text-[#050506] transition cursor-pointer ${
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-ed-amber hover:text-ed-void transition cursor-pointer ${
                   region.id === currentRegionId
-                    ? 'bg-[#2b190c] text-[#FF7100] font-bold'
-                    : 'text-[#F4ECE4]'
+                    ? 'bg-ed-amber-tint text-ed-amber font-bold'
+                    : 'text-ed-text-main'
                 }`}
               >
                 <span>{region.name}</span>
-                <span className="text-[9px] font-mono-tabular px-1.5 py-0.5 bg-[#16100b] text-[#FF7100] border border-[#472e19]">
+                <span className="text-[9px] font-mono-tabular px-1.5 py-0.5 bg-ed-control text-ed-amber border border-ed-border-strong">
                   ADJACENT
                 </span>
               </button>
@@ -156,20 +156,20 @@ function RegionDropdownMenu({
 
         {anchorOption && (
           <div>
-            <div className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-[#00D2FF] bg-[#08151c] border-y border-[#16485c]">
+            <div className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-ed-cyan bg-ed-cyan-tint border-y border-ed-cyan-border">
               Anchor Region
             </div>
             <button
               type="button"
               onClick={() => onSelectRegion(anchorOption.id)}
-              className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-[#00D2FF] hover:text-[#050506] transition cursor-pointer ${
+              className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-ed-cyan hover:text-ed-void transition cursor-pointer ${
                 anchorOption.id === currentRegionId
-                  ? 'bg-[#08151c] text-[#00D2FF] font-bold'
-                  : 'text-[#F4ECE4]'
+                  ? 'bg-ed-cyan-tint text-ed-cyan font-bold'
+                  : 'text-ed-text-main'
               }`}
             >
               <span>{anchorOption.name}</span>
-              <span className="text-[9px] font-mono-tabular px-1.5 py-0.5 bg-[#08151c] text-[#00D2FF] border border-[#16485c]">
+              <span className="text-[9px] font-mono-tabular px-1.5 py-0.5 bg-ed-cyan-tint text-ed-cyan border border-ed-cyan-border">
                 ANCHOR
               </span>
             </button>
@@ -177,7 +177,7 @@ function RegionDropdownMenu({
         )}
 
         <div>
-          <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[#a6907c] bg-[#241a10] border-y border-[#3d2816]">
+          <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-ed-text-muted bg-ed-hover border-y border-ed-border">
             All Other Regions ({otherList.length})
           </div>
           {otherList.map((region) => (
@@ -185,10 +185,10 @@ function RegionDropdownMenu({
               key={region.id}
               type="button"
               onClick={() => onSelectRegion(region.id)}
-              className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-[#FF7100] hover:text-[#050506] transition cursor-pointer ${
+              className={`w-full flex items-center justify-between px-3 py-1.5 text-left hover:bg-ed-amber hover:text-ed-void transition cursor-pointer ${
                 region.id === currentRegionId
-                  ? 'bg-[#211307] text-[#FF7100] font-bold'
-                  : 'text-[#d6c7b8]'
+                  ? 'bg-ed-amber-tint text-ed-amber font-bold'
+                  : 'text-ed-text-body'
               }`}
             >
               <span>{region.name}</span>

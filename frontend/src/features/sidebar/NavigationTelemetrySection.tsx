@@ -79,8 +79,8 @@ export function NavigationTelemetrySection({
             }
             className={`px-1.5 py-0.5 text-[9px] font-mono-tabular font-bold uppercase tracking-wider border transition whitespace-nowrap ${
               carrierRouteOpen
-                ? 'bg-[#120d09] text-[#554030] border-[#2e1f12] cursor-not-allowed'
-                : 'bg-[#08151c] hover:bg-[#00D2FF] text-[#00D2FF] hover:text-[#050506] border border-[#00D2FF] cursor-pointer'
+                ? 'bg-ed-surface text-ed-text-disabled border-ed-border-dim cursor-not-allowed'
+                : 'bg-ed-cyan-tint hover:bg-ed-cyan text-ed-cyan hover:text-ed-void border border-ed-cyan cursor-pointer'
             }`}
           >
             LOG JUMP
@@ -90,7 +90,7 @@ export function NavigationTelemetrySection({
           type="button"
           onClick={onOpenCarrierConfig}
           title="Configure expedition Fleet Carrier vessel classification and weekly upkeep"
-          className="h-5 w-5 flex items-center justify-center text-[#a6907c] hover:text-[#00D2FF] hover:bg-[#24180e] cursor-pointer"
+          className="h-5 w-5 flex items-center justify-center text-ed-text-muted hover:text-ed-cyan hover:bg-ed-hover cursor-pointer"
         >
           <CogIcon />
         </button>
@@ -100,20 +100,20 @@ export function NavigationTelemetrySection({
   return (
     <>
       {/* Duration */}
-      <div className="p-2.5 border border-[#3d2816] border-l-2 border-l-[#FF7100] bg-[#0e0a07]">
+      <div className="p-2.5 border border-ed-border border-l-2 border-l-ed-amber bg-ed-card-alt">
         {viewScope === 'allTime' ? (
           <>
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c]">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
               <span>Career Duration</span>
-              <span className="font-mono-tabular text-[#F4ECE4] font-bold">
+              <span className="font-mono-tabular text-ed-text-main font-bold">
                 {sidebarStats?.careerStart ? sidebarStats.careerDuration : 'UNKNOWN'}
               </span>
             </div>
             {sidebarStats?.careerStart && (
-              <div className="mt-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] space-y-0.5">
+              <div className="mt-1.5 font-mono-tabular text-[11px] text-ed-text-main space-y-0.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[#a6907c]">START:</span>
-                  <span className="text-[#F4ECE4] font-bold text-right">
+                  <span className="text-ed-text-muted">START:</span>
+                  <span className="text-ed-text-main font-bold text-right">
                     {sidebarStats.careerStartGalactic}
                   </span>
                 </div>
@@ -122,25 +122,25 @@ export function NavigationTelemetrySection({
           </>
         ) : (
           <>
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-[#a6907c]">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
               <span>Expedition Duration</span>
-              <span className="font-mono-tabular text-[#F4ECE4] font-bold">
+              <span className="font-mono-tabular text-ed-text-main font-bold">
                 {sidebarStats?.started ? sidebarStats.duration : 'NOT STARTED'}
               </span>
             </div>
             {sidebarStats?.started && (
-              <div className="mt-1.5 font-mono-tabular text-[11px] text-[#F4ECE4] space-y-0.5">
+              <div className="mt-1.5 font-mono-tabular text-[11px] text-ed-text-main space-y-0.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[#a6907c]">START:</span>
-                  <span className="text-[#F4ECE4] font-bold text-right">
+                  <span className="text-ed-text-muted">START:</span>
+                  <span className="text-ed-text-main font-bold text-right">
                     {sidebarStats.startGalactic}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[#a6907c]">
+                  <span className="text-ed-text-muted">
                     {sidebarStats.endIsNow ? 'CURRENT:' : 'END:'}
                   </span>
-                  <span className="text-[#F4ECE4] font-bold text-right">
+                  <span className="text-ed-text-main font-bold text-right">
                     {sidebarStats.endIsNow ? currentGalacticTime : sidebarStats.endGalactic}
                   </span>
                 </div>
@@ -160,23 +160,23 @@ export function NavigationTelemetrySection({
         {/* Distance Travelled (Ly) — Total and Breakdown */}
         <div className="p-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#F4ECE4]">
+            <span className="text-xs font-bold uppercase tracking-wider text-ed-text-main">
               Distance Travelled (Ly)
             </span>
-            <span className="font-mono-tabular text-xs font-extrabold text-[#FF7100]">
+            <span className="font-mono-tabular text-xs font-extrabold text-ed-amber">
               {formatLy(displayedMetrics.distanceLy)}
             </span>
           </div>
-          <div className="mt-1.5 pl-3.5 space-y-0.5 border-l-2 border-[#FF7100]/50 text-[11px]">
-            <div className="flex items-center justify-between text-[#a6907c]">
+          <div className="mt-1.5 pl-3.5 space-y-0.5 border-l-2 border-ed-amber/50 text-[11px]">
+            <div className="flex items-center justify-between text-ed-text-muted">
               <span>By Ship (FSD)</span>
-              <span className="font-mono-tabular text-[#F4ECE4]">
+              <span className="font-mono-tabular text-ed-text-main">
                 {formatLy(computeShipDistanceLy(displayedMetrics))}
               </span>
             </div>
-            <div className="flex items-center justify-between text-[#a6907c]">
+            <div className="flex items-center justify-between text-ed-text-muted">
               <span>By Carrier (Passenger)</span>
-              <span className="font-mono-tabular text-[#F4ECE4]">
+              <span className="font-mono-tabular text-ed-text-main">
                 {formatLy(displayedMetrics.carrierPassengerLy)}
               </span>
             </div>
@@ -233,24 +233,24 @@ export function NavigationTelemetrySection({
               expanded={carrierCostExpanded}
               onToggle={onToggleCarrierCostExpanded}
             >
-              <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#FF7100]/50 text-[11px]">
-                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+              <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-ed-amber/50 text-[11px]">
+                <div className="flex items-center justify-between gap-2 text-ed-text-muted">
                   <span className="truncate">Tritium Cost</span>
-                  <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
+                  <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
                     {(carrierCost.tritiumCost || 0) > 0
                       ? `~${formatCredits(carrierCost.tritiumCost || 0)}`
                       : formatCredits(0)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                <div className="flex items-center justify-between gap-2 text-ed-text-muted">
                   <span className="truncate">Jump Maintenance</span>
-                  <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
+                  <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
                     {formatCredits(carrierCost.jumpCost || 0)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-2 text-[#a6907c]">
+                <div className="flex items-center justify-between gap-2 text-ed-text-muted">
                   <span className="truncate">Weekly Upkeep</span>
-                  <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
+                  <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
                     {(carrierCost.upkeepCost || 0) > 0
                       ? `~${formatCredits(carrierCost.upkeepCost || 0)}`
                       : formatCredits(0)}

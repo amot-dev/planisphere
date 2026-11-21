@@ -23,7 +23,7 @@ export function PlannerActiveLegFooter({
     <>
       {/* Bottom Route Action Bar: Add Waypoint / Add Region Header */}
       {!isCompleted && (
-        <div className="px-5 py-3.5 border-t border-[#3d2816] bg-[#0b0907] flex flex-wrap items-center justify-between gap-3">
+        <div className="px-5 py-3.5 border-t border-ed-border bg-ed-panel flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <button
               type="button"
@@ -38,12 +38,12 @@ export function PlannerActiveLegFooter({
               onClick={() => onAppendRow('region')}
               className="ed-btn"
             >
-              <span className="font-extrabold text-[#FF7100]">+</span>
+              <span className="font-extrabold text-ed-amber">+</span>
               <span>ADD REGION HEADER</span>
             </button>
           </div>
 
-          <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-[#a6907c]">
+          <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-ed-text-muted">
             {isPlanning
               ? 'HOLD AND DRAG (⋮⋮) TO REORDER WAYPOINTS AND REGION HEADERS'
               : 'HOLD (⋮⋮) TO PREVIEW VALID CHRONOLOGICAL BOUNDS · CLONE IN EXPEDITIONS MENU TO RE-PLAN'}
