@@ -65,13 +65,9 @@ func TestCarrierJumpPassengerDistanceRespectsModeFilter(t *testing.T) {
 	engine := newEngineWithModes(conn)
 
 	// Seeded window starting after Location ("19:20:00Z") must still resolve previous StarPos ([0,0,0]) for CarrierJump.
-	unfiltered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:20:00Z"}, nil)
+	unfiltered, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:20:00Z"}, nil)
 	if computeError != nil {
 		t.Fatal(computeError)
-	}
-	if unfiltered.CarrierJumps != 0 || unfiltered.CarrierDistanceLy != 0 || unfiltered.TritiumUsed != nil {
-		t.Fatalf("expected journal Compute not to populate carrier operation metrics, got jumps=%d dist=%.1f tritium=%v",
-			unfiltered.CarrierJumps, unfiltered.CarrierDistanceLy, unfiltered.TritiumUsed)
 	}
 	if unfiltered.CarrierPassengerLy != 100.0 {
 		t.Fatalf("expected 100.0 carrier passenger Ly, got %.1f", unfiltered.CarrierPassengerLy)
@@ -83,7 +79,7 @@ func TestCarrierJumpPassengerDistanceRespectsModeFilter(t *testing.T) {
 		t.Fatalf("expected 106.0 total distance Ly, got %.1f", unfiltered.DistanceLy)
 	}
 
-	filtered, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
+	filtered, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: expModeID, Travel: false, Discovery: true},
@@ -96,7 +92,7 @@ func TestCarrierJumpPassengerDistanceRespectsModeFilter(t *testing.T) {
 		t.Fatalf("expected travel metrics filtered to 0 when Travel=false: %+v", filtered)
 	}
 
-	filteredTravelOn, computeError := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
+	filteredTravelOn, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: expModeID, Travel: true, Discovery: true},
@@ -136,7 +132,7 @@ func TestCarrierPassengerDistanceSpanningDifferentModes(t *testing.T) {
 	}
 
 	engine := newEngineWithModes(conn)
-	computeResult, computeError := engine.Compute(stats.Range{After: "2026-01-18T20:00:00Z"}, &stats.Filter{
+	computeResult, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T20:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
 			{ModeID: modeA, Travel: false, Discovery: true},
@@ -147,9 +143,6 @@ func TestCarrierPassengerDistanceSpanningDifferentModes(t *testing.T) {
 		t.Fatal(computeError)
 	}
 
-	if computeResult.CarrierJumps != 0 || computeResult.CarrierDistanceLy != 0 || computeResult.TritiumUsed != nil {
-		t.Fatalf("expected carrier operation metrics to remain zeroed, got %+v", computeResult)
-	}
 	if computeResult.CarrierPassengerLy != 200.0 {
 		t.Fatalf("expected 200.0 carrier passenger Ly, got %.1f", computeResult.CarrierPassengerLy)
 	}
@@ -167,60 +160,18 @@ func TestPreloadScansForMappedBodies(t *testing.T) {
 	conn := seedStatsDBFromLines(t, lines)
 
 	engine := newEngineWithModes(conn)
-	res, err := engine.Compute(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
-	if err != nil {
-		t.Fatal(err)
+	mappedMetrics, computeError := engine.ComputeCartographics(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
+	if computeError != nil {
+		t.Fatal(computeError)
 	}
-	if res.BodiesMapped != 1 {
-		t.Fatalf("expected 1 body mapped, got %d", res.BodiesMapped)
+	if mappedMetrics.BodiesMapped != 1 {
+		t.Fatalf("expected 1 body mapped, got %d", mappedMetrics.BodiesMapped)
 	}
-	if res.FirstMapped != 1 {
-		t.Fatalf("expected 1 first mapped, got %d", res.FirstMapped)
+	if mappedMetrics.FirstMapped != 1 {
+		t.Fatalf("expected 1 first mapped, got %d", mappedMetrics.FirstMapped)
 	}
-	if res.ScanValueTotal == 0 {
-		t.Fatalf("expected positive scan value total from preloaded scan, got %d", res.ScanValueTotal)
-	}
-}
-
-type timelineQueryCountingQueryer struct {
-	db.Queryer
-	timelineQueryCount int
-}
-
-func (countingQueryer *timelineQueryCountingQueryer) Query(query string, args ...any) (*sql.Rows, error) {
-	if strings.Contains(query, "FROM mode_windows") {
-		countingQueryer.timelineQueryCount++
-	}
-	return countingQueryer.Queryer.Query(query, args...)
-}
-
-func TestFilterPreparedSetsReuse(testingContext *testing.T) {
-	databaseConnection := setupRealizationDB(testingContext)
-
-	modeList, listError := modes.List(databaseConnection)
-	if listError != nil || len(modeList) == 0 {
-		testingContext.Fatalf("expected default modes, got %v (%v)", modeList, listError)
-	}
-
-	countingQueryer := &timelineQueryCountingQueryer{Queryer: databaseConnection}
-	engineInstance := newEngineWithModes(countingQueryer)
-	sharedFilter := stats.Filter{
-		Enabled: true,
-		Modes: []stats.ModeSelection{
-			{ModeID: modeList[0].ID, Travel: true, Discovery: true},
-		},
-	}
-
-	timeWindow := stats.Range{After: "2026-01-01T00:00:00Z", Until: "2026-01-02T00:00:00Z"}
-	if _, computeError := engineInstance.Compute(timeWindow, &sharedFilter); computeError != nil {
-		testingContext.Fatalf("Compute failed: %v", computeError)
-	}
-	if _, realizationError := engineInstance.ComputeRealization(timeWindow, &sharedFilter); realizationError != nil {
-		testingContext.Fatalf("ComputeRealization failed: %v", realizationError)
-	}
-
-	if countingQueryer.timelineQueryCount != 1 {
-		testingContext.Fatalf("expected mode_windows timeline query to execute once when reusing Filter, got %d", countingQueryer.timelineQueryCount)
+	if mappedMetrics.ScanValueTotal == 0 {
+		t.Fatalf("expected positive scan value total from preloaded scan, got %d", mappedMetrics.ScanValueTotal)
 	}
 }
 
@@ -245,9 +196,9 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 			{ModeID: modes.DefaultFallbackModeID(databaseConnection), Travel: true, Discovery: true},
 		},
 	}
-	sameTimestampMetrics, sameTimestampError := engineInstance.Compute(stats.Range{}, fallbackModeFilter)
+	sameTimestampMetrics, sameTimestampError := engineInstance.ComputeCartographics(stats.Range{}, fallbackModeFilter)
 	if sameTimestampError != nil {
-		testingContext.Fatalf("Compute same-timestamp all-time filtered failed: %v", sameTimestampError)
+		testingContext.Fatalf("ComputeCartographics same-timestamp all-time filtered failed: %v", sameTimestampError)
 	}
 	expectedCombinedTotal := expectedScanOnly.Total + expectedMapping.Total
 	if sameTimestampMetrics.FirstMapped != 1 || sameTimestampMetrics.EfficientMappings != 1 || sameTimestampMetrics.ScanValueTotal != expectedCombinedTotal {
@@ -266,7 +217,7 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 		`{"timestamp":"2026-05-01T11:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"FutureScan 1","BodyID":4,"StarSystem":"FutureScan","SystemAddress":7002,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 
 	futureScanWindow := stats.Range{After: "2026-05-01T11:00:00Z", Until: "2026-05-01T12:00:00Z"}
-	futureScanMetrics, futureScanError := engineInstance.Compute(futureScanWindow, nil)
+	futureScanMetrics, futureScanError := engineInstance.ComputeCartographics(futureScanWindow, nil)
 	if futureScanError != nil {
 		testingContext.Fatalf("Compute future-scan range failed: %v", futureScanError)
 	}
@@ -302,7 +253,7 @@ func TestComputeRecoversDisconnectedJumpsAcrossRangeAndFilter(testingContext *te
 
 	engineInstance := newEngineWithModes(databaseConnection)
 
-	legMetrics, legError := engineInstance.Compute(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, nil)
+	legMetrics, legError := engineInstance.ComputeTravel(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, nil)
 	if legError != nil {
 		testingContext.Fatal(legError)
 	}
@@ -311,7 +262,7 @@ func TestComputeRecoversDisconnectedJumpsAcrossRangeAndFilter(testingContext *te
 		testingContext.Fatalf("unexpected bounded-window recovered metrics: %+v (want dist %.6f)", legMetrics, expectedLegDistance)
 	}
 
-	travelExcluded, filterError := engineInstance.Compute(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, &stats.Filter{
+	travelExcluded, filterError := engineInstance.ComputeTravel(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes:   []stats.ModeSelection{{ModeID: explorationModeID, Travel: false, Discovery: true}},
 	})
@@ -389,9 +340,9 @@ func TestComputeExcludesPlanetaryRingMappings(testingContext *testing.T) {
 	databaseConnection := seedStatsDBFromLines(testingContext, journalLines)
 	engineInstance := newEngineWithModes(databaseConnection)
 
-	computedMetrics, computeError := engineInstance.Compute(stats.Range{}, nil)
+	computedMetrics, computeError := engineInstance.ComputeCartographics(stats.Range{}, nil)
 	if computeError != nil {
-		testingContext.Fatalf("Compute failed: %v", computeError)
+		testingContext.Fatalf("ComputeCartographics failed: %v", computeError)
 	}
 
 	planetScan := reference.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}

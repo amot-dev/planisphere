@@ -70,6 +70,6 @@ func (timeRangeTravel *TimeRangeTravel) Compute(timeRange Range, filter *Filter)
 			timeRangeTravel.recoveredJumps,
 			timeRangeTravel.modeLoader,
 		)
-		return engine.ComputeTravel(timeRange, replaystats.CloneUnprepared(filter))
+		return engine.ComputeTravel(timeRange, filter)
 	})
 }

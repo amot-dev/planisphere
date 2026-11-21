@@ -81,7 +81,7 @@ func (engine *Engine) ComputeTravel(timeRange Range, filter *Filter) (TravelMetr
 		filterSet: filterSet,
 	}
 	for _, rowItem := range loadedEvents {
-		if stepError := accumulator.processEvent(rowItem, &metrics); stepError != nil {
+		if stepError := accumulator.processTravelEvent(rowItem, &metrics); stepError != nil {
 			return TravelMetrics{}, stepError
 		}
 	}

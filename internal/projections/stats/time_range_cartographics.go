@@ -66,6 +66,6 @@ func (timeRangeCarto *TimeRangeCartographics) Compute(timeRange Range, filter *F
 			nil,
 			timeRangeCarto.modeLoader,
 		)
-		return engine.ComputeCartographics(timeRange, replaystats.CloneUnprepared(filter))
+		return engine.ComputeCartographics(timeRange, filter)
 	})
 }

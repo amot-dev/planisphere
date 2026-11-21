@@ -292,9 +292,9 @@ func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
 	legWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T10:30:00Z"}
 
 	// Before sale: estimated at base value only (19,010,800 Cr) because WasFootfalled is true.
-	beforeMetrics, err := engine.Compute(legWindow, nil)
-	if err != nil {
-		t.Fatalf("Compute before sale failed: %v", err)
+	beforeMetrics, beforeError := engine.ComputeExobiology(legWindow, nil)
+	if beforeError != nil {
+		t.Fatalf("ComputeExobiology before sale failed: %v", beforeError)
 	}
 	if beforeMetrics.FirstLogged != 0 {
 		t.Errorf("expected FirstLogged 0 before sale, got %d", beforeMetrics.FirstLogged)
@@ -310,9 +310,9 @@ func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
 		]}`)
 
 	// After sale: the original leg's Exobiology Value upgrades to include the first-logged bonus (95,054,000 Cr).
-	afterMetrics, err := engine.Compute(legWindow, nil)
-	if err != nil {
-		t.Fatalf("Compute after sale failed: %v", err)
+	afterMetrics, afterError := engine.ComputeExobiology(legWindow, nil)
+	if afterError != nil {
+		t.Fatalf("ComputeExobiology after sale failed: %v", afterError)
 	}
 	if afterMetrics.FirstLogged != 1 {
 		t.Errorf("expected FirstLogged 1 after sale, got %d", afterMetrics.FirstLogged)
@@ -364,9 +364,9 @@ func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T
 	}
 
 	legWindow := stats.Range{After: "2026-03-01T09:45:00Z", Until: "2026-03-01T11:00:00Z"}
-	legMetrics, computeError := engineInstance.Compute(legWindow, nil)
+	legMetrics, computeError := engineInstance.ComputeExobiology(legWindow, nil)
 	if computeError != nil {
-		t.Fatalf("Compute failed: %v", computeError)
+		t.Fatalf("ComputeExobiology failed: %v", computeError)
 	}
 	if legMetrics.FirstLogged != 1 {
 		t.Errorf("expected FirstLogged 1, got %d", legMetrics.FirstLogged)

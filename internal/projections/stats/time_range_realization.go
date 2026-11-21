@@ -70,6 +70,6 @@ func (timeRangeReal *TimeRangeRealization) Compute(timeRange Range, filter *Filt
 			nil,
 			timeRangeReal.modeLoader,
 		)
-		return engine.ComputeRealization(timeRange, replaystats.CloneUnprepared(filter))
+		return engine.ComputeRealization(timeRange, filter)
 	})
 }

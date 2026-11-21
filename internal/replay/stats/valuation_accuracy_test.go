@@ -142,12 +142,16 @@ func TestPopulatedAndPre2025OrganicEligibility(t *testing.T) {
 		`{"timestamp":"2026-04-02T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`)
 
 	populatedWindow := stats.Range{After: "2026-04-02T09:05:00Z", Until: "2026-04-02T10:00:00Z"}
-	populatedMetrics, popMetricsErr := engineInstance.Compute(populatedWindow, nil)
-	if popMetricsErr != nil {
-		t.Fatalf("Compute populated window failed: %v", popMetricsErr)
+	populatedCarto, popCartoError := engineInstance.ComputeCartographics(populatedWindow, nil)
+	if popCartoError != nil {
+		t.Fatalf("ComputeCartographics populated window failed: %v", popCartoError)
 	}
-	if populatedMetrics.FirstDiscoveries != 0 || populatedMetrics.FirstLogged != 0 || populatedMetrics.OrganicValueBonus != 0 {
-		t.Errorf("expected zero first bonuses in preloaded populated system, got %+v", populatedMetrics)
+	populatedExo, popExoError := engineInstance.ComputeExobiology(populatedWindow, nil)
+	if popExoError != nil {
+		t.Fatalf("ComputeExobiology populated window failed: %v", popExoError)
+	}
+	if populatedCarto.FirstDiscoveries != 0 || populatedExo.FirstLogged != 0 || populatedExo.OrganicValueBonus != 0 {
+		t.Errorf("expected zero first bonuses in preloaded populated system, got carto=%+v exo=%+v", populatedCarto, populatedExo)
 	}
 	populatedRealization, popRealErr := engineInstance.ComputeRealization(populatedWindow, nil)
 	if popRealErr != nil {
@@ -158,9 +162,9 @@ func TestPopulatedAndPre2025OrganicEligibility(t *testing.T) {
 	}
 
 	pre2025Window := stats.Range{After: "2024-06-01T09:55:00Z", Until: "2024-06-01T11:00:00Z"}
-	pre2025Metrics, preMetricsErr := engineInstance.Compute(pre2025Window, nil)
-	if preMetricsErr != nil {
-		t.Fatalf("Compute pre-2025 window failed: %v", preMetricsErr)
+	pre2025Metrics, preMetricsError := engineInstance.ComputeExobiology(pre2025Window, nil)
+	if preMetricsError != nil {
+		t.Fatalf("ComputeExobiology pre-2025 window failed: %v", preMetricsError)
 	}
 	if pre2025Metrics.FirstLogged != 1 || pre2025Metrics.OrganicValueTotal != 95054000 {
 		t.Errorf("expected pre-2025 untouched body to earn 5x first-logged estimate, got %+v", pre2025Metrics)
@@ -199,9 +203,9 @@ func TestRadicoidaUnicaAggregatedCGAndPostCG(t *testing.T) {
 		`{"timestamp":"2026-02-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Ingensradices_Genus_Name;","Species":"$Codex_Ent_Ingensradices_Unicus_Name;","Species_Localised":"Radicoida Unica","SystemAddress":147882789259,"Body":3}`)
 
 	cgWindow := stats.Range{After: "2025-11-24T18:00:00Z", Until: "2025-11-24T21:00:00Z"}
-	cgMetrics, cgMetricsErr := engineInstance.Compute(cgWindow, nil)
-	if cgMetricsErr != nil {
-		t.Fatalf("Compute CG window failed: %v", cgMetricsErr)
+	cgMetrics, cgMetricsError := engineInstance.ComputeExobiology(cgWindow, nil)
+	if cgMetricsError != nil {
+		t.Fatalf("ComputeExobiology CG window failed: %v", cgMetricsError)
 	}
 	if cgMetrics.OrganicSamples != 3 || cgMetrics.OrganicValueTotal != 2856888 {
 		t.Errorf("expected 3 CG samples totaling 2,856,888 Cr, got %+v", cgMetrics)
@@ -214,9 +218,9 @@ func TestRadicoidaUnicaAggregatedCGAndPostCG(t *testing.T) {
 		t.Errorf("expected all 3 aggregated CG samples realized with zero death loss, got %+v", cgRealization)
 	}
 
-	postCGMetrics, postErr := engineInstance.Compute(stats.Range{After: "2026-02-01T09:00:00Z", Until: "2026-02-01T11:00:00Z"}, nil)
-	if postErr != nil {
-		t.Fatalf("Compute post-CG window failed: %v", postErr)
+	postCGMetrics, postError := engineInstance.ComputeExobiology(stats.Range{After: "2026-02-01T09:00:00Z", Until: "2026-02-01T11:00:00Z"}, nil)
+	if postError != nil {
+		t.Fatalf("ComputeExobiology post-CG window failed: %v", postError)
 	}
 	if postCGMetrics.OrganicValueTotal != 119037 {
 		t.Errorf("expected post-CG Radicoida Unica value 119,037 Cr, got %d", postCGMetrics.OrganicValueTotal)
@@ -251,22 +255,22 @@ func TestSessionOdysseyAndPreUpdate14Realization(t *testing.T) {
 	ingestTestLine(t, databaseConnection,
 		`{"timestamp":"2022-10-05T00:11:12Z","event":"SellOrganicData","MarketID":3701316096,"BioData":[{"Species":"$Codex_Ent_Clypeus_03_Name;","Species_Localised":"Clypeus Speculumi","Value":711500,"Bonus":711500}]}`)
 
-	horizonsMetrics, horErr := engineInstance.Compute(stats.Range{After: "2020-05-01T10:05:00Z", Until: "2020-05-01T10:30:00Z"}, nil)
-	if horErr != nil {
-		t.Fatalf("Compute Horizons window failed: %v", horErr)
+	horizonsMetrics, horizonsError := engineInstance.ComputeCartographics(stats.Range{After: "2020-05-01T10:05:00Z", Until: "2020-05-01T10:30:00Z"}, nil)
+	if horizonsError != nil {
+		t.Fatalf("ComputeCartographics Horizons window failed: %v", horizonsError)
 	}
-	odysseyMetrics, odyErr := engineInstance.Compute(stats.Range{After: "2022-09-20T01:05:00Z", Until: "2022-09-20T01:30:00Z"}, nil)
-	if odyErr != nil {
-		t.Fatalf("Compute Odyssey window failed: %v", odyErr)
+	odysseyMetrics, odysseyError := engineInstance.ComputeCartographics(stats.Range{After: "2022-09-20T01:05:00Z", Until: "2022-09-20T01:30:00Z"}, nil)
+	if odysseyError != nil {
+		t.Fatalf("ComputeCartographics Odyssey window failed: %v", odysseyError)
 	}
 	if horizonsMetrics.ScanValueTotal >= odysseyMetrics.ScanValueTotal {
 		t.Errorf("expected Horizons mapped value (%d) < Odyssey mapped value (%d)", horizonsMetrics.ScanValueTotal, odysseyMetrics.ScanValueTotal)
 	}
 
 	legacyBioWindow := stats.Range{After: "2022-09-20T01:50:00Z", Until: "2022-09-20T02:30:00Z"}
-	legacyBioMetrics, bioErr := engineInstance.Compute(legacyBioWindow, nil)
-	if bioErr != nil {
-		t.Fatalf("Compute legacy bio window failed: %v", bioErr)
+	legacyBioMetrics, bioError := engineInstance.ComputeExobiology(legacyBioWindow, nil)
+	if bioError != nil {
+		t.Fatalf("ComputeExobiology legacy bio window failed: %v", bioError)
 	}
 	if legacyBioMetrics.OrganicValueBase != 711500 || legacyBioMetrics.OrganicValueBonus != 711500 || legacyBioMetrics.OrganicValueTotal != 1423000 {
 		t.Errorf("expected pre-Update-14 Clypeus Speculumi 711,500 + 711,500 = 1,423,000, got %+v", legacyBioMetrics)

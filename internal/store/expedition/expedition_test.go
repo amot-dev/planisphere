@@ -214,9 +214,8 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		t.Fatal(modeTxError)
 	}
 
-	statsEngine := replaystats.NewEngineWithSources(dbConn, nil, nil, modes.LoadModeLookup)
-	// Hide Travel jumps/Ly, but include Travel scans/exobio!
-	filtered, computeError := statsEngine.Compute(replaystats.Range{After: "2026-01-18T19:42:10Z"}, &replaystats.Filter{
+	// Hide Travel jumps and distance while retaining Travel scans and exobiology.
+	filteredSummary, computeError := proj.TimeRangeStats.Compute(replaystats.Range{After: "2026-01-18T19:42:10Z"}, &replaystats.Filter{
 		Enabled: true,
 		Modes: []replaystats.ModeSelection{
 			{ModeID: travelModeID, Travel: false, Discovery: true},
@@ -225,6 +224,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	if computeError != nil {
 		t.Fatal(computeError)
 	}
+	filtered := filteredSummary.Metrics
 	if filtered.Jumps != 0 || filtered.DistanceLy != 0 {
 		t.Fatalf("expected Travel jumps/distance to be hidden, got %d jumps / %.1f Ly", filtered.Jumps, filtered.DistanceLy)
 	}

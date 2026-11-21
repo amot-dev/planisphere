@@ -277,10 +277,8 @@ type ModeTimelineLoader = func(queryer db.Queryer) (ModeLookup, error)
 // Filter restricts metrics to events that occurred while selected modes were
 // active. A nil Filter (or Enabled == false) includes everything.
 type Filter struct {
-	Enabled      bool            `json:"enabled"`
-	Modes        []ModeSelection `json:"modes"`
-	preparedSets *filterSets
-	preparedDB   db.Queryer
+	Enabled bool            `json:"enabled"`
+	Modes   []ModeSelection `json:"modes"`
 }
 
 type filterSets struct {
@@ -288,23 +286,9 @@ type filterSets struct {
 	modeLookup        ModeLookup
 }
 
-// CloneUnprepared returns a shallow copy of filter with cached preparation state cleared.
-func CloneUnprepared(filter *Filter) *Filter {
-	if filter == nil {
-		return nil
-	}
-	copied := *filter
-	copied.preparedSets = nil
-	copied.preparedDB = nil
-	return &copied
-}
-
 func (filter *Filter) prepare(queryer db.Queryer, modeLoader ModeTimelineLoader) (*filterSets, error) {
 	if filter == nil || !filter.Enabled {
 		return nil, nil
-	}
-	if filter.preparedSets != nil && filter.preparedDB == queryer {
-		return filter.preparedSets, nil
 	}
 	if modeLoader == nil {
 		return nil, errors.New("mode timeline loader is required when mode filter is enabled")
@@ -322,8 +306,6 @@ func (filter *Filter) prepare(queryer db.Queryer, modeLoader ModeTimelineLoader)
 			sets.discovery[modeSelection.ModeID] = true
 		}
 	}
-	filter.preparedSets = sets
-	filter.preparedDB = queryer
 	return sets, nil
 }
 

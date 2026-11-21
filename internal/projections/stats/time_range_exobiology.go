@@ -70,6 +70,6 @@ func (timeRangeExo *TimeRangeExobiology) Compute(timeRange Range, filter *Filter
 			nil,
 			timeRangeExo.modeLoader,
 		)
-		return engine.ComputeExobiology(timeRange, replaystats.CloneUnprepared(filter))
+		return engine.ComputeExobiology(timeRange, filter)
 	})
 }

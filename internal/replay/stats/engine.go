@@ -52,16 +52,6 @@ func NewEngineWithSources(
 	}
 }
 
-var computeMetricEvents = journal.NewEventSet(
-	journal.EventLoadGame,
-	journal.EventLocation,
-	journal.EventFSDJump,
-	journal.EventCarrierJump,
-	journal.EventScan,
-	journal.EventSAAScanComplete,
-	journal.EventScanOrganic,
-)
-
 type bodyKey struct{ systemAddress, bodyID int64 }
 
 func (engine *Engine) loadLedger() (*realization.Ledger, error) {
@@ -190,58 +180,6 @@ func (engine *Engine) queryBodyScanChunk(
 		return fmt.Errorf("iterate scan chunk rows: %w", iterationError)
 	}
 	return nil
-}
-
-// Compute returns metrics for events in timeRange, optionally filtered by mode.
-func (engine *Engine) Compute(timeRange Range, filter *Filter) (Metrics, error) {
-	var metrics Metrics
-	after, until := timeRange.bounds()
-	filterSet, prepareError := filter.prepare(engine.DB, engine.ModeLoader)
-	if prepareError != nil {
-		return metrics, fmt.Errorf("prepare stats filter: %w", prepareError)
-	}
-	loadedEvents, loadError := replay.LoadEvents(engine.DB, after, until, computeMetricEvents)
-	if loadError != nil {
-		return metrics, fmt.Errorf("load stats events: %w", loadError)
-	}
-
-	session := replay.NewSessionState(engine.Odyssey, len(loadedEvents)/8)
-	if seedError := replay.SeedLoadGameBefore(engine.DB, after, session); seedError != nil {
-		return metrics, fmt.Errorf("seed initial loadgame state: %w", seedError)
-	}
-	if preloadPopError := replay.PreloadSystemPopulations(engine.DB, after, loadedEvents, until, session); preloadPopError != nil {
-		return metrics, fmt.Errorf("preload system populations: %w", preloadPopError)
-	}
-
-	scans, missingScans, preloadScanError := engine.prepareComputeScans(after, loadedEvents)
-	if preloadScanError != nil {
-		return metrics, fmt.Errorf("prepare compute scans: %w", preloadScanError)
-	}
-
-	accumulator := &computeAccumulator{
-		engine:        engine,
-		after:         after,
-		until:         until,
-		filterSet:     filterSet,
-		session:       session,
-		scans:         scans,
-		missingScans:  missingScans,
-		scannedBodies: make(map[bodyKey]bool, len(loadedEvents)/2),
-		mappedBodies:  make(map[bodyKey]bool, len(loadedEvents)/8),
-	}
-	for _, rowItem := range loadedEvents {
-		if stepError := accumulator.processEvent(rowItem, &metrics); stepError != nil {
-			return metrics, stepError
-		}
-	}
-	recoveredJumps, recoverError := engine.loadRecoveredJumps(after, until)
-	if recoverError != nil {
-		return metrics, fmt.Errorf("recover disconnected jumps: %w", recoverError)
-	}
-	for _, recoveredJump := range recoveredJumps {
-		creditJump(recoveredJump.Timestamp, recoveredJump.JumpDist, recoveredJump.BoostUsed, filterSet, &metrics)
-	}
-	return metrics, nil
 }
 
 // ComputeRealization computes the realization breakdown for the given time range.

@@ -14,10 +14,10 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
-// prepareComputeScans identifies mapped or organically sampled bodies that have
-// no Scan event in loadedEvents and preloads their latest prior Scan at or before
-// afterTimestamp. Two passes ensure same-second mappings ordered before their
-// matching Scan in loadedEvents are not marked missing.
+// prepareComputeScans identifies mapped bodies that have no Scan event in
+// loadedEvents and preloads their latest prior Scan at or before afterTimestamp.
+// Two passes ensure same-second mappings ordered before their matching Scan in
+// loadedEvents are not marked missing.
 func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []replay.Row) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
 	scans := make(map[bodyKey]*journal.ScanEvent)
 	missingScans := make(map[bodyKey]bool)
@@ -30,8 +30,7 @@ func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []
 	neededSet := make(map[bodyKey]bool)
 	var neededKeys []bodyKey
 	for _, rowItem := range loadedEvents {
-		if (rowItem.Type == journal.EventSAAScanComplete || rowItem.Type == journal.EventScanOrganic) &&
-			rowItem.SystemAddress.Valid && rowItem.BodyID.Valid {
+		if rowItem.Type == journal.EventSAAScanComplete && rowItem.SystemAddress.Valid && rowItem.BodyID.Valid {
 			key := bodyKey{rowItem.SystemAddress.Int64, rowItem.BodyID.Int64}
 			if !scannedInEvents[key] && !neededSet[key] {
 				neededSet[key] = true
@@ -80,27 +79,14 @@ type computeAccumulator struct {
 	mappedBodies            map[bodyKey]bool
 }
 
-func (accumulator *computeAccumulator) processEvent(rowItem replay.Row, metrics *Metrics) error {
+func (accumulator *computeAccumulator) processTravelEvent(rowItem replay.Row, metrics *Metrics) error {
 	switch rowItem.Type {
-	case journal.EventLoadGame:
-		if accumulator.session != nil {
-			accumulator.session.ApplyLoadGame(rowItem.RawJSON)
-		}
 	case journal.EventLocation:
-		if accumulator.session != nil {
-			accumulator.session.ApplyLocation(rowItem.RawJSON)
-		}
 		accumulator.recordStarPosition(rowItem.StarPos)
 	case journal.EventFSDJump:
 		accumulator.processFSDJump(rowItem, metrics)
 	case journal.EventCarrierJump:
 		return accumulator.processCarrierJump(rowItem, metrics)
-	case journal.EventScan:
-		accumulator.processScan(rowItem, metrics)
-	case journal.EventSAAScanComplete:
-		return accumulator.processMapping(rowItem, metrics)
-	case journal.EventScanOrganic:
-		return accumulator.processOrganic(rowItem, metrics)
 	}
 	return nil
 }
@@ -160,9 +146,6 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metric
 	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
 		return
 	}
-	if accumulator.session != nil {
-		accumulator.session.ApplyFSDJumpEvent(&jumpEvent)
-	}
 	if jumpEvent.Taxi || jumpEvent.Multicrew {
 		return
 	}
@@ -170,9 +153,6 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metric
 }
 
 func (accumulator *computeAccumulator) processCarrierJump(rowItem replay.Row, metrics *Metrics) error {
-	if accumulator.session != nil {
-		accumulator.session.ApplyCarrierJump(rowItem.RawJSON)
-	}
 	if seedError := accumulator.ensurePreviousPosition(); seedError != nil {
 		return seedError
 	}
@@ -257,10 +237,7 @@ func (accumulator *computeAccumulator) processOrganic(rowItem replay.Row, metric
 	}
 	metrics.OrganicSamples++
 	systemPopulation := accumulator.session.SystemPopulation(organicEvent.SystemAddress)
-	firstLoggedBonus, checkError := accumulator.firstLogged(&organicEvent, systemPopulation, rowItem.Timestamp)
-	if checkError != nil {
-		return checkError
-	}
+	firstLoggedBonus := accumulator.firstLogged(&organicEvent, systemPopulation, rowItem.Timestamp)
 
 	var saleOutcome realization.OrganicSaleOutcome
 	if rowItem.UID != "" {
@@ -305,9 +282,6 @@ func latestScanAtOrBefore(bodyScans []*journal.ScanEvent, sampleTimestamp string
 }
 
 func (accumulator *computeAccumulator) resolveParentScan(key bodyKey, timestamp string) (*journal.ScanEvent, error) {
-	if accumulator.chronologicalScans != nil {
-		return latestScanAtOrBefore(accumulator.chronologicalScans[key], timestamp), nil
-	}
 	parentScan := accumulator.scans[key]
 	if parentScan != nil || accumulator.missingScans[key] {
 		return parentScan, nil
@@ -329,11 +303,11 @@ func (accumulator *computeAccumulator) resolveParentScan(key bodyKey, timestamp 
 // WasFootfalled == false with pre-2025 fallback). ScanOrganic.WasLogged is
 // intentionally ignored because Frontier journals do not reliably populate it:
 // https://issues.frontierstore.net/issue-detail/81891
-func (accumulator *computeAccumulator) firstLogged(organicEvent *journal.ScanOrganicEvent, systemPopulation int64, timestamp string) (bool, error) {
+func (accumulator *computeAccumulator) firstLogged(organicEvent *journal.ScanOrganicEvent, systemPopulation int64, timestamp string) bool {
 	key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}
-	parentScan, lookupError := accumulator.resolveParentScan(key, timestamp)
-	if lookupError != nil || parentScan == nil {
-		return false, lookupError
+	parentScan := latestScanAtOrBefore(accumulator.chronologicalScans[key], timestamp)
+	if parentScan == nil {
+		return false
 	}
-	return reference.CanExpectFirstLogged(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped, parentScan.WasFootfalled), nil
+	return reference.CanExpectFirstLogged(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped, parentScan.WasFootfalled)
 }
