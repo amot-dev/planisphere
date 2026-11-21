@@ -290,18 +290,18 @@ export function NavigationTelemetrySection({
                       <span className="text-xs font-bold uppercase tracking-wider text-[#F4ECE4] truncate">
                         Carrier Cost
                       </span>
-                      <span className="text-[10px] text-[#00D2FF] shrink-0">
+                      <span className="text-[10px] text-[#FF7100] shrink-0">
                         {carrierCostExpanded ? '▾' : '▸'}
                       </span>
                     </div>
-                    <span className="font-mono-tabular text-xs font-extrabold text-[#00D2FF] whitespace-nowrap shrink-0">
+                    <span className="font-mono-tabular text-xs font-extrabold text-[#FF7100] whitespace-nowrap shrink-0">
                       {carrierCost.totalEstimated && (carrierCost.totalCost || 0) > 0
                         ? `~${formatCredits(carrierCost.totalCost || 0)}`
                         : formatCredits(carrierCost.totalCost || 0)}
                     </span>
                   </button>
                   {carrierCostExpanded && (
-                    <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#00D2FF]/50 text-[11px]">
+                    <div className="mt-2 pl-3.5 space-y-1 border-l-2 border-[#FF7100]/50 text-[11px]">
                       <div className="flex items-center justify-between gap-2 text-[#a6907c]">
                         <span className="truncate">Tritium Cost</span>
                         <span className="font-mono-tabular text-[#F4ECE4] whitespace-nowrap shrink-0">
