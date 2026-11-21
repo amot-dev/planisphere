@@ -26,7 +26,6 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
           row: { id: 10, expeditionId: 1, position: 1, rowType: 'region', regionId: 18 },
           number: 0,
           regionName: 'Inner Orion Spur',
-          transitions: [],
         },
         {
           row: {
@@ -48,7 +47,6 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
           visitCount: 2,
           visitState: 'visited',
           visitedAtGalactic: '01 JAN 3312 10:05',
-          transitions: [],
         },
         {
           row: {
@@ -76,7 +74,6 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
           legModeId: 1,
           legModeName: 'Exploration',
           legModeColor: '#FF7100',
-          transitions: [{ kind: 'ship', to: 'Mandalay' }],
         },
       ],
       currentRowId: 12,
@@ -139,6 +136,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
         number: 1,
         from: '2024-01-01T00:00:00Z',
         to: '2026-01-01T10:05:00Z',
+        shipsUsed: [],
         metrics: {},
         realization: {},
       },
@@ -149,6 +147,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
         from: '2026-01-01T10:05:00Z',
         to: '2026-01-01T10:15:00Z',
         prevSystem: 'Sol',
+        shipsUsed: ['Mandalay'],
         metrics: { jumps: 1, distanceLy: 4.24 },
         realization: {},
       },

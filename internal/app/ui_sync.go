@@ -53,7 +53,7 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	)
 	bus.SubscribeUI(
 		events.UITargetPlan,
-		projection.TriggersFrom(app.systemArrivals, app.systemVisitCounts, app.shipHistory).
+		projection.TriggersFrom(app.systemArrivals, app.systemVisitCounts).
 			WithApp(events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppModeWindowsChanged),
 	)
 	bus.SubscribeUI(

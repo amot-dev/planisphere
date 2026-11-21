@@ -191,10 +191,14 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		t.Fatalf("visit states = %v, want %v", waypointStates, wantStates)
 	}
 
-	// Verify ship switch transition banner between #2 and #3.
+	// Verify vessel flown on leg details between #2 and #3.
 	beagleView := plan.Rows[2]
-	if len(beagleView.Transitions) != 1 || beagleView.Transitions[0].Kind != "ship" || beagleView.Transitions[0].To != "Caspian Explorer" {
-		t.Fatalf("expected ship transition on Beagle Point leg, got %+v", beagleView.Transitions)
+	beagleDetails, beagleDetailsError := expedition.Details(dbConn, beagleView.Row.ID, proj)
+	if beagleDetailsError != nil {
+		t.Fatalf("Details for Beagle Point failed: %v", beagleDetailsError)
+	}
+	if len(beagleDetails.ShipsUsed) != 1 || beagleDetails.ShipsUsed[0] != "Caspian Explorer" {
+		t.Fatalf("expected Caspian Explorer flown on Beagle Point leg, got %+v", beagleDetails.ShipsUsed)
 	}
 
 	// Verify mode filtering with the Travel scan/exobio override.
@@ -353,31 +357,31 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		t.Fatalf("BuildPlan failed: %v", err)
 	}
 
-	// Verify transitions on leg arriving at Alpha Centauri
-	var alphaTransitions []expedition.Transition
-	for _, r := range plan.Rows {
-		if r.Row.SystemName == "Alpha Centauri" {
-			alphaTransitions = r.Transitions
-		}
+	// Verify vessels flown on leg details arriving at Alpha Centauri.
+	alphaDetails, alphaDetailsError := expedition.Details(dbConn, alpha.ID, proj)
+	if alphaDetailsError != nil {
+		t.Fatalf("Details for Alpha Centauri failed: %v", alphaDetailsError)
 	}
-	if len(alphaTransitions) == 0 {
-		t.Fatalf("expected transitions arriving at Alpha Centauri, got none")
+	if len(alphaDetails.ShipsUsed) == 0 {
+		t.Fatalf("expected ships flown arriving at Alpha Centauri, got none")
 	}
-	// It should have Krait Phantom
 	foundPhantom := false
-	for _, tr := range alphaTransitions {
-		if tr.To == "Krait Phantom" {
+	for _, hullName := range alphaDetails.ShipsUsed {
+		if hullName == "Krait Phantom" {
 			foundPhantom = true
 		}
-		if tr.To == "Imperial Cutter" {
+		if hullName == "Diamondback Explorer" {
+			t.Errorf("Diamondback Explorer should have been filtered out (no jump made before swap)")
+		}
+		if hullName == "Imperial Cutter" {
 			t.Errorf("Imperial Cutter should have been clamped out (occurred after expedition end)")
 		}
-		if tr.To == "Nomad" {
-			t.Errorf("Nomad ship-launched lander should have been filtered out of ship transitions")
+		if hullName == "Nomad" {
+			t.Errorf("Nomad ship-launched lander should have been filtered out of ships flown")
 		}
 	}
 	if !foundPhantom {
-		t.Errorf("expected Krait Phantom transition, got: %+v", alphaTransitions)
+		t.Errorf("expected Krait Phantom flown, got: %+v", alphaDetails.ShipsUsed)
 	}
 
 	// Verify cache hit
@@ -1189,8 +1193,12 @@ func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testi
 	if destView.VisitState != expedition.VisitVisited {
 		testingContext.Fatalf("expected destination waypoint to be visited via Location, got %q", destView.VisitState)
 	}
-	if len(destView.Transitions) != 1 || destView.Transitions[0].To != "Caspian Explorer" {
-		testingContext.Fatalf("expected single disconnected-jump leg to record Caspian Explorer ship transition, got %+v", destView.Transitions)
+	destDetails, destDetailsError := expedition.Details(databaseConnection, destinationWaypoint.ID, proj)
+	if destDetailsError != nil {
+		testingContext.Fatalf("Details for destination waypoint failed: %v", destDetailsError)
+	}
+	if len(destDetails.ShipsUsed) != 1 || destDetails.ShipsUsed[0] != "Caspian Explorer" {
+		testingContext.Fatalf("expected single disconnected-jump leg to record Caspian Explorer flown, got %+v", destDetails.ShipsUsed)
 	}
 	if destView.VisitCount != 2 {
 		testingContext.Fatalf("expected VisitCount=2 (1 FSDJump + 1 recovered disconnect jump), got %d", destView.VisitCount)
@@ -1450,5 +1458,51 @@ func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
 	}
 	if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: originWaypoint.ID, SystemName: &newSystem}); err == nil {
 		testingContext.Fatalf("expected active expedition to reject SystemName edit on unvisited origin waypoint #1")
+	}
+}
+
+func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-06-01T10:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
+		`{"timestamp":"2026-06-01T10:05:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-06-01T10:15:00Z","event":"FSDJump","StarSystem":"Transit One","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-06-01T10:20:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"SideWinder","ShipType_Localised":"Sidewinder","ShipID":2}`,
+		`{"timestamp":"2026-06-01T10:25:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"Anaconda","ShipType_Localised":"Anaconda","ShipID":3}`,
+		`{"timestamp":"2026-06-01T10:30:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1003,"StarPos":[20,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-06-01T11:00:00Z","event":"FSDJump","StarSystem":"Transit Two","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-06-01T11:10:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"Krait_Phantom","ShipType_Localised":"Krait Phantom","ShipID":4}`,
+		`{"timestamp":"2026-06-01T11:20:00Z","event":"FSDJump","StarSystem":"Transit Three","SystemAddress":1005,"StarPos":[40,0,0],"JumpDist":10.0}`,
+	})
+
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Multi-Hull Test", "")
+	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
+	closedWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, closedWaypoint.ID, "Alpha Centauri")
+	activeWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, closedWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, activeWaypoint.ID, "Beagle Point")
+
+	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-06-01T10:05:00Z")
+	}); startError != nil {
+		testingContext.Fatal(startError)
+	}
+
+	closedDetails, closedError := expedition.Details(databaseConnection, closedWaypoint.ID, expeditionProjections)
+	if closedError != nil {
+		testingContext.Fatalf("Details for closed multi-hull leg failed: %v", closedError)
+	}
+	if strings.Join(closedDetails.ShipsUsed, "|") != "Mandalay|Anaconda" {
+		testingContext.Fatalf("closed leg ShipsUsed = %v, want [Mandalay Anaconda] (Sidewinder was never jumped)", closedDetails.ShipsUsed)
+	}
+
+	activeDetails, activeError := expedition.Details(databaseConnection, activeWaypoint.ID, expeditionProjections)
+	if activeError != nil {
+		testingContext.Fatalf("Details for active open leg failed: %v", activeError)
+	}
+	if strings.Join(activeDetails.ShipsUsed, "|") != "Anaconda|Krait Phantom" {
+		testingContext.Fatalf("active open leg ShipsUsed = %v, want [Anaconda Krait Phantom]", activeDetails.ShipsUsed)
 	}
 }

@@ -73,9 +73,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           legModeId: 1,
           legModeName: 'Travel',
           legModeColor: '#FF7100',
-          transitions: [
-            { kind: 'ship', to: 'Krait Phantom' },
-          ],
         },
         {
           row: {

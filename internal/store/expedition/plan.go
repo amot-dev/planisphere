@@ -18,9 +18,6 @@ const (
 	VisitFuture  = "future"
 )
 
-// Transition is a ship switch that happened during a leg.
-type Transition = replay.ShipTransition
-
 // GECRef links a system to an EDAstro Galactic Exploration Catalog entry.
 type GECRef struct {
 	ID    int64  `json:"id"`
@@ -41,10 +38,9 @@ type RowView struct {
 	VisitState        string       `json:"visitState"`
 	VisitedAtGalactic string       `json:"visitedAtGalactic"`
 	DistFromPrevLy    *float64     `json:"distFromPrevLy,omitempty"`
-	DistFromCurrentLy *float64     `json:"distFromCurrentLy,omitempty"`
-	IsNextWaypoint    bool         `json:"isNextWaypoint,omitempty"`
-	Transitions       []Transition `json:"transitions"` // ships flown during the leg arriving at this waypoint
-	LegModeID         int64        `json:"legModeId"`
+	DistFromCurrentLy *float64 `json:"distFromCurrentLy,omitempty"`
+	IsNextWaypoint    bool     `json:"isNextWaypoint,omitempty"`
+	LegModeID         int64    `json:"legModeId"`
 	LegModeName       string       `json:"legModeName"`
 	LegModeColor      string       `json:"legModeColor"`
 	GEC               *GECRef      `json:"gec,omitempty"`
@@ -76,8 +72,6 @@ type planBuildContext struct {
 	currentWaypoint    *Row
 	playerPosition     *reference.Vec3
 	nextWaypointRowID  int64
-	shipTimeline       []replay.ShipSwitch
-	jumpTimestamps     []string
 	modeTimeline       *modes.Timeline
 	modeList           []modes.Mode
 	modeByID           map[int64]modes.Mode
@@ -100,7 +94,7 @@ func (buildContext *planBuildContext) resolveMode(modeID int64) (int64, string, 
 	return 0, "Travel", "#FF7100"
 }
 
-// buildPreviousVisitMap indexes visited waypoints sorted by visit time for leg transitions.
+// buildPreviousVisitMap indexes non-origin visited waypoints sorted by visit time.
 func buildPreviousVisitMap(rows []Row) map[int64]string {
 	previousVisitByID := map[int64]string{}
 	var visitedRows []Row
@@ -135,20 +129,6 @@ func resolvePlanVisitCounts(rows []Row, expeditionProjections *Projections) (map
 		return nil, nil
 	}
 	return expeditionProjections.VisitCounts.CountsForSystems(waypointSystems)
-}
-
-func loadPlanShipContext(queryer db.Queryer, expeditionRecord Expedition, buildContext *planBuildContext, expeditionProjections *Projections) error {
-	var shipError error
-	if buildContext.shipTimeline, shipError = expeditionProjections.ShipHistory.Timeline(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp); shipError != nil {
-		return shipError
-	}
-	recoveredJumps, recoverError := expeditionProjections.RecoveredJumps.InRange(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
-	if recoverError != nil {
-		return recoverError
-	}
-	var jumpError error
-	buildContext.jumpTimestamps, jumpError = replay.QueryJumpTimestamps(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, recoveredJumps)
-	return jumpError
 }
 
 func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView, expeditionProjections *Projections) (*planBuildContext, error) {
@@ -211,12 +191,6 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 	}
 	buildContext.defaultModeID = modes.DefaultFallbackModeID(queryer)
 
-	if expeditionRecord.StartTimestamp != "" {
-		if shipContextError := loadPlanShipContext(queryer, expeditionRecord, buildContext, expeditionProjections); shipContextError != nil {
-			return nil, shipContextError
-		}
-	}
-
 	return buildContext, nil
 }
 
@@ -252,8 +226,7 @@ func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, w
 	switch rowViewItem.VisitState {
 	case VisitVisited:
 		rowViewItem.VisitedAtGalactic = reference.ToGalactic(rowItem.VisitedAt)
-		if afterTimestamp, ok := buildContext.previousVisitByID[rowItem.ID]; ok && buildContext.shipTimeline != nil {
-			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildContext.shipTimeline, buildContext.jumpTimestamps, afterTimestamp, rowItem.VisitedAt)
+		if _, hasPreviousVisit := buildContext.previousVisitByID[rowItem.ID]; hasPreviousVisit {
 			modeID := rowItem.LegModeID
 			if modeID == 0 && buildContext.modeTimeline != nil {
 				modeID = buildContext.modeTimeline.ModeAt(rowItem.VisitedAt)
@@ -265,9 +238,6 @@ func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, w
 		if untilTimestamp == "" {
 			untilTimestamp = reference.NowISO()
 		}
-		if buildContext.shipTimeline != nil {
-			rowViewItem.Transitions = replay.ExtractShipsUsedOnLeg(buildContext.shipTimeline, buildContext.jumpTimestamps, buildContext.currentWaypoint.VisitedAt, untilTimestamp)
-		}
 		var modeID int64
 		if buildContext.modeTimeline != nil {
 			modeID = buildContext.modeTimeline.ModeAt(untilTimestamp)
@@ -278,13 +248,10 @@ func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, w
 			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(rowItem.LegModeID)
 		}
 	}
-	if rowViewItem.Transitions == nil {
-		rowViewItem.Transitions = []Transition{}
-	}
 }
 
 func buildWaypointRowView(buildContext *planBuildContext, rowItem Row, waypointNumber int, previousWaypoint *Row, planView *PlanView) RowView {
-	rowViewItem := RowView{Row: rowItem, Number: waypointNumber, Transitions: []Transition{}}
+	rowViewItem := RowView{Row: rowItem, Number: waypointNumber}
 	if rowItem.FCStop && !rowItem.FCArrived && planView.NextFCStopRowID == 0 {
 		planView.NextFCStopRowID = rowItem.ID
 	}
@@ -345,8 +312,8 @@ func buildWaypointRowView(buildContext *planBuildContext, rowItem Row, waypointN
 
 // BuildPlan assembles the planner view for an expedition.
 func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expeditionProjections *Projections) (PlanView, error) {
-	if expeditionProjections == nil || expeditionProjections.VisitCounts == nil || expeditionProjections.ShipHistory == nil || expeditionProjections.RecoveredJumps == nil {
-		return PlanView{}, errors.New("expedition VisitCounts, ShipHistory, and RecoveredJumps projections are required")
+	if expeditionProjections == nil || expeditionProjections.VisitCounts == nil {
+		return PlanView{}, errors.New("expedition VisitCounts projection is required")
 	}
 	expeditionRecord, getExpeditionError := Get(queryer, expeditionID)
 	if getExpeditionError != nil {
@@ -372,7 +339,7 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expe
 	for i := range rows {
 		rowItem := rows[i]
 		if rowItem.RowType == RowRegion {
-			rowViewItem := RowView{Row: rowItem, Transitions: []Transition{}}
+			rowViewItem := RowView{Row: rowItem}
 			if region, ok := reference.RegionByID(rowItem.RegionID); ok {
 				rowViewItem.RegionName = region.Name
 			}

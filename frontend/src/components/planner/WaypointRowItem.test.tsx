@@ -195,14 +195,12 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       legModeId: 10,
       legModeName: 'Exploration',
       legModeColor: '#00D2FF',
-      transitions: [
-        { kind: 'ship', to: 'Anaconda' },
-      ],
     })
 
     const mockDetails = expedition.WaypointDetails.createFrom({
       kind: 'historical',
       number: 2,
+      shipsUsed: ['Anaconda'],
       metrics: {
         distanceLy: 120.5,
         shipDistanceLy: 120.5,

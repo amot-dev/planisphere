@@ -122,7 +122,7 @@ func ExtractShipsUsedOnLeg(
 	startIndex := sort.Search(len(jumpTimestamps), func(i int) bool { return jumpTimestamps[i] > afterTimestamp })
 	for i := startIndex; i < len(jumpTimestamps); i++ {
 		jumpTimestamp := jumpTimestamps[i]
-		if jumpTimestamp > untilTimestamp {
+		if untilTimestamp != "" && jumpTimestamp > untilTimestamp {
 			break
 		}
 		activeSwitch := shipAtTimestamp(timeline, jumpTimestamp)

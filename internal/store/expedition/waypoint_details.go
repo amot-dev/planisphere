@@ -21,6 +21,7 @@ type WaypointDetails struct {
 	ToGalactic   string                           `json:"toGalactic"`
 	Elapsed      string                           `json:"elapsed"`
 	PrevSystem   string                           `json:"prevSystem"`
+	ShipsUsed    []string                         `json:"shipsUsed"`
 	Metrics      replaystats.Metrics              `json:"metrics"`
 	Realization  replaystats.RealizationBreakdown `json:"realization"`
 }
@@ -43,6 +44,53 @@ func populateOriginWaypointDetails(dbConn *sql.DB, targetRow Row, waypointDetail
 	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: targetRow.VisitedAt}, waypointDetails)
 }
 
+func resolveLegShipsUsed(
+	dbConn *sql.DB,
+	expeditionProjections *Projections,
+	afterTimestamp, untilTimestamp string,
+	pilotedJumpCount int,
+) ([]string, error) {
+	if pilotedJumpCount <= 0 {
+		return []string{}, nil
+	}
+	shipTimeline, timelineError := expeditionProjections.ShipHistory.Timeline(afterTimestamp, untilTimestamp)
+	if timelineError != nil {
+		return nil, timelineError
+	}
+	distinctHulls := make([]string, 0, len(shipTimeline))
+	seenHulls := make(map[string]bool, len(shipTimeline))
+	for _, shipSwitch := range shipTimeline {
+		if shipSwitch.HullName != "" && !seenHulls[shipSwitch.HullName] {
+			seenHulls[shipSwitch.HullName] = true
+			distinctHulls = append(distinctHulls, shipSwitch.HullName)
+		}
+	}
+	if len(distinctHulls) == 0 {
+		return []string{}, nil
+	}
+	// When a single hull was already active at leg start and piloted jumps occurred,
+	// every piloted jump on the leg belongs to that hull without querying jump timestamps.
+	if len(distinctHulls) == 1 && shipTimeline[0].HullName == distinctHulls[0] && shipTimeline[0].Timestamp <= afterTimestamp {
+		return distinctHulls, nil
+	}
+	recoveredJumps, recoverError := expeditionProjections.RecoveredJumps.InRange(afterTimestamp, untilTimestamp)
+	if recoverError != nil {
+		return nil, recoverError
+	}
+	jumpTimestamps, jumpError := replay.QueryJumpTimestamps(dbConn, afterTimestamp, untilTimestamp, recoveredJumps)
+	if jumpError != nil {
+		return nil, jumpError
+	}
+	transitions := replay.ExtractShipsUsedOnLeg(shipTimeline, jumpTimestamps, afterTimestamp, untilTimestamp)
+	shipsUsed := make([]string, 0, len(transitions))
+	for _, transition := range transitions {
+		if transition.To != "" {
+			shipsUsed = append(shipsUsed, transition.To)
+		}
+	}
+	return shipsUsed, nil
+}
+
 func populateLegDetails(dbConn *sql.DB, targetRow Row, rows []Row, waypointDetails *WaypointDetails, expeditionProjections *Projections) error {
 	waypointDetails.Kind = "leg"
 	// The leg starts at the visit of the waypoint visited immediately before this one.
@@ -60,7 +108,15 @@ func populateLegDetails(dbConn *sql.DB, targetRow Row, rows []Row, waypointDetai
 	}
 	waypointDetails.From, waypointDetails.FromGalactic = afterTimestamp, reference.ToGalactic(afterTimestamp)
 	waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, reference.ToGalactic(targetRow.VisitedAt)
-	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, waypointDetails)
+	if telemetryError := populateWindowTelemetry(expeditionProjections, replaystats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, waypointDetails); telemetryError != nil {
+		return telemetryError
+	}
+	shipsUsed, shipsError := resolveLegShipsUsed(dbConn, expeditionProjections, afterTimestamp, targetRow.VisitedAt, waypointDetails.Metrics.Jumps)
+	if shipsError != nil {
+		return shipsError
+	}
+	waypointDetails.ShipsUsed = shipsUsed
+	return nil
 }
 
 func formatLegElapsed(fromTimestamp, toTimestamp string) string {
@@ -80,8 +136,8 @@ func formatLegElapsed(fromTimestamp, toTimestamp string) string {
 
 // Details computes the drawer content for a visited or active current waypoint row.
 func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (WaypointDetails, error) {
-	if expeditionProjections == nil || expeditionProjections.TimeRangeStats == nil {
-		return WaypointDetails{}, errors.New("expedition TimeRangeStats projection is required")
+	if expeditionProjections == nil || expeditionProjections.TimeRangeStats == nil || expeditionProjections.ShipHistory == nil || expeditionProjections.RecoveredJumps == nil {
+		return WaypointDetails{}, errors.New("expedition TimeRangeStats, ShipHistory, and RecoveredJumps projections are required")
 	}
 	targetRow, rowError := GetRow(dbConn, rowID)
 	if rowError != nil {
@@ -132,8 +188,9 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 	}
 
 	waypointDetails := WaypointDetails{
-		RowID:  rowID,
-		Number: selfNumber,
+		RowID:     rowID,
+		Number:    selfNumber,
+		ShipsUsed: []string{},
 	}
 
 	if selfNumber == 1 {

@@ -633,7 +633,6 @@ export namespace expedition {
 	    distFromPrevLy?: number;
 	    distFromCurrentLy?: number;
 	    isNextWaypoint?: boolean;
-	    transitions: replay.ShipTransition[];
 	    legModeId: number;
 	    legModeName: string;
 	    legModeColor: string;
@@ -656,7 +655,6 @@ export namespace expedition {
 	        this.distFromPrevLy = source["distFromPrevLy"];
 	        this.distFromCurrentLy = source["distFromCurrentLy"];
 	        this.isNextWaypoint = source["isNextWaypoint"];
-	        this.transitions = this.convertValues(source["transitions"], replay.ShipTransition);
 	        this.legModeId = source["legModeId"];
 	        this.legModeName = source["legModeName"];
 	        this.legModeColor = source["legModeColor"];
@@ -775,6 +773,7 @@ export namespace expedition {
 	    toGalactic: string;
 	    elapsed: string;
 	    prevSystem: string;
+	    shipsUsed: string[];
 	    metrics: stats.Metrics;
 	    realization: realization.Breakdown;
 	
@@ -793,6 +792,7 @@ export namespace expedition {
 	        this.toGalactic = source["toGalactic"];
 	        this.elapsed = source["elapsed"];
 	        this.prevSystem = source["prevSystem"];
+	        this.shipsUsed = source["shipsUsed"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
 	    }
@@ -963,24 +963,6 @@ export namespace replay {
 	        this.firstGalactic = source["firstGalactic"];
 	        this.lastGalactic = source["lastGalactic"];
 	        this.eventCount = source["eventCount"];
-	    }
-	}
-	export class ShipTransition {
-	    kind: string;
-	    at: string;
-	    atGalactic: string;
-	    to: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ShipTransition(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.kind = source["kind"];
-	        this.at = source["at"];
-	        this.atGalactic = source["atGalactic"];
-	        this.to = source["to"];
 	    }
 	}
 

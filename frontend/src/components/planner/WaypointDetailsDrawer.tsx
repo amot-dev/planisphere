@@ -54,11 +54,7 @@ export function WaypointDetailsDrawer({
   const realization = details.realization
 
   const shipsUsed = Array.from(
-    new Set(
-      (rowView.transitions ?? [])
-        .filter((transition) => transition.kind === 'ship' && transition.to)
-        .map((transition) => transition.to),
-    ),
+    new Set((details.shipsUsed ?? []).filter((ship) => ship.trim() !== '')),
   )
 
   return (
