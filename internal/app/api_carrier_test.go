@@ -224,8 +224,25 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 	}
 
 	// Start and complete expedition over exactly 7 days, and log 2 carrier jumps consuming 150t of tritium.
-	startExpeditionAtOrigin(testingContext, testApp, expeditionRecord.ID, "Sol")
-	if err := expedition.CompleteTx(testApp.db, expeditionRecord.ID, "2026-01-08T00:00:00Z"); err != nil {
+	originRowID := startExpeditionAtOrigin(testingContext, testApp, expeditionRecord.ID, "Sol")
+	destinationRow, insertErr := testApp.AddRow(expeditionRecord.ID, originRowID, expedition.RowWaypoint, 0)
+	if insertErr != nil {
+		testingContext.Fatalf("AddRow failed: %v", insertErr)
+	}
+	destinationName := "Alpha Centauri"
+	if updateErr := testApp.UpdateRow(expedition.RowPatch{ID: destinationRow.ID, SystemName: &destinationName}); updateErr != nil {
+		testingContext.Fatalf("UpdateRow destination failed: %v", updateErr)
+	}
+	if _, execErr := testApp.db.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
+		 VALUES ('ev-carrier-cost-dest', '2026-01-08T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2026-01-08T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2026-01-08T00:00:00Z')`,
+	); execErr != nil {
+		testingContext.Fatalf("insert destination arrival failed: %v", execErr)
+	}
+	if _, reevalErr := expedition.ReevaluateTx(testApp.db, expeditionRecord.ID); reevalErr != nil {
+		testingContext.Fatalf("ReevaluateTx failed: %v", reevalErr)
+	}
+	if err := expedition.CompleteTx(testApp.db, expeditionRecord.ID); err != nil {
 		testingContext.Fatalf("Complete failed: %v", err)
 	}
 	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 490.0, 80); err != nil {

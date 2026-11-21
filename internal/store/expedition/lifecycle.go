@@ -65,8 +65,8 @@ func StartTx(dbConn *sql.DB, expeditionID int64, startTimestamp string) error {
 	})
 }
 
-// Complete ends the expedition at endTimestamp (now when empty).
-func Complete(transaction *sql.Tx, expeditionID int64, endTimestamp string) error {
+// Complete ends the expedition at the final visited waypoint's arrival timestamp.
+func Complete(transaction *sql.Tx, expeditionID int64) error {
 	expeditionRecord, getError := Get(transaction, expeditionID)
 	if getError != nil {
 		return getError
@@ -74,22 +74,37 @@ func Complete(transaction *sql.Tx, expeditionID int64, endTimestamp string) erro
 	if expeditionRecord.Status != StatusActive || expeditionRecord.StartTimestamp == "" {
 		return errors.New("only a started, active expedition can be completed")
 	}
-	normalizedEndTimestamp := reference.NowISO()
-	if endTimestamp != "" {
-		var parseError error
-		if normalizedEndTimestamp, parseError = reference.NormalizeISO(endTimestamp); parseError != nil {
-			return parseError
-		}
-	}
-	if normalizedEndTimestamp <= expeditionRecord.StartTimestamp {
-		return errors.New("end must be after the expedition start")
-	}
 	activeCarrierRoute, routeError := GetActiveCarrierRoute(transaction, expeditionID)
 	if routeError != nil {
 		return routeError
 	}
 	if activeCarrierRoute != nil {
 		return errors.New("close or finish the active fleet carrier route before completing the expedition")
+	}
+	rows, listError := ListRows(transaction, expeditionID)
+	if listError != nil {
+		return listError
+	}
+	visitedWaypointCount := 0
+	finalVisitedAt := ""
+	for _, rowItem := range rows {
+		if !rowItem.IsWaypoint() || rowItem.VisitedAt == "" {
+			continue
+		}
+		visitedWaypointCount++
+		if rowItem.VisitedAt > finalVisitedAt {
+			finalVisitedAt = rowItem.VisitedAt
+		}
+	}
+	if visitedWaypointCount < 2 || finalVisitedAt == "" {
+		return errors.New("at least 2 visited waypoints are required to complete an expedition")
+	}
+	normalizedEndTimestamp, parseError := reference.NormalizeISO(finalVisitedAt)
+	if parseError != nil {
+		return parseError
+	}
+	if normalizedEndTimestamp <= expeditionRecord.StartTimestamp {
+		return errors.New("end must be after the expedition start")
 	}
 	if pruneError := PruneEmptyRows(transaction, expeditionID); pruneError != nil {
 		return pruneError
@@ -102,9 +117,9 @@ func Complete(transaction *sql.Tx, expeditionID int64, endTimestamp string) erro
 }
 
 // CompleteTx runs Complete inside a database transaction on dbConn.
-func CompleteTx(dbConn *sql.DB, expeditionID int64, endTimestamp string) error {
+func CompleteTx(dbConn *sql.DB, expeditionID int64) error {
 	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return Complete(transaction, expeditionID, endTimestamp)
+		return Complete(transaction, expeditionID)
 	})
 }
 

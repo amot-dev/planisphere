@@ -257,6 +257,11 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 	// Header 3: Empty header at end (no waypoints at all)
 	_ = mustInsert(t, dbConn, expeditionRecord.ID, emptyWaypoint2.ID, expedition.RowRegion, 3)
 
+	ingestJournalLines(t, dbConn, []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-01-18T20:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
+	})
+
 	// Start expedition
 	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:00:00Z")
@@ -266,7 +271,7 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 
 	// Complete expedition
 	if completeTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Complete(transaction, expeditionRecord.ID, "2026-01-18T20:00:00Z")
+		return expedition.Complete(transaction, expeditionRecord.ID)
 	}); completeTxError != nil {
 		t.Fatal(completeTxError)
 	}
@@ -339,7 +344,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 	alpha := mustInsert(t, dbConn, exp.ID, originRow.ID, expedition.RowWaypoint, 0)
 	setRowSystemName(t, dbConn, alpha.ID, "Alpha Centauri")
 
-	// Start at 2026-01-18T10:00:00Z, complete at 2026-01-21T10:00:00Z
+	// Start at 2026-01-18T10:00:00Z, complete at final visited waypoint (2026-01-20T16:00:00Z)
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		return expedition.Start(transaction, exp.ID, "2026-01-18T10:00:00Z")
 	})
@@ -348,7 +353,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		return err
 	})
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Complete(transaction, exp.ID, "2026-01-21T10:00:00Z")
+		return expedition.Complete(transaction, exp.ID)
 	})
 
 	// Build plan
@@ -1253,7 +1258,7 @@ func TestCompleteRejectsActiveCarrierRouteAndDeleteClearsRoute(testingContext *t
 		testingContext.Fatal(saveRouteError)
 	}
 
-	completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID, "")
+	completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID)
 	if completeError == nil || completeError.Error() != "close or finish the active fleet carrier route before completing the expedition" {
 		testingContext.Fatalf("expected CompleteTx to reject active carrier route, got %v", completeError)
 	}
@@ -1302,10 +1307,14 @@ func TestUpdateRowTxRollbackAndCompletedRestrictions(testingContext *testing.T) 
 		testingContext.Fatalf("expected UpdateRowTx to roll back POIName on invalid RegionID, got %+v", reloadedRegion)
 	}
 
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-01-18T12:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,100],"JumpDist":50.0}`,
+	})
 	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z"); startError != nil {
 		testingContext.Fatal(startError)
 	}
-	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID, "2026-01-18T12:00:00Z"); completeError != nil {
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
 		testingContext.Fatal(completeError)
 	}
 
@@ -1504,5 +1513,75 @@ func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
 	}
 	if strings.Join(activeDetails.ShipsUsed, "|") != "Anaconda|Krait Phantom" {
 		testingContext.Fatalf("active open leg ShipsUsed = %v, want [Anaconda Krait Phantom]", activeDetails.ShipsUsed)
+	}
+}
+
+func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Historical Completion Test", "")
+	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
+	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, secondWaypoint.ID, "Alpha Centauri")
+	thirdWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, secondWaypoint.ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, thirdWaypoint.ID, "Beagle Point")
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2022-05-01T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
+	})
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2022-05-01T10:00:00Z"); startError != nil {
+		testingContext.Fatalf("StartTx: %v", startError)
+	}
+
+	// Only Waypoint #1 is visited, so Complete must reject.
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError == nil || completeError.Error() != "at least 2 visited waypoints are required to complete an expedition" {
+		testingContext.Fatalf("expected CompleteTx to require at least 2 visited waypoints, got %v", completeError)
+	}
+
+	// Arrive at Alpha Centauri and then make an unrelated later jump; Beagle Point remains unvisited.
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at) VALUES
+		 ('ev-complete-wp2', '2022-05-01T12:30:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2022-05-01T12:30:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2022-05-01T12:30:00Z'),
+		 ('ev-complete-unrelated', '2022-05-05T18:00:00Z', 'FSDJump', 'Unrelated System', 9999, '{"timestamp":"2022-05-05T18:00:00Z","event":"FSDJump","StarSystem":"Unrelated System","SystemAddress":9999,"StarPos":[50,0,0],"JumpDist":49.0}', 'test.log', '2022-05-05T18:00:00Z')`,
+	); execError != nil {
+		testingContext.Fatalf("insert second waypoint and unrelated jump: %v", execError)
+	}
+	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
+		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
+	}
+
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx after second waypoint: %v", completeError)
+	}
+	completedRecord, getError := expedition.Get(databaseConnection, expeditionRecord.ID)
+	if getError != nil {
+		testingContext.Fatalf("Get completed expedition: %v", getError)
+	}
+	if completedRecord.Status != expedition.StatusCompleted || completedRecord.EndTimestamp != "2022-05-01T12:30:00Z" {
+		testingContext.Fatalf("completed expedition = (%q, %q), want (%q, %q)",
+			completedRecord.Status, completedRecord.EndTimestamp, expedition.StatusCompleted, "2022-05-01T12:30:00Z")
+	}
+
+	// Reopening and visiting the final waypoint advances the completion timestamp to that arrival.
+	if reopenError := expedition.ReopenTx(databaseConnection, expeditionRecord.ID); reopenError != nil {
+		testingContext.Fatalf("ReopenTx: %v", reopenError)
+	}
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at) VALUES
+		 ('ev-complete-wp3', '2022-05-10T09:15:00Z', 'FSDJump', 'Beagle Point', 1003, '{"timestamp":"2022-05-10T09:15:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":60.0}', 'test.log', '2022-05-10T09:15:00Z')`,
+	); execError != nil {
+		testingContext.Fatalf("insert third waypoint arrival: %v", execError)
+	}
+	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
+		testingContext.Fatalf("ReevaluateTx after reopen: %v", reevalError)
+	}
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx after third waypoint: %v", completeError)
+	}
+	finalRecord, getFinalError := expedition.Get(databaseConnection, expeditionRecord.ID)
+	if getFinalError != nil {
+		testingContext.Fatalf("Get final completed expedition: %v", getFinalError)
+	}
+	if finalRecord.EndTimestamp != "2022-05-10T09:15:00Z" {
+		testingContext.Fatalf("final completed EndTimestamp = %q, want %q", finalRecord.EndTimestamp, "2022-05-10T09:15:00Z")
 	}
 }

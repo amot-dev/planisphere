@@ -117,6 +117,27 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	expeditionID := createAndStartExpedition(testingContext, testApp, "Cache Key Test", "Sol")
+	initialPlan, initialPlanError := testApp.GetPlan(expeditionID)
+	if initialPlanError != nil || len(initialPlan.Rows) == 0 {
+		testingContext.Fatalf("initial GetPlan: len=%d err=%v", len(initialPlan.Rows), initialPlanError)
+	}
+	secondRow, insertError := testApp.AddRow(expeditionID, initialPlan.Rows[0].Row.ID, expedition.RowWaypoint, 0)
+	if insertError != nil {
+		testingContext.Fatalf("AddRow: %v", insertError)
+	}
+	secondSystem := "Alpha Centauri"
+	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: secondRow.ID, SystemName: &secondSystem}); updateError != nil {
+		testingContext.Fatalf("UpdateRow second waypoint: %v", updateError)
+	}
+	if _, execError := testApp.db.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
+		 VALUES ('ev-cache-key-dest', '2026-01-02T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2026-01-02T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2026-01-02T00:00:00Z')`,
+	); execError != nil {
+		testingContext.Fatalf("insert destination arrival: %v", execError)
+	}
+	if _, reevalError := expedition.ReevaluateTx(testApp.db, expeditionID); reevalError != nil {
+		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
+	}
 
 	testApp.warmInitialStats()
 
@@ -181,6 +202,9 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	}
 	if completedSidebar.EndIsNow {
 		testingContext.Fatalf("expected completed expedition sidebar EndIsNow=false")
+	}
+	if completedSidebar.End != "2026-01-02T00:00:00Z" {
+		testingContext.Fatalf("expected completed expedition sidebar End=2026-01-02T00:00:00Z, got %q", completedSidebar.End)
 	}
 	sizeAfterCompletedQuery := testApp.timeRangeStats.CachedCount()
 	if sizeAfterCompletedQuery != 3 {

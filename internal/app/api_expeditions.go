@@ -440,9 +440,9 @@ func (app *App) StartExpedition(expeditionID int64, timestamp string) error {
 	return app.lifecycle(expeditionID, func() error { return expedition.StartTx(app.db, expeditionID, timestamp) })
 }
 
-// CompleteExpedition ends the expedition now.
+// CompleteExpedition ends the expedition at the final visited waypoint's arrival timestamp.
 func (app *App) CompleteExpedition(expeditionID int64) error {
-	return app.lifecycle(expeditionID, func() error { return expedition.CompleteTx(app.db, expeditionID, "") })
+	return app.lifecycle(expeditionID, func() error { return expedition.CompleteTx(app.db, expeditionID) })
 }
 
 // ReopenExpedition makes a completed expedition active again.
