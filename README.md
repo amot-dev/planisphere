@@ -33,7 +33,7 @@ When an expedition spans months, you don't always fly the same way. Flight Modes
 ### Expedition Planning
 Plan your route stop by stop without juggling external spreadsheets.
 
-- **Multiple Expeditions and Cloning:** Create and switch between multiple expeditions, or clone an existing expedition (preserving its waypoints and region headers) into a fresh expedition.
+- **Multiple Expeditions, Bulk Import, and Cloning:** Create and switch between multiple expeditions, optionally bulk-import waypoints from a pasted star system list or a `.txt` / Spansh `.csv` file when creating a new expedition (automatically resolving known local coordinates and cached GEC POIs), or clone an existing expedition (preserving its waypoints and region headers) into a fresh expedition.
 - **Waypoints and Region Headers:** Build your expedition with system names, coordinates, and personal notes, and organize stops with Region Headers that automatically suggest the region matching your next waypoint and prioritize adjacent regions.
 - **Coordinate Resolution and Visit History:** Waypoint coordinates resolve from your local journal history first and fall back to EDSM for unvisited systems. The status indicator shows the system's galactic region, coordinates, and how many times you have visited it (`Never Visited` via EDSM or visit count via Journal), automatically switching from EDSM to Journal and incrementing your visit count when you jump into the system.
 - **Built-in POI Catalog and External Links:** Systems matching EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP) are flagged automatically alongside configurable one-click waypoint links to Inara, EDSM (defaulting to `If No GEC`), and GEC.

@@ -18,6 +18,10 @@ export function BrowseJournalDir() {
   return window['go']['app']['App']['BrowseJournalDir']();
 }
 
+export function BrowseWaypointImportFile() {
+  return window['go']['app']['App']['BrowseWaypointImportFile']();
+}
+
 export function ClearActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['ClearActiveCarrierRoute'](arg1);
 }
@@ -36,6 +40,10 @@ export function CompleteSetup() {
 
 export function CreateExpedition(arg1, arg2) {
   return window['go']['app']['App']['CreateExpedition'](arg1, arg2);
+}
+
+export function CreateExpeditionWithWaypoints(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateExpeditionWithWaypoints'](arg1, arg2, arg3);
 }
 
 export function CreateMode(arg1, arg2, arg3) {

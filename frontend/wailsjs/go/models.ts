@@ -340,6 +340,20 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class WaypointImportFile {
+	    fileName: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WaypointImportFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fileName = source["fileName"];
+	        this.content = source["content"];
+	    }
+	}
 
 }
 

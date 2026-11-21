@@ -198,19 +198,32 @@ func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
 	})
 }
 
-// applyMissingPOIFromGEC looks up systemName and systemAddress in the GEC catalog,
-// HTML-unescapes the matched POI name, stores it on rowID when poi_name is still
-// blank, and returns the persisted name (or "" when none matched or persisted).
+// lookupGECPOIName returns the HTML-unescaped name of the primary cached GEC or
+// GMP POI matching systemName or systemAddress, or "" when none matches.
 // Caller must hold app.dbMu.RLock.
-func (app *App) applyMissingPOIFromGEC(rowID int64, systemName string, systemAddress int64) string {
-	if app.db == nil || app.gec == nil || systemName == "" {
+func (app *App) lookupGECPOIName(systemName string, systemAddress int64) string {
+	if app.gec == nil || systemName == "" {
 		return ""
 	}
 	matchedPOIs := app.gec.Lookup(systemName, systemAddress)
 	if len(matchedPOIs) == 0 || strings.TrimSpace(matchedPOIs[0].Name) == "" {
 		return ""
 	}
-	poiName := html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
+	return html.UnescapeString(strings.TrimSpace(matchedPOIs[0].Name))
+}
+
+// applyMissingPOIFromGEC looks up systemName and systemAddress in the GEC catalog,
+// HTML-unescapes the matched POI name, stores it on rowID when poi_name is still
+// blank, and returns the persisted name (or "" when none matched or persisted).
+// Caller must hold app.dbMu.RLock.
+func (app *App) applyMissingPOIFromGEC(rowID int64, systemName string, systemAddress int64) string {
+	if app.db == nil {
+		return ""
+	}
+	poiName := app.lookupGECPOIName(systemName, systemAddress)
+	if poiName == "" {
+		return ""
+	}
 	if execError := expedition.SetRowPOIIfBlank(app.db, rowID, poiName); execError != nil {
 		log.Printf("update poi name for row %d: %v", rowID, execError)
 		return ""

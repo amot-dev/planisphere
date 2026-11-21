@@ -53,25 +53,40 @@ func NewResolver(dbConn *sql.DB, online func() bool) *Resolver {
 	}
 }
 
+// ResolveLocal looks a system up offline from the local journal archive and
+// shared system cache, returning (nil, nil) when no cached coordinates exist.
+func (resolver *Resolver) ResolveLocal(name string) (*Info, error) {
+	normalizedName := strings.Join(strings.Fields(name), " ")
+	if normalizedName == "" {
+		return nil, nil
+	}
+	if journalInfo, journalError := FromJournal(resolver.DB, normalizedName); journalError != nil || journalInfo != nil {
+		if journalInfo != nil {
+			// Enrich with a cached EDSM id when available.
+			if cachedInfo, _ := resolver.fromCache(normalizedName); cachedInfo != nil && cachedInfo.EDSMID != 0 {
+				journalInfo.EDSMID = cachedInfo.EDSMID
+			}
+		}
+		return journalInfo, journalError
+	}
+	cachedInfo, cacheError := resolver.fromCache(normalizedName)
+	if cacheError != nil {
+		return nil, cacheError
+	}
+	if cachedInfo != nil && cachedInfo.Pos != nil {
+		return cachedInfo, nil
+	}
+	return nil, nil
+}
+
 // Resolve looks a system up (journal -> cache -> EDSM).
 func (resolver *Resolver) Resolve(ctx context.Context, name string) (*Info, error) {
 	name = strings.Join(strings.Fields(name), " ")
 	if name == "" {
 		return nil, ErrorNotFound
 	}
-	if journalInfo, journalError := FromJournal(resolver.DB, name); journalError != nil || journalInfo != nil {
-		if journalInfo != nil {
-			// Enrich with a cached EDSM id when available.
-			if cachedInfo, _ := resolver.fromCache(name); cachedInfo != nil && cachedInfo.EDSMID != 0 {
-				journalInfo.EDSMID = cachedInfo.EDSMID
-			}
-		}
-		return journalInfo, journalError
-	}
-	if cachedInfo, cacheError := resolver.fromCache(name); cacheError != nil {
-		return nil, cacheError
-	} else if cachedInfo != nil && cachedInfo.Pos != nil {
-		return cachedInfo, nil
+	if localInfo, localError := resolver.ResolveLocal(name); localError != nil || localInfo != nil {
+		return localInfo, localError
 	}
 	if resolver.Online != nil && !resolver.Online() {
 		return nil, fmt.Errorf("%w (online lookups disabled)", ErrorNotFound)

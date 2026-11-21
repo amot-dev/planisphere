@@ -14,6 +14,8 @@ export function BrowseEDDiscoveryDB():Promise<string>;
 
 export function BrowseJournalDir():Promise<string>;
 
+export function BrowseWaypointImportFile():Promise<app.WaypointImportFile>;
+
 export function ClearActiveCarrierRoute(arg1:number):Promise<void>;
 
 export function CloneExpedition(arg1:number):Promise<expedition.Expedition>;
@@ -23,6 +25,8 @@ export function CompleteExpedition(arg1:number):Promise<void>;
 export function CompleteSetup():Promise<app.Settings>;
 
 export function CreateExpedition(arg1:string,arg2:string):Promise<expedition.Expedition>;
+
+export function CreateExpeditionWithWaypoints(arg1:string,arg2:string,arg3:Array<string>):Promise<expedition.Expedition>;
 
 export function CreateMode(arg1:string,arg2:string,arg3:string):Promise<modes.Mode>;
 

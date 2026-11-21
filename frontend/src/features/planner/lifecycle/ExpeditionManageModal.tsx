@@ -1,12 +1,19 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
+  BrowseWaypointImportFile,
   CloneExpedition,
   CreateExpedition,
+  CreateExpeditionWithWaypoints,
   DeleteExpedition,
   UpdateExpedition,
 } from '../../../api/backend'
 import { expedition } from '../../../api/models'
 import { ModalShell } from '../../../components/ui/ModalShell'
+import {
+  deriveExpeditionNameFromFilename,
+  parseWaypointImportText,
+} from '../../../domain/waypointImport'
+import { WaypointImportSection } from './WaypointImportSection'
 
 /**
  * ExpeditionManageModalProps defines the saved expedition list, active selection,
@@ -31,11 +38,21 @@ export function ExpeditionManageModal({
 }: ExpeditionManageModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [importExpanded, setImportExpanded] = useState(false)
+  const [rawImportText, setRawImportText] = useState('')
+  const [loadedFileNote, setLoadedFileNote] = useState('')
+  const [loadingFile, setLoadingFile] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+
+  const parsedImport = useMemo(() => parseWaypointImportText(rawImportText), [rawImportText])
+  const hasRawImportText = rawImportText.trim().length > 0
+  const hasInvalidImport = hasRawImportText && parsedImport.systems.length === 0
+  const stagedWaypointCount = parsedImport.systems.length
 
   async function runExpeditionAction(action: () => Promise<void>) {
     setErrorMessage('')
@@ -46,14 +63,73 @@ export function ExpeditionManageModal({
     }
   }
 
+  async function handleLoadImportFile() {
+    setErrorMessage('')
+    setLoadingFile(true)
+    try {
+      const selectedFile = await BrowseWaypointImportFile()
+      if (!selectedFile?.fileName && !selectedFile?.content) {
+        return
+      }
+      const parsedFile = parseWaypointImportText(selectedFile.content ?? '')
+      if (parsedFile.systems.length === 0) {
+        setErrorMessage(`No star systems found in "${selectedFile.fileName}".`)
+        return
+      }
+      setRawImportText(parsedFile.systems.join('\n'))
+      const duplicateNote =
+        parsedFile.collapsedDuplicateCount > 0
+          ? ` (${parsedFile.collapsedDuplicateCount} duplicate body ${
+              parsedFile.collapsedDuplicateCount === 1 ? 'row' : 'rows'
+            } collapsed)`
+          : ''
+      setLoadedFileNote(`Loaded from ${selectedFile.fileName}${duplicateNote}`)
+      if (!name.trim() && selectedFile.fileName) {
+        setName(deriveExpeditionNameFromFilename(selectedFile.fileName))
+      }
+    } catch (loadError) {
+      setErrorMessage(String(loadError))
+    } finally {
+      setLoadingFile(false)
+    }
+  }
+
+  function handleChangeImportText(nextText: string) {
+    setRawImportText(nextText)
+    if (loadedFileNote) {
+      setLoadedFileNote('')
+    }
+  }
+
+  function handleClearImportText() {
+    setRawImportText('')
+    setLoadedFileNote('')
+    setErrorMessage('')
+  }
+
   function handleCreate() {
-    if (!name.trim()) return
+    if (!name.trim() || creating || loadingFile || hasInvalidImport) return
     return runExpeditionAction(async () => {
-      const created = await CreateExpedition(name.trim(), description.trim())
-      setName('')
-      setDescription('')
-      onSelect(created.id)
-      onClose()
+      setCreating(true)
+      try {
+        const created =
+          parsedImport.systems.length > 0
+            ? await CreateExpeditionWithWaypoints(
+                name.trim(),
+                description.trim(),
+                parsedImport.systems,
+              )
+            : await CreateExpedition(name.trim(), description.trim())
+        setName('')
+        setDescription('')
+        setRawImportText('')
+        setLoadedFileNote('')
+        setImportExpanded(false)
+        onSelect(created.id)
+        onClose()
+      } finally {
+        setCreating(false)
+      }
     })
   }
 
@@ -110,13 +186,46 @@ export function ExpeditionManageModal({
             className="bg-ed-void border border-ed-border px-2.5 py-1.5 text-ed-text-main"
           />
         </div>
-        <div className="flex justify-end">
+        {importExpanded && (
+          <WaypointImportSection
+            rawImportText={rawImportText}
+            parsedImport={parsedImport}
+            loadedFileNote={loadedFileNote}
+            loadingFile={loadingFile}
+            disabled={creating}
+            onChangeText={handleChangeImportText}
+            onLoadFile={() => void handleLoadImportFile()}
+            onClear={handleClearImportText}
+          />
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
-            onClick={handleCreate}
-            className="ed-btn-primary"
+            disabled={creating}
+            onClick={() => setImportExpanded((previous) => !previous)}
+            className="ed-btn"
           >
-            CREATE EXPEDITION
+            {importExpanded
+              ? 'HIDE IMPORT'
+              : stagedWaypointCount > 0
+                ? `+ IMPORT WAYPOINTS (${stagedWaypointCount})`
+                : '+ IMPORT WAYPOINTS'}
+          </button>
+          <button
+            type="button"
+            disabled={!name.trim() || creating || loadingFile || hasInvalidImport}
+            onClick={handleCreate}
+            className={`ed-btn-primary ${
+              !name.trim() || creating || loadingFile || hasInvalidImport
+                ? 'opacity-40 cursor-not-allowed hover:bg-transparent'
+                : ''
+            }`}
+          >
+            {creating
+              ? 'CREATING...'
+              : stagedWaypointCount > 0
+                ? `CREATE AND IMPORT (${stagedWaypointCount})`
+                : 'CREATE EXPEDITION'}
           </button>
         </div>
       </div>

@@ -138,12 +138,79 @@ func Get(queryer db.Queryer, expeditionID int64) (Expedition, error) {
 	return expeditionRecord, queryError
 }
 
-// Create adds an expedition in planning status with one empty waypoint row.
-func Create(dbConn *sql.DB, name, description string) (Expedition, error) {
+// SeedWaypoint describes a waypoint row to seed when creating a new expedition,
+// optionally carrying pre-resolved local coordinates and GEC POI metadata.
+type SeedWaypoint struct {
+	SystemName    string
+	POIName       string
+	SystemAddress int64
+	EDSMID        int64
+	HasCoords     bool
+	X             float64
+	Y             float64
+	Z             float64
+	CoordsSource  string
+}
+
+func normalizeSeedWaypoints(waypoints []SeedWaypoint) []SeedWaypoint {
+	normalizedWaypoints := make([]SeedWaypoint, 0, len(waypoints))
+	for _, waypoint := range waypoints {
+		normalizedSystemName := strings.Join(strings.Fields(waypoint.SystemName), " ")
+		if normalizedSystemName == "" {
+			continue
+		}
+		waypoint.SystemName = normalizedSystemName
+		waypoint.POIName = strings.TrimSpace(waypoint.POIName)
+		normalizedWaypoints = append(normalizedWaypoints, waypoint)
+	}
+	return normalizedWaypoints
+}
+
+func insertSeedWaypoints(transaction *sql.Tx, expeditionID int64, waypoints []SeedWaypoint, timestamp string) error {
+	if len(waypoints) == 0 {
+		_, rowError := transaction.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, created_at, updated_at) VALUES(?,1,?,?,?)`,
+			expeditionID, RowWaypoint, timestamp, timestamp)
+		return rowError
+	}
+	rowInsertStatement, prepareError := transaction.Prepare(`INSERT INTO expedition_rows(
+		expedition_id, position, row_type, system_name, poi_name, system_address, edsm_id,
+		x, y, z, coords_source, created_at, updated_at
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+	if prepareError != nil {
+		return fmt.Errorf("prepare seed waypoint insert: %w", prepareError)
+	}
+	defer rowInsertStatement.Close()
+
+	for index, waypoint := range waypoints {
+		var systemAddressValue, edsmIDValue, xCoord, yCoord, zCoord any
+		if waypoint.SystemAddress != 0 {
+			systemAddressValue = waypoint.SystemAddress
+		}
+		if waypoint.EDSMID != 0 {
+			edsmIDValue = waypoint.EDSMID
+		}
+		if waypoint.HasCoords {
+			xCoord, yCoord, zCoord = waypoint.X, waypoint.Y, waypoint.Z
+		}
+		if _, insertError := rowInsertStatement.Exec(
+			expeditionID, index+1, RowWaypoint, waypoint.SystemName, waypoint.POIName,
+			systemAddressValue, edsmIDValue, xCoord, yCoord, zCoord, waypoint.CoordsSource,
+			timestamp, timestamp,
+		); insertError != nil {
+			return fmt.Errorf("insert seed waypoint %d: %w", index+1, insertError)
+		}
+	}
+	return nil
+}
+
+// CreateWithWaypoints adds an expedition in planning status seeded with waypoints
+// (or one empty waypoint row when waypoints has no non-empty entries).
+func CreateWithWaypoints(dbConn *sql.DB, name, description string, waypoints []SeedWaypoint) (Expedition, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return Expedition{}, errors.New("expedition name is required")
 	}
+	normalizedWaypoints := normalizeSeedWaypoints(waypoints)
 	now := reference.NowISO()
 	var expeditionID int64
 	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
@@ -152,15 +219,22 @@ func Create(dbConn *sql.DB, name, description string) (Expedition, error) {
 		if insertError != nil {
 			return insertError
 		}
-		expeditionID, _ = insertResult.LastInsertId()
-		_, rowError := transaction.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, created_at, updated_at) VALUES(?,1,?,?,?)`,
-			expeditionID, RowWaypoint, now, now)
-		return rowError
+		var idError error
+		expeditionID, idError = insertResult.LastInsertId()
+		if idError != nil {
+			return fmt.Errorf("read created expedition id: %w", idError)
+		}
+		return insertSeedWaypoints(transaction, expeditionID, normalizedWaypoints, now)
 	})
 	if txError != nil {
 		return Expedition{}, txError
 	}
 	return Get(dbConn, expeditionID)
+}
+
+// Create adds an expedition in planning status with one empty waypoint row.
+func Create(dbConn *sql.DB, name, description string) (Expedition, error) {
+	return CreateWithWaypoints(dbConn, name, description, nil)
 }
 
 // UpdateMeta renames an expedition or edits its description.
