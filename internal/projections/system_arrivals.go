@@ -37,9 +37,16 @@ func NewSystemArrivals(dbConn *sql.DB, bus *projection.Bus) *SystemArrivals {
 		Journal: systemArrivalsJournalEvents,
 		App:     systemArrivalsAppEvents,
 	}
+	windows := projection.NewKeyedCache[string, []Arrival](bus, "SystemArrivals", triggers)
+	windows.SetInvalidationFilter(func(observed projection.Triggers, windowKey string) bool {
+		if !observed.App.IsEmpty() {
+			return true
+		}
+		return !projection.WindowEndsBefore(windowKey, observed.EarliestTimestamp)
+	})
 	return &SystemArrivals{
 		database: dbConn,
-		windows:  projection.NewKeyedCache[string, []Arrival](bus, "SystemArrivals", triggers),
+		windows:  windows,
 	}
 }
 

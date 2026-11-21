@@ -128,6 +128,9 @@ func TestIngestFilePartialLine(t *testing.T) {
 	if firstScanResult.NewEvents != 2 {
 		t.Fatalf("expected 2 new events, got %d", firstScanResult.NewEvents)
 	}
+	if firstScanResult.EarliestTimestamp != "2026-01-18T20:01:00Z" {
+		t.Fatalf("expected first EarliestTimestamp 2026-01-18T20:01:00Z, got %q", firstScanResult.EarliestTimestamp)
+	}
 
 	var storedOffset int64
 	name := filepath.Base(logFile)
@@ -160,6 +163,9 @@ func TestIngestFilePartialLine(t *testing.T) {
 	}
 	if secondScanResult.NewEvents != 1 {
 		t.Fatalf("expected 1 new event on second pass, got %d", secondScanResult.NewEvents)
+	}
+	if secondScanResult.EarliestTimestamp != "2026-01-18T20:03:00Z" {
+		t.Fatalf("expected second EarliestTimestamp 2026-01-18T20:03:00Z, got %q", secondScanResult.EarliestTimestamp)
 	}
 
 	if err := conn.QueryRow("SELECT byte_offset FROM ingested_journals WHERE file_name = ?", name).Scan(&storedOffset); err != nil {

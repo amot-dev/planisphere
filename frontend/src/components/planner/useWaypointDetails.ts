@@ -65,7 +65,10 @@ export function useWaypointDetails(
     const requestArchiveRevision = archiveRevisionRef.current
     const requestSequence = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
     requestSeqByRowIdRef.current[rowId] = requestSequence
-    setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
+    const hasLoadedDetails = Boolean(detailsByIdRef.current[rowId])
+    if (!hasLoadedDetails) {
+      setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
+    }
     GetWaypointDetails(rowId)
       .then((details) => {
         if (
@@ -97,7 +100,7 @@ export function useWaypointDetails(
         ) {
           return
         }
-        setLoadingDetails((previous) => ({ ...previous, [rowId]: false }))
+        setLoadingDetails((previous) => (previous[rowId] ? { ...previous, [rowId]: false } : previous))
       })
   }, [])
 

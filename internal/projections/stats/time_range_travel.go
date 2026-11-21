@@ -38,7 +38,7 @@ func NewTimeRangeTravel(
 		database:       dbConn,
 		recoveredJumps: recoveredJumps,
 		modeLoader:     modeLoader,
-		entries:        newTimeRangeDomainCache[TravelMetrics](bus, "TimeRangeTravel", triggers),
+		entries:        newTimeRangeDomainCache[TravelMetrics](bus, "TimeRangeTravel", triggers, 0),
 	}
 }
 

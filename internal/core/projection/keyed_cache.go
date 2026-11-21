@@ -10,9 +10,10 @@ type KeyedCache[K comparable, V any] struct {
 	name     string
 	triggers Triggers
 
-	mu         sync.Mutex
-	entries    map[K]V
-	generation uint64
+	mu                 sync.Mutex
+	entries            map[K]V
+	generation         uint64
+	invalidationFilter func(observed Triggers, key K) bool
 }
 
 // NewKeyedCache creates a keyed projection cache and registers it on bus when non-nil.
@@ -49,6 +50,33 @@ func (cache *KeyedCache[K, V]) Invalidate() {
 	cache.entries = make(map[K]V)
 	cache.generation++
 	cache.mu.Unlock()
+}
+
+// SetInvalidationFilter configures an optional predicate used by InvalidateObserved
+// to decide whether each cached key must be evicted for an observed trigger payload.
+func (cache *KeyedCache[K, V]) SetInvalidationFilter(shouldEvict func(observed Triggers, key K) bool) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.invalidationFilter = shouldEvict
+}
+
+// InvalidateObserved evicts only keys matching the configured invalidation filter
+// for observed triggers, or all entries when no filter is set.
+func (cache *KeyedCache[K, V]) InvalidateObserved(observed Triggers) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.invalidationFilter == nil {
+		cache.entries = make(map[K]V)
+		cache.generation++
+		return
+	}
+	for key := range cache.entries {
+		if cache.invalidationFilter(observed, key) {
+			delete(cache.entries, key)
+		}
+	}
+	// Increment generation so concurrent loads for evicted or active keys cannot write back stale data.
+	cache.generation++
 }
 
 // InvalidateWhere drops cached entries matching predicate (or all entries when

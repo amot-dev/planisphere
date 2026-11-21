@@ -114,11 +114,15 @@ func (app *App) currentBus() *projection.Bus {
 }
 
 func (app *App) publishJournalEvents(journalEvents journal.EventSet) events.UITargetSet {
+	return app.publishJournalBatch(journalEvents, "")
+}
+
+func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTimestamp string) events.UITargetSet {
 	bus := app.currentBus()
 	if bus == nil {
 		return 0
 	}
-	return bus.PublishJournal(journalEvents)
+	return bus.PublishJournalSince(journalEvents, earliestTimestamp)
 }
 
 func (app *App) emitDataChanged(scope string, expeditionID int64, targets events.UITargetSet) {

@@ -178,6 +178,7 @@ func (accumulator *archiveImportAccumulator) processEntry(
 
 	accumulator.fileEventCounts[normalizedFileName]++
 	result.Events = result.Events.Add(parsedEvent.Type)
+	result.ObserveTimestamp(parsedEvent.Timestamp)
 	if firstSeen, exists := accumulator.fileFirstTimestamps[normalizedFileName]; !exists || parsedEvent.Timestamp < firstSeen {
 		accumulator.fileFirstTimestamps[normalizedFileName] = parsedEvent.Timestamp
 	}

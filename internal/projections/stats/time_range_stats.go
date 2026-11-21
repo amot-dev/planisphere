@@ -120,14 +120,26 @@ func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (
 	}, nil
 }
 
-// newTimeRangeDomainCache registers standard triggers for a time-window cache
-// and narrows AppModeWindowsChanged invalidation to mode-filtered keys.
+// newTimeRangeDomainCache registers standard triggers for a time-window cache,
+// preserves closed windows ending strictly before live journal batches unless
+// retroactiveJournalEvents intersect the batch, and narrows AppModeWindowsChanged
+// invalidation to mode-filtered keys.
 func newTimeRangeDomainCache[V any](
 	bus *projection.Bus,
 	projectionName string,
 	triggers projection.Triggers,
+	retroactiveJournalEvents events.JournalEventSet,
 ) *projection.KeyedCache[string, V] {
 	entries := projection.NewKeyedCache[string, V](bus, projectionName, triggers)
+	entries.SetInvalidationFilter(func(observed projection.Triggers, cacheKey string) bool {
+		if !observed.App.IsEmpty() {
+			return true
+		}
+		if !retroactiveJournalEvents.IsEmpty() && observed.Journal.Intersects(retroactiveJournalEvents) {
+			return true
+		}
+		return !projection.WindowEndsBefore(cacheKey, observed.EarliestTimestamp)
+	})
 	if bus != nil {
 		bus.OnTrigger(projection.Triggers{App: events.NewAppSet(events.AppModeWindowsChanged)}, func(_ projection.Triggers) {
 			entries.InvalidateWhere(func(cacheKey string) bool {

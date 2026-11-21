@@ -3,14 +3,18 @@
 package projection
 
 import (
+	"strings"
+	"time"
+
 	"planisphere/internal/core/events"
 )
 
 // Triggers pairs external Elite Dangerous journal events and internal
 // Planisphere application events that invalidate a projection or invoke a hook.
 type Triggers struct {
-	Journal events.JournalEventSet
-	App     events.AppEventSet
+	Journal           events.JournalEventSet
+	App               events.AppEventSet
+	EarliestTimestamp string
 }
 
 // Matches reports whether triggers and observed share any journal or app event.
@@ -65,4 +69,39 @@ type Projection interface {
 	TriggerSource
 	Name() string
 	Invalidate()
+}
+
+// SelectiveProjection is an optional Projection extension that can preserve
+// unaffected cache keys based on the observed trigger payload.
+type SelectiveProjection interface {
+	Projection
+	InvalidateObserved(observed Triggers)
+}
+
+// WindowEndsBefore reports whether a pipe-delimited "after|until..." cache key
+// represents a closed time window whose upper bound strictly precedes earliestTimestamp.
+// Returns false for open-ended windows, malformed keys, or empty earliestTimestamp
+// so callers defensively evict affected or unknown ranges.
+func WindowEndsBefore(cacheKey, earliestTimestamp string) bool {
+	if earliestTimestamp == "" {
+		return false
+	}
+	firstSeparator := strings.IndexByte(cacheKey, '|')
+	if firstSeparator < 0 {
+		return false
+	}
+	remainder := cacheKey[firstSeparator+1:]
+	untilTimestamp := remainder
+	if secondSeparator := strings.IndexByte(remainder, '|'); secondSeparator >= 0 {
+		untilTimestamp = remainder[:secondSeparator]
+	}
+	if untilTimestamp == "" {
+		return false
+	}
+	untilTime, untilParseError := time.Parse(time.RFC3339Nano, untilTimestamp)
+	earliestTime, earliestParseError := time.Parse(time.RFC3339Nano, earliestTimestamp)
+	if untilParseError == nil && earliestParseError == nil {
+		return untilTime.Before(earliestTime)
+	}
+	return untilTimestamp < earliestTimestamp
 }

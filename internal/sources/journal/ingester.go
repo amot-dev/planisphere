@@ -49,12 +49,23 @@ func (ingester *Ingester) WithExclusiveConn(operation func(conn *sql.DB) (Result
 
 // Result summarises an ingestion pass.
 type Result struct {
-	FilesScanned int
-	FilesUpdated int
-	LinesRead    int
-	NewEvents    int      // count of events actually inserted (not previously known)
-	Events       EventSet // set of newly inserted event types
-	Errors       []string
+	FilesScanned      int
+	FilesUpdated      int
+	LinesRead         int
+	NewEvents         int      // count of events actually inserted (not previously known)
+	Events            EventSet // set of newly inserted event types
+	EarliestTimestamp string   // earliest timestamp among newly inserted or backfilled events
+	Errors            []string
+}
+
+// ObserveTimestamp records timestamp when it precedes the earliest timestamp seen in result.
+func (result *Result) ObserveTimestamp(timestamp string) {
+	if timestamp == "" {
+		return
+	}
+	if result.EarliestTimestamp == "" || timestamp < result.EarliestTimestamp {
+		result.EarliestTimestamp = timestamp
+	}
 }
 
 func (result *Result) merge(other Result) {
@@ -63,6 +74,7 @@ func (result *Result) merge(other Result) {
 	result.LinesRead += other.LinesRead
 	result.NewEvents += other.NewEvents
 	result.Events = result.Events.Union(other.Events)
+	result.ObserveTimestamp(other.EarliestTimestamp)
 	result.Errors = append(result.Errors, other.Errors...)
 }
 
@@ -283,6 +295,9 @@ func ingestAppendedLines(
 				if _, execError := transaction.Exec(BackfillFileCommanderSQL, currentCommander, fileName); execError != nil {
 					return fmt.Errorf("backfill commander for %s: %w", fileName, execError)
 				}
+				if state.first.Valid {
+					result.ObserveTimestamp(state.first.String)
+				}
 				hasUnattributedEvents = false
 			}
 		} else if currentCommander != "" {
@@ -302,6 +317,7 @@ func ingestAppendedLines(
 			state.stored++
 			result.NewEvents++
 			result.Events = result.Events.Add(parsedEvent.Type)
+			result.ObserveTimestamp(parsedEvent.Timestamp)
 			if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
 				state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
 			}

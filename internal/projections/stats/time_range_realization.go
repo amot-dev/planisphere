@@ -7,11 +7,22 @@ import (
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
 	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/sources/journal"
 )
 
-var timeRangeRealizationAppEvents = events.NewAppSet(
-	events.AppCommanderFilterChanged,
-	events.AppDatabaseSwitched,
+var (
+	timeRangeRealizationAppEvents = events.NewAppSet(
+		events.AppCommanderFilterChanged,
+		events.AppDatabaseSwitched,
+	)
+	// Sales, ship destruction, and crew wage payments retroactively affect earlier scan windows.
+	realizationRetroactiveJournalEvents = journal.NewEventSet(
+		journal.EventSellExplorationData,
+		journal.EventMultiSellExplorationData,
+		journal.EventSellOrganicData,
+		journal.EventResurrect,
+		journal.EventNpcCrewPaidWage,
+	)
 )
 
 // TimeRangeRealization caches Realized Value profit and loss breakdowns for
@@ -38,7 +49,7 @@ func NewTimeRangeRealization(
 		database:    dbConn,
 		salesLedger: salesLedger,
 		modeLoader:  modeLoader,
-		entries:     newTimeRangeDomainCache[RealizationBreakdown](bus, "TimeRangeRealization", triggers),
+		entries:     newTimeRangeDomainCache[RealizationBreakdown](bus, "TimeRangeRealization", triggers, realizationRetroactiveJournalEvents),
 	}
 }
 

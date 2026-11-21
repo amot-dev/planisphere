@@ -7,11 +7,18 @@ import (
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
 	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/sources/journal"
 )
 
-var timeRangeExobiologyAppEvents = events.NewAppSet(
-	events.AppCommanderFilterChanged,
-	events.AppDatabaseSwitched,
+var (
+	timeRangeExobiologyAppEvents = events.NewAppSet(
+		events.AppCommanderFilterChanged,
+		events.AppDatabaseSwitched,
+	)
+	// Vista Genomics sales retroactively settle First Logged bonuses onto earlier scans.
+	exobiologyRetroactiveJournalEvents = journal.NewEventSet(
+		journal.EventSellOrganicData,
+	)
 )
 
 // TimeRangeExobiology caches Vista Genomics exobiology metrics for bounded
@@ -38,7 +45,7 @@ func NewTimeRangeExobiology(
 		database:    dbConn,
 		salesLedger: salesLedger,
 		modeLoader:  modeLoader,
-		entries:     newTimeRangeDomainCache[ExobiologyMetrics](bus, "TimeRangeExobiology", triggers),
+		entries:     newTimeRangeDomainCache[ExobiologyMetrics](bus, "TimeRangeExobiology", triggers, exobiologyRetroactiveJournalEvents),
 	}
 }
 

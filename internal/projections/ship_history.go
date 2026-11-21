@@ -38,9 +38,16 @@ func NewShipHistory(dbConn *sql.DB, bus *projection.Bus) *ShipHistory {
 		Journal: shipHistoryJournalEvents,
 		App:     shipHistoryAppEvents,
 	}
+	windows := projection.NewKeyedCache[string, []ShipSwitch](bus, "ShipHistory", triggers)
+	windows.SetInvalidationFilter(func(observed projection.Triggers, windowKey string) bool {
+		if !observed.App.IsEmpty() {
+			return true
+		}
+		return !projection.WindowEndsBefore(windowKey, observed.EarliestTimestamp)
+	})
 	return &ShipHistory{
 		database: dbConn,
-		windows:  projection.NewKeyedCache[string, []ShipSwitch](bus, "ShipHistory", triggers),
+		windows:  windows,
 	}
 }
 

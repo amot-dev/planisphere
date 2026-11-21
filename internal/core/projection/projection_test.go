@@ -222,3 +222,74 @@ func TestBusInvalidatesProjectionsBeforeHandlersAndResolvesUITargets(testingCont
 		testingContext.Fatalf("expected [stats] UI target for AppAdjustmentsChanged, got %v", uiOnAdjustment.Names())
 	}
 }
+
+func TestWindowEndsBeforeAndSelectiveCacheInvalidation(testingContext *testing.T) {
+	windowCases := []struct {
+		name              string
+		cacheKey          string
+		earliestTimestamp string
+		wantEndsBefore    bool
+	}{
+		{"closed two-part key before batch", "2026-01-01T10:00:00Z|2026-01-01T11:00:00Z", "2026-01-01T12:00:00Z", true},
+		{"closed three-part key before batch", "2026-01-01T10:00:00Z|2026-01-01T11:00:00Z|all", "2026-01-01T12:00:00Z", true},
+		{"origin key with empty start before batch", "|2026-01-01T11:00:00Z|all", "2026-01-01T12:00:00Z", true},
+		{"subsecond RFC3339 before batch", "2026-01-01T10:00:00Z|2026-01-01T11:59:59.999Z|modes:1", "2026-01-01T12:00:00Z", true},
+		{"exact upper boundary evicts defensively", "2026-01-01T10:00:00Z|2026-01-01T12:00:00Z|all", "2026-01-01T12:00:00Z", false},
+		{"overlapping historical backfill evicts", "2026-01-01T10:00:00Z|2026-01-01T13:00:00Z|all", "2026-01-01T12:00:00Z", false},
+		{"open active two-part key evicts", "2026-01-01T10:00:00Z|", "2026-01-01T12:00:00Z", false},
+		{"open active three-part key evicts", "2026-01-01T10:00:00Z||all", "2026-01-01T12:00:00Z", false},
+		{"missing earliest timestamp evicts", "2026-01-01T10:00:00Z|2026-01-01T11:00:00Z|all", "", false},
+		{"malformed key evicts", "not-a-window-key", "2026-01-01T12:00:00Z", false},
+	}
+	for _, testCase := range windowCases {
+		if got := WindowEndsBefore(testCase.cacheKey, testCase.earliestTimestamp); got != testCase.wantEndsBefore {
+			testingContext.Errorf("%s: WindowEndsBefore(%q, %q) = %v, want %v",
+				testCase.name, testCase.cacheKey, testCase.earliestTimestamp, got, testCase.wantEndsBefore)
+		}
+	}
+
+	bus := NewBus()
+	windowCache := NewKeyedCache[string, int](bus, "windowed", Triggers{
+		Journal: events.NewJournalSet(testEventFSDJump),
+		App:     events.NewAppSet(events.AppCommanderFilterChanged),
+	})
+	windowCache.SetInvalidationFilter(func(observed Triggers, cacheKey string) bool {
+		if !observed.App.IsEmpty() {
+			return true
+		}
+		return !WindowEndsBefore(cacheKey, observed.EarliestTimestamp)
+	})
+
+	closedKey := "2026-01-01T10:00:00Z|2026-01-01T11:00:00Z|all"
+	overlappingKey := "2026-01-01T11:00:00Z|2026-01-01T13:00:00Z|all"
+	activeKey := "2026-01-01T13:00:00Z||all"
+	var loads atomic.Int32
+	for _, key := range []string{closedKey, overlappingKey, activeKey} {
+		if _, loadError := windowCache.GetOrLoad(key, func() (int, error) { return int(loads.Add(1)), nil }); loadError != nil {
+			testingContext.Fatalf("warm %s: %v", key, loadError)
+		}
+	}
+
+	// Live jump at 12:00 keeps closedKey (ends 11:00) and evicts overlappingKey and activeKey.
+	bus.PublishJournalSince(events.NewJournalSet(testEventFSDJump), "2026-01-01T12:00:00Z")
+	if windowCache.Len() != 1 {
+		testingContext.Fatalf("expected 1 preserved closed entry after live jump, got %d", windowCache.Len())
+	}
+	if cachedClosed, _ := windowCache.GetOrLoad(closedKey, func() (int, error) { return int(loads.Add(1)), nil }); cachedClosed != 1 {
+		testingContext.Fatalf("expected closedKey cache hit returning 1, got %d", cachedClosed)
+	}
+	if loads.Load() != 3 {
+		testingContext.Fatalf("expected closedKey lookup not to reload, loads=%d", loads.Load())
+	}
+
+	// PublishJournal without timestamp and PublishApp must defensively evict closedKey.
+	bus.PublishJournal(events.NewJournalSet(testEventFSDJump))
+	if windowCache.Len() != 0 {
+		testingContext.Fatalf("expected PublishJournal without timestamp to evict all entries, got %d", windowCache.Len())
+	}
+	_, _ = windowCache.GetOrLoad(closedKey, func() (int, error) { return int(loads.Add(1)), nil })
+	bus.PublishApp(events.AppCommanderFilterChanged)
+	if windowCache.Len() != 0 {
+		testingContext.Fatalf("expected PublishApp to evict all entries, got %d", windowCache.Len())
+	}
+}

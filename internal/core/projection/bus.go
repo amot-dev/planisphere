@@ -89,7 +89,11 @@ func (bus *Bus) Publish(observed Triggers) events.UITargetSet {
 	bus.mu.RUnlock()
 
 	for _, proj := range matchingProjections {
-		proj.Invalidate()
+		if selective, ok := proj.(SelectiveProjection); ok {
+			selective.InvalidateObserved(observed)
+		} else {
+			proj.Invalidate()
+		}
 	}
 	for _, handler := range matchingHandlers {
 		handler(observed)
@@ -99,10 +103,20 @@ func (bus *Bus) Publish(observed Triggers) events.UITargetSet {
 
 // PublishJournal dispatches a set of newly ingested journal events across the bus.
 func (bus *Bus) PublishJournal(journalEvents events.JournalEventSet) events.UITargetSet {
+	return bus.PublishJournalSince(journalEvents, "")
+}
+
+// PublishJournalSince dispatches newly ingested journal events across the bus
+// along with the earliest timestamp among inserted events so windowed caches
+// can preserve closed historical ranges ending strictly before earliestTimestamp.
+func (bus *Bus) PublishJournalSince(journalEvents events.JournalEventSet, earliestTimestamp string) events.UITargetSet {
 	if journalEvents.IsEmpty() {
 		return 0
 	}
-	return bus.Publish(Triggers{Journal: journalEvents})
+	return bus.Publish(Triggers{
+		Journal:           journalEvents,
+		EarliestTimestamp: earliestTimestamp,
+	})
 }
 
 // PublishApp dispatches internal application mutation events across the bus.

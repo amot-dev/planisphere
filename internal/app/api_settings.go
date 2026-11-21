@@ -286,7 +286,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	}
 	app.dbMu.RUnlock()
 
-	affectedTargets := app.publishJournalEvents(importResult.Events)
+	affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp)
 	if affectedTargets.IsEmpty() {
 		affectedTargets = events.NewUITargetSet(events.UITargetIngest)
 	}

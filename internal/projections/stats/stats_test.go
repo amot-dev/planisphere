@@ -284,3 +284,69 @@ func TestRealizationLedgerCaching(testingContext *testing.T) {
 		testingContext.Fatalf("expected TotalRealized 95054000 after cache invalidation, got %d", thirdResult.TotalRealized)
 	}
 }
+
+func TestTimeRangeSelectiveInvalidationPreservesClosedWindowsExceptRetroactiveEvents(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T19:10:00Z","event":"FSDJump","StarSystem":"ClosedSys","SystemAddress":1001,"StarPos":[10,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"ClosedSys","SystemAddress":1001,"BodyID":1,"BodyName":"ClosedSys 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":1001,"Body":1}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, lines)
+
+	eventBus := projection.NewBus()
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, modes.LoadModeLookup)
+
+	closedRange := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
+	activeRange := stats.Range{After: "2026-01-18T20:00:00Z", Until: ""}
+	if _, closedError := timeRangeStats.Compute(closedRange, nil); closedError != nil {
+		testingContext.Fatalf("warm closedRange: %v", closedError)
+	}
+	if _, activeError := timeRangeStats.Compute(activeRange, nil); activeError != nil {
+		testingContext.Fatalf("warm activeRange: %v", activeError)
+	}
+
+	// Normal live tail events after 20:00 must evict activeRange while keeping closedRange cached in every domain.
+	eventBus.PublishJournalSince(
+		journal.NewEventSet(journal.EventFSDJump, journal.EventScan, journal.EventScanOrganic),
+		"2026-01-18T21:00:00Z",
+	)
+	if timeRangeStats.Travel().CachedCount() != 1 ||
+		timeRangeStats.Cartographics().CachedCount() != 1 ||
+		timeRangeStats.Exobiology().CachedCount() != 1 ||
+		timeRangeStats.Realization().CachedCount() != 1 {
+		testingContext.Fatalf(
+			"expected closedRange preserved (count=1) and activeRange evicted across all 4 sections, got travel=%d carto=%d exo=%d real=%d",
+			timeRangeStats.Travel().CachedCount(),
+			timeRangeStats.Cartographics().CachedCount(),
+			timeRangeStats.Exobiology().CachedCount(),
+			timeRangeStats.Realization().CachedCount(),
+		)
+	}
+
+	// Retroactive Vista Genomics sale after 20:00 must evict closedRange on Exobiology and Realization only.
+	eventBus.PublishJournalSince(journal.NewEventSet(journal.EventSellOrganicData), "2026-01-18T22:00:00Z")
+	if timeRangeStats.Travel().CachedCount() != 1 || timeRangeStats.Cartographics().CachedCount() != 1 {
+		testingContext.Fatalf("expected Travel and Cartographics closedRange to remain cached on SellOrganicData")
+	}
+	if timeRangeStats.Exobiology().CachedCount() != 0 || timeRangeStats.Realization().CachedCount() != 0 {
+		testingContext.Fatalf("expected SellOrganicData to evict Exobiology and Realization closedRange, got exo=%d real=%d",
+			timeRangeStats.Exobiology().CachedCount(), timeRangeStats.Realization().CachedCount())
+	}
+
+	// Re-warm closedRange and verify SellExplorationData evicts only Realization while leaving Travel, Cartographics, and Exobiology cached.
+	if _, rewarmError := timeRangeStats.Compute(closedRange, nil); rewarmError != nil {
+		testingContext.Fatalf("rewarm closedRange: %v", rewarmError)
+	}
+	eventBus.PublishJournalSince(journal.NewEventSet(journal.EventSellExplorationData), "2026-01-18T23:00:00Z")
+	if timeRangeStats.Travel().CachedCount() != 1 ||
+		timeRangeStats.Cartographics().CachedCount() != 1 ||
+		timeRangeStats.Exobiology().CachedCount() != 1 {
+		testingContext.Fatalf("expected Travel, Cartographics, and Exobiology closedRange to remain cached on SellExplorationData")
+	}
+	if timeRangeStats.Realization().CachedCount() != 0 {
+		testingContext.Fatalf("expected SellExplorationData to evict Realization closedRange, got %d", timeRangeStats.Realization().CachedCount())
+	}
+}

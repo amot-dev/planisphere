@@ -68,7 +68,7 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 	hasNewEvents := scanResult.NewEvents > 0
 	var affectedTargets events.UITargetSet
 	if hasNewEvents {
-		affectedTargets = app.publishJournalEvents(scanResult.Events)
+		affectedTargets = app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
 	}
 	return hasNewEvents, true, affectedTargets
 }
@@ -112,7 +112,7 @@ func (app *App) warmInitialStats() {
 
 // onJournalBatch runs after the live tailer stored new events.
 func (app *App) onJournalBatch(scanResult journal.Result) {
-	affectedTargets := app.publishJournalEvents(scanResult.Events)
+	affectedTargets := app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
 	app.emitDataChanged("journal", 0, affectedTargets)
 }
 
@@ -217,7 +217,7 @@ func (app *App) maybeCatchUpEDD() {
 		if settingError := settings.MarkEDDDisconnectsRecovered(database); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}
-		affectedTargets := app.publishJournalEvents(importResult.Events)
+		affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp)
 		if affectedTargets.IsEmpty() {
 			affectedTargets = events.NewUITargetSet(events.UITargetIngest)
 		}

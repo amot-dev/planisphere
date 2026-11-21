@@ -34,7 +34,7 @@ func NewTimeRangeCartographics(
 	return &TimeRangeCartographics{
 		database:   dbConn,
 		modeLoader: modeLoader,
-		entries:    newTimeRangeDomainCache[CartographicsMetrics](bus, "TimeRangeCartographics", triggers),
+		entries:    newTimeRangeDomainCache[CartographicsMetrics](bus, "TimeRangeCartographics", triggers, 0),
 	}
 }
 
