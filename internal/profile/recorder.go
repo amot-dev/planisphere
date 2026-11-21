@@ -422,3 +422,43 @@ func runColdWarmProbe(
 		WarmSpeedupPct: speedupPct,
 	}, nil
 }
+
+func runSingleModeProbe(
+	database *sql.DB,
+	recorder *treeRecorder,
+	name string,
+	category string,
+	description string,
+	rootSpanName string,
+	itemUnit string,
+	secondaryUnit string,
+	iterations int,
+	beforeEachIteration func(),
+	invokeOperation func() (singleExecOutcome, error),
+) (ProbeResult, error) {
+	measuredRun, itemsProcessed, secondaryCount, runError := executeMeasuredRun(
+		database,
+		recorder,
+		"Cold",
+		rootSpanName,
+		itemUnit,
+		iterations,
+		beforeEachIteration,
+		invokeOperation,
+	)
+	if runError != nil {
+		return ProbeResult{}, runError
+	}
+	return ProbeResult{
+		Name:           name,
+		Category:       category,
+		Description:    description,
+		ItemsProcessed: itemsProcessed,
+		ItemUnit:       itemUnit,
+		SecondaryCount: secondaryCount,
+		SecondaryUnit:  secondaryUnit,
+		Cold:           measuredRun,
+		HasWarm:        false,
+		ColdWarmMatch:  true,
+	}, nil
+}

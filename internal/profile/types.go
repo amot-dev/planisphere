@@ -160,6 +160,7 @@ type Report struct {
 // DiffEntry compares a single probe between a baseline report and a current report.
 type DiffEntry struct {
 	ProbeName         string        `json:"probeName"`
+	HasWarm           bool          `json:"hasWarm"`
 	ColdBaseline      time.Duration `json:"coldBaseline"`
 	ColdCurrent       time.Duration `json:"coldCurrent"`
 	ColdDeltaPct      float64       `json:"coldDeltaPct"`

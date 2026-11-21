@@ -10,19 +10,25 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 
 	"planisphere/internal/app"
-	stats "planisphere/internal/replay/stats"
+	projstats "planisphere/internal/projections/stats"
+	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/store/settings"
 )
 
 type frontendLiveFixture struct {
 	Plan           expedition.PlanView          `json:"plan"`
 	SidebarStats   app.SidebarStats             `json:"sidebarStats"`
-	Modes          []modes.Mode                 `json:"modes"`
+	ModesState     app.ModesState               `json:"modesState"`
 	VisitedDetails []expedition.WaypointDetails `json:"visitedDetails"`
+	HeldRowIndex   int                          `json:"heldRowIndex"`
+	DropPreviews   []expedition.DropSlotPreview `json:"dropPreviews"`
 }
 
 func runFrontendProbes(
@@ -36,7 +42,8 @@ func runFrontendProbes(
 		return nil, nil
 	}
 	if !matchesFilter("Frontend/WailsHydration", options.FilterPattern) &&
-		!matchesFilter("Frontend/RenderTree", options.FilterPattern) {
+		!matchesFilter("Frontend/RenderTree", options.FilterPattern) &&
+		!matchesFilter("Frontend/ClientReconciliation", options.FilterPattern) {
 		return nil, nil
 	}
 
@@ -45,29 +52,17 @@ func runFrontendProbes(
 		return nil, buildError
 	}
 
-	fixtureFile, createFixtureError := os.CreateTemp("", "planisphere-frontend-fixture-*.json")
-	if createFixtureError != nil {
-		return nil, fmt.Errorf("create frontend fixture file: %w", createFixtureError)
+	fixturePath, cleanupFixture, writeError := writeTemporaryFixtureJSON(fixture)
+	if writeError != nil {
+		return nil, writeError
 	}
-	fixturePath := fixtureFile.Name()
-	defer func() { _ = os.Remove(fixturePath) }()
+	defer cleanupFixture()
 
-	encodedFixture, marshalError := json.Marshal(fixture)
-	_ = fixtureFile.Close()
-	if marshalError != nil {
-		return nil, fmt.Errorf("marshal frontend fixture: %w", marshalError)
+	outputPath, cleanupOutput, outError := createTemporaryOutputFile()
+	if outError != nil {
+		return nil, outError
 	}
-	if writeError := os.WriteFile(fixturePath, encodedFixture, 0o600); writeError != nil {
-		return nil, fmt.Errorf("write frontend fixture: %w", writeError)
-	}
-
-	outputFile, createOutError := os.CreateTemp("", "planisphere-frontend-profile-out-*.json")
-	if createOutError != nil {
-		return nil, fmt.Errorf("create frontend profile output file: %w", createOutError)
-	}
-	outputPath := outputFile.Name()
-	_ = outputFile.Close()
-	defer func() { _ = os.Remove(outputPath) }()
+	defer cleanupOutput()
 
 	frontendDir, dirError := resolveFrontendDirectory()
 	if dirError != nil {
@@ -105,6 +100,52 @@ func runFrontendProbes(
 	return filtered, nil
 }
 
+func writeTemporaryFixtureJSON(fixture frontendLiveFixture) (string, func(), error) {
+	fixtureFile, createFixtureError := os.CreateTemp("", "planisphere-frontend-fixture-*.json")
+	if createFixtureError != nil {
+		return "", nil, fmt.Errorf("create frontend fixture file: %w", createFixtureError)
+	}
+	fixturePath := fixtureFile.Name()
+	cleanup := func() {
+		if removeError := os.Remove(fixturePath); removeError != nil {
+			return
+		}
+	}
+	if closeError := fixtureFile.Close(); closeError != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close temporary fixture handle: %w", closeError)
+	}
+
+	encodedFixture, marshalError := json.Marshal(fixture)
+	if marshalError != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("marshal frontend fixture: %w", marshalError)
+	}
+	if writeError := os.WriteFile(fixturePath, encodedFixture, 0o600); writeError != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("write frontend fixture: %w", writeError)
+	}
+	return fixturePath, cleanup, nil
+}
+
+func createTemporaryOutputFile() (string, func(), error) {
+	outputFile, createOutError := os.CreateTemp("", "planisphere-frontend-profile-out-*.json")
+	if createOutError != nil {
+		return "", nil, fmt.Errorf("create frontend profile output file: %w", createOutError)
+	}
+	outputPath := outputFile.Name()
+	cleanup := func() {
+		if removeError := os.Remove(outputPath); removeError != nil {
+			return
+		}
+	}
+	if closeError := outputFile.Close(); closeError != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close temporary output handle: %w", closeError)
+	}
+	return outputPath, cleanup, nil
+}
+
 func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset DatasetSummary) (frontendLiveFixture, error) {
 	gecCatalog := gec.NewCatalog(database)
 	gecLookup := func(systemName string, systemAddress int64) *expedition.GECRef {
@@ -121,44 +162,185 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 		}
 	}
 
-	expProj := proj.expeditionProjections()
-	planView, planError := expedition.BuildPlan(database, dataset.PrimaryExpeditionID, gecLookup, expProj)
+	expProjections := proj.expeditionProjections()
+	planView, planError := expedition.BuildPlan(database, dataset.PrimaryExpeditionID, gecLookup, expProjections)
 	if planError != nil {
 		return frontendLiveFixture{}, planError
 	}
 
-	statsEngine := proj.statsEngine()
-	allMetrics, _ := statsEngine.Compute(stats.Range{}, nil)
-	allRealization, _ := statsEngine.ComputeRealization(stats.Range{}, nil)
-	expRange := stats.Range{After: planView.Expedition.StartTimestamp, Until: planView.Expedition.EndTimestamp}
-	liveMetrics, _ := statsEngine.Compute(expRange, nil)
-	liveRealization, _ := statsEngine.ComputeRealization(expRange, nil)
+	sidebarStats, sidebarError := buildFixtureSidebarStats(database, proj, planView)
+	if sidebarError != nil {
+		return frontendLiveFixture{}, sidebarError
+	}
 
-	manualAdjustments := planView.Expedition.Adjustments.ToMetrics()
+	modesState, modesError := buildFixtureModesState(database)
+	if modesError != nil {
+		return frontendLiveFixture{}, modesError
+	}
+
+	visitedDetails := loadFixtureVisitedDetails(database, planView, expProjections)
+	heldRowIndex, dropPreviews := loadFixtureDropPreviews(database, planView, dataset.SampleVisitedLegRowID, expProjections)
+
+	return frontendLiveFixture{
+		Plan:           planView,
+		SidebarStats:   sidebarStats,
+		ModesState:     modesState,
+		VisitedDetails: visitedDetails,
+		HeldRowIndex:   heldRowIndex,
+		DropPreviews:   dropPreviews,
+	}, nil
+}
+
+func buildFixtureSidebarStats(
+	database *sql.DB,
+	proj *profileProjections,
+	planView expedition.PlanView,
+) (app.SidebarStats, error) {
+	careerSummary, careerError := proj.careerStats.Get()
+	if careerError != nil {
+		return app.SidebarStats{}, careerError
+	}
+
+	expeditionRecord := planView.Expedition
+	manualAdjustments := expeditionRecord.Adjustments.ToMetrics()
 	sidebar := app.SidebarStats{
-		ExpeditionID:           planView.Expedition.ID,
-		Status:                 planView.Expedition.Status,
-		Started:                planView.Expedition.StartTimestamp != "",
-		Start:                  planView.Expedition.StartTimestamp,
-		End:                    planView.Expedition.EndTimestamp,
+		ExpeditionID:           expeditionRecord.ID,
+		Status:                 expeditionRecord.Status,
+		Started:                expeditionRecord.StartTimestamp != "",
+		Start:                  expeditionRecord.StartTimestamp,
+		End:                    expeditionRecord.EndTimestamp,
 		StartGalactic:          planView.StartGalactic,
 		EndGalactic:            planView.EndGalactic,
-		Live:                   liveMetrics,
 		Adjustments:            manualAdjustments,
-		Expedition:             liveMetrics.Add(manualAdjustments),
-		AllJournals:            allMetrics,
-		Realization:            liveRealization,
-		AllJournalsRealization: allRealization,
+		Expedition:             manualAdjustments,
+		AllJournals:            careerSummary.Metrics,
+		AllJournalsRealization: careerSummary.Realization,
 	}
 
-	modeList, _ := modes.List(database)
-	if modeList == nil {
-		modeList = []modes.Mode{}
+	if careerStart, careerStartGalactic := replay.CareerStart(database); careerStart != "" {
+		sidebar.CareerStart = careerStart
+		sidebar.CareerStartGalactic = careerStartGalactic
+		sidebar.CareerDuration = reference.Elapsed(careerStart, "")
 	}
-	visitedDetails := []expedition.WaypointDetails{}
+
+	referenceNow := time.Now().UTC()
+	if sidebar.Started {
+		if sidebar.End == "" {
+			sidebar.EndIsNow = true
+			sidebar.EndGalactic = reference.TimeToGalactic(referenceNow)
+		}
+		sidebar.Duration = reference.Elapsed(sidebar.Start, sidebar.End)
+		expeditionRange := projstats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
+		expeditionSummary, rangeError := proj.timeRangeStats.Compute(expeditionRange, nil)
+		if rangeError != nil {
+			return app.SidebarStats{}, rangeError
+		}
+		sidebar.Live = expeditionSummary.Metrics
+		sidebar.Expedition = expeditionSummary.Metrics.Add(manualAdjustments)
+		sidebar.Realization = expeditionSummary.Realization
+	}
+
+	sidebar.CarrierCost = computeFixtureCarrierCost(database, expeditionRecord, sidebar.Expedition, sidebar.Started, referenceNow)
+	return sidebar, nil
+}
+
+func computeFixtureCarrierCost(
+	database *sql.DB,
+	expeditionRecord expedition.Expedition,
+	expeditionMetrics projstats.Metrics,
+	expeditionStarted bool,
+	referenceNow time.Time,
+) app.CarrierCostBreakdown {
+	tritiumPrice := settings.TritiumPricePerTonne(database)
+	var tritiumTonnes int64
+	if expeditionMetrics.TritiumUsed != nil && *expeditionMetrics.TritiumUsed > 0 {
+		tritiumTonnes = int64(*expeditionMetrics.TritiumUsed)
+	}
+	tritiumCost := tritiumTonnes * tritiumPrice
+	jumpCost := int64(expeditionMetrics.CarrierJumps) * reference.CarrierJumpMaintenanceCost
+	var upkeepCost int64
+	if expeditionStarted && expeditionRecord.CarrierWeeklyUpkeep > 0 {
+		upkeepCost = reference.CarrierProratedUpkeep(
+			expeditionRecord.StartTimestamp,
+			expeditionRecord.EndTimestamp,
+			expeditionRecord.CarrierWeeklyUpkeep,
+			referenceNow,
+		)
+	}
+	totalCost := tritiumCost + jumpCost + upkeepCost
+	return app.CarrierCostBreakdown{
+		CarrierType:    expeditionRecord.CarrierType,
+		WeeklyUpkeep:   expeditionRecord.CarrierWeeklyUpkeep,
+		TritiumPrice:   tritiumPrice,
+		TritiumCost:    tritiumCost,
+		JumpCost:       jumpCost,
+		UpkeepCost:     upkeepCost,
+		TotalCost:      totalCost,
+		TotalEstimated: tritiumCost > 0 || upkeepCost > 0,
+	}
+}
+
+func buildFixtureModesState(database *sql.DB) (app.ModesState, error) {
+	modesList, listError := modes.List(database)
+	if listError != nil {
+		return app.ModesState{}, listError
+	}
+	if modesList == nil {
+		modesList = []modes.Mode{}
+	}
+	modesByID := make(map[int64]modes.Mode, len(modesList))
+	for _, modeItem := range modesList {
+		modesByID[modeItem.ID] = modeItem
+	}
+
+	state := app.ModesState{
+		Modes:   modesList,
+		Windows: []app.ModeWindowView{},
+	}
+	activeWindow, activeError := modes.Active(database)
+	if activeError != nil {
+		return app.ModesState{}, activeError
+	}
+	if activeWindow != nil {
+		state.ActiveModeID = activeWindow.ModeID
+		state.ActiveSince = activeWindow.Start
+		state.ActiveSinceGalactic = reference.ToGalactic(activeWindow.Start)
+	} else {
+		state.ActiveModeID = modes.DefaultFallbackModeID(database)
+	}
+
+	windowsList, windowsError := modes.ListWindows(database)
+	if windowsError != nil {
+		return app.ModesState{}, windowsError
+	}
+	for windowIndex := len(windowsList) - 1; windowIndex >= 0; windowIndex-- {
+		windowItem := windowsList[windowIndex]
+		modeItem := modesByID[windowItem.ModeID]
+		state.Windows = append(state.Windows, app.ModeWindowView{
+			ID:            windowItem.ID,
+			ModeID:        windowItem.ModeID,
+			ModeName:      modeItem.Name,
+			Color:         modeItem.Color,
+			Start:         windowItem.Start,
+			End:           windowItem.End,
+			StartGalactic: reference.ToGalactic(windowItem.Start),
+			EndGalactic:   reference.ToGalactic(windowItem.End),
+			Duration:      reference.Elapsed(windowItem.Start, windowItem.End),
+		})
+	}
+	return state, nil
+}
+
+func loadFixtureVisitedDetails(
+	database *sql.DB,
+	planView expedition.PlanView,
+	expProjections *expedition.Projections,
+) []expedition.WaypointDetails {
+	visitedDetails := make([]expedition.WaypointDetails, 0, 6)
 	for _, rowView := range planView.Rows {
 		if rowView.Row.IsWaypoint() && rowView.Row.VisitedAt != "" {
-			if detail, err := expedition.Details(database, rowView.Row.ID, expProj); err == nil {
+			detail, detailError := expedition.Details(database, rowView.Row.ID, expProjections)
+			if detailError == nil {
 				visitedDetails = append(visitedDetails, detail)
 			}
 			if len(visitedDetails) >= 6 {
@@ -166,13 +348,33 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 			}
 		}
 	}
+	return visitedDetails
+}
 
-	return frontendLiveFixture{
-		Plan:           planView,
-		SidebarStats:   sidebar,
-		Modes:          modeList,
-		VisitedDetails: visitedDetails,
-	}, nil
+func loadFixtureDropPreviews(
+	database *sql.DB,
+	planView expedition.PlanView,
+	sampleRowID int64,
+	expProjections *expedition.Projections,
+) (int, []expedition.DropSlotPreview) {
+	if sampleRowID <= 0 {
+		return -1, []expedition.DropSlotPreview{}
+	}
+	heldIndex := -1
+	for rowIndex, rowView := range planView.Rows {
+		if rowView.Row.ID == sampleRowID {
+			heldIndex = rowIndex
+			break
+		}
+	}
+	if heldIndex < 0 {
+		return -1, []expedition.DropSlotPreview{}
+	}
+	previews, previewError := expedition.ComputeRowDropPreviews(database, sampleRowID, expProjections)
+	if previewError != nil || len(previews) == 0 {
+		return -1, []expedition.DropSlotPreview{}
+	}
+	return heldIndex, previews
 }
 
 func resolveFrontendDirectory() (string, error) {
@@ -182,7 +384,7 @@ func resolveFrontendDirectory() (string, error) {
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(callerFile), "..", ".."))
 	frontendDir := filepath.Join(repoRoot, "frontend")
-	if info, statErr := os.Stat(frontendDir); statErr != nil || !info.IsDir() {
+	if fileInfo, statError := os.Stat(frontendDir); statError != nil || !fileInfo.IsDir() {
 		return "", fmt.Errorf("frontend directory not found at %s", frontendDir)
 	}
 	return frontendDir, nil

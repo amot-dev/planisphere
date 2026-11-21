@@ -85,7 +85,7 @@ func runExpeditionProbes(
 	}
 
 	if matchesFilter("Expedition/Reevaluate", options.FilterPattern) {
-		reevalProbe, err := profileExpeditionReevaluate(database, proj, recorder, dataset, options.Iterations)
+		reevalProbe, err := profileExpeditionReevaluate(database, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -103,7 +103,7 @@ func runExpeditionProbes(
 	}
 
 	if matchesFilter("Expedition/StartCandidates", options.FilterPattern) {
-		candidatesProbe, ok, err := profileStartCandidates(database, proj, recorder, dataset, options.Iterations)
+		candidatesProbe, ok, err := profileStartCandidates(database, recorder, dataset, options.Iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -244,13 +244,12 @@ func profileVisitedLegsBatch(
 			var lastDetails expedition.WaypointDetails
 			for idx, targetRowID := range visitedRowIDs {
 				label := fmt.Sprintf("expedition.Details[Leg #%d]", idx+1)
-				var callErr error
-				_ = recorder.withSubSpan(label, "internal/store/expedition/details.go:111", 1, "drawer", func() error {
-					lastDetails, callErr = expedition.Details(database, targetRowID, proj.expeditionProjections())
-					return callErr
-				})
-				if callErr != nil {
-					return singleExecOutcome{}, callErr
+				var callError error
+				if spanError := recorder.withSubSpan(label, "internal/store/expedition/waypoint_details.go:82", 1, "drawer", func() error {
+					lastDetails, callError = expedition.Details(database, targetRowID, proj.expeditionProjections())
+					return callError
+				}); spanError != nil {
+					return singleExecOutcome{}, spanError
 				}
 				totalJumps += lastDetails.Metrics.Jumps
 				totalCarto += lastDetails.Metrics.ScanValueTotal
@@ -269,12 +268,11 @@ func profileVisitedLegsBatch(
 
 func profileExpeditionReevaluate(
 	database *sql.DB,
-	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
 ) (ProbeResult, error) {
-	return runColdWarmProbe(
+	return runSingleModeProbe(
 		database,
 		recorder,
 		"Expedition/Reevaluate",
@@ -284,15 +282,19 @@ func profileExpeditionReevaluate(
 		"waypoints",
 		"visited",
 		iterations,
-		proj.invalidate,
+		nil,
 		func() (singleExecOutcome, error) {
-			tx, beginError := database.Begin()
+			transaction, beginError := database.Begin()
 			if beginError != nil {
 				return singleExecOutcome{}, beginError
 			}
-			defer func() { _ = tx.Rollback() }()
+			defer func() {
+				if rollbackError := transaction.Rollback(); rollbackError != nil {
+					return
+				}
+			}()
 
-			changed, reevalError := expedition.Reevaluate(tx, dataset.PrimaryExpeditionID)
+			changed, reevalError := expedition.Reevaluate(transaction, dataset.PrimaryExpeditionID)
 			if reevalError != nil {
 				return singleExecOutcome{}, reevalError
 			}
@@ -309,7 +311,6 @@ func profileExpeditionReevaluate(
 
 func profileStartCandidates(
 	database *sql.DB,
-	proj *profileProjections,
 	recorder *treeRecorder,
 	dataset DatasetSummary,
 	iterations int,
@@ -329,7 +330,7 @@ func profileStartCandidates(
 		return ProbeResult{}, false, nil
 	}
 
-	probe, err := runColdWarmProbe(
+	probe, probeError := runSingleModeProbe(
 		database,
 		recorder,
 		"Expedition/StartCandidates",
@@ -339,7 +340,7 @@ func profileStartCandidates(
 		"arrivals",
 		"candidates",
 		iterations,
-		proj.invalidate,
+		nil,
 		func() (singleExecOutcome, error) {
 			systemName, candidates, candError := expedition.StartCandidates(database, dataset.PrimaryExpeditionID)
 			if candError != nil {
@@ -354,7 +355,7 @@ func profileStartCandidates(
 			}, nil
 		},
 	)
-	return probe, true, err
+	return probe, true, probeError
 }
 
 func profileRowDropPreviews(

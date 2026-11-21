@@ -301,16 +301,24 @@ func writeDiffSection(builder *strings.Builder, diff DiffReport) {
 		if !entry.ResultHashMatched {
 			matchStatus = "MISMATCH"
 		}
+		warmBaselineLabel := "n/a"
+		warmCurrentLabel := "n/a"
+		warmDeltaLabel := "n/a"
+		if entry.HasWarm {
+			warmBaselineLabel = formatDuration(entry.WarmBaseline)
+			warmCurrentLabel = formatDuration(entry.WarmCurrent)
+			warmDeltaLabel = fmt.Sprintf("%+8.1f%%", entry.WarmDeltaPct)
+		}
 		fmt.Fprintf(
 			builder,
-			"%-38s %12s %12s %+8.1f%% %12s %12s %+8.1f%% %-8s\n",
+			"%-38s %12s %12s %+8.1f%% %12s %12s %9s %-8s\n",
 			truncateText(entry.ProbeName, 38),
 			formatDuration(entry.ColdBaseline),
 			formatDuration(entry.ColdCurrent),
 			entry.ColdDeltaPct,
-			formatDuration(entry.WarmBaseline),
-			formatDuration(entry.WarmCurrent),
-			entry.WarmDeltaPct,
+			warmBaselineLabel,
+			warmCurrentLabel,
+			warmDeltaLabel,
 			matchStatus,
 		)
 	}

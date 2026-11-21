@@ -106,9 +106,16 @@ func TestRunSnapshotSuiteAndDiff(t *testing.T) {
 	}
 
 	foundExplainPlan := false
+	foundCachedProbe := false
+	foundSinglePassProbe := false
 	for _, probe := range report.Probes {
-		if probe.HasWarm && !probe.ColdWarmMatch {
-			t.Errorf("probe %s Cold hash (%s) != Warm hash (%s)", probe.Name, probe.Cold.ResultHash, probe.Warm.ResultHash)
+		if probe.HasWarm {
+			foundCachedProbe = true
+			if !probe.ColdWarmMatch {
+				t.Errorf("probe %s Cold hash (%s) != Warm hash (%s)", probe.Name, probe.Cold.ResultHash, probe.Warm.ResultHash)
+			}
+		} else {
+			foundSinglePassProbe = true
 		}
 		if probe.Cold.RootSpan == nil || len(probe.Cold.RootSpan.Children) == 0 {
 			t.Errorf("probe %s missing hierarchical child spans", probe.Name)
@@ -119,6 +126,9 @@ func TestRunSnapshotSuiteAndDiff(t *testing.T) {
 	}
 	if !foundExplainPlan {
 		t.Errorf("expected at least one SQL span to include an EXPLAIN QUERY PLAN summary")
+	}
+	if !foundCachedProbe || !foundSinglePassProbe {
+		t.Errorf("expected both cached Cold/Warm probes (%v) and single-pass stateless probes (%v)", foundCachedProbe, foundSinglePassProbe)
 	}
 
 	baselinePath := filepath.Join(t.TempDir(), "baseline.json")

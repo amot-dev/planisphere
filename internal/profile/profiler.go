@@ -17,8 +17,7 @@ import (
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
-	"planisphere/internal/replay"
-	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
 )
@@ -30,6 +29,7 @@ type profileProjections struct {
 	systemArrivals *projections.SystemArrivals
 	visitCounts    *projections.SystemVisitCounts
 	shipHistory    *projections.ShipHistory
+	carrierState   *projections.CarrierState
 	salesLedger    *realization.SalesLedger
 	careerStats    *stats.CareerStats
 	timeRangeStats *stats.TimeRangeStats
@@ -46,14 +46,11 @@ func newProfileProjections(database *sql.DB) *profileProjections {
 		systemArrivals: projections.NewSystemArrivals(database, bus),
 		visitCounts:    projections.NewSystemVisitCounts(database, bus, recoveredJumps),
 		shipHistory:    projections.NewShipHistory(database, bus),
+		carrierState:   projections.NewCarrierState(database, bus),
 		salesLedger:    salesLedger,
 		careerStats:    stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
 		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps, modes.LoadModeLookup),
 	}
-}
-
-func (proj *profileProjections) statsEngine() *replaystats.Engine {
-	return replaystats.NewEngineWithSources(proj.database, proj.salesLedger, proj.recoveredJumps, modes.LoadModeLookup)
 }
 
 func (proj *profileProjections) expeditionProjections() *expedition.Projections {
@@ -71,6 +68,36 @@ func (proj *profileProjections) invalidate() {
 	if proj != nil && proj.bus != nil {
 		proj.bus.PublishApp(events.AppDatabaseSwitched)
 	}
+}
+
+// warmBaseProjections populates SalesLedger and RecoveredJumps after a full bus
+// reset so bounded TimeRangeStats Cold runs measure per-window section replay
+// without attributing lifetime ledger setup to each individual window.
+func (proj *profileProjections) warmBaseProjections() error {
+	if _, ledgerError := proj.salesLedger.Get(); ledgerError != nil {
+		return fmt.Errorf("warm sales ledger: %w", ledgerError)
+	}
+	if _, jumpsError := proj.recoveredJumps.All(); jumpsError != nil {
+		return fmt.Errorf("warm recovered jumps: %w", jumpsError)
+	}
+	return nil
+}
+
+func (proj *profileProjections) prepareJournalInvalidation(
+	expeditionRange stats.Range,
+	hasExpeditionRange bool,
+	eventTypes ...journal.EventType,
+) error {
+	if _, careerError := proj.careerStats.Get(); careerError != nil {
+		return fmt.Errorf("warm career stats before journal invalidation: %w", careerError)
+	}
+	if hasExpeditionRange {
+		if _, rangeError := proj.timeRangeStats.Compute(expeditionRange, nil); rangeError != nil {
+			return fmt.Errorf("warm expedition time range before journal invalidation: %w", rangeError)
+		}
+	}
+	proj.bus.PublishJournal(journal.NewEventSet(eventTypes...))
+	return nil
 }
 
 // RunSnapshotSuite creates a temporary read-only snapshot of the configured
@@ -160,189 +187,6 @@ func matchesFilter(probeName, filterPattern string) bool {
 	return strings.Contains(strings.ToLower(probeName), strings.ToLower(trimmed))
 }
 
-func inspectDataset(database *sql.DB, sourcePath, snapshotPath string) (DatasetSummary, error) {
-	summary := DatasetSummary{
-		SourceDBPath:   sourcePath,
-		SnapshotDBPath: snapshotPath,
-	}
-	if fileInfo, statErr := os.Stat(sourcePath); statErr == nil {
-		summary.DatabaseSizeBytes = fileInfo.Size()
-	}
-
-	_ = database.QueryRow(`SELECT COUNT(*) FROM ingested_journals`).Scan(&summary.FilesTracked)
-	_ = database.QueryRow(`SELECT COUNT(*), COALESCE(SUM(LENGTH(raw_json)), 0) FROM journal_events`).Scan(&summary.TotalEvents, &summary.RawJSONBytesTotal)
-	_ = database.QueryRow(`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Scan','SAAScanComplete','ScanOrganic')`).Scan(&summary.MetricEvents)
-	_ = database.QueryRow(`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Docked','Undocked','Scan','SAAScanComplete','ScanOrganic','SellExplorationData','MultiSellExplorationData','SellOrganicData','Resurrect','NpcCrewPaidWage')`).Scan(&summary.RealizationEvents)
-	_ = database.QueryRow(`SELECT COUNT(*) FROM commanders`).Scan(&summary.CommanderCount)
-	_ = database.QueryRow(`SELECT COUNT(*) FROM expeditions`).Scan(&summary.ExpeditionCount)
-	_ = database.QueryRow(`SELECT COUNT(*) FROM gec_pois_cache`).Scan(&summary.GECPOICount)
-
-	selectPrimaryExpedition(database, &summary)
-	summary.Windows = buildRepresentativeWindows(database, summary)
-	return summary, nil
-}
-
-func selectPrimaryExpedition(database *sql.DB, summary *DatasetSummary) {
-	expeditionsList, listErr := expedition.List(database)
-	if listErr != nil || len(expeditionsList) == 0 {
-		return
-	}
-	chosen := expeditionsList[0]
-	bestScore := -1
-	for _, candidate := range expeditionsList {
-		rows, _ := expedition.ListRows(database, candidate.ID)
-		visited := 0
-		for _, r := range rows {
-			if r.IsWaypoint() && r.VisitedAt != "" {
-				visited++
-			}
-		}
-		score := visited*1000 + len(rows)
-		if candidate.Status == expedition.StatusActive {
-			score += 50000
-		}
-		if score > bestScore {
-			bestScore = score
-			chosen = candidate
-		}
-	}
-	summary.PrimaryExpeditionID = chosen.ID
-	summary.PrimaryExpeditionName = chosen.Name
-	summary.PrimaryExpeditionStatus = chosen.Status
-
-	rows, _ := expedition.ListRows(database, chosen.ID)
-	summary.PrimaryRowCount = len(rows)
-	waypointNumber := 0
-	for _, rowItem := range rows {
-		if !rowItem.IsWaypoint() {
-			continue
-		}
-		waypointNumber++
-		summary.PrimaryWaypointCount++
-		if waypointNumber == 1 {
-			summary.OriginRowID = rowItem.ID
-		}
-		if rowItem.VisitedAt != "" {
-			summary.PrimaryVisitedCount++
-			if waypointNumber > 1 && summary.SampleVisitedLegRowID == 0 {
-				summary.SampleVisitedLegRowID = rowItem.ID
-				summary.SampleVisitedLegNumber = waypointNumber
-			}
-		}
-	}
-}
-
-func buildRepresentativeWindows(database *sql.DB, summary DatasetSummary) []RepresentativeWindow {
-	var windows []RepresentativeWindow
-
-	if legWindow, ok := findSingleLegWindow(database, summary); ok {
-		windows = append(windows, legWindow)
-	}
-	if expWindow, ok := findExpeditionWindow(database, summary); ok {
-		windows = append(windows, expWindow)
-	}
-	windows = append(windows, RepresentativeWindow{
-		Label:          "AllTime",
-		AfterTimestamp: "",
-		UntilTimestamp: "9999-12-31T23:59:59Z",
-		MetricEvents:   summary.MetricEvents,
-		RealEvents:     summary.RealizationEvents,
-	})
-	return windows
-}
-
-func findSingleLegWindow(database *sql.DB, summary DatasetSummary) (RepresentativeWindow, bool) {
-	if summary.PrimaryExpeditionID > 0 {
-		rows, _ := expedition.ListRows(database, summary.PrimaryExpeditionID)
-		var visitedTimestamps []string
-		for _, rowItem := range rows {
-			if rowItem.IsWaypoint() && rowItem.VisitedAt != "" {
-				visitedTimestamps = append(visitedTimestamps, rowItem.VisitedAt)
-			}
-		}
-		slices.Sort(visitedTimestamps)
-		for i := 1; i < len(visitedTimestamps); i++ {
-			after := visitedTimestamps[i-1]
-			until := visitedTimestamps[i]
-			metricCount, realCount := countWindowEvents(database, after, until)
-			if metricCount >= 5 {
-				return RepresentativeWindow{
-					Label:          "SingleLeg",
-					AfterTimestamp: after,
-					UntilTimestamp: until,
-					MetricEvents:   metricCount,
-					RealEvents:     realCount,
-				}, true
-			}
-		}
-	}
-	var firstTS, endSliceTS sql.NullString
-	_ = database.QueryRow(`SELECT MIN(timestamp) FROM journal_events`).Scan(&firstTS)
-	_ = database.QueryRow(`SELECT timestamp FROM journal_events ORDER BY timestamp ASC LIMIT 1 OFFSET 250`).Scan(&endSliceTS)
-	if firstTS.Valid && endSliceTS.Valid && endSliceTS.String > firstTS.String {
-		metricCount, realCount := countWindowEvents(database, firstTS.String, endSliceTS.String)
-		return RepresentativeWindow{
-			Label:          "SingleLeg",
-			AfterTimestamp: firstTS.String,
-			UntilTimestamp: endSliceTS.String,
-			MetricEvents:   metricCount,
-			RealEvents:     realCount,
-		}, true
-	}
-	return RepresentativeWindow{}, false
-}
-
-func findExpeditionWindow(database *sql.DB, summary DatasetSummary) (RepresentativeWindow, bool) {
-	if summary.PrimaryExpeditionID > 0 {
-		expRecord, err := expedition.Get(database, summary.PrimaryExpeditionID)
-		if err == nil && expRecord.StartTimestamp != "" {
-			until := expRecord.EndTimestamp
-			if until == "" {
-				until = "9999-12-31T23:59:59Z"
-			}
-			metricCount, realCount := countWindowEvents(database, expRecord.StartTimestamp, until)
-			if metricCount > 0 {
-				return RepresentativeWindow{
-					Label:          "ExpeditionWindow",
-					AfterTimestamp: expRecord.StartTimestamp,
-					UntilTimestamp: until,
-					MetricEvents:   metricCount,
-					RealEvents:     realCount,
-				}, true
-			}
-		}
-	}
-	if summary.TotalEvents > 20 {
-		offset := max(summary.TotalEvents*3/4, 1)
-		var midTS sql.NullString
-		_ = database.QueryRow(`SELECT timestamp FROM journal_events ORDER BY timestamp ASC LIMIT 1 OFFSET ?`, offset).Scan(&midTS)
-		if midTS.Valid && midTS.String != "" {
-			metricCount, realCount := countWindowEvents(database, midTS.String, "9999-12-31T23:59:59Z")
-			return RepresentativeWindow{
-				Label:          "ExpeditionWindow",
-				AfterTimestamp: midTS.String,
-				UntilTimestamp: "9999-12-31T23:59:59Z",
-				MetricEvents:   metricCount,
-				RealEvents:     realCount,
-			}, true
-		}
-	}
-	return RepresentativeWindow{}, false
-}
-
-func countWindowEvents(database *sql.DB, afterTimestamp, untilTimestamp string) (int, int) {
-	var metricCount, realCount int
-	_ = database.QueryRow(
-		`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Scan','SAAScanComplete','ScanOrganic') AND timestamp > ? AND timestamp <= ? AND `+replay.CmdrFilterSQL,
-		afterTimestamp, untilTimestamp,
-	).Scan(&metricCount)
-	_ = database.QueryRow(
-		`SELECT COUNT(*) FROM journal_events WHERE event IN ('LoadGame','Location','FSDJump','CarrierJump','Docked','Undocked','Scan','SAAScanComplete','ScanOrganic','SellExplorationData','MultiSellExplorationData','SellOrganicData','Resurrect','NpcCrewPaidWage') AND timestamp > ? AND timestamp <= ? AND `+replay.CmdrFilterSQL,
-		afterTimestamp, untilTimestamp,
-	).Scan(&realCount)
-	return metricCount, realCount
-}
-
 func populateReportDiagnostics(report *Report) {
 	var leafSpans []HotspotEntry
 	var sqlAnomalies []HotspotEntry
@@ -378,13 +222,7 @@ func populateReportDiagnostics(report *Report) {
 	}
 
 	slices.SortFunc(memoryEntries, func(left, right HotspotEntry) int {
-		if right.AllocBytes > left.AllocBytes {
-			return 1
-		}
-		if right.AllocBytes < left.AllocBytes {
-			return -1
-		}
-		return 0
+		return cmp.Compare(right.AllocBytes, left.AllocBytes)
 	})
 	if len(memoryEntries) > 5 {
 		memoryEntries = memoryEntries[:5]
@@ -477,22 +315,22 @@ func collectSpanDiagnostics(
 
 // SaveReport writes a profiling report as formatted JSON to filePath.
 func SaveReport(filePath string, report Report) error {
-	encoded, marshalErr := json.MarshalIndent(report, "", "  ")
-	if marshalErr != nil {
-		return marshalErr
+	encoded, marshalError := json.MarshalIndent(report, "", "  ")
+	if marshalError != nil {
+		return marshalError
 	}
 	return os.WriteFile(filePath, append(encoded, '\n'), 0o644)
 }
 
 // LoadReport reads a previously saved JSON profiling report from filePath.
 func LoadReport(filePath string) (Report, error) {
-	rawBytes, readErr := os.ReadFile(filePath)
-	if readErr != nil {
-		return Report{}, readErr
+	rawBytes, readError := os.ReadFile(filePath)
+	if readError != nil {
+		return Report{}, readError
 	}
 	var report Report
-	if unmarshalErr := json.Unmarshal(rawBytes, &report); unmarshalErr != nil {
-		return Report{}, unmarshalErr
+	if unmarshalError := json.Unmarshal(rawBytes, &report); unmarshalError != nil {
+		return Report{}, unmarshalError
 	}
 	return report, nil
 }
@@ -506,26 +344,32 @@ func CompareReports(baseline, current Report) DiffReport {
 	}
 
 	diff := DiffReport{BaselineGeneratedAt: baseline.GeneratedAt}
-	for _, curProbe := range current.Probes {
-		baseProbe, exists := baselineByName[curProbe.Name]
+	for _, currentProbe := range current.Probes {
+		baseProbe, exists := baselineByName[currentProbe.Name]
 		if !exists {
 			continue
 		}
-		hashMatched := baseProbe.Cold.ResultHash == curProbe.Cold.ResultHash
+		hashMatched := baseProbe.Cold.ResultHash == currentProbe.Cold.ResultHash
 		if !hashMatched {
 			diff.AnyResultMismatch = true
 		}
+		hasWarmBoth := currentProbe.HasWarm && baseProbe.HasWarm
+		var warmDelta float64
+		if hasWarmBoth {
+			warmDelta = percentDelta(float64(baseProbe.Warm.MedianDuration), float64(currentProbe.Warm.MedianDuration))
+		}
 		diff.Entries = append(diff.Entries, DiffEntry{
-			ProbeName:         curProbe.Name,
+			ProbeName:         currentProbe.Name,
+			HasWarm:           hasWarmBoth,
 			ColdBaseline:      baseProbe.Cold.MedianDuration,
-			ColdCurrent:       curProbe.Cold.MedianDuration,
-			ColdDeltaPct:      percentDelta(float64(baseProbe.Cold.MedianDuration), float64(curProbe.Cold.MedianDuration)),
+			ColdCurrent:       currentProbe.Cold.MedianDuration,
+			ColdDeltaPct:      percentDelta(float64(baseProbe.Cold.MedianDuration), float64(currentProbe.Cold.MedianDuration)),
 			WarmBaseline:      baseProbe.Warm.MedianDuration,
-			WarmCurrent:       curProbe.Warm.MedianDuration,
-			WarmDeltaPct:      percentDelta(float64(baseProbe.Warm.MedianDuration), float64(curProbe.Warm.MedianDuration)),
+			WarmCurrent:       currentProbe.Warm.MedianDuration,
+			WarmDeltaPct:      warmDelta,
 			AllocBaseline:     baseProbe.Cold.AllocBytes,
-			AllocCurrent:      curProbe.Cold.AllocBytes,
-			AllocDeltaPct:     percentDelta(float64(baseProbe.Cold.AllocBytes), float64(curProbe.Cold.AllocBytes)),
+			AllocCurrent:      currentProbe.Cold.AllocBytes,
+			AllocDeltaPct:     percentDelta(float64(baseProbe.Cold.AllocBytes), float64(currentProbe.Cold.AllocBytes)),
 			ResultHashMatched: hashMatched,
 		})
 	}
