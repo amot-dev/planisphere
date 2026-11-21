@@ -54,7 +54,7 @@ export interface ExpeditionPlannerProps {
 
 /**
  * ExpeditionPlanner renders the primary flight plan table, inline cell drafts,
- * drag-and-drop row reordering, telemetry drawers, and Fleet Carrier plotter.
+ * drag-and-drop row reordering, telemetry drawers, and Fleet Carrier router.
  */
 export function ExpeditionPlanner({
   plan,

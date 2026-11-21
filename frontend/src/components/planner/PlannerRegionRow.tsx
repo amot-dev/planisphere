@@ -5,7 +5,7 @@ import { RowManipulationButtons } from './widgets/RowManipulationButtons'
 
 /**
  * PlannerRegionRowProps defines the row view, column span, lock state, drag
- * attributes, and manipulation callbacks for a Galactic Region divider row.
+ * attributes, and manipulation callbacks for a Region Header row.
  */
 export interface PlannerRegionRowProps {
   expeditionId: number
@@ -17,6 +17,7 @@ export interface PlannerRegionRowProps {
   isBeingDragged: boolean
   topGapHighlight?: boolean
   bottomGapHighlight?: boolean
+  /** Inherited leg accent border color rendered on the left edge when active (omitted while dragging). */
   leftBorderColor?: string
   lastVisitedIndex: number
   insertMenuOpen: boolean
@@ -33,7 +34,7 @@ export interface PlannerRegionRowProps {
 }
 
 /**
- * PlannerRegionRow renders a full-width Galactic Region header row inside the
+ * PlannerRegionRow renders a full-width Region Header row inside the
  * flight planner table with region selection and row controls.
  */
 export const PlannerRegionRow = memo(function PlannerRegionRow({

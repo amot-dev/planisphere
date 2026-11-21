@@ -81,7 +81,7 @@ export const CarrierRouteBottomPanel = memo(function CarrierRouteBottomPanel({
 
   return (
     <div className="border-t-2 border-[#00D2FF] bg-[#0b0907] px-3 sm:px-5 py-2.5 sm:py-3 shadow-2xl text-xs">
-      <CarrierPlotterHeaderBar
+      <CarrierRouterHeaderBar
         route={route}
         destinationDisplay={destinationDisplay}
         manualMode={manualMode}
@@ -124,7 +124,7 @@ export const CarrierRouteBottomPanel = memo(function CarrierRouteBottomPanel({
   )
 })
 
-function CarrierPlotterHeaderBar({
+function CarrierRouterHeaderBar({
   route,
   destinationDisplay,
   manualMode,

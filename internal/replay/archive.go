@@ -124,6 +124,7 @@ func sqliteNocaseKey(value string) string {
 	return string(folded)
 }
 
+// Bounds per-commander EXISTS and COUNT(*) subqueries in the fast-path query.
 const maxFastPathCommanders = 16
 
 const sampleDominantCommanderSQL = `WITH bounds AS (
@@ -172,7 +173,8 @@ func sortCommanderKeys(commanders []Commander) ([]sortedCommanderKey, bool) {
 // sampleDominantCommanderIndex probes seven evenly spaced rowids across
 // journal_events to pick the commander with the most rows so the fast path can
 // derive its count by subtraction instead of scanning its index range. Returns
-// ok=false when unattributed or unlisted rows should trigger the GROUP BY path.
+// false as the second result when sampled rows include an unlisted commander or
+// unattributed rows outnumber the top commander's sample votes.
 func sampleDominantCommanderIndex(queryer db.Queryer, sortedCommanders []sortedCommanderKey) (int, bool, error) {
 	var samples [7]sql.NullString
 	sampleError := queryer.QueryRow(sampleDominantCommanderSQL).Scan(
