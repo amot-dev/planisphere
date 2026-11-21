@@ -1,4 +1,4 @@
-import type { SyncPauseState } from '../../features/sync/useSyncPause'
+import type { SyncPauseState } from '../../domain/syncState'
 
 /**
  * SyncStatusButtonProps defines the live task status, pause lifecycle state,

@@ -1,5 +1,4 @@
 import { expedition } from '../api/models'
-export type { ExternalLinkVisibilityConfig } from './externalLinks'
 import { DEFAULT_LEG_BORDER_COLOR, ORIGIN_LEG_BORDER_COLOR } from './theme'
 
 /**

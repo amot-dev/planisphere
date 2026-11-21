@@ -2,19 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { SetActiveExpedition, SwitchMode } from '../../api/backend'
 import { subscribeBackendEvents } from '../../api/events'
 import { stats, type EddImportProgress } from '../../api/models'
-import {
-  routeDataChangedEvent,
-  type DataChangedDispatchContext,
-  type SyncBootLifecycleState,
-} from './syncEventRouter'
+import type { DataChangedDispatchContext, SyncBootLifecycleState } from './syncEventRouter'
 import { useDomainLoaders } from './useDomainLoaders'
 import { useSyncPause } from './useSyncPause'
-
-export {
-  routeDataChangedEvent,
-  type DataChangedDispatchContext,
-  type SyncBootLifecycleState,
-}
 
 /**
  * useBackendSync manages terminal bootstrap state, Wails IPC queries for

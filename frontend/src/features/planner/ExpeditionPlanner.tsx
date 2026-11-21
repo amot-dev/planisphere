@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expedition } from '../../api/models'
+import type { ExternalLinkVisibilityConfig } from '../../domain/externalLinks'
 import {
   computePlanFrontierIndices,
   computePlannerTableDimensions,
-  type ExternalLinkVisibilityConfig,
 } from '../../domain/planTableItems'
 import { useCopyFeedback } from '../../hooks/useCopyFeedback'
 import { useLocalStorageBoolean } from '../../hooks/useLocalStorageBoolean'

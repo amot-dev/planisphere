@@ -1,5 +1,5 @@
 import { app, expedition } from '../../api/models'
-import type { SyncPauseState } from '../../features/sync/useSyncPause'
+import type { SyncPauseState } from '../../domain/syncState'
 import { APP_PRODUCT_NAME, APP_TAGLINE } from '../../version'
 import { CogIcon } from './HudIcons'
 import { SyncStatusButton } from './SyncStatusButton'

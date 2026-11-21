@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { setLiveSyncPaused } from '../../api/backend'
 import type { BackendEventHandlers } from '../../api/events'
 import type { DataChangedPayload, EddImportProgress } from '../../api/models'
+import type { SyncPauseState } from '../../domain/syncState'
 import { routeDataChangedEvent, type DataChangedDispatchContext } from './syncEventRouter'
-
-/**
- * SyncPauseState represents the user-facing pause lifecycle of live backend
- * synchronization.
- */
-export type SyncPauseState = 'active' | 'pausing' | 'paused'
 
 /**
  * UseSyncPauseOptions supplies the live status indicator, dispatch context
