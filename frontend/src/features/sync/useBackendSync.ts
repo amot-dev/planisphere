@@ -8,6 +8,7 @@ import {
   type SyncBootLifecycleState,
 } from './syncEventRouter'
 import { useDomainLoaders } from './useDomainLoaders'
+import { useSyncPause } from './useSyncPause'
 
 export {
   routeDataChangedEvent,
@@ -146,40 +147,51 @@ export function useBackendSync() {
     void loadStatsOnly(activeExpeditionId, filter)
   }, [activeExpeditionId, filter, loadStatsOnly])
 
+  const activeStatusMessage =
+    busyAction ||
+    (eddProgress?.active ? `EDD IMPORT ${eddProgress.percent}%` : null) ||
+    (ingest?.scanning ? 'INGESTING JOURNALS' : null) ||
+    (statsLoading ? 'COMPUTING TELEMETRY' : null)
+
+  const getLiveDispatchContext = useCallback(
+    (): DataChangedDispatchContext => ({
+      bootState: bootStateRef.current,
+      currentActiveExpeditionId: activeExpeditionIdRef.current,
+      currentFilter: filterRef.current,
+      refreshExpeditionListOnly,
+      loadIngestStatusOnly,
+      loadSettingsOnly,
+      loadModesOnly,
+      loadPlanOnly,
+      loadStatsOnly,
+      refreshAll,
+    }),
+    [
+      activeExpeditionIdRef,
+      loadIngestStatusOnly,
+      loadModesOnly,
+      loadPlanOnly,
+      loadSettingsOnly,
+      loadStatsOnly,
+      refreshAll,
+      refreshExpeditionListOnly,
+    ],
+  )
+
+  const {
+    effectiveSyncPauseState,
+    hasPendingSyncUpdates,
+    isClockSuspended,
+    handleToggleSyncPause,
+    eventHandlers,
+  } = useSyncPause({
+    activeStatusMessage,
+    getLiveDispatchContext,
+    applyEddProgress: setEddProgress,
+  })
+
   // Subscribe to Wails backend events (live fsnotify journal tailing, coordinate resolution, and mode changes).
-  useEffect(() => {
-    return subscribeBackendEvents({
-      onDataChanged: (payload) => {
-        routeDataChangedEvent(payload, {
-          bootState: bootStateRef.current,
-          currentActiveExpeditionId: activeExpeditionIdRef.current,
-          currentFilter: filterRef.current,
-          refreshExpeditionListOnly,
-          loadIngestStatusOnly,
-          loadSettingsOnly,
-          loadModesOnly,
-          loadPlanOnly,
-          loadStatsOnly,
-          refreshAll,
-        })
-      },
-      onIngestStatus: () => {
-        void loadIngestStatusOnly()
-      },
-      onEddProgress: (progress) => {
-        setEddProgress(progress)
-      },
-    })
-  }, [
-    activeExpeditionIdRef,
-    loadIngestStatusOnly,
-    loadModesOnly,
-    loadPlanOnly,
-    loadSettingsOnly,
-    loadStatsOnly,
-    refreshAll,
-    refreshExpeditionListOnly,
-  ])
+  useEffect(() => subscribeBackendEvents(eventHandlers), [eventHandlers])
 
   const handleSelectExpedition = useCallback(
     async (selectedExpeditionId: number) => {
@@ -214,12 +226,6 @@ export function useBackendSync() {
     }
   }, [activeExpeditionIdRef, loadPlanOnly])
 
-  const activeStatusMessage =
-    busyAction ||
-    (eddProgress?.active ? `EDD IMPORT ${eddProgress.percent}%` : null) ||
-    (ingest?.scanning ? 'INGESTING JOURNALS' : null) ||
-    (statsLoading ? 'COMPUTING TELEMETRY' : null)
-
   return {
     booting,
     setBusyAction,
@@ -237,6 +243,10 @@ export function useBackendSync() {
     setFilter,
     eddProgress,
     activeStatusMessage,
+    syncPauseState: effectiveSyncPauseState,
+    hasPendingSyncUpdates,
+    isClockSuspended,
+    handleToggleSyncPause,
     handleSelectExpedition,
     handleQuickSwitchMode,
     refreshAll,

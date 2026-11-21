@@ -334,3 +334,10 @@
 [data-scrollable] {
   will-change: scroll-position;
 }
+
+/* Suspend infinite HUD pulse and scan animations while the window is hidden */
+html[data-document-hidden="true"] *,
+html[data-document-hidden="true"] *::before,
+html[data-document-hidden="true"] *::after {
+  animation-play-state: paused !important;
+}

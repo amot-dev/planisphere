@@ -21,6 +21,7 @@ export interface NavigationTelemetrySectionProps {
   sidebarStats: app.SidebarStats | null
   displayedMetrics: stats.Metrics
   carrierRouteOpen: boolean
+  clockSuspended?: boolean
   flightOpsExpanded?: boolean
   carrierOpsExpanded?: boolean
   carrierCostExpanded?: boolean
@@ -40,6 +41,7 @@ export function NavigationTelemetrySection({
   sidebarStats,
   displayedMetrics,
   carrierRouteOpen,
+  clockSuspended = false,
   flightOpsExpanded = true,
   carrierOpsExpanded = true,
   carrierCostExpanded = true,
@@ -54,7 +56,7 @@ export function NavigationTelemetrySection({
   const carrierCost = sidebarStats?.carrierCost ?? new app.CarrierCostBreakdown()
 
   useEffect(() => {
-    if (!isActiveExpeditionClock) {
+    if (!isActiveExpeditionClock || clockSuspended) {
       return
     }
     setCurrentGalacticTime(nowGalacticTime())
@@ -62,7 +64,7 @@ export function NavigationTelemetrySection({
       setCurrentGalacticTime(nowGalacticTime())
     }, 60_000)
     return () => clearInterval(clockInterval)
-  }, [isActiveExpeditionClock])
+  }, [clockSuspended, isActiveExpeditionClock])
 
   const carrierHeaderActions =
     viewScope !== 'allTime' ? (

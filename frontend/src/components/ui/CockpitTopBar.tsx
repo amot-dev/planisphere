@@ -1,6 +1,8 @@
 import { app, expedition } from '../../api/models'
+import type { SyncPauseState } from '../../features/sync/useSyncPause'
 import { APP_PRODUCT_NAME, APP_TAGLINE } from '../../version'
 import { CogIcon } from './HudIcons'
+import { SyncStatusButton } from './SyncStatusButton'
 import { VersionIndicator } from './VersionIndicator'
 
 /**
@@ -12,8 +14,11 @@ export interface CockpitTopBarProps {
   expeditions: expedition.Expedition[]
   activeExpeditionId: number
   activeStatusMessage: string | null
+  syncPauseState: SyncPauseState
+  hasPendingSyncUpdates: boolean
   ingest: app.IngestStatus | null
   settings: app.Settings | null
+  onToggleSyncPause: () => void
   onSelectExpedition: (selectedExpeditionId: number) => void
   onOpenExpeditionsModal: () => void
   onOpenSettingsModal: () => void
@@ -28,8 +33,11 @@ export function CockpitTopBar({
   expeditions,
   activeExpeditionId,
   activeStatusMessage,
+  syncPauseState,
+  hasPendingSyncUpdates,
   ingest,
   settings,
+  onToggleSyncPause,
   onSelectExpedition,
   onOpenExpeditionsModal,
   onOpenSettingsModal,
@@ -90,26 +98,13 @@ export function CockpitTopBar({
 
         {/* Right Telemetry Strip */}
         <div className="flex items-center gap-2.5 text-xs shrink-0">
-          {/* System Status Readout */}
-          <div
-            className={`h-[30px] flex items-center gap-2 px-2.5 border font-mono-tabular text-[11px] uppercase tracking-wider ${
-              activeStatusMessage
-                ? 'bg-ed-amber-tint border-ed-amber text-ed-amber'
-                : 'bg-ed-cyan-tint border-ed-cyan-border text-ed-cyan'
-            }`}
-            title={
-              activeStatusMessage
-                ? `Background task: ${activeStatusMessage}`
-                : 'Planisphere idle and ready for input'
-            }
-          >
-            <span
-              className={`w-2 h-2 ${
-                activeStatusMessage ? 'bg-ed-amber animate-ping' : 'bg-ed-cyan'
-              }`}
-            />
-            <span className="font-bold">{activeStatusMessage ? 'BUSY' : 'READY'}</span>
-          </div>
+          {/* System Status Readout and Pause Toggle */}
+          <SyncStatusButton
+            activeStatusMessage={activeStatusMessage}
+            syncPauseState={syncPauseState}
+            hasPendingSyncUpdates={hasPendingSyncUpdates}
+            onToggleSyncPause={onToggleSyncPause}
+          />
 
           {ingest?.currentSystem && (
             <div

@@ -32,6 +32,10 @@ export default function App() {
     setFilter,
     eddProgress,
     activeStatusMessage,
+    syncPauseState,
+    hasPendingSyncUpdates,
+    isClockSuspended,
+    handleToggleSyncPause,
     handleSelectExpedition,
     handleQuickSwitchMode,
     refreshAll,
@@ -91,8 +95,11 @@ export default function App() {
         expeditions={expeditions}
         activeExpeditionId={activeExpeditionId}
         activeStatusMessage={activeStatusMessage}
+        syncPauseState={syncPauseState}
+        hasPendingSyncUpdates={hasPendingSyncUpdates}
         ingest={ingest}
         settings={settings}
+        onToggleSyncPause={handleToggleSyncPause}
         onSelectExpedition={handleSelectExpedition}
         onOpenExpeditionsModal={() => setActiveModal('expeditions')}
         onOpenSettingsModal={handleOpenSettingsModal}
@@ -108,6 +115,7 @@ export default function App() {
             filter={filter}
             collapsed={sidebarCollapsed}
             carrierRouteOpen={carrierRouteOpen}
+            clockSuspended={isClockSuspended}
             onFilterChange={setFilter}
             onQuickSwitchMode={handleQuickSwitchMode}
             onToggleCollapse={toggleSidebarCollapsed}
