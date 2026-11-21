@@ -82,7 +82,7 @@ export const PlannerRegionRow = memo(function PlannerRegionRow({
       data-row-id={row.id}
       data-row-index={index}
       data-being-dragged={isBeingDragged ? 'true' : undefined}
-      className={`group ed-header-bar ${gapHighlightClass}`}
+      className={`group ${isBeingDragged ? '' : 'ed-header-bar'} ${gapHighlightClass}`}
     >
       {/* Region Name and optional MOVING badge */}
       <td

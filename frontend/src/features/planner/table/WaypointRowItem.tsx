@@ -143,10 +143,12 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       data-row-index={index}
       data-being-dragged={isBeingDragged ? 'true' : undefined}
       data-last-visited={!isPlanning && index === lastVisitedIndex ? 'true' : undefined}
-      className={`group align-top ${
-        permissions.isVisited
-          ? 'bg-ed-surface hover:bg-ed-elevated text-ed-text-main'
-          : 'bg-ed-rail hover:bg-ed-control text-ed-text-main'
+      className={`group align-top text-ed-text-main ${
+        isBeingDragged
+          ? ''
+          : permissions.isVisited
+            ? 'bg-ed-surface hover:bg-ed-elevated'
+            : 'bg-ed-rail hover:bg-ed-control'
       } ${permissions.rowDropHighlightClass}`}
     >
       {/* Expand Chevron */}

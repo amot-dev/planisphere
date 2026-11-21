@@ -207,7 +207,20 @@ export function ExpeditionPlanner({
       onRowDragStart: rowDrag.handleRowDragStart,
       onRowDragEnd: rowDrag.handleRowDragEnd,
     }),
-    [rowDrag],
+    [
+      rowDrag.dragOverGapIndex,
+      rowDrag.draggedIndex,
+      rowDrag.dropSlotGaps,
+      rowDrag.getRowDropProps,
+      rowDrag.getSlotDropProps,
+      rowDrag.handleClearDragOverGap,
+      rowDrag.handleRowDragEnd,
+      rowDrag.handleRowDragStart,
+      rowDrag.handleRowHoldEnd,
+      rowDrag.handleRowHoldStart,
+      rowDrag.heldOrDraggedIndex,
+      rowDrag.tableItems,
+    ],
   )
 
   const carrierState = useMemo(
@@ -244,7 +257,19 @@ export function ExpeditionPlanner({
       onToggleFcStop: mutations.toggleFcStop,
       onOverrideFcArrived: mutations.handleRequestOverrideFcArrived,
     }),
-    [copiedSystemRowId, handleCopySystem, mutations],
+    [
+      copiedSystemRowId,
+      handleCopySystem,
+      mutations.changeRegion,
+      mutations.commitField,
+      mutations.handleInsert,
+      mutations.handleLegModeChange,
+      mutations.handleRequestDeleteRow,
+      mutations.handleRequestOverrideFcArrived,
+      mutations.insertMenuAfterId,
+      mutations.setInsertMenuAfterId,
+      mutations.toggleFcStop,
+    ],
   )
 
   if (!plan) {

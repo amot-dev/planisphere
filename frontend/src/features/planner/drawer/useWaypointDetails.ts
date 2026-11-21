@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GetWaypointDetails } from '../../../api/backend'
 import { expedition } from '../../../api/models'
 
@@ -148,26 +148,32 @@ export function useWaypointDetails(
     }
   }, [archiveRevision, isOptimisticPlan, isPlanning, loadDetails, plan])
 
-  function toggleExpand(rowId: number) {
-    const rowView = plan?.rows?.find((candidate) => candidate.row.id === rowId)
-    if (isPlanning || !rowView || rowView.visitState === 'future') return
+  const toggleExpand = useCallback(
+    (rowId: number) => {
+      const rowView = plan?.rows?.find((candidate) => candidate.row.id === rowId)
+      if (isPlanning || !rowView || rowView.visitState === 'future') return
 
-    const nextOpen = !expandedRowIdsRef.current[rowId]
-    setExpandedRowIds((previous) => {
-      const nextExpanded = { ...previous, [rowId]: nextOpen }
-      expandedRowIdsRef.current = nextExpanded
-      return nextExpanded
-    })
-    if (nextOpen) {
-      loadDetails(rowId)
-    }
-  }
+      const nextOpen = !expandedRowIdsRef.current[rowId]
+      setExpandedRowIds((previous) => {
+        const nextExpanded = { ...previous, [rowId]: nextOpen }
+        expandedRowIdsRef.current = nextExpanded
+        return nextExpanded
+      })
+      if (nextOpen) {
+        loadDetails(rowId)
+      }
+    },
+    [isPlanning, loadDetails, plan],
+  )
 
-  return {
-    expandedRowIds,
-    detailsById,
-    loadingDetails,
-    toggleExpand,
-  }
+  return useMemo(
+    () => ({
+      expandedRowIds,
+      detailsById,
+      loadingDetails,
+      toggleExpand,
+    }),
+    [detailsById, expandedRowIds, loadingDetails, toggleExpand],
+  )
 }
 
