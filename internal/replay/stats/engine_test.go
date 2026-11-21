@@ -186,9 +186,7 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 	ingestTestLine(testingContext, databaseConnection,
 		`{"timestamp":"2026-05-01T10:05:00Z","event":"Scan","ScanType":"Detailed","BodyName":"SameSec 1","BodyID":3,"StarSystem":"SameSec","SystemAddress":7001,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
 
-	earthlikeScan := reference.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}
-	expectedScanOnly := reference.EstimateBodyValue(earthlikeScan, reference.MappingInfo{}, true)
-	expectedMapping := reference.EstimateMappingIncrementBreakdown(earthlikeScan, reference.MappingInfo{Mapped: true, ProbesUsed: 4, EfficiencyTarget: 6}, true)
+	expectedScanOnly, expectedMapping := expectedEfficientELWMapping(4)
 
 	fallbackModeFilter := &stats.Filter{
 		Enabled: true,
@@ -328,6 +326,12 @@ func newEngineWithModes(queryer db.Queryer) *stats.Engine {
 	return stats.NewEngineWithSources(queryer, nil, nil, modes.LoadModeLookup)
 }
 
+func expectedEfficientELWMapping(probesUsed int) (reference.ScanValue, reference.MappingIncrementBreakdown) {
+	earthlikeScan := reference.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}
+	return reference.EstimateBodyValue(earthlikeScan, reference.MappingInfo{}, true),
+		reference.EstimateMappingIncrementBreakdown(earthlikeScan, reference.MappingInfo{Mapped: true, ProbesUsed: probesUsed, EfficiencyTarget: 6}, true)
+}
+
 func TestComputeExcludesPlanetaryRingMappings(testingContext *testing.T) {
 	journalLines := []string{
 		`{"timestamp":"2026-07-01T10:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
@@ -345,12 +349,10 @@ func TestComputeExcludesPlanetaryRingMappings(testingContext *testing.T) {
 		testingContext.Fatalf("ComputeCartographics failed: %v", computeError)
 	}
 
-	planetScan := reference.BodyScan{PlanetClass: "Earthlike body", MassEM: 1.0}
-	expectedScan := reference.EstimateBodyValue(planetScan, reference.MappingInfo{}, true)
-	expectedMapping := reference.EstimateMappingIncrementBreakdown(planetScan, reference.MappingInfo{Mapped: true, ProbesUsed: 5, EfficiencyTarget: 6}, true)
+	expectedScan, expectedMapping := expectedEfficientELWMapping(5)
 	expectedTotal := expectedScan.Total + expectedMapping.Total
 
-	if computedMetrics.BodiesMapped != 1 || computedMetrics.EfficientMappings != 1 || computedMetrics.FirstMapped != 1 || computedMetrics.ScanValueTotal != expectedTotal || computedMetrics.ScanValueTotal <= 0 {
+	if computedMetrics.BodiesMapped != 1 || computedMetrics.EfficientMappings != 1 || computedMetrics.FirstMapped != 1 || computedMetrics.ScanValueTotal != expectedTotal {
 		testingContext.Fatalf("got BodiesMapped=%d EfficientMappings=%d FirstMapped=%d ScanValueTotal=%d, want 1, 1, 1, %d",
 			computedMetrics.BodiesMapped, computedMetrics.EfficientMappings, computedMetrics.FirstMapped, computedMetrics.ScanValueTotal, expectedTotal)
 	}

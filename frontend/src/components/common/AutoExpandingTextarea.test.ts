@@ -65,6 +65,17 @@ function createResizeEntry(target: HTMLTextAreaElement, width: number): ResizeOb
   } as unknown as ResizeObserverEntry
 }
 
+function expectResetsBeforeReads(operationLog: string[]): void {
+  const lastAutoResetIndex = operationLog.reduce(
+    (lastIndex, entry, index) =>
+      entry.startsWith('write:height:') && entry.endsWith(':auto') ? index : lastIndex,
+    -1,
+  )
+  const firstReadIndex = operationLog.findIndex((entry) => entry.startsWith('read:'))
+  expect(lastAutoResetIndex).toBeGreaterThanOrEqual(0)
+  expect(firstReadIndex).toBeGreaterThan(lastAutoResetIndex)
+}
+
 describe('createTextareaResizeCoordinator', () => {
   const originalResizeObserver = globalThis.ResizeObserver
   const originalWindow = globalThis.window
@@ -113,12 +124,6 @@ describe('createTextareaResizeCoordinator', () => {
 
     // All auto-height resets happen before the first layout read, and all final
     // height writes happen after the last layout read.
-    const lastAutoResetIndex = operationLog.reduce(
-      (lastIndex, entry, index) =>
-        entry.startsWith('write:height:') && entry.endsWith(':auto') ? index : lastIndex,
-      -1,
-    )
-    const firstReadIndex = operationLog.findIndex((entry) => entry.startsWith('read:'))
     const lastReadIndex = operationLog.reduce(
       (lastIndex, entry, index) => (entry.startsWith('read:') ? index : lastIndex),
       -1,
@@ -128,8 +133,7 @@ describe('createTextareaResizeCoordinator', () => {
         entry.startsWith('write:height:') && !entry.endsWith(':auto') && !entry.includes(':short:'),
     )
 
-    expect(lastAutoResetIndex).toBeGreaterThanOrEqual(0)
-    expect(firstReadIndex).toBeGreaterThan(lastAutoResetIndex)
+    expectResetsBeforeReads(operationLog)
     expect(firstFinalHeightWriteIndex).toBeGreaterThan(lastReadIndex)
   })
 
@@ -201,13 +205,7 @@ describe('createTextareaResizeCoordinator', () => {
       [createResizeEntry(visibleTextarea, 180), createResizeEntry(offscreenTextarea, 180)],
       {} as ResizeObserver,
     )
-    const lastAutoResetIndex = operationLog.reduce(
-      (lastIndex, entry, index) =>
-        entry.startsWith('write:height:') && entry.endsWith(':auto') ? index : lastIndex,
-      -1,
-    )
-    const firstReadIndex = operationLog.findIndex((entry) => entry.startsWith('read:'))
-    expect(firstReadIndex).toBeGreaterThan(lastAutoResetIndex)
+    expectResetsBeforeReads(operationLog)
 
     coordinator.unobserve(visibleTextarea)
     expect(disconnectCalls).toBe(0)

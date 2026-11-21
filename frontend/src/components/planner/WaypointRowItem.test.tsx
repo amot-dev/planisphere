@@ -42,6 +42,20 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     )
   }
 
+  function createOriginRowView(
+    overrides: Partial<Omit<expedition.RowView, 'row' | 'convertValues'>> & {
+      row?: Partial<expedition.Row>
+    } = {},
+  ) {
+    const { row: rowOverrides, ...rowViewOverrides } = overrides
+    return expedition.RowView.createFrom({
+      row: { id: 1, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol', ...rowOverrides },
+      number: 1,
+      visitState: 'visited',
+      ...rowViewOverrides,
+    })
+  }
+
   it('renders visited row with uniform h-7 (28px) elements, align-top cells, and inset shadow left border', () => {
     const mockRowView = expedition.RowView.createFrom({
       row: {
@@ -224,11 +238,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
   })
 
   it('colors waypoint and drawer left borders by flight mode, extends to current leg, and uses muted neutral on origin', () => {
-    const originRowView = expedition.RowView.createFrom({
-      row: { id: 1, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol' },
-      number: 1,
-      visitState: 'visited',
-    })
+    const originRowView = createOriginRowView()
     const originRowHtml = renderRowItem({ rowView: originRowView, index: 0, lastVisitedIndex: 1 })
     expect(originRowHtml).toContain('style="border-left-color:#3d2816"')
     expect(originRowHtml).toContain('border-l-2 shadow-[inset_0_-1px_0_0_#24180e]')
@@ -241,6 +251,15 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
     expect(originLoadingDrawerHtml).toContain('style="border-left-color:#3d2816"')
+
+    const originDrawerHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: expedition.WaypointDetails.createFrom({ kind: 'origin', number: 1, metrics: {} }),
+        loading: false,
+        rowView: originRowView,
+      }),
+    )
+    expect(originDrawerHtml).toContain('style="border-left-color:#3d2816"')
 
     const currentLegRowView = expedition.RowView.createFrom({
       row: { id: 3, expeditionId: 1, rowType: 'waypoint', systemName: 'Sagittarius A*' },
@@ -269,16 +288,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
   })
 
   it('omits Vessel Flown and Mode toggle in WaypointDetailsDrawer for origin baseline waypoint #1', () => {
-    const mockRowView = expedition.RowView.createFrom({
-      row: {
-        id: 1,
-        expeditionId: 1,
-        rowType: 'waypoint',
-        systemName: 'Sol',
-      },
-      number: 1,
-      visitState: 'visited',
-    })
+    const mockRowView = createOriginRowView()
 
     const mockDetails = expedition.WaypointDetails.createFrom({
       kind: 'origin',
@@ -294,7 +304,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       }),
     )
 
-    expect(html).toContain('style="border-left-color:#3d2816"')
     expect(html).toContain('HISTORICAL BASELINE')
     expect(html).not.toContain('[VESSEL FLOWN]:')
     expect(html).not.toContain('[FLIGHT MODE]:')
@@ -579,16 +588,8 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(visitedSecondHtml).toContain('Add new waypoints in the unvisited section and drag them into valid past slots.')
 
     const originHtml = renderRowItem({
-      rowView: expedition.RowView.createFrom({
-        row: {
-          id: 40,
-          expeditionId: 1,
-          rowType: 'waypoint',
-          systemName: 'Sol',
-          visitedAt: '3312-01-01T00:00:00Z',
-        },
-        number: 1,
-        visitState: 'visited',
+      rowView: createOriginRowView({
+        row: { id: 40, visitedAt: '3312-01-01T00:00:00Z' },
         visitedAtGalactic: '3312-01-01 00:00 UTC',
       }),
       index: 0,

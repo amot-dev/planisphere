@@ -119,13 +119,14 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
     )
 
     const tDrawer = performance.now()
-    clickMatchingButton(container, 'button[title="Toggle per-waypoint leg telemetry drawer"]')
+    clickMatchingButton(container, 'button[aria-label="Toggle per-waypoint leg telemetry drawer"]')
+    const expandedDrawersCount = container.querySelectorAll('td.p-0 > div.border-l-2').length
     children.push(
       makeRenderSpan(
         'Toggle Waypoint Telemetry Drawer Reconciliation',
         'frontend/src/components/planner/useWaypointDetails.ts:37',
         1,
-        1,
+        expandedDrawersCount,
         'drawer',
         msToNs(performance.now() - tDrawer),
       ),
@@ -162,8 +163,8 @@ function executeClientReconciliationPass(hydrated: HydratedFrontendFixture): {
 
     const domElementCount = container.querySelectorAll('*').length
     return {
-      summary: `DOMNodes=${domElementCount} CopiedButtons=${copiedButtonsCount} TextareasMeasured=${measuredCells}`,
-      hashInput: `${domElementCount}:${copiedButtonsCount}:${measuredCells}`,
+      summary: `DOMNodes=${domElementCount} CopiedButtons=${copiedButtonsCount} ExpandedDrawers=${expandedDrawersCount} TextareasMeasured=${measuredCells}`,
+      hashInput: `${domElementCount}:${copiedButtonsCount}:${expandedDrawersCount}:${measuredCells}`,
       children,
     }
   } finally {
@@ -316,6 +317,9 @@ describe.skipIf(Boolean(fixturePath))('Frontend Profiler Smoke Suite', () => {
     for (const probe of results) {
       expect(probe.coldWarmMatch).toBe(true)
       expect(probe.cold.rootSpan.children?.length).toBeGreaterThan(0)
+      if (probe.name === 'Frontend/ClientReconciliation') {
+        expect(probe.cold.resultSummary).toContain('ExpandedDrawers=1')
+      }
     }
   })
 })
