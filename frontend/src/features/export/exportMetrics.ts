@@ -39,6 +39,59 @@ export function formatEstimatedCarrierCredits(
   return isEstimated && amount > 0 ? `~${formatCredits(amount)}` : formatCredits(amount)
 }
 
+/** Formatted net profit value paired with whether its rounded amount is negative. */
+export interface FormattedNetProfit {
+  text: string
+  isNegative: boolean
+}
+
+/**
+ * Formats credit amounts with any minus sign placed before the tilde prefix
+ * and normalizes negative values rounding to zero.
+ */
+export function formatSignedEstimatedCredits(amount: number, isEstimated: boolean): string {
+  const rounded = Math.round(amount) || 0
+  if (rounded < 0) {
+    const absoluteText = formatCredits(Math.abs(rounded))
+    return isEstimated ? `-~${absoluteText}` : `-${absoluteText}`
+  }
+  const formattedText = formatCredits(rounded)
+  return isEstimated ? `~${formattedText}` : formattedText
+}
+
+/**
+ * Formats a net profit credit amount using carrier cost estimation metadata
+ * and reports whether the rounded amount is negative.
+ */
+export function formatNetProfitValue(
+  amount: number,
+  carrierCost: ExportCarrierCost | null,
+): FormattedNetProfit {
+  const rounded = Math.round(amount) || 0
+  const isEstimated = Boolean(
+    carrierCost && carrierCost.totalCost > 0 && carrierCost.totalEstimated,
+  )
+  return {
+    text: formatSignedEstimatedCredits(rounded, isEstimated),
+    isNegative: rounded < 0,
+  }
+}
+
+/**
+ * Resolves the formatted NET PROFIT readout for Full Expedition Combined
+ * Summary cards, returning null for all other scopes.
+ */
+export function resolveFormattedNetProfit(
+  context: ResolvedTelemetryContext,
+): FormattedNetProfit | null {
+  if (!context.isFullExpeditionCombined) {
+    return null
+  }
+  const netProfit =
+    context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
+  return formatNetProfitValue(netProfit, context.carrierCost)
+}
+
 /** Visited non-origin leg enriched with its drawer details and attributed Galactic Region. */
 export interface VisitedLegRecord {
   rowView: expedition.RowView

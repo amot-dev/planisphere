@@ -5,7 +5,9 @@ import {
   createEmptyRealization,
   createQuickShareCart,
   expandConfigToCartItems,
+  formatSignedEstimatedCredits,
   getVisitedRegions,
+  resolveFormattedNetProfit,
   resolveTelemetryContext,
   scopeSupportsModeSplit,
 } from './exportMetrics'
@@ -170,5 +172,74 @@ describe('exportMetrics', () => {
       { rowId: 2, section: 'realized' },
       { rowId: 3, section: 'flight' },
     ])
+  })
+
+  it('formats signed estimated credits and resolves Full Expedition Combined net profit safely', () => {
+    expect(formatSignedEstimatedCredits(26_000_000, false)).toBe('26,000,000 Cr')
+    expect(formatSignedEstimatedCredits(0, false)).toBe('0 Cr')
+    expect(formatSignedEstimatedCredits(26_000_000, true)).toBe('~26,000,000 Cr')
+    expect(formatSignedEstimatedCredits(-26_000_000, false)).toBe('-26,000,000 Cr')
+    expect(formatSignedEstimatedCredits(-26_000_000, true)).toBe('-~26,000,000 Cr')
+    expect(formatSignedEstimatedCredits(-0.4, false)).toBe('0 Cr')
+    expect(formatSignedEstimatedCredits(-0.4, true)).toBe('~0 Cr')
+    expect(formatSignedEstimatedCredits(-0.4, true)).not.toContain('-')
+
+    const baseData = buildSampleExportData()
+    const positiveEstimatedContext = resolveTelemetryContext(baseData, { kind: 'full' })
+    expect(resolveFormattedNetProfit(positiveEstimatedContext)).toEqual({
+      text: '~129,000,000 Cr',
+      isNegative: false,
+    })
+
+    const negativeEstimatedData = buildSampleExportData({
+      expedition: {
+        metrics: baseData.expedition.metrics,
+        realization: { ...baseData.expedition.realization, totalRealized: 10_000_000 },
+      },
+    })
+    expect(
+      resolveFormattedNetProfit(resolveTelemetryContext(negativeEstimatedData, { kind: 'full' })),
+    ).toEqual({
+      text: '-~16,000,000 Cr',
+      isNegative: true,
+    })
+
+    const negativeExactData = buildSampleExportData({
+      expedition: {
+        metrics: baseData.expedition.metrics,
+        realization: { ...baseData.expedition.realization, totalRealized: 10_000_000 },
+      },
+      carrierCost: { ...baseData.carrierCost, totalEstimated: false },
+    })
+    expect(
+      resolveFormattedNetProfit(resolveTelemetryContext(negativeExactData, { kind: 'full' })),
+    ).toEqual({
+      text: '-16,000,000 Cr',
+      isNegative: true,
+    })
+
+    const roundingToZeroData = buildSampleExportData({
+      expedition: {
+        metrics: baseData.expedition.metrics,
+        realization: { ...baseData.expedition.realization, totalRealized: 25_999_999.6 },
+      },
+      carrierCost: { ...baseData.carrierCost, totalEstimated: false },
+    })
+    expect(
+      resolveFormattedNetProfit(resolveTelemetryContext(roundingToZeroData, { kind: 'full' })),
+    ).toEqual({
+      text: '0 Cr',
+      isNegative: false,
+    })
+
+    const nonCombinedScopes = [
+      resolveTelemetryContext(baseData, { kind: 'full' }, 1),
+      resolveTelemetryContext(baseData, { kind: 'baseline' }),
+      resolveTelemetryContext(baseData, { kind: 'leg', rowId: 2 }),
+      resolveTelemetryContext(baseData, { kind: 'region', regionName: 'Inner Orion Spur' }),
+    ]
+    for (const scopeContext of nonCombinedScopes) {
+      expect(resolveFormattedNetProfit(scopeContext)).toBeNull()
+    }
   })
 })

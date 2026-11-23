@@ -61,7 +61,7 @@ describe('export visual blocks and PNG SVG serializer', () => {
       }),
     )
     expect(realizedMarkup).toContain('Net Profit After Carrier')
-    expect(realizedMarkup).toContain('129,000,000 Cr')
+    expect(realizedMarkup).toContain('~129,000,000 Cr')
   })
 
   it('renders Waypoints with DEPARTED origin and IN SYSTEM state, and Highlights at Top 1 and Top 3', () => {
@@ -162,6 +162,8 @@ describe('export visual blocks and PNG SVG serializer', () => {
     const realizedNonEstimated = renderCard(nonEstimatedAndUnsafeData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] })
     expect(realizedNonEstimated).toContain('Carrier cost: 26,000,000 Cr')
     expect(realizedNonEstimated).not.toContain('~26,000,000 Cr')
+    expect(realizedNonEstimated).toContain('ed-exp-amber">129,000,000 Cr')
+    expect(realizedNonEstimated).not.toContain('~129,000,000 Cr')
 
     const summaryUnsafeColor = renderCard(nonEstimatedAndUnsafeData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' })
     expect(summaryUnsafeColor).not.toContain('#12;x:1')
@@ -176,6 +178,127 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(waypointsUnsafeColor).not.toContain('red;bad:1')
     expect(waypointsUnsafeColor).toContain('#FF7100')
     expect(waypointsUnsafeColor).toContain('#3d2816')
+  })
+
+  it('gates Summary NET PROFIT strip strictly on Full Expedition Combined including ship-only expeditions', () => {
+    const baseData = buildSampleExportData()
+    const renderSummary = (
+      exportData: typeof baseData,
+      config: Extract<ExportBlockConfig, { kind: 'summary' }>,
+    ) => renderToStaticMarkup(createElement(ExportBlockRenderer, { exportData, config }))
+
+    const nonCombinedConfigs: Array<Extract<ExportBlockConfig, { kind: 'summary' }>> = [
+      { kind: 'summary', scope: { kind: 'baseline' }, modeGrouping: 'combined', careerDiff: 'hide' },
+      { kind: 'summary', scope: { kind: 'leg', rowId: 2 }, modeGrouping: 'combined', careerDiff: 'hide' },
+      { kind: 'summary', scope: { kind: 'region', regionName: 'Inner Orion Spur' }, modeGrouping: 'combined', careerDiff: 'hide' },
+      { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' },
+    ]
+    for (const summaryConfig of nonCombinedConfigs) {
+      expect(renderSummary(baseData, summaryConfig)).not.toContain('NET PROFIT:')
+    }
+
+    const shipOnlyMetrics = {
+      ...baseData.expedition.metrics,
+      carrierJumps: 0,
+      carrierDistanceLy: 0,
+      tritiumUsed: 0,
+    }
+    const shipOnlyDatasets = [
+      buildSampleExportData({
+        expedition: { metrics: shipOnlyMetrics, realization: baseData.expedition.realization },
+        carrierCost: {
+          ...baseData.carrierCost,
+          carrierType: 'none',
+          weeklyUpkeep: 0,
+          tritiumPrice: 0,
+          tritiumCost: 0,
+          jumpCost: 0,
+          upkeepCost: 0,
+          totalCost: 0,
+          totalEstimated: false,
+        },
+      }),
+      buildSampleExportData({
+        expedition: { metrics: shipOnlyMetrics, realization: baseData.expedition.realization },
+        carrierCost: null as unknown as typeof baseData.carrierCost,
+      }),
+    ]
+    for (const shipOnlyData of shipOnlyDatasets) {
+      const shipOnlyMarkup = renderSummary(shipOnlyData, {
+        kind: 'summary',
+        scope: { kind: 'full' },
+        modeGrouping: 'combined',
+        careerDiff: 'hide',
+      })
+      expect(shipOnlyMarkup).toMatch(/NET PROFIT:\s*<strong[^>]*>155,000,000 Cr<\/strong>/)
+    }
+  })
+
+  it('renders negative net profit with leading minus before tilde and danger accent in Summary and Details', () => {
+    const baseData = buildSampleExportData()
+    const renderBlock = (exportData: typeof baseData, config: ExportBlockConfig) =>
+      renderToStaticMarkup(createElement(ExportBlockRenderer, { exportData, config }))
+
+    const negativeEstimatedData = buildSampleExportData({
+      expedition: {
+        metrics: baseData.expedition.metrics,
+        realization: { ...baseData.expedition.realization, totalRealized: 10_000_000 },
+      },
+    })
+    const negativeExactData = buildSampleExportData({
+      expedition: {
+        metrics: baseData.expedition.metrics,
+        realization: { ...baseData.expedition.realization, totalRealized: 10_000_000 },
+      },
+      carrierCost: { ...baseData.carrierCost, totalEstimated: false },
+    })
+
+    const summaryConfig: ExportBlockConfig = {
+      kind: 'summary',
+      scope: { kind: 'full' },
+      modeGrouping: 'combined',
+      careerDiff: 'hide',
+    }
+    const detailsConfig: ExportBlockConfig = {
+      kind: 'details',
+      section: 'realized',
+      scope: { kind: 'full' },
+      modeGrouping: 'combined',
+      selectedMetrics: ['netProfitAfterCarrierCost'],
+    }
+
+    const summaryNegativeEstimated = renderBlock(negativeEstimatedData, summaryConfig)
+    expect(summaryNegativeEstimated).toContain(
+      'NET PROFIT: <strong class="ed-exp-mono ed-exp-danger">-~16,000,000 Cr</strong>',
+    )
+    expect(summaryNegativeEstimated).not.toContain('~-')
+    expect(summaryNegativeEstimated).not.toContain('ed-exp-cyan">-~16,000,000 Cr')
+
+    const summaryNegativeExact = renderBlock(negativeExactData, summaryConfig)
+    expect(summaryNegativeExact).toContain(
+      'NET PROFIT: <strong class="ed-exp-mono ed-exp-danger">-16,000,000 Cr</strong>',
+    )
+
+    const detailsNegativeEstimated = renderBlock(negativeEstimatedData, detailsConfig)
+    expect(detailsNegativeEstimated).toContain(
+      '<div class="ed-exp-kpi-value ed-exp-mono ed-exp-danger">-~16,000,000 Cr</div>',
+    )
+    expect(detailsNegativeEstimated).not.toContain('~-')
+    expect(detailsNegativeEstimated).not.toContain('ed-exp-amber">-~16,000,000 Cr')
+
+    const detailsNegativeExact = renderBlock(negativeExactData, detailsConfig)
+    expect(detailsNegativeExact).toContain(
+      '<div class="ed-exp-kpi-value ed-exp-mono ed-exp-danger">-16,000,000 Cr</div>',
+    )
+    expect(detailsNegativeExact).not.toContain('ed-exp-amber">-16,000,000 Cr')
+
+    const nullCarrierData = buildSampleExportData({
+      carrierCost: null as unknown as typeof baseData.carrierCost,
+    })
+    const detailsNullCarrier = renderBlock(nullCarrierData, detailsConfig)
+    expect(detailsNullCarrier).toContain(
+      '<div class="ed-exp-kpi-value ed-exp-mono ed-exp-amber">—</div>',
+    )
   })
 })
 

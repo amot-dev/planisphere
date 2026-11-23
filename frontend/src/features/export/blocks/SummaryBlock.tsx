@@ -7,6 +7,7 @@ import {
 import {
   CareerDiffItem,
   formatEstimatedCarrierCredits,
+  resolveFormattedNetProfit,
   resolveTelemetryContext,
   sanitizeExportHexColor,
 } from '../exportMetrics'
@@ -44,12 +45,7 @@ export function SummaryBlock({
   const showCarrierTile =
     context.carrierCost != null &&
     (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
-  const netProfit =
-    context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
-  const netProfitIsEstimated = Boolean(
-    context.carrierCost && context.carrierCost.totalCost > 0 && context.carrierCost.totalEstimated,
-  )
-  const formattedNetProfit = `${netProfitIsEstimated ? '~' : ''}${formatCredits(netProfit)}`
+  const formattedNetProfit = resolveFormattedNetProfit(context)
   const safeModeColor = context.modeBadge
     ? sanitizeExportHexColor(context.modeBadge.modeColor)
     : null
@@ -233,12 +229,18 @@ export function SummaryBlock({
         )}
       </div>
 
-      <div className="ed-exp-strip" style={{ borderTop: '1px solid #2e1f12' }}>
-        <span>
-          NET PROFIT:{' '}
-          <strong className="ed-exp-mono ed-exp-cyan">{formattedNetProfit}</strong>
-        </span>
-      </div>
+      {formattedNetProfit && (
+        <div className="ed-exp-strip" style={{ borderTop: '1px solid #2e1f12' }}>
+          <span>
+            NET PROFIT:{' '}
+            <strong
+              className={`ed-exp-mono ${formattedNetProfit.isNegative ? 'ed-exp-danger' : 'ed-exp-cyan'}`}
+            >
+              {formattedNetProfit.text}
+            </strong>
+          </span>
+        </div>
+      )}
 
       <div className="ed-exp-footer ed-exp-mono">
         <span>PLANISPHERE // ASTROMETRIC TELEMETRY TERMINAL</span>

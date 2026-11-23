@@ -10,8 +10,10 @@ import { computeAllHighlightLeaderboards, selectHighlightCards } from './exportH
 import {
   CareerDiffItem,
   formatEstimatedCarrierCredits,
+  formatNetProfitValue,
   isDetailsMetricAvailable,
   ResolvedTelemetryContext,
+  resolveFormattedNetProfit,
   resolveTelemetryContext,
   sanitizeExportHexColor,
 } from './exportMetrics'
@@ -148,12 +150,7 @@ function renderSummarySection(
   const hasCarrier =
     context.carrierCost != null &&
     (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
-  const netProfit =
-    context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
-  const netProfitIsEstimated = Boolean(
-    context.carrierCost && context.carrierCost.totalCost > 0 && context.carrierCost.totalEstimated,
-  )
-  const formattedNetProfit = `${netProfitIsEstimated ? '~' : ''}${formatCredits(netProfit)}`
+  const formattedNetProfit = resolveFormattedNetProfit(context)
 
   const routeItems: string[] = []
   if (exportData.commanders.length > 0) {
@@ -229,10 +226,13 @@ function renderSummarySection(
     </div>`
         : ''
     }
-  </div>
-  <div class="strip-bar" style="border-top:1px solid #2e1f12">
-    <span>NET PROFIT: <strong class="mono cyan">${escapeHtml(formattedNetProfit)}</strong></span>
-  </div>
+  </div>${
+    formattedNetProfit
+      ? `\n  <div class="strip-bar" style="border-top:1px solid #2e1f12">
+    <span>NET PROFIT: <strong class="mono ${formattedNetProfit.isNegative ? 'danger' : 'cyan'}">${escapeHtml(formattedNetProfit.text)}</strong></span>
+  </div>`
+      : ''
+  }
 </section>`
 }
 
@@ -371,8 +371,20 @@ function renderDetailsKpiTile(metricId: DetailsMetricId, context: ResolvedTeleme
       return tile('Combined Estimated', formatCredits(derived.combinedEstimatedCredits))
     case 'realizationRetentionRate':
       return tile('Realization Retention', formatOptionalPercent(derived.realizationRetentionPercent), '', 'amber')
-    case 'netProfitAfterCarrierCost':
-      return tile('Net Profit After Carrier', formatOptionalCredits(derived.netProfitAfterCarrierCost), carrierCost ? `Carrier cost: ${formatEstimatedCarrierCredits(carrierCost.totalCost, Boolean(carrierCost.totalEstimated))}` : '', 'amber')
+    case 'netProfitAfterCarrierCost': {
+      const formattedProfit =
+        derived.netProfitAfterCarrierCost != null
+          ? formatNetProfitValue(derived.netProfitAfterCarrierCost, carrierCost)
+          : null
+      return tile(
+        'Net Profit After Carrier',
+        formattedProfit ? formattedProfit.text : '—',
+        carrierCost
+          ? `Carrier cost: ${formatEstimatedCarrierCredits(carrierCost.totalCost, Boolean(carrierCost.totalEstimated))}`
+          : '',
+        formattedProfit?.isNegative ? 'danger' : 'amber',
+      )
+    }
     case 'avgRealizedCreditsPerJump':
       return tile('Avg Realized Cr / Jump', formatOptionalCredits(derived.avgRealizedCreditsPerJump), '', 'amber')
     case 'avgRealizedCreditsPer1000Ly':

@@ -7,6 +7,7 @@ import {
 } from '../../../domain/galacticTime'
 import {
   formatEstimatedCarrierCredits,
+  formatNetProfitValue,
   isDetailsMetricAvailable,
   ResolvedTelemetryContext,
   resolveTelemetryContext,
@@ -331,15 +332,20 @@ function resolveKpiTileContent(
         value: formatOptPercent(derived.realizationRetentionPercent),
         accentClass: 'ed-exp-amber',
       }
-    case 'netProfitAfterCarrierCost':
+    case 'netProfitAfterCarrierCost': {
+      const formattedProfit =
+        derived.netProfitAfterCarrierCost != null
+          ? formatNetProfitValue(derived.netProfitAfterCarrierCost, carrierCost)
+          : null
       return {
         label: 'Net Profit After Carrier',
-        value: formatOptCredits(derived.netProfitAfterCarrierCost),
+        value: formattedProfit ? formattedProfit.text : '—',
         sub: carrierCost
           ? `Carrier cost: ${formatEstimatedCarrierCredits(carrierCost.totalCost, Boolean(carrierCost.totalEstimated))}`
           : undefined,
-        accentClass: 'ed-exp-amber',
+        accentClass: formattedProfit?.isNegative ? 'ed-exp-danger' : 'ed-exp-amber',
       }
+    }
     case 'avgRealizedCreditsPerJump':
       return {
         label: 'Avg Realized Cr / Jump',
