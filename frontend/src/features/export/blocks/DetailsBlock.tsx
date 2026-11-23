@@ -6,9 +6,11 @@ import {
   formatLy,
 } from '../../../domain/galacticTime'
 import {
+  formatEstimatedCarrierCredits,
   isDetailsMetricAvailable,
   ResolvedTelemetryContext,
   resolveTelemetryContext,
+  sanitizeExportHexColor,
 } from '../exportMetrics'
 import {
   DETAILS_SECTION_METRICS,
@@ -16,14 +18,12 @@ import {
   DetailsBlockConfig,
   DetailsMetricId,
   ExpeditionExportData,
-  ExportTelemetrySnapshot,
 } from '../exportTypes'
 
 /** Props for the self-contained Details export card component. */
 export interface DetailsBlockProps {
   exportData: ExpeditionExportData
   config: DetailsBlockConfig
-  customRangeSnapshot?: ExportTelemetrySnapshot
 }
 
 /**
@@ -33,13 +33,11 @@ export interface DetailsBlockProps {
 export function DetailsBlock({
   exportData,
   config,
-  customRangeSnapshot,
 }: DetailsBlockProps) {
   const context = resolveTelemetryContext(
     exportData,
     config.scope,
     config.selectedModeId,
-    customRangeSnapshot,
   )
   const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === config.section)!
   const selectedSet = new Set<DetailsMetricId>(config.selectedMetrics)
@@ -63,8 +61,11 @@ export function DetailsBlock({
       : sectionMeta.accent === 'emerald'
         ? 'ed-exp-header-emerald'
         : ''
-  const accentStyle = context.modeBadge
-    ? { borderLeftColor: context.modeBadge.modeColor, borderLeftWidth: '3px' }
+  const safeModeColor = context.modeBadge
+    ? sanitizeExportHexColor(context.modeBadge.modeColor)
+    : null
+  const accentStyle = safeModeColor
+    ? { borderLeftColor: safeModeColor, borderLeftWidth: '3px' }
     : undefined
 
   return (
@@ -76,12 +77,12 @@ export function DetailsBlock({
           </div>
           <div className="ed-exp-title-row">
             <h2 className="ed-exp-title">{context.routeTitle}</h2>
-            {context.modeBadge && (
+            {context.modeBadge && safeModeColor && (
               <span
                 className="ed-exp-badge ed-exp-mono"
                 style={{
-                  borderColor: context.modeBadge.modeColor,
-                  color: context.modeBadge.modeColor,
+                  borderColor: safeModeColor,
+                  color: safeModeColor,
                 }}
               >
                 {context.modeBadge.modeName}
@@ -334,7 +335,9 @@ function resolveKpiTileContent(
       return {
         label: 'Net Profit After Carrier',
         value: formatOptCredits(derived.netProfitAfterCarrierCost),
-        sub: carrierCost ? `Carrier cost: ${formatCredits(carrierCost.totalCost)}` : undefined,
+        sub: carrierCost
+          ? `Carrier cost: ${formatEstimatedCarrierCredits(carrierCost.totalCost, Boolean(carrierCost.totalEstimated))}`
+          : undefined,
         accentClass: 'ed-exp-amber',
       }
     case 'avgRealizedCreditsPerJump':
@@ -405,12 +408,17 @@ function DetailsBreakdownCard({
         <div className="ed-exp-bd-card ed-exp-left-amber">
           <div className="ed-exp-bd-head">
             <span>Carrier Cost Breakdown ({carrierCost.carrierType})</span>
-            <span className="ed-exp-mono ed-exp-amber">{formatCredits(carrierCost.totalCost)}</span>
+            <span className="ed-exp-mono ed-exp-amber">
+              {formatEstimatedCarrierCredits(
+                carrierCost.totalCost,
+                Boolean(carrierCost.totalEstimated),
+              )}
+            </span>
           </div>
           {renderRows([
-            { label: 'Tritium Cost', value: formatCredits(carrierCost.tritiumCost) },
+            { label: 'Tritium Cost', value: formatEstimatedCarrierCredits(carrierCost.tritiumCost) },
             { label: 'Jump Maintenance', value: formatCredits(carrierCost.jumpCost) },
-            { label: 'Prorated Weekly Upkeep', value: formatCredits(carrierCost.upkeepCost) },
+            { label: 'Prorated Weekly Upkeep', value: formatEstimatedCarrierCredits(carrierCost.upkeepCost) },
           ])}
         </div>
       )

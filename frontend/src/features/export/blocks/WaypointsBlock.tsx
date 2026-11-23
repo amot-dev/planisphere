@@ -1,5 +1,6 @@
 import { expedition } from '../../../api/models'
 import { formatLy } from '../../../domain/galacticTime'
+import { sanitizeExportHexColor } from '../exportMetrics'
 import { ExpeditionExportData, WaypointsBlockConfig } from '../exportTypes'
 
 /** Props for the self-contained Waypoints route manifest card component. */
@@ -85,7 +86,7 @@ export function WaypointsBlock({ exportData, config }: WaypointsBlockProps) {
             }
             const detail = detailsByRowId.get(rowView.row.id)
             const borderColor =
-              rowView.number === 1 ? '#3d2816' : rowView.legModeColor || '#FF7100'
+              rowView.number === 1 ? '#3d2816' : sanitizeExportHexColor(rowView.legModeColor)
             return (
               <tr key={rowView.row.id} style={{ borderLeft: `3px solid ${borderColor}` }}>
                 <td className="ed-exp-mono">{rowView.number}</td>
@@ -120,7 +121,7 @@ export function WaypointsBlock({ exportData, config }: WaypointsBlockProps) {
                 {columns.has('flightMode') && (
                   <td className="ed-exp-mono" style={{ fontSize: '11px' }}>
                     {rowView.number > 1 && rowView.legModeName ? (
-                      <span style={{ color: rowView.legModeColor || '#FF7100' }}>
+                      <span style={{ color: sanitizeExportHexColor(rowView.legModeColor) }}>
                         {rowView.legModeName}
                       </span>
                     ) : (

@@ -1,4 +1,4 @@
-package export_test
+package exporter_test
 
 import (
 	"archive/zip"
@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"planisphere/internal/export"
+	"planisphere/internal/exporter"
 )
 
 func TestWriteExportSingleFileAndBase64DataURI(testingContext *testing.T) {
 	temporaryDir := testingContext.TempDir()
 
 	htmlPath := filepath.Join(temporaryDir, "nested", "report.html")
-	writtenHTMLPath, htmlError := export.WriteExport(htmlPath, []export.BundleFile{
+	writtenHTMLPath, htmlError := exporter.WriteExport(htmlPath, []exporter.BundleFile{
 		{Name: "report.html", ContentText: "<html><body>Planisphere</body></html>"},
 	})
 	if htmlError != nil {
@@ -32,7 +32,7 @@ func TestWriteExportSingleFileAndBase64DataURI(testingContext *testing.T) {
 	rawPNGHeader := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
 	dataURIPayload := "data:image/png;base64," + base64.StdEncoding.EncodeToString(rawPNGHeader)
 	pngPath := filepath.Join(temporaryDir, "summary.png")
-	if _, pngError := export.WriteExport(pngPath, []export.BundleFile{
+	if _, pngError := exporter.WriteExport(pngPath, []exporter.BundleFile{
 		{Name: "summary.png", ContentBase64: dataURIPayload},
 	}); pngError != nil {
 		testingContext.Fatalf("write single base64 png: %v", pngError)
@@ -45,14 +45,14 @@ func TestWriteExportSingleFileAndBase64DataURI(testingContext *testing.T) {
 
 func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testing.T) {
 	temporaryDir := testingContext.TempDir()
-	zipPath := filepath.Join(temporaryDir, "expedition_export.zip")
+	zipPath := filepath.Join(temporaryDir, "expedition_exporter.zip")
 
-	files := []export.BundleFile{
+	files := []exporter.BundleFile{
 		{Name: "../outside/01-summary.png", ContentBase64: base64.StdEncoding.EncodeToString([]byte("png-one"))},
 		{Name: "outside/01-summary.png", ContentBase64: base64.StdEncoding.EncodeToString([]byte("png-two"))},
 		{Name: `folder\bad:name?.html`, ContentText: "<h1>Report</h1>"},
 	}
-	writtenZipPath, zipError := export.WriteExport(zipPath, files)
+	writtenZipPath, zipError := exporter.WriteExport(zipPath, files)
 	if zipError != nil {
 		testingContext.Fatalf("write zip bundle: %v", zipError)
 	}
@@ -93,10 +93,10 @@ func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testin
 
 func TestWriteExportRejectsInvalidInputs(testingContext *testing.T) {
 	temporaryDir := testingContext.TempDir()
-	if _, emptyError := export.WriteExport(filepath.Join(temporaryDir, "empty.zip"), nil); emptyError == nil {
+	if _, emptyError := exporter.WriteExport(filepath.Join(temporaryDir, "empty.zip"), nil); emptyError == nil {
 		testingContext.Fatalf("expected error for empty file list")
 	}
-	if _, badBase64Error := export.WriteExport(filepath.Join(temporaryDir, "bad.png"), []export.BundleFile{
+	if _, badBase64Error := exporter.WriteExport(filepath.Join(temporaryDir, "bad.png"), []exporter.BundleFile{
 		{Name: "bad.png", ContentBase64: "%%%not-valid-base64%%%"},
 	}); badBase64Error == nil {
 		testingContext.Fatalf("expected error for malformed base64 payload")

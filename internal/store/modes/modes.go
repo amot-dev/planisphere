@@ -6,11 +6,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 )
+
+var hexColorPattern = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
 
 // UnassignedID is the pseudo mode ID when no flight mode has been assigned.
 const UnassignedID int64 = 0
@@ -74,8 +77,8 @@ func validate(name, color string) (string, string, error) {
 	if color == "" {
 		color = "#FF7100"
 	}
-	if !strings.HasPrefix(color, "#") || (len(color) != 7 && len(color) != 4) {
-		return "", "", fmt.Errorf("invalid colour %q (expected #RRGGBB)", color)
+	if !hexColorPattern.MatchString(color) {
+		return "", "", fmt.Errorf("invalid colour %q (expected #RGB or #RRGGBB)", color)
 	}
 	return name, color, nil
 }

@@ -4,11 +4,15 @@ import {
   formatLoss,
   formatLy,
 } from '../../../domain/galacticTime'
-import { CareerDiffItem, resolveTelemetryContext } from '../exportMetrics'
+import {
+  CareerDiffItem,
+  formatEstimatedCarrierCredits,
+  resolveTelemetryContext,
+  sanitizeExportHexColor,
+} from '../exportMetrics'
 import {
   CareerDiffDisplay,
   ExpeditionExportData,
-  ExportTelemetrySnapshot,
   SummaryBlockConfig,
 } from '../exportTypes'
 
@@ -16,7 +20,6 @@ import {
 export interface SummaryBlockProps {
   exportData: ExpeditionExportData
   config: SummaryBlockConfig
-  customRangeSnapshot?: ExportTelemetrySnapshot
 }
 
 /**
@@ -26,13 +29,11 @@ export interface SummaryBlockProps {
 export function SummaryBlock({
   exportData,
   config,
-  customRangeSnapshot,
 }: SummaryBlockProps) {
   const context = resolveTelemetryContext(
     exportData,
     config.scope,
     config.selectedModeId,
-    customRangeSnapshot,
   )
   const diffById = new Map<CareerDiffItem['id'], CareerDiffItem>()
   if (config.careerDiff !== 'hide' && context.careerDiff) {
@@ -43,8 +44,11 @@ export function SummaryBlock({
   const showCarrierStrip =
     context.carrierCost != null &&
     (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
-  const accentStyle = context.modeBadge
-    ? { borderLeftColor: context.modeBadge.modeColor, borderLeftWidth: '3px' }
+  const safeModeColor = context.modeBadge
+    ? sanitizeExportHexColor(context.modeBadge.modeColor)
+    : null
+  const accentStyle = safeModeColor
+    ? { borderLeftColor: safeModeColor, borderLeftWidth: '3px' }
     : undefined
 
   return (
@@ -56,12 +60,12 @@ export function SummaryBlock({
           </div>
           <div className="ed-exp-title-row">
             <h2 className="ed-exp-title">{context.routeTitle}</h2>
-            {context.modeBadge && (
+            {context.modeBadge && safeModeColor && (
               <span
                 className="ed-exp-badge ed-exp-mono"
                 style={{
-                  borderColor: context.modeBadge.modeColor,
-                  color: context.modeBadge.modeColor,
+                  borderColor: safeModeColor,
+                  color: safeModeColor,
                 }}
               >
                 {context.modeBadge.modeName}
@@ -198,7 +202,10 @@ export function SummaryBlock({
           <span>
             CARRIER COST:{' '}
             <strong className="ed-exp-mono ed-exp-amber">
-              {formatCredits(context.carrierCost.totalCost)}
+              {formatEstimatedCarrierCredits(
+                context.carrierCost.totalCost,
+                Boolean(context.carrierCost.totalEstimated),
+              )}
             </strong>
           </span>
         </div>

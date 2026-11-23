@@ -1,4 +1,4 @@
-package export
+package exporter
 
 import (
 	"database/sql"
@@ -54,52 +54,6 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 		return ExpeditionExport{}, bucketsError
 	}
 	return exportSnapshot, nil
-}
-
-// ComputeRange evaluates expedition telemetry over a custom ISO-8601 window clamped
-// to the expedition's effective departure and end boundaries, optionally scoped to modeID.
-func ComputeRange(
-	databaseConnection *sql.DB,
-	expeditionProjections *expedition.Projections,
-	expeditionID int64,
-	afterTimestamp, untilTimestamp string,
-	modeID int64,
-) (TelemetrySnapshot, error) {
-	if databaseConnection == nil {
-		return TelemetrySnapshot{}, ErrNilDatabase
-	}
-	if expeditionProjections == nil || expeditionProjections.TimeRangeStats == nil {
-		return TelemetrySnapshot{}, ErrMissingProjections
-	}
-	expeditionRecord, loadError := expedition.Get(databaseConnection, expeditionID)
-	if loadError != nil {
-		return TelemetrySnapshot{}, fmt.Errorf("load expedition %d for custom range: %w", expeditionID, loadError)
-	}
-	queryAfter, displayStart, departed, startError := expedition.EffectiveStart(databaseConnection, expeditionRecord)
-	if startError != nil {
-		return TelemetrySnapshot{}, fmt.Errorf("resolve effective start for custom range: %w", startError)
-	}
-	if !departed {
-		return TelemetrySnapshot{}, ErrNotExportable
-	}
-
-	clampedAfter, clampedUntil, normalizeError := clampCustomRange(queryAfter, displayStart, expeditionRecord.EndTimestamp, afterTimestamp, untilTimestamp)
-	if normalizeError != nil {
-		return TelemetrySnapshot{}, normalizeError
-	}
-	var modeFilter *replaystats.Filter
-	if modeID > 0 {
-		modeFilter = &replaystats.Filter{
-			Enabled:      true,
-			ExpeditionID: expeditionID,
-			Modes:        []replaystats.ModeSelection{{ModeID: modeID, Travel: true, Discovery: true}},
-		}
-	}
-	summary, computeError := expeditionProjections.TimeRangeStats.Compute(replaystats.Range{After: clampedAfter, Until: clampedUntil}, modeFilter)
-	if computeError != nil {
-		return TelemetrySnapshot{}, fmt.Errorf("compute custom range stats: %w", computeError)
-	}
-	return TelemetrySnapshot{Metrics: summary.Metrics, Realization: summary.Realization}, nil
 }
 
 func resolveNow(nowProvider func() time.Time) time.Time {
@@ -324,31 +278,4 @@ func hasTelemetryActivity(metrics replaystats.Metrics, realization replaystats.R
 		realization.PendingValue > 0 ||
 		realization.CartoLostDeath > 0 ||
 		realization.OrganicLostDeath > 0
-}
-
-func clampCustomRange(queryAfter, displayStart, expeditionEnd, requestedAfter, requestedUntil string) (string, string, error) {
-	resolvedAfter := queryAfter
-	if requestedAfter != "" {
-		normalizedAfter, parseAfterError := reference.NormalizeISO(requestedAfter)
-		if parseAfterError != nil {
-			return "", "", fmt.Errorf("invalid custom start timestamp: %w", parseAfterError)
-		}
-		if normalizedAfter > displayStart {
-			resolvedAfter = normalizedAfter
-		}
-	}
-	resolvedUntil := expeditionEnd
-	if requestedUntil != "" {
-		normalizedUntil, parseUntilError := reference.NormalizeISO(requestedUntil)
-		if parseUntilError != nil {
-			return "", "", fmt.Errorf("invalid custom end timestamp: %w", parseUntilError)
-		}
-		if expeditionEnd == "" || normalizedUntil < expeditionEnd {
-			resolvedUntil = normalizedUntil
-		}
-	}
-	if resolvedUntil != "" && resolvedAfter != "" && resolvedUntil < resolvedAfter {
-		return "", "", errors.New("custom range end timestamp must not precede start timestamp")
-	}
-	return resolvedAfter, resolvedUntil, nil
 }

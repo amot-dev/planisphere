@@ -66,7 +66,7 @@ describe('exportMetrics', () => {
     expect(separateMode.modeBadge?.modeName).toBe('Exploration')
 
     const fixedNowMs = Date.parse('2026-04-05T12:00:00Z')
-    const parkedLeg = resolveTelemetryContext(data, { kind: 'leg', rowId: 4 }, undefined, undefined, fixedNowMs)
+    const parkedLeg = resolveTelemetryContext(data, { kind: 'leg', rowId: 4 }, undefined, fixedNowMs)
     expect(parkedLeg.inSystem).toBe(true)
     expect(parkedLeg.toGalactic).toBe('IN SYSTEM')
     expect(parkedLeg.modeBadge?.modeName).toBe('Exploration')

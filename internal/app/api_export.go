@@ -6,26 +6,26 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"planisphere/internal/export"
+	"planisphere/internal/exporter"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/version"
 )
 
 // GetExpeditionExportData assembles the complete canonical export snapshot for expeditionID.
-func (app *App) GetExpeditionExportData(expeditionID int64) (export.ExpeditionExport, error) {
+func (app *App) GetExpeditionExportData(expeditionID int64) (exporter.ExpeditionExport, error) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
-		return export.ExpeditionExport{}, readyError
+		return exporter.ExpeditionExport{}, readyError
 	}
-	return export.Build(app.db, expeditionID, export.BuilderDeps{
+	return exporter.Build(app.db, expeditionID, exporter.BuilderDeps{
 		Projections: app.expeditionProjections(),
 		CareerStats: app.careerStats,
 		GECLookup:   app.gecLookup,
-		ComputeCarrierCost: func(expeditionRecord expedition.Expedition, expeditionMetrics replaystats.Metrics, effectiveStart string, departed bool) export.CarrierCost {
+		ComputeCarrierCost: func(expeditionRecord expedition.Expedition, expeditionMetrics replaystats.Metrics, effectiveStart string, departed bool) exporter.CarrierCost {
 			cost := app.computeExpeditionCarrierCost(expeditionRecord, expeditionMetrics, effectiveStart, departed)
-			return export.CarrierCost{
+			return exporter.CarrierCost{
 				CarrierType:    cost.CarrierType,
 				WeeklyUpkeep:   cost.WeeklyUpkeep,
 				TritiumPrice:   cost.TritiumPrice,
@@ -41,28 +41,6 @@ func (app *App) GetExpeditionExportData(expeditionID int64) (export.ExpeditionEx
 	})
 }
 
-// ComputeExportRangeStats evaluates telemetry for a custom timeframe within
-// expeditionID, optionally restricted to a single flight mode when modeID > 0.
-func (app *App) ComputeExportRangeStats(
-	expeditionID int64,
-	afterTimestamp, untilTimestamp string,
-	modeID int64,
-) (export.TelemetrySnapshot, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return export.TelemetrySnapshot{}, readyError
-	}
-	return export.ComputeRange(
-		app.db,
-		app.expeditionProjections(),
-		expeditionID,
-		afterTimestamp,
-		untilTimestamp,
-		modeID,
-	)
-}
-
 // PickExportSavePath opens a native save-file dialog tailored to fileExt (png, html, json, or zip).
 func (app *App) PickExportSavePath(defaultFilename, fileExt string) (string, error) {
 	cleanedExtension := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileExt)), ".")
@@ -76,8 +54,8 @@ func (app *App) PickExportSavePath(defaultFilename, fileExt string) (string, err
 }
 
 // WriteExportOutput writes one file directly or packages multiple files into a zip archive at targetPath.
-func (app *App) WriteExportOutput(targetPath string, files []export.BundleFile) (string, error) {
-	return export.WriteExport(targetPath, files)
+func (app *App) WriteExportOutput(targetPath string, files []exporter.BundleFile) (string, error) {
+	return exporter.WriteExport(targetPath, files)
 }
 
 func exportDialogFilters(extension string) []runtime.FileFilter {

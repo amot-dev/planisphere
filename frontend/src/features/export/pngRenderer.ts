@@ -61,7 +61,6 @@ export async function renderCartBlockToPngBase64(
     createElement(ExportBlockRenderer, {
       exportData,
       config: item.config,
-      customRangeSnapshot: item.customRangeSnapshot,
     }),
   )
   const { serializedXhtml, width, height } = measureAndSerializeCard(staticMarkup)

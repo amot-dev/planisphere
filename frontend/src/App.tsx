@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { CockpitTopBar } from './components/ui/CockpitTopBar'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { TerminalBootScreen } from './components/ui/TerminalBootScreen'
+import { ExportExpeditionModal } from './features/export/ExportExpeditionModal'
 import { ExpeditionPlanner } from './features/planner/ExpeditionPlanner'
 import { ExpeditionManageModal } from './features/planner/lifecycle/ExpeditionManageModal'
 import { StartExpeditionModal } from './features/planner/lifecycle/StartExpeditionModal'
@@ -43,7 +44,7 @@ export default function App() {
   } = useBackendSync()
 
   const [activeModal, setActiveModal] = useState<
-    null | 'start' | 'settings' | 'expeditions' | 'setup'
+    null | 'start' | 'settings' | 'expeditions' | 'setup' | 'export'
   >(null)
 
   const [sidebarCollapsed, toggleSidebarCollapsed] = useLocalStorageBoolean(
@@ -59,6 +60,7 @@ export default function App() {
   }, [])
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
+  const handleOpenExportModal = useCallback(() => setActiveModal('export'), [])
 
   const handleOpenSettingsModal = useCallback(() => {
     void refreshSettings()
@@ -130,8 +132,10 @@ export default function App() {
             externalLinkEdsm={settings?.externalLinkEdsm}
             externalLinkGec={settings?.externalLinkGec}
             manualPlotterRequestCount={manualPlotterRequestCount}
+            exportEnabled={Boolean(sidebarStats?.departed || plan?.expedition?.status === 'completed')}
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
+            onOpenExportModal={handleOpenExportModal}
             onRefreshPlan={handleRefreshPlan}
             onBusyChange={setBusyAction}
             onCarrierRouteOpenChange={setCarrierRouteOpen}
@@ -178,6 +182,13 @@ export default function App() {
           expeditions={expeditions}
           activeId={activeExpeditionId}
           onSelect={handleSelectExpedition}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'export' && activeExpeditionId > 0 && (
+        <ExportExpeditionModal
+          expeditionId={activeExpeditionId}
           onClose={() => setActiveModal(null)}
         />
       )}

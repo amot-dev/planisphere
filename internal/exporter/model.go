@@ -1,6 +1,6 @@
-// Package export assembles canonical expedition export snapshots from cached
+// Package exporter assembles canonical expedition export snapshots from cached
 // backend projections and writes single-file or zipped export bundles to disk.
-package export
+package exporter
 
 import (
 	"database/sql"

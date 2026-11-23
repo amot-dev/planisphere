@@ -1,7 +1,6 @@
 import {
   ExpeditionExportData,
   ExportBlockConfig,
-  ExportTelemetrySnapshot,
 } from '../exportTypes'
 import { DetailsBlock } from './DetailsBlock'
 import { HighlightsBlock } from './HighlightsBlock'
@@ -12,7 +11,6 @@ import { WaypointsBlock } from './WaypointsBlock'
 export interface ExportBlockRendererProps {
   exportData: ExpeditionExportData
   config: ExportBlockConfig
-  customRangeSnapshot?: ExportTelemetrySnapshot
 }
 
 /**
@@ -22,7 +20,6 @@ export interface ExportBlockRendererProps {
 export function ExportBlockRenderer({
   exportData,
   config,
-  customRangeSnapshot,
 }: ExportBlockRendererProps) {
   switch (config.kind) {
     case 'summary':
@@ -30,7 +27,6 @@ export function ExportBlockRenderer({
         <SummaryBlock
           exportData={exportData}
           config={config}
-          customRangeSnapshot={customRangeSnapshot}
         />
       )
     case 'details':
@@ -38,7 +34,6 @@ export function ExportBlockRenderer({
         <DetailsBlock
           exportData={exportData}
           config={config}
-          customRangeSnapshot={customRangeSnapshot}
         />
       )
     case 'waypoints':

@@ -1,4 +1,4 @@
-export { app, expedition, modes, realization, stats } from '../../wailsjs/go/models'
+export { app, expedition, exporter, modes, realization, stats } from '../../wailsjs/go/models'
 
 /**
  * UiSyncDomain identifies a targeted frontend refresh domain emitted in

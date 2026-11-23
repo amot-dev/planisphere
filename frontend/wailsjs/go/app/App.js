@@ -74,6 +74,10 @@ export function GetCarrierLastLocation() {
   return window['go']['app']['App']['GetCarrierLastLocation']();
 }
 
+export function GetExpeditionExportData(arg1) {
+  return window['go']['app']['App']['GetExpeditionExportData'](arg1);
+}
+
 export function GetIngestStatus() {
   return window['go']['app']['App']['GetIngestStatus']();
 }
@@ -132,6 +136,10 @@ export function OpenURL(arg1) {
 
 export function OverrideCarrierStopArrival(arg1, arg2) {
   return window['go']['app']['App']['OverrideCarrierStopArrival'](arg1, arg2);
+}
+
+export function PickExportSavePath(arg1, arg2) {
+  return window['go']['app']['App']['PickExportSavePath'](arg1, arg2);
 }
 
 export function PlotCarrierRoute(arg1, arg2, arg3, arg4, arg5) {
@@ -224,4 +232,8 @@ export function UpdateMode(arg1, arg2, arg3, arg4) {
 
 export function UpdateRow(arg1) {
   return window['go']['app']['App']['UpdateRow'](arg1);
+}
+
+export function WriteExportOutput(arg1, arg2) {
+  return window['go']['app']['App']['WriteExportOutput'](arg1, arg2);
 }

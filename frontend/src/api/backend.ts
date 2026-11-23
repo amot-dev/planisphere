@@ -19,6 +19,7 @@ export {
   GetActiveCarrierRoute,
   GetCarrierDepotInfo,
   GetCarrierLastLocation,
+  GetExpeditionExportData,
   GetIngestStatus,
   GetModeUsage,
   GetModesState,
@@ -34,6 +35,7 @@ export {
   MoveRow,
   OpenURL,
   OverrideCarrierStopArrival,
+  PickExportSavePath,
   PlotCarrierRoute,
   RecordCarrierJump,
   RefreshGEC,
@@ -57,6 +59,7 @@ export {
   UpdateExpeditionCarrierConfig,
   UpdateMode,
   UpdateRow,
+  WriteExportOutput,
 } from '../../wailsjs/go/app/App'
 
 /**

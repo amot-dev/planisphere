@@ -1,4 +1,4 @@
-package export_test
+package exporter_test
 
 import (
 	"database/sql"
@@ -11,7 +11,7 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/projection"
-	"planisphere/internal/export"
+	"planisphere/internal/exporter"
 	projstats "planisphere/internal/projections/stats"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
@@ -90,8 +90,8 @@ func (fixture *exportTestFixture) lookupModeID(testingContext *testing.T, target
 	return 0
 }
 
-func (fixture *exportTestFixture) builderDeps(fixedTime time.Time) export.BuilderDeps {
-	return export.BuilderDeps{
+func (fixture *exportTestFixture) builderDeps(fixedTime time.Time) exporter.BuilderDeps {
+	return exporter.BuilderDeps{
 		Projections: fixture.expeditionProjections,
 		CareerStats: fixture.careerStats,
 		AppVersion:  "0.6.2-test",
@@ -116,7 +116,7 @@ func TestBuildRejectsPlanningAndStagedExpeditions(testingContext *testing.T) {
 		testingContext.Fatalf("create expedition: %v", createError)
 	}
 
-	if _, planningError := export.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime)); !errors.Is(planningError, export.ErrNotExportable) {
+	if _, planningError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime)); !errors.Is(planningError, exporter.ErrNotExportable) {
 		testingContext.Fatalf("expected ErrNotExportable for planning expedition, got %v", planningError)
 	}
 
@@ -124,7 +124,7 @@ func TestBuildRejectsPlanningAndStagedExpeditions(testingContext *testing.T) {
 	if startError := expedition.StartTx(fixture.databaseConnection, expeditionRecord.ID, "2026-04-01T10:05:00Z", explorationID); startError != nil {
 		testingContext.Fatalf("start expedition: %v", startError)
 	}
-	if _, stagedError := export.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime)); !errors.Is(stagedError, export.ErrNotExportable) {
+	if _, stagedError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime)); !errors.Is(stagedError, exporter.ErrNotExportable) {
 		testingContext.Fatalf("expected ErrNotExportable for staged awaiting-departure expedition, got %v", stagedError)
 	}
 }
@@ -178,13 +178,13 @@ func TestBuildCompletedExpeditionBoundariesModeBucketsAndExactPostCareer(testing
 		testingContext.Fatalf("complete expedition: %v", completeError)
 	}
 
-	snapshot, buildError := export.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime))
+	snapshot, buildError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime))
 	if buildError != nil {
-		testingContext.Fatalf("export.Build failed: %v", buildError)
+		testingContext.Fatalf("exporter.Build failed: %v", buildError)
 	}
 
-	if snapshot.SchemaVersion != export.SchemaVersion {
-		testingContext.Fatalf("expected schemaVersion=%d, got %d", export.SchemaVersion, snapshot.SchemaVersion)
+	if snapshot.SchemaVersion != exporter.SchemaVersion {
+		testingContext.Fatalf("expected schemaVersion=%d, got %d", exporter.SchemaVersion, snapshot.SchemaVersion)
 	}
 	if snapshot.EffectiveStart != "2026-04-01T10:00:00Z" {
 		testingContext.Fatalf("expected EffectiveStart at WP1 departure 2026-04-01T10:00:00Z, got %q", snapshot.EffectiveStart)
@@ -218,22 +218,5 @@ func TestBuildCompletedExpeditionBoundariesModeBucketsAndExactPostCareer(testing
 	}
 	if math.Abs(bucketSum.DistanceLy-snapshot.Live.DistanceLy) > 0.001 || bucketSum.Jumps != snapshot.Live.Jumps || bucketSum.BodiesScanned != snapshot.Live.BodiesScanned {
 		testingContext.Fatalf("mode buckets sum %+v != live %+v", bucketSum, snapshot.Live)
-	}
-
-	// Verify ComputeRange respects EffectiveStart inclusive departure jump and mode filtering.
-	fullCustomRange, rangeError := export.ComputeRange(fixture.databaseConnection, fixture.expeditionProjections, expeditionRecord.ID, "2026-04-01T10:00:00Z", "2026-04-02T10:20:00Z", 0)
-	if rangeError != nil {
-		testingContext.Fatalf("ComputeRange combined failed: %v", rangeError)
-	}
-	if fullCustomRange.Metrics.Jumps != 3 || math.Abs(fullCustomRange.Metrics.DistanceLy-200.0) > 0.001 {
-		testingContext.Fatalf("expected combined custom range 3 jumps / 200 Ly, got %d jumps / %.1f Ly", fullCustomRange.Metrics.Jumps, fullCustomRange.Metrics.DistanceLy)
-	}
-
-	travelOnlyRange, travelRangeError := export.ComputeRange(fixture.databaseConnection, fixture.expeditionProjections, expeditionRecord.ID, "", "", travelID)
-	if travelRangeError != nil {
-		testingContext.Fatalf("ComputeRange travel-only failed: %v", travelRangeError)
-	}
-	if travelOnlyRange.Metrics.Jumps != 1 || math.Abs(travelOnlyRange.Metrics.DistanceLy-80.0) > 0.001 {
-		testingContext.Fatalf("expected travel-only range 1 jump / 80 Ly, got %d jumps / %.1f Ly", travelOnlyRange.Metrics.Jumps, travelOnlyRange.Metrics.DistanceLy)
 	}
 }

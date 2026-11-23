@@ -9,9 +9,11 @@ import {
 import { computeAllHighlightLeaderboards, selectHighlightCards } from './exportHighlights'
 import {
   CareerDiffItem,
+  formatEstimatedCarrierCredits,
   isDetailsMetricAvailable,
   ResolvedTelemetryContext,
   resolveTelemetryContext,
+  sanitizeExportHexColor,
 } from './exportMetrics'
 import {
   CareerDiffDisplay,
@@ -94,9 +96,9 @@ function renderCartSection(
 ): string {
   switch (item.config.kind) {
     case 'summary':
-      return renderSummarySection(exportData, item.config, item.customRangeSnapshot, sectionIndex)
+      return renderSummarySection(exportData, item.config, sectionIndex)
     case 'details':
-      return renderDetailsSection(exportData, item.config, item.customRangeSnapshot, sectionIndex)
+      return renderDetailsSection(exportData, item.config, sectionIndex)
     case 'waypoints':
       return renderWaypointsSection(exportData, item.config, sectionIndex)
     case 'highlights':
@@ -110,8 +112,11 @@ function renderTelemetryHeader(
   context: ResolvedTelemetryContext,
   accentClass: string,
 ): string {
+  const safeModeColor = context.modeBadge
+    ? sanitizeExportHexColor(context.modeBadge.modeColor)
+    : ''
   const modePill = context.modeBadge
-    ? `<span class="badge" style="border-color:${escapeHtml(context.modeBadge.modeColor)};color:${escapeHtml(context.modeBadge.modeColor)}">${escapeHtml(context.modeBadge.modeName)}</span>`
+    ? `<span class="badge" style="border-color:${safeModeColor};color:${safeModeColor}">${escapeHtml(context.modeBadge.modeName)}</span>`
     : ''
   const inSystemPill = context.inSystem
     ? `<span class="badge badge-cyan">IN SYSTEM</span>`
@@ -134,14 +139,12 @@ function renderTelemetryHeader(
 function renderSummarySection(
   exportData: ExpeditionExportData,
   config: SummaryBlockConfig,
-  customSnapshot: CartBlockItem['customRangeSnapshot'],
   sectionIndex: number,
 ): string {
   const context = resolveTelemetryContext(
     exportData,
     config.scope,
     config.selectedModeId,
-    customSnapshot,
   )
   const diffMap = new Map<CareerDiffItem['id'], CareerDiffItem>()
   if (config.careerDiff !== 'hide' && context.careerDiff) {
@@ -154,6 +157,9 @@ function renderSummarySection(
     (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
 
   const routeItems: string[] = []
+  if (exportData.commanders.length > 0) {
+    routeItems.push(`<span>CMDR: <strong class="mono">${escapeHtml(exportData.commanders.join(', '))}</strong></span>`)
+  }
   if (context.visitedWaypoints != null && context.plannedWaypoints != null) {
     routeItems.push(`<span>WAYPOINTS: <strong class="mono">${context.visitedWaypoints} / ${context.plannedWaypoints}</strong></span>`)
   }
@@ -163,8 +169,11 @@ function renderSummarySection(
   if (context.shipsFlown.length > 0) {
     routeItems.push(`<span>SHIPS: <strong class="mono">${escapeHtml(context.shipsFlown.join(', '))}</strong></span>`)
   }
+  const sectionStyle = context.modeBadge
+    ? ` style="border-left:3px solid ${sanitizeExportHexColor(context.modeBadge.modeColor)}"`
+    : ''
 
-  return `<section id="section-${sectionIndex}" class="card">
+  return `<section id="section-${sectionIndex}" class="card"${sectionStyle}>
   ${renderTelemetryHeader('SUMMARY', `${context.routeTitle} — ${context.scopeLabel}`, context, 'accent-amber')}
   ${routeItems.length > 0 ? `<div class="strip-bar">${routeItems.join('<span class="sep">|</span>')}</div>` : ''}
   <div class="kpi-grid cols-4">
@@ -207,7 +216,7 @@ function renderSummarySection(
     <span class="sep">|</span>
     <span>TRITIUM: <strong class="mono">${formatInt(context.metrics.tritiumUsed ?? 0)} t</strong></span>
     <span class="sep">|</span>
-    <span>CARRIER COST: <strong class="mono amber">${escapeHtml(formatCredits(context.carrierCost.totalCost))}</strong></span>
+    <span>CARRIER COST: <strong class="mono amber">${escapeHtml(formatEstimatedCarrierCredits(context.carrierCost.totalCost, Boolean(context.carrierCost.totalEstimated)))}</strong></span>
   </div>`
       : ''
   }
@@ -240,14 +249,12 @@ function renderInlineCareerDiff(
 function renderDetailsSection(
   exportData: ExpeditionExportData,
   config: DetailsBlockConfig,
-  customSnapshot: CartBlockItem['customRangeSnapshot'],
   sectionIndex: number,
 ): string {
   const context = resolveTelemetryContext(
     exportData,
     config.scope,
     config.selectedModeId,
-    customSnapshot,
   )
   const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === config.section)!
   const selectedSet = new Set<DetailsMetricId>(config.selectedMetrics)
@@ -267,11 +274,17 @@ function renderDetailsSection(
     .join('')
   const kpiCount = descriptors.filter((descriptor) => descriptor.zone === 'kpi').length
   const colsClass = kpiCount <= 1 ? 'cols-1' : kpiCount === 2 || kpiCount === 4 ? 'cols-2' : 'cols-3'
+  const sectionStyle = context.modeBadge
+    ? ` style="border-left:3px solid ${sanitizeExportHexColor(context.modeBadge.modeColor)}"`
+    : ''
+  const bodyHtml =
+    descriptors.length === 0
+      ? `<div class="empty-banner mono">Select at least one applicable data point to preview and add this block</div>`
+      : `${kpiCount > 0 ? `<div class="kpi-grid ${colsClass}">${kpiTiles}</div>` : ''}${breakdownCards ? `<div class="card-stack">${breakdownCards}</div>` : ''}`
 
-  return `<section id="section-${sectionIndex}" class="card">
+  return `<section id="section-${sectionIndex}" class="card"${sectionStyle}>
   ${renderTelemetryHeader(sectionMeta.label.toUpperCase(), `${context.routeTitle} — ${context.scopeLabel}`, context, `accent-${sectionMeta.accent}`)}
-  ${kpiCount > 0 ? `<div class="kpi-grid ${colsClass}">${kpiTiles}</div>` : ''}
-  ${breakdownCards ? `<div class="card-stack">${breakdownCards}</div>` : ''}
+  ${bodyHtml}
 </section>`
 }
 
@@ -348,7 +361,7 @@ function renderDetailsKpiTile(metricId: DetailsMetricId, context: ResolvedTeleme
     case 'realizationRetentionRate':
       return tile('Realization Retention', formatOptionalPercent(derived.realizationRetentionPercent), '', 'amber')
     case 'netProfitAfterCarrierCost':
-      return tile('Net Profit After Carrier', formatOptionalCredits(derived.netProfitAfterCarrierCost), carrierCost ? `Carrier cost: ${formatCredits(carrierCost.totalCost)}` : '', 'amber')
+      return tile('Net Profit After Carrier', formatOptionalCredits(derived.netProfitAfterCarrierCost), carrierCost ? `Carrier cost: ${formatEstimatedCarrierCredits(carrierCost.totalCost, Boolean(carrierCost.totalEstimated))}` : '', 'amber')
     case 'avgRealizedCreditsPerJump':
       return tile('Avg Realized Cr / Jump', formatOptionalCredits(derived.avgRealizedCreditsPerJump), '', 'amber')
     case 'avgRealizedCreditsPer1000Ly':
@@ -373,7 +386,7 @@ function renderDetailsBreakdownCard(
       return `<div class="bd-card accent-left-amber"><div class="bd-head"><span>FSD Boosts</span><span class="mono amber">${formatInt(derived.totalBoosts)} total</span></div>${row('Jet Cone Boosts', formatInt(metrics.jetConeBoosts))}${row('Premium Injections', formatInt(metrics.premiumBoosts))}${row('Standard Injections', formatInt(metrics.standardBoosts))}${row('Basic Injections', formatInt(metrics.basicBoosts))}</div>`
     case 'carrierCosts':
       return carrierCost
-        ? `<div class="bd-card accent-left-amber"><div class="bd-head"><span>Carrier Cost Breakdown (${escapeHtml(carrierCost.carrierType)})</span><span class="mono amber">${escapeHtml(formatCredits(carrierCost.totalCost))}</span></div>${row('Tritium Cost', formatCredits(carrierCost.tritiumCost))}${row('Jump Maintenance', formatCredits(carrierCost.jumpCost))}${row('Prorated Weekly Upkeep', formatCredits(carrierCost.upkeepCost))}</div>`
+        ? `<div class="bd-card accent-left-amber"><div class="bd-head"><span>Carrier Cost Breakdown (${escapeHtml(carrierCost.carrierType)})</span><span class="mono amber">${escapeHtml(formatEstimatedCarrierCredits(carrierCost.totalCost, Boolean(carrierCost.totalEstimated)))}</span></div>${row('Tritium Cost', formatEstimatedCarrierCredits(carrierCost.tritiumCost))}${row('Jump Maintenance', formatCredits(carrierCost.jumpCost))}${row('Prorated Weekly Upkeep', formatEstimatedCarrierCredits(carrierCost.upkeepCost))}</div>`
         : ''
     case 'combinedEstimatedValue':
       return `<div class="bd-card accent-left-cyan"><div class="bd-head"><span>Combined Estimated Exploration Value</span><span class="mono cyan">${escapeHtml(formatCredits(derived.combinedEstimatedCredits))}</span></div>${row('Universal Cartographics', formatCredits(metrics.scanValueTotal), 'cyan')}${row('Vista Genomics (Exobiology)', formatCredits(metrics.organicValueTotal), 'emerald')}</div>`
@@ -426,7 +439,8 @@ function renderWaypointsSection(
         return `<tr class="region-row"><td colspan="${headers.length}">${escapeHtml(rowView.regionName || 'Galactic Region')}</td></tr>`
       }
       const detail = detailsByRowId.get(rowView.row.id)
-      const borderColor = rowView.number === 1 ? '#3d2816' : rowView.legModeColor || '#FF7100'
+      const borderColor =
+        rowView.number === 1 ? '#3d2816' : sanitizeExportHexColor(rowView.legModeColor)
       const cells: string[] = [
         `<td class="mono">${rowView.number}</td>`,
         `<td><strong>${escapeHtml(rowView.row.systemName)}</strong>${rowView.row.poiName ? `<div class="muted small">${escapeHtml(rowView.row.poiName)}</div>` : ''}</td>`,
@@ -458,7 +472,7 @@ function renderWaypointsSection(
       if (columns.has('flightMode')) {
         const hasLegMode = rowView.number > 1 && Boolean(rowView.legModeName)
         cells.push(
-          `<td class="mono small">${hasLegMode ? `<span style="color:${escapeHtml(rowView.legModeColor || '#FF7100')}">${escapeHtml(rowView.legModeName)}</span>` : '—'}</td>`,
+          `<td class="mono small">${hasLegMode ? `<span style="color:${sanitizeExportHexColor(rowView.legModeColor)}">${escapeHtml(rowView.legModeName)}</span>` : '—'}</td>`,
         )
       }
       if (columns.has('fcStops')) {
@@ -480,7 +494,7 @@ function renderWaypointsSection(
       <div class="eyebrow">WAYPOINTS LOG</div>
       <h2 class="block-title">${escapeHtml(exportData.plan.expedition.name)} — ${config.waypointsScope === 'fullPlan' ? 'Full Plan' : 'Visited Waypoints'}</h2>
     </div>
-    <div class="header-dates mono">${exportData.plan.visitedWaypointCount} / ${exportData.plan.waypointCount} VISITED</div>
+    <div class="header-dates mono"><div>${exportData.plan.visitedWaypointCount} / ${exportData.plan.waypointCount} VISITED</div><div class="muted">COVERED ${escapeHtml(formatLy(exportData.plan.coveredLy, 1))}</div></div>
   </div>
   <table class="wp-table"><thead><tr>${headers.join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
 </section>`
@@ -514,14 +528,20 @@ function renderHighlightsSection(
     })
     .join('')
 
+  const bodyHtml =
+    visibleBoards.length === 0
+      ? `<div class="empty-banner mono">Select at least one highlight card with recorded expedition data</div>`
+      : `<div class="hl-grid">${cardsHtml}</div>`
+
   return `<section id="section-${sectionIndex}" class="card">
   <div class="block-header accent-cyan">
     <div>
       <div class="eyebrow">EXPEDITION HIGHLIGHTS // TOP ${config.depth}</div>
       <h2 class="block-title">${escapeHtml(exportData.plan.expedition.name)}</h2>
     </div>
+    <div class="header-dates mono"><div>${visibleBoards.length} TROPHY CARDS</div><div class="muted">${escapeHtml(exportData.effectiveStartGalactic)}</div></div>
   </div>
-  <div class="hl-grid">${cardsHtml}</div>
+  ${bodyHtml}
 </section>`
 }
 
@@ -581,6 +601,7 @@ body{margin:0;background:#050506;color:#f4ece4;font-family:"Rajdhani","Bahnschri
 .hl-card{background:#110c08;border:1px solid #2e1f12;padding:10px 12px}
 .hl-entry{padding:6px 0;border-top:1px solid #24180e;margin-top:6px}
 .hl-row{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+.empty-banner{padding:24px 18px;text-align:center;font-size:11px;color:#a6907c}
 .report-footer{text-align:center;padding:16px;font-size:10px;color:#6e5b4b}
 @media print{
   body{background:#fff;color:#111}

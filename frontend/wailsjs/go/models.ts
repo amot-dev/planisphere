@@ -810,6 +810,200 @@ export namespace expedition {
 
 }
 
+export namespace exporter {
+	
+	export class BundleFile {
+	    name: string;
+	    contentBase64?: string;
+	    contentText?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BundleFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.contentBase64 = source["contentBase64"];
+	        this.contentText = source["contentText"];
+	    }
+	}
+	export class CarrierCost {
+	    carrierType: string;
+	    weeklyUpkeep: number;
+	    tritiumPrice: number;
+	    tritiumCost: number;
+	    jumpCost: number;
+	    upkeepCost: number;
+	    totalCost: number;
+	    totalEstimated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierCost(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.carrierType = source["carrierType"];
+	        this.weeklyUpkeep = source["weeklyUpkeep"];
+	        this.tritiumPrice = source["tritiumPrice"];
+	        this.tritiumCost = source["tritiumCost"];
+	        this.jumpCost = source["jumpCost"];
+	        this.upkeepCost = source["upkeepCost"];
+	        this.totalCost = source["totalCost"];
+	        this.totalEstimated = source["totalEstimated"];
+	    }
+	}
+	export class ModeBucket {
+	    modeId: number;
+	    modeName: string;
+	    modeColor: string;
+	    metrics: stats.Metrics;
+	    realization: realization.Breakdown;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModeBucket(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.modeId = source["modeId"];
+	        this.modeName = source["modeName"];
+	        this.modeColor = source["modeColor"];
+	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
+	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TelemetrySnapshot {
+	    metrics: stats.Metrics;
+	    realization: realization.Breakdown;
+	
+	    static createFrom(source: any = {}) {
+	        return new TelemetrySnapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
+	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExpeditionExport {
+	    schemaVersion: number;
+	    exportedAt: string;
+	    exportedAtGalactic: string;
+	    appVersion: string;
+	    commanders: string[];
+	    departed: boolean;
+	    effectiveStart: string;
+	    effectiveStartGalactic: string;
+	    effectiveEnd: string;
+	    effectiveEndGalactic: string;
+	    endIsNow: boolean;
+	    duration: string;
+	    careerStart: string;
+	    careerStartGalactic: string;
+	    careerDuration: string;
+	    plan: expedition.PlanView;
+	    expedition: TelemetrySnapshot;
+	    live: stats.Metrics;
+	    adjustments: stats.Metrics;
+	    carrierCost: CarrierCost;
+	    originBaseline?: expedition.WaypointDetails;
+	    postCareer: TelemetrySnapshot;
+	    modeBuckets: ModeBucket[];
+	    rowDetails: expedition.WaypointDetails[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExpeditionExport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schemaVersion = source["schemaVersion"];
+	        this.exportedAt = source["exportedAt"];
+	        this.exportedAtGalactic = source["exportedAtGalactic"];
+	        this.appVersion = source["appVersion"];
+	        this.commanders = source["commanders"];
+	        this.departed = source["departed"];
+	        this.effectiveStart = source["effectiveStart"];
+	        this.effectiveStartGalactic = source["effectiveStartGalactic"];
+	        this.effectiveEnd = source["effectiveEnd"];
+	        this.effectiveEndGalactic = source["effectiveEndGalactic"];
+	        this.endIsNow = source["endIsNow"];
+	        this.duration = source["duration"];
+	        this.careerStart = source["careerStart"];
+	        this.careerStartGalactic = source["careerStartGalactic"];
+	        this.careerDuration = source["careerDuration"];
+	        this.plan = this.convertValues(source["plan"], expedition.PlanView);
+	        this.expedition = this.convertValues(source["expedition"], TelemetrySnapshot);
+	        this.live = this.convertValues(source["live"], stats.Metrics);
+	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
+	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCost);
+	        this.originBaseline = this.convertValues(source["originBaseline"], expedition.WaypointDetails);
+	        this.postCareer = this.convertValues(source["postCareer"], TelemetrySnapshot);
+	        this.modeBuckets = this.convertValues(source["modeBuckets"], ModeBucket);
+	        this.rowDetails = this.convertValues(source["rowDetails"], expedition.WaypointDetails);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+
+}
+
 export namespace modes {
 	
 	export class ExpeditionUsage {

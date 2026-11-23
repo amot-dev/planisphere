@@ -59,6 +59,14 @@ See what your discoveries are worth as you scan them, and track what actually hi
 - **Realized Earnings Breakdown:** Compares your estimated survey value against the net credits you actually pocket at Universal Cartographics and Vista Genomics, breaking down losses from death, stolen first-discovery or first-logged bonuses, the 25 percent Fleet Carrier tariff, and hired NPC crew cuts (active or inactive).
 - **Expedition and All-Time Scopes:** Switch the telemetry sidebar between your active expedition (with flight mode filters) and all-time career totals across your entire journal archive, with travel distance broken down between ship FSD jumps and carrier passenger rides.
 
+### Expedition Export
+Share your finished or in-progress journeys with crisp cockpit telemetry cards, offline HTML reports, and complete JSON data archives.
+
+- **Export Studio and Cart Queue:** Open Export Studio from the planner header on any departed or completed expedition to build a custom queue of `Summary`, `Details`, `Waypoints`, and `Highlights` blocks with live preview, a one-click `Quick Share` preset, and sticky checkboxes for queueing rapid variations.
+- **Flexible Scopes and Mode Grouping:** Scope `Summary` and `Details` blocks to the full expedition, pre-expedition baseline, a specific leg, all legs, a galactic region, or all galactic regions. When a scope spans multiple active flight modes, toggle cleanly between `Combined` and `Separate` outputs; on `Summary`, include optional inline career diff deltas comparing pre-expedition and post-expedition totals.
+- **Per-Data-Point Details and Leaderboard Highlights:** Customize six focused `Details` sections (Flight Operations, Carrier Operations, Exploration Value, Cartographics, Exobiology, and Realized Value) with individual metric checkboxes, or surface `Top 1`, `Top 3`, or `Top 5` leg and waypoint leaderboards in `Highlights`.
+- **Self-Contained PNG, Offline HTML, and Complete JSON Outputs:** Independently toggle 2x DPI PNG cards, a single-file print-ready offline `.html` report, and a complete unfiltered `.json` snapshot (always including full ordered highlight rankings). Single-file exports save directly while multi-file exports bundle cleanly into a `.zip` archive.
+
 
 ## Installation
 

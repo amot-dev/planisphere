@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"planisphere/internal/export"
+	"planisphere/internal/exporter"
 	"planisphere/internal/store/expedition"
 )
 
@@ -36,16 +36,8 @@ func TestAppExportFacadeEndToEnd(testingContext *testing.T) {
 		testingContext.Fatalf("unexpected export snapshot: departed=%v jumps=%d rows=%d", exportData.Departed, exportData.Live.Jumps, len(exportData.RowDetails))
 	}
 
-	customRange, rangeError := testApp.ComputeExportRangeStats(createdExpedition.ID, "2026-04-01T10:00:00Z", "", 0)
-	if rangeError != nil {
-		testingContext.Fatalf("ComputeExportRangeStats: %v", rangeError)
-	}
-	if customRange.Metrics.Jumps != 1 {
-		testingContext.Fatalf("expected 1 jump in custom range, got %d", customRange.Metrics.Jumps)
-	}
-
 	outputPath := filepath.Join(testingContext.TempDir(), "snapshot.json")
-	savedPath, writeError := testApp.WriteExportOutput(outputPath, []export.BundleFile{
+	savedPath, writeError := testApp.WriteExportOutput(outputPath, []exporter.BundleFile{
 		{Name: "snapshot.json", ContentText: `{"schemaVersion":1}`},
 	})
 	if writeError != nil || savedPath != outputPath {

@@ -1,8 +1,8 @@
 import { expedition, realization, stats } from '../../api/models'
 import {
   computeShipDistanceLy,
+  formatCredits,
   formatElapsedDuration,
-  toGalacticTime,
 } from '../../domain/galacticTime'
 import {
   CartBlockItem,
@@ -13,12 +13,29 @@ import {
   ExportBlockConfig,
   ExportCarrierCost,
   ExportScopeSpec,
-  ExportTelemetrySnapshot,
   HIGHLIGHT_CARDS,
   WAYPOINTS_COLUMNS,
 } from './exportTypes'
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
+const EXPORT_HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+
+/** Validates a CSS hex color (#RGB or #RRGGBB), returning fallback for malformed inputs. */
+export function sanitizeExportHexColor(
+  rawColor: string | null | undefined,
+  fallback: string = '#FF7100',
+): string {
+  const trimmedColor = rawColor?.trim() ?? ''
+  return EXPORT_HEX_COLOR_PATTERN.test(trimmedColor) ? trimmedColor : fallback
+}
+
+/** Formats carrier credit values with a tilde prefix when estimated and greater than zero. */
+export function formatEstimatedCarrierCredits(
+  amount: number,
+  isEstimated: boolean = amount > 0,
+): string {
+  return isEstimated && amount > 0 ? `~${formatCredits(amount)}` : formatCredits(amount)
+}
 
 /** Visited non-origin leg enriched with its drawer details and attributed Galactic Region. */
 export interface VisitedLegRecord {
@@ -259,7 +276,6 @@ export function getDistinctModesForScope(
     case 'allLegs':
       return []
     case 'full':
-    case 'customTime':
       return (exportData.modeBuckets ?? []).map((bucket) => ({
         modeId: bucket.modeId,
         modeName: bucket.modeName,
@@ -304,7 +320,7 @@ export function isDetailsMetricAvailable(
   if (descriptor.fullExpeditionCombinedOnly && !context.isFullExpeditionCombined) {
     return false
   }
-  if (descriptor.requiresVisitedRoute && (scopeKind === 'baseline' || scopeKind === 'customTime')) {
+  if (descriptor.requiresVisitedRoute && scopeKind === 'baseline') {
     return false
   }
   if (descriptor.requiresElapsed24h && (context.elapsedDays == null || context.elapsedDays < 1)) {
@@ -376,7 +392,6 @@ export function resolveTelemetryContext(
   exportData: ExpeditionExportData,
   scope: ExportScopeSpec,
   selectedModeId?: number,
-  customRangeSnapshot?: ExportTelemetrySnapshot,
   nowMs: number = Date.now(),
 ): ResolvedTelemetryContext {
   switch (scope.kind) {
@@ -386,8 +401,6 @@ export function resolveTelemetryContext(
       return resolveLegContext(exportData, scope.rowId, nowMs)
     case 'region':
       return resolveRegionContext(exportData, scope.regionName, selectedModeId, nowMs)
-    case 'customTime':
-      return resolveCustomTimeContext(exportData, scope, selectedModeId, customRangeSnapshot, nowMs)
     case 'allLegs': {
       const firstLeg = getVisitedLegs(exportData)[0]
       return resolveLegContext(exportData, firstLeg?.rowView.row.id, nowMs)
@@ -407,7 +420,6 @@ export function expandConfigToCartItems(
   exportData: ExpeditionExportData,
   config: ExportBlockConfig,
   idPrefix: string,
-  customRangeSnapshotByMode?: Map<number, ExportTelemetrySnapshot>,
 ): CartBlockItem[] {
   if (config.kind === 'waypoints') {
     const scopeText = config.waypointsScope === 'fullPlan' ? 'Full Plan' : 'Visited Only'
@@ -434,7 +446,7 @@ export function expandConfigToCartItems(
       },
     ]
   }
-  return expandTelemetryBlockConfig(exportData, config, idPrefix, customRangeSnapshotByMode)
+  return expandTelemetryBlockConfig(exportData, config, idPrefix)
 }
 
 /** Builds the Quick Share 3-card preset cart (Summary + Highlights Top 1 + Waypoints). */
@@ -498,7 +510,6 @@ function expandTelemetryBlockConfig(
   exportData: ExpeditionExportData,
   config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
   idPrefix: string,
-  customRangeSnapshotByMode?: Map<number, ExportTelemetrySnapshot>,
 ): CartBlockItem[] {
   const blockLabel =
     config.kind === 'summary'
@@ -518,7 +529,6 @@ function expandTelemetryBlockConfig(
     idPrefix,
     blockLabel,
     blockSlug,
-    customRangeSnapshotByMode,
   )
 }
 
@@ -602,7 +612,6 @@ function expandSingleScopeItems(
   idPrefix: string,
   blockLabel: string,
   blockSlug: string,
-  customRangeSnapshotByMode?: Map<number, ExportTelemetrySnapshot>,
 ): CartBlockItem[] {
   const availableModes = getDistinctModesForScope(exportData, config.scope)
   const shouldSplitByMode =
@@ -619,7 +628,6 @@ function expandSingleScopeItems(
       filenameSlug: `${blockSlug}-${slugify(scopeText)}-${slugify(modeTag.modeName)}`,
       subfolder: 'by-mode',
       config: cloneConcreteTelemetryConfig(config, { ...config.scope }, modeTag.modeId, 'hide'),
-      customRangeSnapshot: customRangeSnapshotByMode?.get(modeTag.modeId),
     }))
   }
 
@@ -642,7 +650,6 @@ function expandSingleScopeItems(
         undefined,
         config.scope.kind === 'full' ? baseCareerDiff : 'hide',
       ),
-      customRangeSnapshot: customRangeSnapshotByMode?.get(0),
     },
   ]
 }
@@ -684,8 +691,6 @@ function describeScopeShort(exportData: ExpeditionExportData, scope: ExportScope
     }
     case 'region':
       return scope.regionName || 'Selected Region'
-    case 'customTime':
-      return 'Custom Timeframe'
     case 'allLegs':
       return 'All Legs'
     case 'allRegions':
@@ -909,48 +914,6 @@ function resolveRegionContext(
     visitedWaypoints: matchingLegs.length,
     plannedWaypoints: null,
     coveredLy: matchingLegs.reduce((sum, leg) => sum + (leg.rowView.distFromPrevLy ?? 0), 0),
-    plannedLy: null,
-    derived: computeDerivedMetrics(metrics, realizationBreakdown, null, elapsedDays),
-    careerDiff: null,
-    isFullExpeditionCombined: false,
-  }
-}
-
-function resolveCustomTimeContext(
-  exportData: ExpeditionExportData,
-  scope: ExportScopeSpec,
-  selectedModeId: number | undefined,
-  customRangeSnapshot: ExportTelemetrySnapshot | undefined,
-  nowMs: number,
-): ResolvedTelemetryContext {
-  const metrics = customRangeSnapshot?.metrics ?? createEmptyMetrics()
-  const realizationBreakdown = customRangeSnapshot?.realization ?? createEmptyRealization()
-  const afterIso = scope.afterIso || exportData.effectiveStart
-  const untilIso = scope.untilIso || exportData.effectiveEnd
-  const elapsedDays = computeElapsedDays(afterIso, untilIso, nowMs)
-  const modeBucket =
-    selectedModeId != null
-      ? exportData.modeBuckets.find((bucket) => bucket.modeId === selectedModeId)
-      : undefined
-  return {
-    scopeLabel: modeBucket ? `Custom Timeframe (${modeBucket.modeName})` : 'Custom Timeframe',
-    routeTitle: exportData.plan.expedition.name,
-    modeBadge: modeBucket
-      ? { modeId: modeBucket.modeId, modeName: modeBucket.modeName, modeColor: modeBucket.modeColor }
-      : null,
-    fromGalactic: toGalacticTime(afterIso),
-    toGalactic: untilIso ? toGalacticTime(untilIso) : 'ACTIVE',
-    inSystem: false,
-    durationLabel: formatElapsedDuration(afterIso, untilIso, nowMs),
-    elapsedDays,
-    metrics,
-    realization: realizationBreakdown,
-    carrierCost: null,
-    shipsFlown: [],
-    distinctRegionCount: null,
-    visitedWaypoints: null,
-    plannedWaypoints: null,
-    coveredLy: null,
     plannedLy: null,
     derived: computeDerivedMetrics(metrics, realizationBreakdown, null, elapsedDays),
     careerDiff: null,

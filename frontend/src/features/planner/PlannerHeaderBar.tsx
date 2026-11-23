@@ -4,29 +4,35 @@ import { formatLy } from '../../domain/galacticTime'
 import { LegModeDropdown } from './table/widgets/LegModeDropdown'
 
 /**
- * PlannerHeaderBarProps defines the active expedition plan, carrier plotter
- * open state, flight mode handler, and lifecycle action callbacks for the top bar of the planner.
+ * PlannerHeaderBarProps defines the active expedition plan, carrier plotter open state,
+ * `exportEnabled` (whether export is enabled after departing Waypoint #1), flight mode handler,
+ * optional `onOpenExportModal` callback, and lifecycle action callbacks for the top bar of the planner.
  */
 export interface PlannerHeaderBarProps {
   plan: expedition.PlanView
   hasOriginWaypointSystem: boolean
   carrierRouteOpen?: boolean
+  exportEnabled?: boolean
   onChangeActiveMode?: (modeId: number) => void
   onOpenStartModal: () => void
+  onOpenExportModal?: () => void
   onLifecycleAction: (label: string, actionFunction: () => Promise<void>) => Promise<void>
 }
 
 /**
  * PlannerHeaderBar renders the expedition title, status-styled waypoint count badge,
  * per-expedition flight mode selector (hidden when completed), planned/covered/remaining
- * distance strip, and Engage / Complete / Reopen buttons.
+ * distance strip, optional EXPORT button (opens Export Studio when engaged and `exportEnabled`),
+ * and Engage / Complete / Reopen buttons.
  */
 export function PlannerHeaderBar({
   plan,
   hasOriginWaypointSystem,
   carrierRouteOpen = false,
+  exportEnabled = false,
   onChangeActiveMode,
   onOpenStartModal,
+  onOpenExportModal,
   onLifecycleAction,
 }: PlannerHeaderBarProps) {
   const currentExpedition = plan.expedition
@@ -152,6 +158,26 @@ export function PlannerHeaderBar({
             </div>
           )}
         </div>
+
+        {onOpenExportModal && (
+          <button
+            type="button"
+            disabled={isPlanning || !exportEnabled}
+            onClick={onOpenExportModal}
+            title={
+              isPlanning
+                ? 'Engage the expedition to enable exports'
+                : !exportEnabled
+                  ? 'Depart Waypoint #1 to enable exports'
+                  : 'Open Export Studio to generate PNG cards, HTML reports, or JSON snapshots'
+            }
+            className={`ed-btn-cyan ${
+              isPlanning || !exportEnabled ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''
+            }`}
+          >
+            EXPORT
+          </button>
+        )}
 
         {isPlanning && (
           <button

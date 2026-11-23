@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { ExportBlockRenderer } from '../blocks/ExportBlockRenderer'
 import { EXPORT_CARD_WIDTH } from '../exportCardStyles'
 import { createQuickShareCart, expandConfigToCartItems } from '../exportMetrics'
-import { defaultMetricsForSection } from '../exportTypes'
+import { defaultMetricsForSection, ExportBlockConfig } from '../exportTypes'
 import { buildPngBundleFileName, buildSvgForeignObjectDocument } from '../pngRenderer'
 import { buildSampleExportData } from './exportTestFixtures'
 
@@ -112,6 +112,61 @@ describe('export visual blocks and PNG SVG serializer', () => {
       'leg',
     )
     expect(buildPngBundleFileName(legItems[0], 1, 12)).toMatch(/^by-leg\/01-/)
+  })
+
+  it('prefixes estimated carrier costs with tilde and sanitizes malformed mode colors in React blocks', () => {
+    const baseData = buildSampleExportData()
+    const renderCard = (exportData: typeof baseData, config: ExportBlockConfig) =>
+      renderToStaticMarkup(createElement(ExportBlockRenderer, { exportData, config }))
+
+    expect(renderCard(baseData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' })).toContain('~26,000,000 Cr')
+    expect(renderCard(baseData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] })).toContain('Carrier cost: ~26,000,000 Cr')
+
+    const carrierEstimated = renderCard(baseData, { kind: 'details', section: 'carrier', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['carrierCosts'] })
+    expect(carrierEstimated).toContain('~26,000,000 Cr')
+    expect(carrierEstimated).toContain('~20,000,000 Cr')
+    expect(carrierEstimated).toContain('~5,600,000 Cr')
+    expect(carrierEstimated).toContain('400,000 Cr')
+    expect(carrierEstimated).not.toContain('~400,000 Cr')
+
+    const nonEstimatedAndUnsafeData = buildSampleExportData({
+      carrierCost: { ...baseData.carrierCost, totalEstimated: false },
+      modeBuckets: baseData.modeBuckets.map((bucket) =>
+        bucket.modeId === 1 ? { ...bucket, modeColor: '#12;x:1' } : bucket,
+      ),
+      plan: {
+        ...baseData.plan,
+        rows: baseData.plan.rows.map((rowView) =>
+          rowView.number === 2
+            ? { ...rowView, legModeColor: '#zzzzzz' }
+            : rowView.number === 3
+              ? { ...rowView, legModeColor: 'red;bad:1' }
+              : rowView,
+        ),
+      } as typeof baseData.plan,
+    })
+
+    const summaryNonEstimated = renderCard(nonEstimatedAndUnsafeData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' })
+    expect(summaryNonEstimated).toContain('26,000,000 Cr')
+    expect(summaryNonEstimated).not.toContain('~26,000,000 Cr')
+
+    const realizedNonEstimated = renderCard(nonEstimatedAndUnsafeData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] })
+    expect(realizedNonEstimated).toContain('Carrier cost: 26,000,000 Cr')
+    expect(realizedNonEstimated).not.toContain('~26,000,000 Cr')
+
+    const summaryUnsafeColor = renderCard(nonEstimatedAndUnsafeData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' })
+    expect(summaryUnsafeColor).not.toContain('#12;x:1')
+    expect(summaryUnsafeColor).toContain('#FF7100')
+
+    const detailsUnsafeColor = renderCard(nonEstimatedAndUnsafeData, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, selectedMetrics: ['jumps'] })
+    expect(detailsUnsafeColor).not.toContain('#12;x:1')
+    expect(detailsUnsafeColor).toContain('#FF7100')
+
+    const waypointsUnsafeColor = renderCard(nonEstimatedAndUnsafeData, { kind: 'waypoints', waypointsScope: 'visited', selectedColumns: ['flightMode'] })
+    expect(waypointsUnsafeColor).not.toContain('#zzzzzz')
+    expect(waypointsUnsafeColor).not.toContain('red;bad:1')
+    expect(waypointsUnsafeColor).toContain('#FF7100')
+    expect(waypointsUnsafeColor).toContain('#3d2816')
   })
 })
 

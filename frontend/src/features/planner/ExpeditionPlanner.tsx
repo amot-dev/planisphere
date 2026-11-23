@@ -32,8 +32,10 @@ export interface ExpeditionPlannerProps {
   externalLinkEdsm?: string
   externalLinkGec?: string
   manualPlotterRequestCount?: number
+  exportEnabled?: boolean
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
   onOpenStartModal: () => void
+  onOpenExportModal?: () => void
   onRefreshPlan: () => void
   onBusyChange: (busyMessage: string | null) => void
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
@@ -51,8 +53,10 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   externalLinkEdsm,
   externalLinkGec,
   manualPlotterRequestCount = 0,
+  exportEnabled = false,
   onPlanOptimisticUpdate,
   onOpenStartModal,
+  onOpenExportModal,
   onRefreshPlan,
   onBusyChange,
   onCarrierRouteOpenChange,
@@ -306,8 +310,10 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
         plan={plan}
         hasOriginWaypointSystem={hasOriginWaypointSystem}
         carrierRouteOpen={Boolean(carrierRoute.activeCarrierRoute || carrierRoute.routePrompt)}
+        exportEnabled={exportEnabled}
         onChangeActiveMode={mutations.handleActiveModeChange}
         onOpenStartModal={onOpenStartModal}
+        onOpenExportModal={onOpenExportModal}
         onLifecycleAction={mutations.handleLifecycleAction}
       />
 

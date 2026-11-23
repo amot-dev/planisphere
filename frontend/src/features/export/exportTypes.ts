@@ -92,7 +92,6 @@ export type ExportScopeKind =
   | 'allLegs'
   | 'region'
   | 'allRegions'
-  | 'customTime'
 
 /** Flight mode grouping mode shown when a scope spans multiple active flight modes. */
 export type ModeGrouping = 'combined' | 'separate'
@@ -111,8 +110,6 @@ export interface ExportScopeSpec {
   kind: ExportScopeKind
   rowId?: number
   regionName?: string
-  afterIso?: string
-  untilIso?: string
 }
 
 /** Toggleable metric identifiers across all six Details sections. */
@@ -251,7 +248,6 @@ export interface CartBlockItem {
   filenameSlug: string
   subfolder: string
   config: ExportBlockConfig
-  customRangeSnapshot?: ExportTelemetrySnapshot
 }
 
 /** Global output format toggles displayed in the Export Studio footer. */
