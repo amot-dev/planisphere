@@ -100,7 +100,11 @@ func decodeBundleFile(bundleFile BundleFile) ([]byte, error) {
 	return []byte(bundleFile.ContentText), nil
 }
 
-func deduplicateEntryName(candidateName string, usedNames map[string]int) string {
+func deduplicateEntryName(
+	candidateName string,
+	usedNames map[string]int,
+	canonicalDirectories map[string]string,
+) string {
 	normalizedKey := strings.ToLower(candidateName)
 	seenCount := usedNames[normalizedKey]
 	if seenCount == 0 {
@@ -112,7 +116,7 @@ func deduplicateEntryName(candidateName string, usedNames map[string]int) string
 	for suffix := seenCount + 1; ; suffix++ {
 		nextCandidate := fmt.Sprintf("%s-%d%s", baseWithoutExtension, suffix, extension)
 		nextKey := strings.ToLower(nextCandidate)
-		if usedNames[nextKey] == 0 {
+		if _, collidesWithDirectory := canonicalDirectories[nextKey]; !collidesWithDirectory && usedNames[nextKey] == 0 {
 			usedNames[normalizedKey] = suffix
 			usedNames[nextKey] = 1
 			return nextCandidate
@@ -171,19 +175,28 @@ func writeZipBundleAtomically(targetPath string, files []BundleFile) error {
 func writeZipEntries(archiveWriter *zip.Writer, files []BundleFile) error {
 	exportTimestamp := time.Now().UTC()
 	usedNames := make(map[string]int, len(files))
-	createdDirectories := make(map[string]struct{})
+	canonicalDirectories := make(map[string]string)
 	for _, bundleFile := range files {
 		fileBytes, decodeError := decodeBundleFile(bundleFile)
 		if decodeError != nil {
 			return decodeError
 		}
-		entryName := deduplicateEntryName(SanitizeArchiveEntryName(bundleFile.Name), usedNames)
-		if dirError := ensureZipDirectoryHeaders(archiveWriter, entryName, createdDirectories, exportTimestamp); dirError != nil {
-			return dirError
+		sanitizedName := SanitizeArchiveEntryName(bundleFile.Name)
+		canonicalName, pathError := canonicalizeZipEntryPath(sanitizedName, usedNames, canonicalDirectories)
+		if pathError != nil {
+			return pathError
+		}
+		entryName := deduplicateEntryName(canonicalName, usedNames, canonicalDirectories)
+		if directoryError := ensureZipDirectoryHeaders(archiveWriter, entryName, canonicalDirectories, exportTimestamp); directoryError != nil {
+			return directoryError
+		}
+		compressionMethod := zip.Deflate
+		if strings.EqualFold(path.Ext(entryName), ".png") {
+			compressionMethod = zip.Store
 		}
 		fileHeader := &zip.FileHeader{
 			Name:     entryName,
-			Method:   zip.Deflate,
+			Method:   compressionMethod,
 			Modified: exportTimestamp,
 		}
 		fileHeader.SetMode(0o644)
@@ -198,28 +211,72 @@ func writeZipEntries(archiveWriter *zip.Writer, files []BundleFile) error {
 	return nil
 }
 
+func canonicalizeZipEntryPath(
+	sanitizedName string,
+	usedNames map[string]int,
+	canonicalDirectories map[string]string,
+) (string, error) {
+	if existingDirectory, collidesWithDirectory := canonicalDirectories[strings.ToLower(sanitizedName)]; collidesWithDirectory {
+		return "", fmt.Errorf("zip entry %q collides with existing directory %q", sanitizedName, existingDirectory+"/")
+	}
+	directoryPath := path.Dir(sanitizedName)
+	if directoryPath == "." || directoryPath == "/" {
+		return sanitizedName, nil
+	}
+	if existingCanonical, exists := canonicalDirectories[strings.ToLower(directoryPath)]; exists {
+		return existingCanonical + "/" + path.Base(sanitizedName), nil
+	}
+	canonicalPrefix := ""
+	segmentStart := 0
+	for segmentStart <= len(directoryPath) {
+		var segment string
+		segment, segmentStart = nextPathSegment(directoryPath, segmentStart)
+		candidatePrefix := segment
+		if canonicalPrefix != "" {
+			candidatePrefix = canonicalPrefix + "/" + segment
+		}
+		prefixKey := strings.ToLower(candidatePrefix)
+		if usedNames[prefixKey] > 0 {
+			return "", fmt.Errorf("zip directory %q collides with existing file entry", candidatePrefix+"/")
+		}
+		if existingCanonical, exists := canonicalDirectories[prefixKey]; exists {
+			canonicalPrefix = existingCanonical
+		} else {
+			canonicalPrefix = candidatePrefix
+		}
+	}
+	return canonicalPrefix + "/" + path.Base(sanitizedName), nil
+}
+
 func ensureZipDirectoryHeaders(
 	archiveWriter *zip.Writer,
 	entryName string,
-	createdDirectories map[string]struct{},
+	canonicalDirectories map[string]string,
 	exportTimestamp time.Time,
 ) error {
 	directoryPath := path.Dir(entryName)
 	if directoryPath == "." || directoryPath == "/" {
 		return nil
 	}
-	segments := strings.Split(directoryPath, "/")
-	currentDirectory := ""
-	for _, segment := range segments {
-		if currentDirectory == "" {
-			currentDirectory = segment
+	if _, alreadyCreated := canonicalDirectories[strings.ToLower(directoryPath)]; alreadyCreated {
+		return nil
+	}
+	canonicalPrefix := ""
+	segmentStart := 0
+	for segmentStart <= len(directoryPath) {
+		var segment string
+		segment, segmentStart = nextPathSegment(directoryPath, segmentStart)
+		if canonicalPrefix == "" {
+			canonicalPrefix = segment
 		} else {
-			currentDirectory = currentDirectory + "/" + segment
+			canonicalPrefix = canonicalPrefix + "/" + segment
 		}
-		directoryEntryName := currentDirectory + "/"
-		if _, alreadyCreated := createdDirectories[directoryEntryName]; alreadyCreated {
+		directoryKey := strings.ToLower(canonicalPrefix)
+		if existingCanonical, alreadyCreated := canonicalDirectories[directoryKey]; alreadyCreated {
+			canonicalPrefix = existingCanonical
 			continue
 		}
+		directoryEntryName := canonicalPrefix + "/"
 		directoryHeader := &zip.FileHeader{
 			Name:     directoryEntryName,
 			Method:   zip.Store,
@@ -229,7 +286,15 @@ func ensureZipDirectoryHeaders(
 		if _, headerError := archiveWriter.CreateHeader(directoryHeader); headerError != nil {
 			return fmt.Errorf("create zip directory %q: %w", directoryEntryName, headerError)
 		}
-		createdDirectories[directoryEntryName] = struct{}{}
+		canonicalDirectories[directoryKey] = canonicalPrefix
 	}
 	return nil
+}
+
+func nextPathSegment(directoryPath string, segmentStart int) (string, int) {
+	slashOffset := strings.IndexByte(directoryPath[segmentStart:], '/')
+	if slashOffset < 0 {
+		return directoryPath[segmentStart:], len(directoryPath) + 1
+	}
+	return directoryPath[segmentStart : segmentStart+slashOffset], segmentStart + slashOffset + 1
 }
