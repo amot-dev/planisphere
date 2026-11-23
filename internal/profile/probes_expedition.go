@@ -2,8 +2,12 @@ package profile
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
+	"planisphere/internal/exporter"
+	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/store/expedition"
 )
@@ -109,6 +113,16 @@ func runExpeditionProbes(
 		}
 		if ok {
 			results = append(results, candidatesProbe)
+		}
+	}
+
+	if matchesFilter("Export/Build", options.FilterPattern) {
+		exportProbe, ok, exportError := profileExportBuild(database, proj, recorder, dataset, gecLookup, options.Iterations)
+		if exportError != nil {
+			return nil, exportError
+		}
+		if ok {
+			results = append(results, exportProbe)
 		}
 	}
 
@@ -402,4 +416,79 @@ func profileRowDropPreviews(
 		},
 	)
 	return probe, true, err
+}
+
+type exportBuildProbeValue struct {
+	EffectiveStart    string                     `json:"effectiveStart"`
+	EffectiveEnd      string                     `json:"effectiveEnd"`
+	ExportedAt        string                     `json:"exportedAt"`
+	Commanders        []string                   `json:"commanders"`
+	Departed          bool                       `json:"departed"`
+	EndIsNow          bool                       `json:"endIsNow"`
+	RowDetailsCount   int                        `json:"rowDetailsCount"`
+	ModeBucketsCount  int                        `json:"modeBucketsCount"`
+	HasOriginBaseline bool                       `json:"hasOriginBaseline"`
+	Live              replaystats.Metrics        `json:"live"`
+	Expedition        exporter.TelemetrySnapshot `json:"expedition"`
+	PostCareer        replaystats.Metrics        `json:"postCareer"`
+	CarrierCostTotal  int64                      `json:"carrierCostTotal"`
+}
+
+func profileExportNow() time.Time {
+	return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+}
+
+func profileExportBuild(
+	database *sql.DB,
+	proj *profileProjections,
+	recorder *treeRecorder,
+	dataset DatasetSummary,
+	gecLookup expedition.GECLookup,
+	iterations int,
+) (ProbeResult, bool, error) {
+	probe, probeError := runColdWarmProbe(
+		database, recorder, "Export/Build", "Export",
+		fmt.Sprintf("Assemble canonical export snapshot for expedition #%d (%s)", dataset.PrimaryExpeditionID, dataset.PrimaryExpeditionName),
+		"exporter.Build", "rows", "legs", iterations, proj.invalidate,
+		func() (singleExecOutcome, error) {
+			snapshot, buildError := exporter.Build(database, dataset.PrimaryExpeditionID, exporter.BuilderDeps{
+				Projections: proj.expeditionProjections(),
+				CareerStats: proj.careerStats,
+				GECLookup:   gecLookup,
+				AppVersion:  "profile",
+				Now:         profileExportNow,
+			})
+			if buildError != nil {
+				return singleExecOutcome{}, buildError
+			}
+			return buildExportProbeOutcome(snapshot), nil
+		},
+	)
+	if errors.Is(probeError, exporter.ErrNotExportable) {
+		return ProbeResult{}, false, nil
+	}
+	return probe, probeError == nil, probeError
+}
+
+func buildExportProbeOutcome(snapshot exporter.ExpeditionExport) singleExecOutcome {
+	digestValue := exportBuildProbeValue{
+		EffectiveStart:    snapshot.EffectiveStart,
+		EffectiveEnd:      snapshot.EffectiveEnd,
+		ExportedAt:        snapshot.ExportedAt,
+		Commanders:        snapshot.Commanders,
+		Departed:          snapshot.Departed,
+		EndIsNow:          snapshot.EndIsNow,
+		RowDetailsCount:   len(snapshot.RowDetails),
+		ModeBucketsCount:  len(snapshot.ModeBuckets),
+		HasOriginBaseline: snapshot.OriginBaseline != nil,
+		Live:              snapshot.Live,
+		Expedition:        snapshot.Expedition,
+		PostCareer:        snapshot.PostCareer.Metrics,
+		CarrierCostTotal:  snapshot.CarrierCost.TotalCost,
+	}
+	summary := fmt.Sprintf("Rows=%d RowDetails=%d ModeBuckets=%d Jumps=%d Realized=%d",
+		len(snapshot.Plan.Rows), len(snapshot.RowDetails), len(snapshot.ModeBuckets),
+		snapshot.Live.Jumps, snapshot.Expedition.Realization.TotalRealized,
+	)
+	return singleExecOutcome{value: digestValue, summary: summary, items: max(len(snapshot.Plan.Rows), 1), secondary: len(snapshot.RowDetails)}
 }

@@ -19,6 +19,7 @@ import {
   type SpanNodeJSON,
 } from './profileHelpers'
 import { buildSmokeFrontendFixture } from './smokeFixture'
+import { executeExportStudioPass } from './exportProbes'
 import { executeHydrationPass, executeSSRRenderPass } from './ssrProbes'
 
 declare const process: {
@@ -245,6 +246,27 @@ function runAllFrontendProbes(
     () => executeClientReconciliationPass(hydrated),
   )
 
+  const exportRowCount = Math.max(hydrated.exportData?.plan.rows.length ?? hydrated.plan.rows.length, 1)
+  const exportSecondaryCount = hydrated.exportData?.rowDetails.length ?? hydrated.visitedDetails.length
+  const exportCold = buildProbeRun(
+    'Cold',
+    'Frontend/ExportStudio',
+    'frontend/src/features/export/ExportExpeditionModal.tsx:45',
+    exportRowCount,
+    'rows',
+    1,
+    () => executeExportStudioPass(hydrated),
+  )
+  const exportWarm = buildProbeRun(
+    'Warm',
+    'Frontend/ExportStudio',
+    'frontend/src/features/export/ExportExpeditionModal.tsx:45',
+    exportRowCount,
+    'rows',
+    warmIterations,
+    () => executeExportStudioPass(hydrated),
+  )
+
   return [
     {
       name: 'Frontend/WailsHydration',
@@ -291,6 +313,21 @@ function runAllFrontendProbes(
       coldWarmMatch: clientCold.resultHash === clientWarm.resultHash,
       warmSpeedupPct: calcSpeedup(clientCold.medianDuration, clientWarm.medianDuration),
     },
+    {
+      name: 'Frontend/ExportStudio',
+      category: 'Frontend',
+      description:
+        'Export Studio cart expansion, ExportBlockRenderer SSR, HTML report generation, and canonical JSON snapshot',
+      itemsProcessed: exportRowCount,
+      itemUnit: 'rows',
+      secondaryCount: exportSecondaryCount,
+      secondaryUnit: 'legs',
+      cold: exportCold,
+      warm: exportWarm,
+      hasWarm: true,
+      coldWarmMatch: exportCold.resultHash === exportWarm.resultHash,
+      warmSpeedupPct: calcSpeedup(exportCold.medianDuration, exportWarm.medianDuration),
+    },
   ]
 }
 
@@ -305,14 +342,14 @@ describe.skipIf(!fixturePath || !outputPath)('Live Data Frontend CLI Profiler', 
 
     const probeResults = runAllFrontendProbes(parsedFixture, iterationsCount)
     nodeFS.writeFileSync(outputPath, JSON.stringify(probeResults, null, 2), 'utf-8')
-    expect(probeResults).toHaveLength(3)
+    expect(probeResults).toHaveLength(4)
   })
 })
 
 describe.skipIf(Boolean(fixturePath))('Frontend Profiler Smoke Suite', () => {
   it('validates hydration, SSR, drag-slot preview, and happy-dom client reconciliation probes', () => {
     const results = runAllFrontendProbes(buildSmokeFrontendFixture(), 1)
-    expect(results).toHaveLength(3)
+    expect(results).toHaveLength(4)
     for (const probe of results) {
       expect(probe.coldWarmMatch).toBe(true)
       expect(probe.cold.rootSpan.children?.length).toBeGreaterThan(0)

@@ -1,4 +1,241 @@
+import {
+  createEmptyMetrics,
+  createEmptyRealization,
+} from '../features/export/exportMetrics'
 import type { LiveFrontendFixture } from './profileHelpers'
+
+function buildSmokeExportData(): Record<string, unknown> {
+  const zeroMetrics = createEmptyMetrics()
+  const zeroRealization = createEmptyRealization()
+  const originMetrics = {
+    ...zeroMetrics,
+    distanceLy: 1000,
+    shipDistanceLy: 1000,
+    jumps: 40,
+    bodiesScanned: 50,
+    scanValueTotal: 5_000_000,
+  }
+  const originRealization = { ...zeroRealization, totalRealized: 4_500_000 }
+  const leg2Metrics = {
+    ...zeroMetrics,
+    distanceLy: 4.24,
+    shipDistanceLy: 4.24,
+    jumps: 1,
+    bodiesScanned: 8,
+    bodiesMapped: 4,
+    efficientMappings: 4,
+    scanValueTotal: 1_200_000,
+    scanValueBase: 600_000,
+    scanValueBonus: 450_000,
+    scanValueEfficiencyBonus: 150_000,
+    firstDiscoveries: 6,
+    firstMapped: 3,
+    organicSamples: 2,
+    organicValueTotal: 19_010_800,
+    organicValueBase: 3_802_160,
+    organicValueBonus: 15_208_640,
+    firstLogged: 2,
+  }
+  const leg2Realization = { ...zeroRealization, totalRealized: 20_210_800 }
+  const leg3Metrics = {
+    ...zeroMetrics,
+    distanceLy: 6.1,
+    shipDistanceLy: 6.1,
+    jumps: 1,
+    bodiesScanned: 4,
+    bodiesMapped: 2,
+    efficientMappings: 2,
+    scanValueTotal: 800_000,
+    scanValueBase: 500_000,
+    scanValueBonus: 200_000,
+    scanValueEfficiencyBonus: 100_000,
+    firstDiscoveries: 2,
+    firstMapped: 1,
+  }
+  const leg3Realization = { ...zeroRealization, pendingValue: 800_000 }
+  const liveMetrics = {
+    ...zeroMetrics,
+    distanceLy: 10.34,
+    shipDistanceLy: 10.34,
+    jumps: 2,
+    bodiesScanned: 12,
+    bodiesMapped: 6,
+    efficientMappings: 6,
+    scanValueTotal: 2_000_000,
+    scanValueBase: 1_100_000,
+    scanValueBonus: 650_000,
+    scanValueEfficiencyBonus: 250_000,
+    firstDiscoveries: 8,
+    firstMapped: 4,
+    organicSamples: 2,
+    organicValueTotal: 19_010_800,
+    organicValueBase: 3_802_160,
+    organicValueBonus: 15_208_640,
+    firstLogged: 2,
+  }
+  const adjustments = { ...zeroMetrics, carrierJumps: 1, carrierDistanceLy: 498.5, tritiumUsed: 112 }
+  const expeditionMetrics = { ...liveMetrics, carrierJumps: 1, carrierDistanceLy: 498.5, tritiumUsed: 112 }
+  const expeditionRealization = { ...zeroRealization, totalRealized: 20_210_800, pendingValue: 800_000 }
+
+  return {
+    schemaVersion: 1,
+    exportedAt: '2026-08-01T00:00:00Z',
+    exportedAtGalactic: '3312-08-01 00:00 UTC',
+    appVersion: 'profile',
+    commanders: ['CmdrSmoke'],
+    departed: true,
+    effectiveStart: '2026-01-01T10:08:00Z',
+    effectiveStartGalactic: '3312-01-01 10:08 UTC',
+    effectiveEnd: '',
+    effectiveEndGalactic: '3312-08-01 00:00 UTC',
+    endIsNow: true,
+    duration: '211d 13h 52m',
+    careerStart: '2024-01-01T00:00:00Z',
+    careerStartGalactic: '3310-01-01 00:00 UTC',
+    careerDuration: '2y 212d 00h 00m',
+    plan: buildSmokeExportPlan(),
+    expedition: { metrics: expeditionMetrics, realization: expeditionRealization },
+    live: liveMetrics,
+    adjustments,
+    carrierCost: {
+      carrierType: 'player',
+      weeklyUpkeep: 25_000_000,
+      tritiumPrice: 50_000,
+      tritiumCost: 5_600_000,
+      jumpCost: 100_000,
+      upkeepCost: 750_000_000,
+      totalCost: 755_700_000,
+      totalEstimated: true,
+    },
+    originBaseline: {
+      rowId: 11,
+      kind: 'origin',
+      number: 1,
+      from: '2024-01-01T00:00:00Z',
+      to: '2026-01-01T10:08:00Z',
+      fromGalactic: '3310-01-01 00:00 UTC',
+      toGalactic: '3312-01-01 10:08 UTC',
+      elapsed: '2y 0d 10h 08m',
+      shipsUsed: [],
+      metrics: originMetrics,
+      realization: originRealization,
+    },
+    postCareer: {
+      metrics: {
+        ...liveMetrics,
+        distanceLy: originMetrics.distanceLy + liveMetrics.distanceLy,
+        shipDistanceLy: originMetrics.shipDistanceLy + liveMetrics.shipDistanceLy,
+        jumps: originMetrics.jumps + liveMetrics.jumps,
+        bodiesScanned: originMetrics.bodiesScanned + liveMetrics.bodiesScanned,
+        scanValueTotal: originMetrics.scanValueTotal + liveMetrics.scanValueTotal,
+      },
+      realization: {
+        ...zeroRealization,
+        totalRealized: originRealization.totalRealized + expeditionRealization.totalRealized,
+        pendingValue: expeditionRealization.pendingValue,
+      },
+    },
+    modeBuckets: [
+      { modeId: 1, modeName: 'Exploration', modeColor: '#FF7100', metrics: leg2Metrics, realization: leg2Realization },
+      { modeId: 2, modeName: 'Travel', modeColor: '#00D2FF', metrics: leg3Metrics, realization: leg3Realization },
+    ],
+    rowDetails: [
+      {
+        rowId: 12,
+        kind: 'leg',
+        number: 2,
+        prevSystem: 'Sol',
+        from: '2026-01-01T10:08:00Z',
+        to: '2026-01-01T10:40:00Z',
+        fromGalactic: '3312-01-01 10:08 UTC',
+        toGalactic: '3312-01-01 10:40 UTC',
+        elapsed: '32m',
+        shipsUsed: ['Mandalay'],
+        metrics: leg2Metrics,
+        realization: leg2Realization,
+      },
+      {
+        rowId: 13,
+        kind: 'leg',
+        number: 3,
+        prevSystem: 'Alpha Centauri',
+        from: '2026-01-01T10:40:00Z',
+        to: '',
+        fromGalactic: '3312-01-01 10:40 UTC',
+        toGalactic: '',
+        inSystem: true,
+        elapsed: '211d 13h 20m',
+        shipsUsed: ['Mandalay'],
+        metrics: leg3Metrics,
+        realization: leg3Realization,
+      },
+    ],
+  }
+}
+
+function buildSmokeExportPlan(): Record<string, unknown> {
+  return {
+    expedition: {
+      id: 1,
+      name: 'Smoke Survey',
+      status: 'active',
+      startTimestamp: '2026-01-01T10:05:00Z',
+      endTimestamp: '',
+      adjustments: { carrierJumps: 1, carrierDistanceLy: 498.5, tritiumUsed: 112 },
+      carrierType: 'player',
+      carrierWeeklyUpkeep: 25_000_000,
+      activeModeId: 1,
+      createdAt: '2026-01-01T10:00:00Z',
+      updatedAt: '2026-01-01T11:00:00Z',
+    },
+    startGalactic: '3312-01-01 10:08 UTC',
+    endGalactic: '',
+    rows: [
+      { row: { id: 10, expeditionId: 1, position: 1, rowType: 'region', regionId: 18 }, number: 0, regionName: 'Inner Orion Spur' },
+      {
+        row: { id: 11, expeditionId: 1, position: 2, rowType: 'waypoint', systemName: 'Sol', hasCoords: true, x: 0, y: 0, z: 0, visitedAt: '2026-01-01T10:05:00Z', departedAt: '2026-01-01T10:08:00Z' },
+        number: 1,
+        detectedRegion: 'Inner Orion Spur',
+        visitState: 'visited',
+        visitedAtGalactic: '3312-01-01 10:05 UTC',
+        departedAtGalactic: '3312-01-01 10:08 UTC',
+      },
+      {
+        row: { id: 12, expeditionId: 1, position: 3, rowType: 'waypoint', systemName: 'Alpha Centauri', poiName: 'Hutton Orbital', fcStop: true, fcArrived: true, hasCoords: true, x: 3, y: 0, z: 3, visitedAt: '2026-01-01T10:15:00Z', departedAt: '2026-01-01T10:40:00Z', legModeId: 1 },
+        number: 2,
+        detectedRegion: 'Inner Orion Spur',
+        visitState: 'visited',
+        visitedAtGalactic: '3312-01-01 10:15 UTC',
+        departedAtGalactic: '3312-01-01 10:40 UTC',
+        distFromPrevLy: 4.24,
+        legModeId: 1,
+        legModeName: 'Exploration',
+        legModeColor: '#FF7100',
+      },
+      {
+        row: { id: 13, expeditionId: 1, position: 4, rowType: 'waypoint', systemName: 'Barnards Star', hasCoords: true, x: -3, y: 5, z: 1, visitedAt: '2026-01-01T11:00:00Z', departedAt: '', legModeId: 2 },
+        number: 3,
+        detectedRegion: 'Inner Orion Spur',
+        visitState: 'visited',
+        visitedAtGalactic: '3312-01-01 11:00 UTC',
+        distFromPrevLy: 6.1,
+        legModeId: 2,
+        legModeName: 'Travel',
+        legModeColor: '#00D2FF',
+      },
+    ],
+    currentRowId: 13,
+    waypointCount: 3,
+    visitedWaypointCount: 3,
+    plannedLy: 10.34,
+    coveredLy: 10.34,
+    remainingLy: 0,
+    modes: [
+      { id: 1, name: 'Exploration', color: '#FF7100', isDefault: true, sortOrder: 1 },
+      { id: 2, name: 'Travel', color: '#00D2FF', isDefault: true, sortOrder: 2 },
+    ],
+  }
+}
 
 /**
  * buildSmokeFrontendFixture constructs a deterministic multi-row active expedition
@@ -165,6 +402,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
       { targetIndex: 1, status: 'invalid' },
       { targetIndex: 2, status: 'valid_visited', visitedAtGalactic: '01 JAN 3312 10:15' },
     ],
+    exportData: buildSmokeExportData(),
   }
 }
 

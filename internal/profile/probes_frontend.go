@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"planisphere/internal/app"
+	"planisphere/internal/exporter"
 	projstats "planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
@@ -28,6 +30,7 @@ type frontendLiveFixture struct {
 	VisitedDetails []expedition.WaypointDetails `json:"visitedDetails"`
 	HeldRowIndex   int                          `json:"heldRowIndex"`
 	DropPreviews   []expedition.DropSlotPreview `json:"dropPreviews"`
+	ExportData     *exporter.ExpeditionExport   `json:"exportData,omitempty"`
 }
 
 func runFrontendProbes(
@@ -42,7 +45,8 @@ func runFrontendProbes(
 	}
 	if !matchesFilter("Frontend/WailsHydration", options.FilterPattern) &&
 		!matchesFilter("Frontend/RenderTree", options.FilterPattern) &&
-		!matchesFilter("Frontend/ClientReconciliation", options.FilterPattern) {
+		!matchesFilter("Frontend/ClientReconciliation", options.FilterPattern) &&
+		!matchesFilter("Frontend/ExportStudio", options.FilterPattern) {
 		return nil, nil
 	}
 
@@ -180,6 +184,22 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 	visitedDetails := loadFixtureVisitedDetails(database, planView, expProjections)
 	heldRowIndex, dropPreviews := loadFixtureDropPreviews(database, planView, dataset.SampleVisitedLegRowID, expProjections)
 
+	var exportData *exporter.ExpeditionExport
+	builtExport, exportError := exporter.Build(database, dataset.PrimaryExpeditionID, exporter.BuilderDeps{
+		Projections: expProjections,
+		CareerStats: proj.careerStats,
+		GECLookup:   gecLookup,
+		AppVersion:  "profile",
+		Now:         profileExportNow,
+	})
+	if exportError != nil {
+		if !errors.Is(exportError, exporter.ErrNotExportable) {
+			return frontendLiveFixture{}, exportError
+		}
+	} else {
+		exportData = &builtExport
+	}
+
 	return frontendLiveFixture{
 		Plan:           planView,
 		SidebarStats:   sidebarStats,
@@ -187,6 +207,7 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 		VisitedDetails: visitedDetails,
 		HeldRowIndex:   heldRowIndex,
 		DropPreviews:   dropPreviews,
+		ExportData:     exportData,
 	}, nil
 }
 

@@ -1,4 +1,4 @@
-import { app, expedition, modes } from '../api/models'
+import { app, expedition, exporter, modes } from '../api/models'
 import { createTextareaResizeCoordinator } from '../components/ui/AutoExpandingTextarea'
 
 /**
@@ -21,6 +21,7 @@ export interface LiveFrontendFixture {
   visitedDetails: Array<Record<string, unknown>>
   heldRowIndex?: number
   dropPreviews?: Array<Record<string, unknown>>
+  exportData?: Record<string, unknown>
 }
 
 /**
@@ -37,6 +38,7 @@ export interface HydratedFrontendFixture {
   dropPreviews: expedition.DropSlotPreview[]
   lastVisitedIndex: number
   lastFcArrivedIndex: number
+  exportData?: exporter.ExpeditionExport
 }
 
 /**
@@ -264,6 +266,10 @@ export function hydrateFrontendFixture(parsedFixture: LiveFrontendFixture): Hydr
     })
   }
 
+  const exportData = parsedFixture.exportData
+    ? exporter.ExpeditionExport.createFrom(parsedFixture.exportData)
+    : undefined
+
   return {
     plan,
     sidebar,
@@ -274,6 +280,7 @@ export function hydrateFrontendFixture(parsedFixture: LiveFrontendFixture): Hydr
     dropPreviews,
     lastVisitedIndex,
     lastFcArrivedIndex,
+    exportData,
   }
 }
 
