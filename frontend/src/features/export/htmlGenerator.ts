@@ -40,12 +40,6 @@ export function generateSelfContainedHtmlReport(
   cartItems: CartBlockItem[],
 ): string {
   const expeditionName = escapeHtml(exportData.plan.expedition.name)
-  const navLinks = cartItems
-    .map(
-      (item, index) =>
-        `<a class="toc-link" href="#section-${index + 1}">${index + 1}. ${escapeHtml(item.title)}</a>`,
-    )
-    .join('')
   const renderedSections = cartItems
     .map((item, index) => renderCartSection(exportData, item, index + 1))
     .join('\n')
@@ -69,7 +63,6 @@ export function generateSelfContainedHtmlReport(
     <span>EXPORTED: ${escapeHtml(exportData.exportedAtGalactic)}</span>
   </div>
 </header>
-${cartItems.length > 1 ? `<nav class="toc-bar">${navLinks}</nav>` : ''}
 <main class="report-main">
 ${renderedSections}
 </main>
@@ -586,9 +579,6 @@ body{margin:0;background:#050506;color:#f4ece4;font-family:"Rajdhani","Bahnschri
 .eyebrow{font-size:10px;font-weight:700;letter-spacing:0.14em;color:#a6907c;text-transform:uppercase}
 .report-title{margin:2px 0 0;font-size:20px;text-transform:uppercase;letter-spacing:0.08em}
 .topbar-meta{display:flex;gap:16px;font-size:11px;color:#d6c7b8}
-.toc-bar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:8px;padding:10px 24px;background:#0b0907;border-bottom:1px solid #3d2816}
-.toc-link{color:#d6c7b8;text-decoration:none;font-size:11px;padding:3px 8px;border:1px solid #3d2816;background:#110c08}
-.toc-link:hover{border-color:#ff7100;color:#ff7100}
 .report-main{max-width:1020px;margin:20px auto;padding:0 16px;display:flex;flex-direction:column;gap:20px}
 .card{background:#0b0907;border:1px solid #3d2816;break-inside:avoid}
 .block-header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:#140e09;border-bottom:1px solid #3d2816}
@@ -625,7 +615,6 @@ body{margin:0;background:#050506;color:#f4ece4;font-family:"Rajdhani","Bahnschri
 .report-footer{text-align:center;padding:16px;font-size:10px;color:#6e5b4b}
 @media print{
   body{background:#fff;color:#111}
-  .toc-bar{display:none}
   .card,.kpi-tile,.bd-card,.hl-card{background:#fff;border-color:#ccc;color:#111}
   .report-topbar,.block-header,.strip-bar,.wp-table th,.region-row td{background:#f5f5f5;color:#111}
   .amber,.cyan,.emerald,.danger,.muted{color:#222}

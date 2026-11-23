@@ -5,7 +5,7 @@ import { generateSelfContainedHtmlReport } from './htmlGenerator'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('htmlGenerator', () => {
-  it('renders a self-contained offline HTML report with escaped titles, TOC, print rules, and departure badges', () => {
+  it('renders a self-contained offline HTML report with escaped titles, print rules, departure badges, and no TOC bar', () => {
     const data = buildSampleExportData()
     const quickCart = createQuickShareCart(data)
     const detailsItem = expandConfigToCartItems(
@@ -30,8 +30,10 @@ describe('htmlGenerator', () => {
     expect(html).toContain('(IN SYSTEM)')
     expect(html).toContain('EXPEDITION HIGHLIGHTS // TOP 1')
     expect(html).toContain('Combined Estimated Exploration Value')
-    expect(html).toContain('href="#section-1"')
-    expect(html).toContain('href="#section-4"')
+    expect(html).not.toContain('toc-bar')
+    expect(html).not.toContain('toc-link')
+    expect(html).toContain('id="section-1"')
+    expect(html).toContain('id="section-4"')
   })
 
   it('renders HTML parity details and tilde carrier cost prefixes across all section types', () => {

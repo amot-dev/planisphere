@@ -98,7 +98,7 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(highlightsTop3Markup).toContain('[IN SYSTEM]')
   })
 
-  it('builds valid XHTML-namespaced SVG foreignObject documents and applies subfolder naming at 10+ PNGs', () => {
+  it('builds valid XHTML-namespaced SVG foreignObject documents and places PNGs under images/ with dynamic zero-padding', () => {
     const svgDoc = buildSvgForeignObjectDocument('<div class="ed-exp-root">OK</div>', EXPORT_CARD_WIDTH, 320)
     expect(svgDoc).toContain('xmlns="http://www.w3.org/2000/svg"')
     expect(svgDoc).toContain('xmlns="http://www.w3.org/1999/xhtml"')
@@ -107,7 +107,7 @@ describe('export visual blocks and PNG SVG serializer', () => {
 
     const data = buildSampleExportData()
     const quickItems = createQuickShareCart(data)
-    expect(buildPngBundleFileName(quickItems[0], 1, 3)).toBe('01-summary-full-expedition.png')
+    expect(buildPngBundleFileName(quickItems[0], 1, 3)).toBe('images/01-full-expedition-summary.png')
 
     const legItems = expandConfigToCartItems(
       data,
@@ -119,7 +119,8 @@ describe('export visual blocks and PNG SVG serializer', () => {
       },
       'leg',
     )
-    expect(buildPngBundleFileName(legItems[0], 1, 12)).toMatch(/^by-leg\/01-/)
+    expect(buildPngBundleFileName(legItems[0], 1, 223)).toBe('images/001-wp2-summary.png')
+    expect(buildPngBundleFileName(legItems[0], 115, 223)).toBe('images/115-wp2-summary.png')
   })
 
   it('prefixes estimated carrier costs with tilde and sanitizes malformed mode colors in React blocks', () => {

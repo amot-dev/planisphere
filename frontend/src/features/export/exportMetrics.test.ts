@@ -92,7 +92,7 @@ describe('exportMetrics', () => {
       'batch',
     )
     expect(allLegItems).toHaveLength(3)
-    expect(allLegItems[0].subfolder).toBe('by-leg')
+    expect(allLegItems[0].filenameSlug).toBe('wp2-flight')
 
     const allRegionSeparateItems = expandConfigToCartItems(
       data,
@@ -106,9 +106,11 @@ describe('exportMetrics', () => {
     )
     // Inner Orion Spur expands into 2 modes; Odin's Hold stays 1 item (only 1 mode present).
     expect(allRegionSeparateItems).toHaveLength(3)
+    expect(allRegionSeparateItems[0].filenameSlug).toBe('inner-orion-spur-exploration-summary')
 
     const quickShare = createQuickShareCart(data)
     expect(quickShare.map((item) => item.config.kind)).toEqual(['summary', 'highlights', 'waypoints'])
+    expect(quickShare[0].filenameSlug).toBe('full-expedition-summary')
 
     const allFullSections = expandConfigToCartItems(
       data,
@@ -155,6 +157,9 @@ describe('exportMetrics', () => {
     )
     // 3 visited legs x 5 applicable sections, grouped by leg (every section for leg 1 before leg 2).
     expect(allLegsAllSections).toHaveLength(15)
+    expect(allLegsAllSections[0].filenameSlug).toBe('wp2-flight')
+    expect(allLegsAllSections[1].filenameSlug).toBe('wp2-exploration-value')
+    expect(allLegsAllSections[2].filenameSlug).toBe('wp2-cartographics')
     expect(
       allLegsAllSections.slice(0, 6).map((item) => ({
         rowId: item.config.kind === 'details' ? item.config.scope.rowId : undefined,

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"planisphere/internal/exporter"
@@ -67,7 +68,15 @@ func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testin
 	defer archiveReader.Close()
 
 	entries := make(map[string]string, len(archiveReader.File))
+	directories := make(map[string]bool)
 	for _, zipEntry := range archiveReader.File {
+		if zipEntry.Modified.Year() < 2020 {
+			testingContext.Fatalf("expected recent timestamp on zip entry %q, got %v", zipEntry.Name, zipEntry.Modified)
+		}
+		if strings.HasSuffix(zipEntry.Name, "/") {
+			directories[zipEntry.Name] = true
+			continue
+		}
 		entryReader, entryOpenError := zipEntry.Open()
 		if entryOpenError != nil {
 			testingContext.Fatalf("open zip entry %q: %v", zipEntry.Name, entryOpenError)
@@ -80,6 +89,9 @@ func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testin
 		entries[zipEntry.Name] = string(entryBytes)
 	}
 
+	if !directories["outside/"] || !directories["folder/"] {
+		testingContext.Fatalf("expected explicit directory entries outside/ and folder/, got directories=%v", directories)
+	}
 	if entries["outside/01-summary.png"] != "png-one" {
 		testingContext.Fatalf("expected sanitized first entry, got entries=%v", entries)
 	}

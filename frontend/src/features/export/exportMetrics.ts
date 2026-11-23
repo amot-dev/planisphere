@@ -437,7 +437,6 @@ export function expandConfigToCartItems(
         title: `Waypoints (${scopeText})`,
         subtitle: `${config.selectedColumns.length} columns`,
         filenameSlug: `waypoints-${slugify(scopeText)}`,
-        subfolder: 'expedition',
         config: { ...config, selectedColumns: [...config.selectedColumns] },
       },
     ]
@@ -449,7 +448,6 @@ export function expandConfigToCartItems(
         title: `Highlights (Top ${config.depth})`,
         subtitle: `${config.selectedCards.length} cards`,
         filenameSlug: `highlights-top-${config.depth}`,
-        subfolder: 'expedition',
         config: { ...config, selectedCards: [...config.selectedCards] },
       },
     ]
@@ -465,13 +463,12 @@ export function expandConfigToCartItems(
         const legSubtitle = `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`
         for (const sectionMeta of applicableSections) {
           const blockLabel = `Details: ${sectionMeta.label}`
-          const blockSlug = `details-${slugify(sectionMeta.id)}`
+          const blockSlug = slugifyCamelCase(sectionMeta.id)
           items.push({
             id: `${idPrefix}-leg-${leg.rowView.row.id}-${legIndex}-${sectionMeta.id}`,
             title: `${blockLabel} — ${legTitle}`,
             subtitle: legSubtitle,
-            filenameSlug: `${String(legIndex + 1).padStart(2, '0')}-${blockSlug}-wp${leg.details.number}`,
-            subfolder: 'by-leg',
+            filenameSlug: `wp${leg.details.number}-${blockSlug}`,
             config: {
               kind: 'details',
               section: sectionMeta.id,
@@ -562,6 +559,10 @@ export function slugify(rawText: string): string {
   return cleaned || 'block'
 }
 
+function slugifyCamelCase(rawText: string): string {
+  return slugify(rawText.replace(/([a-z0-9])([A-Z])/g, '$1-$2'))
+}
+
 function expandTelemetryBlockConfig(
   exportData: ExpeditionExportData,
   config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
@@ -571,7 +572,7 @@ function expandTelemetryBlockConfig(
     config.kind === 'summary'
       ? 'Summary'
       : `Details: ${DETAILS_SECTIONS.find((section) => section.id === config.section)?.label ?? config.section}`
-  const blockSlug = config.kind === 'summary' ? 'summary' : `details-${slugify(config.section)}`
+  const blockSlug = config.kind === 'summary' ? 'summary' : slugifyCamelCase(config.section)
 
   if (config.scope.kind === 'allLegs') {
     return expandAllLegsItems(exportData, config, idPrefix, blockLabel, blockSlug)
@@ -607,8 +608,7 @@ function expandAllLegsItems(
       id: `${idPrefix}-leg-${leg.rowView.row.id}-${index}`,
       title: `${blockLabel} — ${legTitle}`,
       subtitle: `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`,
-      filenameSlug: `${String(index + 1).padStart(2, '0')}-${blockSlug}-wp${leg.details.number}`,
-      subfolder: 'by-leg',
+      filenameSlug: `wp${leg.details.number}-${blockSlug}`,
       config: concreteConfig,
     }
   })
@@ -633,8 +633,7 @@ function expandAllRegionsItems(
           id: `${idPrefix}-region-${slugify(region.regionName)}-mode-${modeTag.modeId}`,
           title: `${blockLabel} — ${region.regionName} (${modeTag.modeName})`,
           subtitle: `${region.legs.filter((leg) => leg.rowView.legModeId === modeTag.modeId).length} legs`,
-          filenameSlug: `${blockSlug}-${slugify(region.regionName)}-${slugify(modeTag.modeName)}`,
-          subfolder: 'by-region',
+          filenameSlug: `${slugify(region.regionName)}-${slugify(modeTag.modeName)}-${blockSlug}`,
           config: cloneConcreteTelemetryConfig(
             config,
             { kind: 'region', regionName: region.regionName },
@@ -649,8 +648,7 @@ function expandAllRegionsItems(
       id: `${idPrefix}-region-${slugify(region.regionName)}`,
       title: `${blockLabel} — ${region.regionName}`,
       subtitle: `${region.legs.length} legs`,
-      filenameSlug: `${blockSlug}-${slugify(region.regionName)}`,
-      subfolder: 'by-region',
+      filenameSlug: `${slugify(region.regionName)}-${blockSlug}`,
       config: cloneConcreteTelemetryConfig(
         config,
         { kind: 'region', regionName: region.regionName },
@@ -675,14 +673,14 @@ function expandSingleScopeItems(
     (config.kind !== 'details' || config.section !== 'carrier') &&
     availableModes.length >= 2
   const scopeText = describeScopeShort(exportData, config.scope)
+  const scopeSlug = describeScopeSlug(exportData, config.scope, scopeText)
 
   if (shouldSplitByMode) {
     return availableModes.map((modeTag) => ({
       id: `${idPrefix}-mode-${modeTag.modeId}`,
       title: `${blockLabel} — ${scopeText} (${modeTag.modeName})`,
       subtitle: modeTag.modeName,
-      filenameSlug: `${blockSlug}-${slugify(scopeText)}-${slugify(modeTag.modeName)}`,
-      subfolder: 'by-mode',
+      filenameSlug: `${scopeSlug}-${slugify(modeTag.modeName)}-${blockSlug}`,
       config: cloneConcreteTelemetryConfig(config, { ...config.scope }, modeTag.modeId, 'hide'),
     }))
   }
@@ -693,13 +691,7 @@ function expandSingleScopeItems(
       id: `${idPrefix}-single`,
       title: `${blockLabel} — ${scopeText}`,
       subtitle: config.scope.kind === 'full' ? 'Combined' : scopeText,
-      filenameSlug: `${blockSlug}-${slugify(scopeText)}`,
-      subfolder:
-        config.scope.kind === 'leg'
-          ? 'by-leg'
-          : config.scope.kind === 'region'
-            ? 'by-region'
-            : 'expedition',
+      filenameSlug: `${scopeSlug}-${blockSlug}`,
       config: cloneConcreteTelemetryConfig(
         config,
         { ...config.scope },
@@ -708,6 +700,18 @@ function expandSingleScopeItems(
       ),
     },
   ]
+}
+
+function describeScopeSlug(
+  exportData: ExpeditionExportData,
+  scope: ExportScopeSpec,
+  fallbackScopeText: string,
+): string {
+  if (scope.kind === 'leg') {
+    const leg = getVisitedLegs(exportData).find((item) => item.rowView.row.id === scope.rowId)
+    return leg ? `wp${leg.details.number}` : 'selected-leg'
+  }
+  return slugify(fallbackScopeText)
 }
 
 function cloneConcreteTelemetryConfig(

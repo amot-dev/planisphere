@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // WriteExport writes a single file directly or packages multiple files into a
@@ -168,20 +169,67 @@ func writeZipBundleAtomically(targetPath string, files []BundleFile) error {
 }
 
 func writeZipEntries(archiveWriter *zip.Writer, files []BundleFile) error {
+	exportTimestamp := time.Now().UTC()
 	usedNames := make(map[string]int, len(files))
+	createdDirectories := make(map[string]struct{})
 	for _, bundleFile := range files {
 		fileBytes, decodeError := decodeBundleFile(bundleFile)
 		if decodeError != nil {
 			return decodeError
 		}
 		entryName := deduplicateEntryName(SanitizeArchiveEntryName(bundleFile.Name), usedNames)
-		entryWriter, entryError := archiveWriter.Create(entryName)
+		if dirError := ensureZipDirectoryHeaders(archiveWriter, entryName, createdDirectories, exportTimestamp); dirError != nil {
+			return dirError
+		}
+		fileHeader := &zip.FileHeader{
+			Name:     entryName,
+			Method:   zip.Deflate,
+			Modified: exportTimestamp,
+		}
+		fileHeader.SetMode(0o644)
+		entryWriter, entryError := archiveWriter.CreateHeader(fileHeader)
 		if entryError != nil {
 			return fmt.Errorf("create zip entry %q: %w", entryName, entryError)
 		}
 		if _, writeError := entryWriter.Write(fileBytes); writeError != nil {
 			return fmt.Errorf("write zip entry %q: %w", entryName, writeError)
 		}
+	}
+	return nil
+}
+
+func ensureZipDirectoryHeaders(
+	archiveWriter *zip.Writer,
+	entryName string,
+	createdDirectories map[string]struct{},
+	exportTimestamp time.Time,
+) error {
+	directoryPath := path.Dir(entryName)
+	if directoryPath == "." || directoryPath == "/" {
+		return nil
+	}
+	segments := strings.Split(directoryPath, "/")
+	currentDirectory := ""
+	for _, segment := range segments {
+		if currentDirectory == "" {
+			currentDirectory = segment
+		} else {
+			currentDirectory = currentDirectory + "/" + segment
+		}
+		directoryEntryName := currentDirectory + "/"
+		if _, alreadyCreated := createdDirectories[directoryEntryName]; alreadyCreated {
+			continue
+		}
+		directoryHeader := &zip.FileHeader{
+			Name:     directoryEntryName,
+			Method:   zip.Store,
+			Modified: exportTimestamp,
+		}
+		directoryHeader.SetMode(0o755 | os.ModeDir)
+		if _, headerError := archiveWriter.CreateHeader(directoryHeader); headerError != nil {
+			return fmt.Errorf("create zip directory %q: %w", directoryEntryName, headerError)
+		}
+		createdDirectories[directoryEntryName] = struct{}{}
 	}
 	return nil
 }

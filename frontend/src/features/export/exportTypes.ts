@@ -249,7 +249,6 @@ export interface CartBlockItem {
   title: string
   subtitle: string
   filenameSlug: string
-  subfolder: string
   config: ExportBlockConfig
 }
 

@@ -9,7 +9,7 @@ import {
 } from './exportTypes'
 
 const PNG_SCALE_FACTOR = 2
-const SUBFOLDER_PNG_THRESHOLD = 10
+const IMAGES_SUBFOLDER = 'images'
 
 /**
  * Wraps serialized XHTML card markup and EXPORT_CARD_CSS inside an SVG
@@ -32,20 +32,17 @@ export function buildSvgForeignObjectDocument(
 }
 
 /**
- * Resolves the target filename (or subfolder path when 10+ PNGs are bundled)
- * for a queued cart item at oneBasedIndex.
+ * Resolves the target bundle path inside images/ with dynamically zero-padded
+ * ordering for a queued cart item at oneBasedIndex.
  */
 export function buildPngBundleFileName(
   item: CartBlockItem,
   oneBasedIndex: number,
   totalPngCount: number,
 ): string {
-  const numericPrefix = String(oneBasedIndex).padStart(2, '0')
-  const baseFilename = `${numericPrefix}-${item.filenameSlug}.png`
-  if (totalPngCount >= SUBFOLDER_PNG_THRESHOLD && item.subfolder) {
-    return `${item.subfolder}/${baseFilename}`
-  }
-  return baseFilename
+  const padWidth = Math.max(2, String(Math.max(1, totalPngCount)).length)
+  const numericPrefix = String(oneBasedIndex).padStart(padWidth, '0')
+  return `${IMAGES_SUBFOLDER}/${numericPrefix}-${item.filenameSlug}.png`
 }
 
 /**
