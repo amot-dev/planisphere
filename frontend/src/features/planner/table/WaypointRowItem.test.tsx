@@ -437,9 +437,8 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     })
     expect(stagedOriginHtml).toContain('AWAITING DEPARTURE')
     expect(stagedOriginHtml).not.toContain('LOGGED VISIT')
-    expect(stagedOriginHtml).toContain(
-      'title="Staged at Waypoint #1 since 3312-01-18 10:00 UTC (awaiting departure)"',
-    )
+    expect(stagedOriginHtml).not.toContain('Staged at Waypoint #1')
+    expect(stagedOriginHtml).not.toContain('Awaiting departure')
 
     const departedOriginHtml = renderRowItem({
       rowView: createOriginRowView({
@@ -457,9 +456,8 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(departedOriginHtml).toContain('DEPARTED')
     expect(departedOriginHtml).toContain('3312-01-18 12:00 UTC')
     expect(departedOriginHtml).not.toContain('LOGGED VISIT')
-    expect(departedOriginHtml).toContain(
-      'title="Arrived 3312-01-18 10:00 UTC · Departed 3312-01-18 12:00 UTC"',
-    )
+    expect(departedOriginHtml).not.toContain('title="Arrived ')
+    expect(departedOriginHtml).not.toContain('title="Departed ')
 
     const visitedDestinationHtml = renderRowItem({
       rowView: expedition.RowView.createFrom({
@@ -481,8 +479,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     })
     expect(visitedDestinationHtml).toContain('LOGGED VISIT')
     expect(visitedDestinationHtml).toContain('3312-01-18 13:00 UTC')
-    expect(visitedDestinationHtml).toContain(
-      'title="Arrived 3312-01-18 13:00 UTC · Departed 3312-01-18 14:30 UTC"',
-    )
+    expect(visitedDestinationHtml).not.toContain('title="Arrived ')
   })
 })

@@ -57,11 +57,7 @@ function renderDistanceValue(
 
   if (rowView.number === 1) {
     if (row.systemName?.trim()) {
-      return (
-        <span className="text-ed-cyan" title="Starting Waypoint (Origin)">
-          +0 Ly
-        </span>
-      )
+      return <span className="text-ed-cyan">+0 Ly</span>
     }
     return <span className="text-ed-text-dim">—</span>
   }
@@ -91,14 +87,8 @@ function renderVisitedTimestamp(rowView: expedition.RowView) {
 
   if (rowView.number === 1) {
     if (departedGalactic) {
-      const originTooltip = arrivedGalactic
-        ? `Arrived ${arrivedGalactic} · Departed ${departedGalactic}`
-        : `Departed ${departedGalactic}`
       return (
-        <div
-          title={originTooltip}
-          className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5"
-        >
+        <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
           <span className="font-extrabold uppercase tracking-wider text-ed-amber shrink-0">
             DEPARTED
           </span>
@@ -107,14 +97,8 @@ function renderVisitedTimestamp(rowView: expedition.RowView) {
       )
     }
 
-    const stagedTooltip = arrivedGalactic
-      ? `Staged at Waypoint #1 since ${arrivedGalactic} (awaiting departure)`
-      : 'Awaiting departure from Waypoint #1'
     return (
-      <div
-        title={stagedTooltip}
-        className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5"
-      >
+      <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
         <span className="font-extrabold uppercase tracking-wider text-ed-cyan shrink-0">
           AWAITING DEPARTURE
         </span>
@@ -122,17 +106,8 @@ function renderVisitedTimestamp(rowView: expedition.RowView) {
     )
   }
 
-  const visitTooltip =
-    arrivedGalactic && departedGalactic
-      ? `Arrived ${arrivedGalactic} · Departed ${departedGalactic}`
-      : arrivedGalactic
-        ? `Arrived ${arrivedGalactic}`
-        : undefined
   return (
-    <div
-      title={visitTooltip}
-      className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5"
-    >
+    <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
       <span className="font-extrabold uppercase tracking-wider text-ed-amber shrink-0">
         LOGGED VISIT
       </span>
