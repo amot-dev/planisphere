@@ -421,7 +421,7 @@ export function resolveTelemetryContext(
   }
 }
 
-/** Expands a configurator block (including All Legs, All Regions, and Separate modes) into concrete cart items. */
+/** Expands a configurator block (including All Sections, All Legs, All Regions, and Separate modes) into concrete cart items. */
 export function expandConfigToCartItems(
   exportData: ExpeditionExportData,
   config: ConfiguratorBlockConfig,
