@@ -2,7 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ExportExpeditionModal } from '../ExportExpeditionModal'
+import { ExportExpeditionModal } from './ExportExpeditionModal'
 import { buildSampleExportData } from './exportTestFixtures'
 
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

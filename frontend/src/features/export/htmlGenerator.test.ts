@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { createQuickShareCart, expandConfigToCartItems } from '../exportMetrics'
-import { defaultMetricsForSection } from '../exportTypes'
-import { generateSelfContainedHtmlReport } from '../htmlGenerator'
+import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
+import { defaultMetricsForSection } from './exportTypes'
+import { generateSelfContainedHtmlReport } from './htmlGenerator'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('htmlGenerator', () => {

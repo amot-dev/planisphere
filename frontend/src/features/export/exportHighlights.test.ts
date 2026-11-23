@@ -3,7 +3,7 @@ import {
   buildCanonicalJsonSnapshot,
   computeAllHighlightLeaderboards,
   selectHighlightCards,
-} from '../exportHighlights'
+} from './exportHighlights'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('exportHighlights', () => {

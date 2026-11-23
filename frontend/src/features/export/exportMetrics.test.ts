@@ -8,8 +8,8 @@ import {
   getVisitedRegions,
   resolveTelemetryContext,
   scopeSupportsModeSplit,
-} from '../exportMetrics'
-import { defaultMetricsForSection } from '../exportTypes'
+} from './exportMetrics'
+import { defaultMetricsForSection } from './exportTypes'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('exportMetrics', () => {

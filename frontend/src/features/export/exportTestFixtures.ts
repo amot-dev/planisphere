@@ -1,6 +1,6 @@
-import { expedition, realization, stats } from '../../../api/models'
-import { createEmptyMetrics, createEmptyRealization } from '../exportMetrics'
-import { ExpeditionExportData } from '../exportTypes'
+import { expedition, realization, stats } from '../../api/models'
+import { createEmptyMetrics, createEmptyRealization } from './exportMetrics'
+import { ExpeditionExportData } from './exportTypes'
 
 function makeMetrics(overrides: Partial<stats.Metrics>): stats.Metrics {
   return { ...createEmptyMetrics(), ...overrides }

@@ -1,11 +1,11 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { ExportBlockRenderer } from '../blocks/ExportBlockRenderer'
-import { EXPORT_CARD_WIDTH } from '../exportCardStyles'
-import { createQuickShareCart, expandConfigToCartItems } from '../exportMetrics'
-import { defaultMetricsForSection, ExportBlockConfig } from '../exportTypes'
-import { buildPngBundleFileName, buildSvgForeignObjectDocument } from '../pngRenderer'
+import { ExportBlockRenderer } from './blocks/ExportBlockRenderer'
+import { EXPORT_CARD_WIDTH } from './exportCardStyles'
+import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
+import { defaultMetricsForSection, ExportBlockConfig } from './exportTypes'
+import { buildPngBundleFileName, buildSvgForeignObjectDocument } from './pngRenderer'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('export visual blocks and PNG SVG serializer', () => {
