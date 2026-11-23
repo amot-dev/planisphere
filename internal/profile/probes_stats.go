@@ -345,7 +345,8 @@ func profileModeFilteredTimeRange(
 		return ProbeResult{}, false, listError
 	}
 	modeFilter := &projstats.Filter{
-		Enabled: true,
+		Enabled:      true,
+		ExpeditionID: dataset.PrimaryExpeditionID,
 		Modes: []projstats.ModeSelection{
 			{ModeID: modeList[0].ID, Travel: true, Discovery: true},
 		},

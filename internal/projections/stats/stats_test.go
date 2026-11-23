@@ -134,7 +134,11 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
 	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
 	careerStats := stats.NewCareerStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, modes.LoadModeLookup)
+	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
+	staticModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
+		return func(_ string) int64 { return fallbackModeID }, nil
+	}
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, staticModeLoader)
 
 	if _, careerWarmError := careerStats.Get(); careerWarmError != nil {
 		testingContext.Fatalf("initial CareerStats.Get: %v", careerWarmError)
@@ -204,11 +208,12 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	}
 	_, _ = careerStats.Get()
 
-	// Warm a mode-filtered entry alongside the unfiltered entry, then verify AppModeWindowsChanged
+	// Warm a mode-filtered entry alongside the unfiltered entry, then verify AppExpeditionModesChanged
 	// invalidates only the mode-filtered cache while preserving the unfiltered "|all" cache.
 	modeFilter := &stats.Filter{
-		Enabled: true,
-		Modes:   []stats.ModeSelection{{ModeID: modes.DefaultFallbackModeID(databaseConnection), Travel: true, Discovery: true}},
+		Enabled:      true,
+		ExpeditionID: 1,
+		Modes:        []stats.ModeSelection{{ModeID: modes.DefaultFallbackModeID(databaseConnection), Travel: true, Discovery: true}},
 	}
 	filteredBeforeWindowChange, filteredBeforeError := timeRangeStats.Compute(timeRange, modeFilter)
 	if filteredBeforeError != nil || filteredBeforeWindowChange.Metrics.BodiesScanned != 3 {
@@ -221,10 +226,10 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 
 	ingestTestLine(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T19:40:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":4,"BodyName":"RangeSys 4","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	eventBus.PublishApp(events.AppModeWindowsChanged)
+	eventBus.PublishApp(events.AppExpeditionModesChanged)
 
 	if timeRangeStats.CachedCount() != 1 {
-		testingContext.Fatalf("expected AppModeWindowsChanged to drop CachedCount from 2 to 1, got %d", timeRangeStats.CachedCount())
+		testingContext.Fatalf("expected AppExpeditionModesChanged to drop CachedCount from 2 to 1, got %d", timeRangeStats.CachedCount())
 	}
 	preservedUnfilteredSummary, preservedUnfilteredError := timeRangeStats.Compute(timeRange, nil)
 	if preservedUnfilteredError != nil || preservedUnfilteredSummary.Metrics.BodiesScanned != 3 {
@@ -233,7 +238,7 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	}
 	refreshedFilteredSummary, refreshedFilteredError := timeRangeStats.Compute(timeRange, modeFilter)
 	if refreshedFilteredError != nil || refreshedFilteredSummary.Metrics.BodiesScanned != 4 {
-		testingContext.Fatalf("expected mode-filtered BodiesScanned=4 after AppModeWindowsChanged, got %d (err=%v)",
+		testingContext.Fatalf("expected mode-filtered BodiesScanned=4 after AppExpeditionModesChanged, got %d (err=%v)",
 			refreshedFilteredSummary.Metrics.BodiesScanned, refreshedFilteredError)
 	}
 }
@@ -297,7 +302,11 @@ func TestTimeRangeSelectiveInvalidationPreservesClosedWindowsExceptRetroactiveEv
 	eventBus := projection.NewBus()
 	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
 	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, modes.LoadModeLookup)
+	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
+	staticModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
+		return func(_ string) int64 { return fallbackModeID }, nil
+	}
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, staticModeLoader)
 
 	closedRange := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
 	activeRange := stats.Range{After: "2026-01-18T20:00:00Z", Until: ""}

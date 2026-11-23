@@ -11,7 +11,6 @@ import (
 	"planisphere/internal/projections/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
-	"planisphere/internal/store/modes"
 	"planisphere/internal/store/settings"
 )
 
@@ -24,7 +23,7 @@ func (app *App) wireProjections(dbConn *sql.DB) {
 	app.carrierState = projections.NewCarrierState(dbConn, bus)
 	app.salesLedger = realization.NewSalesLedger(dbConn, bus)
 	app.careerStats = stats.NewCareerStats(dbConn, bus, app.salesLedger, app.recoveredJumps)
-	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps, modes.LoadModeLookup)
+	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps, expedition.LoadModeLookup)
 
 	bus.OnTrigger(
 		projection.Triggers{
@@ -49,17 +48,17 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 		events.UITargetStats,
 		projection.TriggersFrom(app.careerStats, app.timeRangeStats).
 			WithJournal(journal.EventCommander).
-			WithApp(events.AppAdjustmentsChanged, events.AppExpeditionBoundsChanged, events.AppModeWindowsChanged),
+			WithApp(events.AppAdjustmentsChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged),
 	)
 	bus.SubscribeUI(
 		events.UITargetPlan,
 		projection.TriggersFrom(app.systemArrivals, app.systemVisitCounts).
-			WithApp(events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppModeWindowsChanged),
+			WithApp(events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppExpeditionModesChanged),
 	)
 	bus.SubscribeUI(
 		events.UITargetModes,
 		projection.Triggers{
-			App: events.NewAppSet(events.AppModesChanged, events.AppModeWindowsChanged, events.AppDatabaseSwitched),
+			App: events.NewAppSet(events.AppModesChanged, events.AppDatabaseSwitched),
 		},
 	)
 	bus.SubscribeUI(

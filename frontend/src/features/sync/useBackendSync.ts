@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SetActiveExpedition, SwitchMode } from '../../api/backend'
+import { SetActiveExpedition } from '../../api/backend'
 import { subscribeBackendEvents } from '../../api/events'
 import { stats, type EddImportProgress } from '../../api/models'
 import type { DataChangedDispatchContext, SyncBootLifecycleState } from './syncEventRouter'
@@ -197,19 +197,6 @@ export function useBackendSync() {
     [activeExpeditionIdRef, setActiveExpeditionId],
   )
 
-  const handleQuickSwitchMode = useCallback(
-    async (modeId: number) => {
-      setBusyAction('SWITCHING FLIGHT MODE')
-      try {
-        const nextModesState = await SwitchMode(modeId)
-        setModesState(nextModesState)
-      } finally {
-        setBusyAction(null)
-      }
-    },
-    [setModesState],
-  )
-
   const handleRefreshPlan = useCallback(() => {
     if (activeExpeditionIdRef.current > 0) {
       void loadPlanOnly(activeExpeditionIdRef.current)
@@ -238,7 +225,6 @@ export function useBackendSync() {
     isClockSuspended,
     handleToggleSyncPause,
     handleSelectExpedition,
-    handleQuickSwitchMode,
     refreshAll,
     handleRefreshPlan,
     refreshSettings: loadSettingsOnly,

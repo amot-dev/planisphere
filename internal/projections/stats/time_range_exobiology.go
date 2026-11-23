@@ -26,7 +26,7 @@ var (
 type TimeRangeExobiology struct {
 	database    *sql.DB
 	salesLedger *realization.SalesLedger
-	modeLoader  replaystats.ModeTimelineLoader
+	modeLoader  replaystats.ModeLookupLoader
 	entries     *projection.KeyedCache[string, ExobiologyMetrics]
 }
 
@@ -35,7 +35,7 @@ func NewTimeRangeExobiology(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
-	modeLoader replaystats.ModeTimelineLoader,
+	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeExobiology {
 	triggers := projection.Triggers{
 		Journal: exobiologyJournalEvents,

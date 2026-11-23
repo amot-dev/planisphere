@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -99,6 +100,11 @@ var migrations = []migration{
 		description: "Reset ingested_journals byte offsets for StartJump, JetConeBoost, and FSD Synthesis",
 		apply:       migrateDisconnectEventsV10,
 	},
+	{
+		key:         "leg_modes_v11",
+		description: "Backfill per-expedition active_mode_id and visited leg_mode_id from legacy mode_windows",
+		apply:       migrateLegModesV11,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -110,6 +116,7 @@ func Migrate(dbConn *sql.DB) error {
 	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN leg_mode_id INTEGER NOT NULL DEFAULT 0`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_type TEXT NOT NULL DEFAULT 'player'`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0`)
+	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN active_mode_id INTEGER NOT NULL DEFAULT 0`)
 	if _, schemaError := dbConn.Exec(schemaSQL); schemaError != nil {
 		return fmt.Errorf("apply schema: %w", schemaError)
 	}
@@ -257,6 +264,135 @@ func migrateDisconnectEventsV10(dbConn *sql.DB) error {
 		return fmt.Errorf("reset ingested_journals offsets (v10): %w", updateError)
 	}
 	return nil
+}
+
+type legacyModeWindow struct {
+	modeID int64
+	start  string
+	end    string
+}
+
+func resolveLegacyModeAt(windows []legacyModeWindow, fallbackModeID int64, targetTimestamp string) int64 {
+	candidateIndex := sort.Search(len(windows), func(index int) bool {
+		return windows[index].start > targetTimestamp
+	}) - 1
+	if candidateIndex >= 0 {
+		windowItem := windows[candidateIndex]
+		if targetTimestamp >= windowItem.start && (windowItem.end == "" || targetTimestamp < windowItem.end) {
+			return windowItem.modeID
+		}
+	}
+	return fallbackModeID
+}
+
+func resolveMigrationFallbackModeID(queryer Queryer) int64 {
+	var modeID int64
+	if queryError := queryer.QueryRow(`SELECT id FROM modes WHERE name = 'Travel' COLLATE NOCASE LIMIT 1`).Scan(&modeID); queryError == nil && modeID > 0 {
+		return modeID
+	}
+	if queryError := queryer.QueryRow(`SELECT id FROM modes ORDER BY is_default DESC, sort_order ASC, id ASC LIMIT 1`).Scan(&modeID); queryError == nil && modeID > 0 {
+		return modeID
+	}
+	return 0
+}
+
+func loadLegacyModeWindows(queryer Queryer) ([]legacyModeWindow, int64, error) {
+	rows, queryError := queryer.Query(`SELECT mode_id, start_timestamp, COALESCE(end_timestamp, '') FROM mode_windows ORDER BY start_timestamp, id`)
+	if queryError != nil {
+		return nil, 0, fmt.Errorf("query legacy mode_windows (v11): %w", queryError)
+	}
+	defer rows.Close()
+
+	var windows []legacyModeWindow
+	var activeOpenModeID int64
+	for rows.Next() {
+		var windowItem legacyModeWindow
+		if scanError := rows.Scan(&windowItem.modeID, &windowItem.start, &windowItem.end); scanError != nil {
+			return nil, 0, fmt.Errorf("scan legacy mode_windows (v11): %w", scanError)
+		}
+		windows = append(windows, windowItem)
+		if windowItem.end == "" {
+			activeOpenModeID = windowItem.modeID
+		}
+	}
+	return windows, activeOpenModeID, rows.Err()
+}
+
+func migrateLegModesV11(dbConn *sql.DB) error {
+	fallbackModeID := resolveMigrationFallbackModeID(dbConn)
+	if fallbackModeID == 0 {
+		return nil
+	}
+	legacyWindows, activeOpenModeID, loadError := loadLegacyModeWindows(dbConn)
+	if loadError != nil {
+		return loadError
+	}
+	expeditionActiveModeID := fallbackModeID
+	if activeOpenModeID > 0 {
+		expeditionActiveModeID = activeOpenModeID
+	}
+
+	type pendingRowMode struct {
+		rowID  int64
+		modeID int64
+	}
+	rows, queryError := dbConn.Query(`
+		SELECT r.id, r.visited_at
+		FROM expedition_rows r
+		WHERE r.row_type = 'waypoint'
+		  AND COALESCE(r.visited_at, '') != ''
+		  AND COALESCE(r.leg_mode_id, 0) = 0
+		  AND r.id NOT IN (
+			  SELECT first_rows.id
+			  FROM (
+				  SELECT id,
+				         ROW_NUMBER() OVER (PARTITION BY expedition_id ORDER BY position, id) AS rn
+				  FROM expedition_rows
+				  WHERE row_type = 'waypoint'
+			  ) first_rows
+			  WHERE first_rows.rn = 1
+		  )`)
+	if queryError != nil {
+		return fmt.Errorf("query unmapped visited rows (v11): %w", queryError)
+	}
+	var pendingUpdates []pendingRowMode
+	for rows.Next() {
+		var rowID int64
+		var visitedAt string
+		if scanError := rows.Scan(&rowID, &visitedAt); scanError != nil {
+			rows.Close()
+			return fmt.Errorf("scan unmapped visited row (v11): %w", scanError)
+		}
+		pendingUpdates = append(pendingUpdates, pendingRowMode{
+			rowID:  rowID,
+			modeID: resolveLegacyModeAt(legacyWindows, fallbackModeID, visitedAt),
+		})
+	}
+	if iterationError := rows.Err(); iterationError != nil {
+		rows.Close()
+		return iterationError
+	}
+	if closeError := rows.Close(); closeError != nil {
+		return closeError
+	}
+
+	return WithTx(dbConn, func(transaction *sql.Tx) error {
+		if _, updateExpError := transaction.Exec(
+			`UPDATE expeditions SET active_mode_id = ? WHERE COALESCE(active_mode_id, 0) = 0`,
+			expeditionActiveModeID,
+		); updateExpError != nil {
+			return fmt.Errorf("backfill expedition active_mode_id (v11): %w", updateExpError)
+		}
+		for _, pending := range pendingUpdates {
+			if _, updateRowError := transaction.Exec(
+				`UPDATE expedition_rows SET leg_mode_id = ? WHERE id = ?`,
+				pending.modeID, pending.rowID,
+			); updateRowError != nil {
+				return fmt.Errorf("backfill row %d leg_mode_id (v11): %w", pending.rowID, updateRowError)
+			}
+		}
+		return nil
+	})
 }
 
 func migrateUnarmExpeditionsV9(dbConn *sql.DB) error {

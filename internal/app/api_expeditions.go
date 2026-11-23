@@ -235,20 +235,37 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 		return err
 	}
 	if changed {
-		app.reevaluate(rowItem.ExpeditionID)
+		reevalChanged := app.reevaluate(rowItem.ExpeditionID)
 		if rowItem.SystemName != "" {
 			app.resolveRowAsync(rowItem, true)
 		}
-		app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+		if reevalChanged {
+			app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+		} else {
+			app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+		}
 		return nil
 	}
 	app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
-// SetLegMode assigns a mode to the leg arriving at rowID and updates the
-// corresponding time window in mode_windows.
-func (app *App) SetLegMode(rowID, modeID int64) error {
+// SetExpeditionFlightMode updates the per-expedition active flight mode for a
+// planning or active expedition.
+func (app *App) SetExpeditionFlightMode(expeditionID, modeID int64) error {
+	if setError := app.withReadyReadLock(func() error {
+		return expedition.SetActiveModeTx(app.db, expeditionID, modeID)
+	}); setError != nil {
+		return setError
+	}
+	app.publishApp(expeditionID, events.AppExpeditionModesChanged)
+	return nil
+}
+
+// SetLegMode assigns a mode to the leg arriving at rowID. When cascade is true
+// on a visited leg, it also overwrites all subsequent visited legs without
+// changing the expedition's active flight mode.
+func (app *App) SetLegMode(rowID, modeID int64, cascade bool) error {
 	var expeditionID int64
 	if err := func() error {
 		app.dbMu.RLock()
@@ -257,12 +274,12 @@ func (app *App) SetLegMode(rowID, modeID int64) error {
 			return readyError
 		}
 		var setModeError error
-		expeditionID, setModeError = expedition.SetLegModeTx(app.db, rowID, modeID)
+		expeditionID, setModeError = expedition.SetLegModeTx(app.db, rowID, modeID, cascade)
 		return setModeError
 	}(); err != nil {
 		return err
 	}
-	app.publishApp(expeditionID, events.AppModesChanged, events.AppModeWindowsChanged)
+	app.publishApp(expeditionID, events.AppExpeditionModesChanged)
 	return nil
 }
 
@@ -290,11 +307,15 @@ func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
 // DeleteRow removes a row.
 func (app *App) DeleteRow(rowID int64) error {
 	var expeditionID int64
+	var deletedVisited bool
 	if err := func() error {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
 		if readyError := app.ready(); readyError != nil {
 			return readyError
+		}
+		if existingRow, getError := expedition.GetRow(app.db, rowID); getError == nil {
+			deletedVisited = existingRow.IsWaypoint() && existingRow.VisitedAt != ""
 		}
 		var deleteRowError error
 		expeditionID, deleteRowError = expedition.DeleteRowTx(app.db, rowID)
@@ -302,8 +323,12 @@ func (app *App) DeleteRow(rowID int64) error {
 	}(); err != nil {
 		return err
 	}
-	app.reevaluate(expeditionID)
-	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
+	reevalChanged := app.reevaluate(expeditionID)
+	if deletedVisited || reevalChanged {
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+	} else {
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
+	}
 	return nil
 }
 
@@ -329,8 +354,11 @@ func (app *App) MoveRow(rowID int64, toIndex int) error {
 		return err
 	}
 	if rowItem.RowType == expedition.RowWaypoint {
-		app.reevaluate(expeditionID)
-		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
+		if app.reevaluate(expeditionID) {
+			app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+		} else {
+			app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
+		}
 		return nil
 	}
 	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
@@ -435,9 +463,16 @@ func (app *App) lifecycle(expeditionID int64, action func() error) error {
 }
 
 // StartExpedition starts the expedition at the given visit timestamp
-// (ISO-8601 UTC) and retroactively replays history from that moment.
-func (app *App) StartExpedition(expeditionID int64, timestamp string) error {
-	return app.lifecycle(expeditionID, func() error { return expedition.StartTx(app.db, expeditionID, timestamp) })
+// (ISO-8601 UTC), applies initialModeID when positive, and retroactively
+// replays history from that moment.
+func (app *App) StartExpedition(expeditionID int64, timestamp string, initialModeID int64) error {
+	if err := app.withReadyReadLock(func() error {
+		return expedition.StartTx(app.db, expeditionID, timestamp, initialModeID)
+	}); err != nil {
+		return err
+	}
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
+	return nil
 }
 
 // CompleteExpedition ends the expedition at the final visited waypoint's arrival timestamp.

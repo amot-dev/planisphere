@@ -1,23 +1,21 @@
 // Package modes manages tracking modes (Exploration / Tourism / Travel and
-// custom modes) and the non-overlapping time windows during which each mode
-// was active.
+// user-defined custom flight modes) referenced by expedition legs.
 package modes
 
 import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 )
 
-// UnassignedID is the pseudo mode ID for time not covered by any window.
+// UnassignedID is the pseudo mode ID when no flight mode has been assigned.
 const UnassignedID int64 = 0
 
-// Mode is a tracking mode.
+// Mode is a tracking flight mode.
 type Mode struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
@@ -27,18 +25,14 @@ type Mode struct {
 	SortOrder   int    `json:"sortOrder"`
 }
 
-// Window is a period during which a mode was active. End == "" means open
-// ended (the currently active mode).
-type Window struct {
-	ID     int64  `json:"id"`
-	ModeID int64  `json:"modeId"`
-	Start  string `json:"start"`
-	End    string `json:"end"`
-}
-
-// Contains reports whether timestamp lies in [Start, End).
-func (window Window) Contains(timestamp string) bool {
-	return timestamp >= window.Start && (window.End == "" || timestamp < window.End)
+// ExpeditionUsage summarizes how an expedition references a flight mode across
+// its visited legs and active mode setting.
+type ExpeditionUsage struct {
+	ExpeditionID   int64  `json:"expeditionId"`
+	ExpeditionName string `json:"expeditionName"`
+	Status         string `json:"status"`
+	LegCount       int    `json:"legCount"`
+	IsActiveMode   bool   `json:"isActiveMode"`
 }
 
 // List returns all modes ordered for display.
@@ -57,6 +51,18 @@ func List(queryer db.Queryer) ([]Mode, error) {
 		modesList = append(modesList, modeItem)
 	}
 	return modesList, rows.Err()
+}
+
+// Exists reports whether a flight mode with modeID exists in the database.
+func Exists(queryer db.Queryer, modeID int64) (bool, error) {
+	if modeID <= 0 {
+		return false, nil
+	}
+	var modeCount int
+	if countError := queryer.QueryRow(`SELECT COUNT(*) FROM modes WHERE id = ?`, modeID).Scan(&modeCount); countError != nil {
+		return false, countError
+	}
+	return modeCount > 0, nil
 }
 
 func validate(name, color string) (string, string, error) {
@@ -113,149 +119,79 @@ func Update(queryer db.Queryer, modeID int64, name, description, color string) e
 	return nil
 }
 
-// Delete removes a custom mode (and, via ON DELETE CASCADE, its windows).
+// UsageByExpedition returns every expedition that currently references modeID on
+// visited legs or as its active flight mode (excluding inactive completed active_mode_id).
+func UsageByExpedition(queryer db.Queryer, modeID int64) ([]ExpeditionUsage, error) {
+	rows, queryError := queryer.Query(`
+		SELECT
+			e.id,
+			e.name,
+			e.status,
+			COALESCE(SUM(CASE WHEN r.row_type = 'waypoint' AND COALESCE(r.visited_at, '') != '' AND r.leg_mode_id = ? THEN 1 ELSE 0 END), 0) AS leg_count,
+			CASE WHEN e.status != 'completed' AND e.active_mode_id = ? THEN 1 ELSE 0 END AS is_active_mode
+		FROM expeditions e
+		LEFT JOIN expedition_rows r ON r.expedition_id = e.id
+		GROUP BY e.id, e.name, e.status, e.active_mode_id
+		HAVING leg_count > 0 OR is_active_mode = 1
+		ORDER BY e.created_at DESC, e.id DESC`,
+		modeID, modeID,
+	)
+	if queryError != nil {
+		return nil, fmt.Errorf("query mode %d usage: %w", modeID, queryError)
+	}
+	defer rows.Close()
+
+	var usageList []ExpeditionUsage
+	for rows.Next() {
+		var usageItem ExpeditionUsage
+		var activeFlag int
+		if scanError := rows.Scan(&usageItem.ExpeditionID, &usageItem.ExpeditionName, &usageItem.Status, &usageItem.LegCount, &activeFlag); scanError != nil {
+			return nil, fmt.Errorf("scan mode %d usage: %w", modeID, scanError)
+		}
+		usageItem.IsActiveMode = activeFlag != 0
+		usageList = append(usageList, usageItem)
+	}
+	return usageList, rows.Err()
+}
+
+// Delete removes a custom mode and reassigns any expedition legs and expedition
+// active_mode_id values referencing it back to the default fallback mode (Travel).
 // The three default modes cannot be deleted.
-func Delete(queryer db.Queryer, modeID int64) error {
+func Delete(transaction *sql.Tx, modeID int64) error {
 	var isDefault bool
-	if queryError := queryer.QueryRow(`SELECT is_default FROM modes WHERE id = ?`, modeID).Scan(&isDefault); queryError != nil {
+	if queryError := transaction.QueryRow(`SELECT is_default FROM modes WHERE id = ?`, modeID).Scan(&isDefault); queryError != nil {
 		return fmt.Errorf("mode %d not found", modeID)
 	}
 	if isDefault {
 		return errors.New("default modes cannot be deleted (you can recolour them)")
 	}
-	_, deleteError := queryer.Exec(`DELETE FROM modes WHERE id = ?`, modeID)
+	fallbackModeID := DefaultFallbackModeID(transaction)
+	now := reference.NowISO()
+	if _, updateRowsError := transaction.Exec(
+		`UPDATE expedition_rows SET leg_mode_id = ?, updated_at = ? WHERE leg_mode_id = ?`,
+		fallbackModeID, now, modeID,
+	); updateRowsError != nil {
+		return fmt.Errorf("reassign leg modes for deleted mode %d: %w", modeID, updateRowsError)
+	}
+	if _, updateExpError := transaction.Exec(
+		`UPDATE expeditions SET active_mode_id = ?, updated_at = ? WHERE active_mode_id = ?`,
+		fallbackModeID, now, modeID,
+	); updateExpError != nil {
+		return fmt.Errorf("reassign expedition active mode for deleted mode %d: %w", modeID, updateExpError)
+	}
+	_, deleteError := transaction.Exec(`DELETE FROM modes WHERE id = ?`, modeID)
 	return deleteError
 }
 
-// ListWindows returns every window ordered by start.
-func ListWindows(queryer db.Queryer) ([]Window, error) {
-	rows, queryError := queryer.Query(`SELECT id, mode_id, start_timestamp, COALESCE(end_timestamp, '') FROM mode_windows ORDER BY start_timestamp, id`)
-	if queryError != nil {
-		return nil, queryError
-	}
-	defer rows.Close()
-	var windowsList []Window
-	for rows.Next() {
-		var windowItem Window
-		if scanError := rows.Scan(&windowItem.ID, &windowItem.ModeID, &windowItem.Start, &windowItem.End); scanError != nil {
-			return nil, scanError
-		}
-		windowsList = append(windowsList, windowItem)
-	}
-	return windowsList, rows.Err()
-}
-
-// Active returns the currently active (open-ended) mode window, if any.
-func Active(queryer db.Queryer) (*Window, error) {
-	var activeWindow Window
-	queryError := queryer.QueryRow(`SELECT id, mode_id, start_timestamp FROM mode_windows WHERE end_timestamp IS NULL ORDER BY start_timestamp DESC LIMIT 1`).
-		Scan(&activeWindow.ID, &activeWindow.ModeID, &activeWindow.Start)
-	if errors.Is(queryError, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if queryError != nil {
-		return nil, queryError
-	}
-	return &activeWindow, nil
-}
-
-// endAfter compares window ends where "" means +infinity: firstEnd > secondEnd.
-func endAfter(firstEnd, secondEnd string) bool {
-	if firstEnd == secondEnd {
-		return false
-	}
-	if firstEnd == "" {
-		return true
-	}
-	if secondEnd == "" {
-		return false
-	}
-	return firstEnd > secondEnd
-}
-
-// SetWindow writes [start, end) for modeID (end "" = open ended), trimming or
-// splitting any overlapping windows so windows never overlap. If replaceID is
-// non-zero that window is removed first (used when editing a window).
-// modeID == UnassignedID clears the range without inserting a new window.
-func SetWindow(transaction *sql.Tx, replaceID, modeID int64, start, end string) error {
-	normalizedStart, parseStartError := reference.NormalizeISO(start)
-	if parseStartError != nil {
-		return parseStartError
-	}
-	normalizedEnd := ""
-	if end != "" {
-		var parseEndError error
-		if normalizedEnd, parseEndError = reference.NormalizeISO(end); parseEndError != nil {
-			return parseEndError
-		}
-		if normalizedEnd <= normalizedStart {
-			return errors.New("window end must be after its start")
-		}
-	}
-	if replaceID != 0 {
-		if _, deleteError := transaction.Exec(`DELETE FROM mode_windows WHERE id = ?`, replaceID); deleteError != nil {
-			return deleteError
-		}
-	}
-	existingWindows, listError := ListWindows(transaction)
-	if listError != nil {
-		return listError
-	}
-	for _, windowItem := range existingWindows {
-		overlaps := (normalizedEnd == "" || windowItem.Start < normalizedEnd) && (windowItem.End == "" || normalizedStart < windowItem.End)
-		if !overlaps {
-			continue
-		}
-		if _, deleteError := transaction.Exec(`DELETE FROM mode_windows WHERE id = ?`, windowItem.ID); deleteError != nil {
-			return deleteError
-		}
-		if windowItem.Start < normalizedStart { // keep head [windowItem.Start, normalizedStart)
-			if insertHeadError := insertWindow(transaction, windowItem.ModeID, windowItem.Start, normalizedStart); insertHeadError != nil {
-				return insertHeadError
-			}
-		}
-		if normalizedEnd != "" && endAfter(windowItem.End, normalizedEnd) { // keep tail [normalizedEnd, windowItem.End)
-			if insertTailError := insertWindow(transaction, windowItem.ModeID, normalizedEnd, windowItem.End); insertTailError != nil {
-				return insertTailError
-			}
-		}
-	}
-	if modeID == UnassignedID {
-		return nil
-	}
-	var modeCount int
-	if countError := transaction.QueryRow(`SELECT COUNT(*) FROM modes WHERE id = ?`, modeID).Scan(&modeCount); countError != nil || modeCount == 0 {
-		return fmt.Errorf("mode %d not found", modeID)
-	}
-	return insertWindow(transaction, modeID, normalizedStart, normalizedEnd)
-}
-
-func insertWindow(transaction *sql.Tx, modeID int64, startTime, endTime string) error {
-	var nullableEndTime any
-	if endTime != "" {
-		nullableEndTime = endTime
-	}
-	_, execError := transaction.Exec(`INSERT INTO mode_windows(mode_id, start_timestamp, end_timestamp) VALUES(?,?,?)`, modeID, startTime, nullableEndTime)
-	return execError
-}
-
-// Switch makes modeID the active mode from now on (UnassignedID stops tracking).
-func Switch(transaction *sql.Tx, modeID int64, atTimestamp string) error {
-	if atTimestamp == "" {
-		atTimestamp = reference.NowISO()
-	}
-	return SetWindow(transaction, 0, modeID, atTimestamp, "")
-}
-
-// SwitchTx runs Switch inside a database transaction on dbConn.
-func SwitchTx(dbConn *sql.DB, modeID int64, atTimestamp string) error {
+// DeleteTx runs Delete inside a database transaction on dbConn.
+func DeleteTx(dbConn *sql.DB, modeID int64) error {
 	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return Switch(transaction, modeID, atTimestamp)
+		return Delete(transaction, modeID)
 	})
 }
 
-// DefaultFallbackModeID returns the mode ID used whenever no explicit mode
-// window covers a timestamp (prefers the default "Travel" mode).
+// DefaultFallbackModeID returns the mode ID used whenever no explicit flight
+// mode is set (prefers the default "Travel" mode).
 func DefaultFallbackModeID(queryer db.Queryer) int64 {
 	var fallbackModeID int64
 	if queryError := queryer.QueryRow(`SELECT id FROM modes WHERE name = 'Travel' COLLATE NOCASE LIMIT 1`).Scan(&fallbackModeID); queryError == nil && fallbackModeID > 0 {
@@ -265,52 +201,4 @@ func DefaultFallbackModeID(queryer db.Queryer) int64 {
 		return fallbackModeID
 	}
 	return UnassignedID
-}
-
-// Timeline answers "which mode was active at time t" for a set of windows.
-type Timeline struct {
-	windows       []Window
-	defaultModeID int64
-}
-
-// NewTimeline builds a timeline from windows (any order).
-func NewTimeline(windowsList []Window, defaultModeID ...int64) *Timeline {
-	copiedWindows := append([]Window(nil), windowsList...)
-	sort.Slice(copiedWindows, func(firstIndex, secondIndex int) bool {
-		return copiedWindows[firstIndex].Start < copiedWindows[secondIndex].Start
-	})
-	fallbackMode := UnassignedID
-	if len(defaultModeID) > 0 {
-		fallbackMode = defaultModeID[0]
-	}
-	return &Timeline{windows: copiedWindows, defaultModeID: fallbackMode}
-}
-
-// LoadTimeline loads all windows into a Timeline with the default fallback mode (Travel).
-func LoadTimeline(queryer db.Queryer) (*Timeline, error) {
-	windowsList, listError := ListWindows(queryer)
-	if listError != nil {
-		return nil, listError
-	}
-	return NewTimeline(windowsList, DefaultFallbackModeID(queryer)), nil
-}
-
-// LoadModeLookup loads the active mode timeline and returns a timestamp-to-modeID lookup function.
-func LoadModeLookup(queryer db.Queryer) (func(timestamp string) int64, error) {
-	timeline, loadError := LoadTimeline(queryer)
-	if loadError != nil {
-		return nil, loadError
-	}
-	return timeline.ModeAt, nil
-}
-
-// ModeAt returns the mode active at targetTimestamp (falling back to the default mode, e.g. Travel, when none).
-func (timeline *Timeline) ModeAt(targetTimestamp string) int64 {
-	// Last window starting at or before targetTimestamp. Windows written through SetWindow
-	// never overlap, so only that window can contain targetTimestamp.
-	candidateIndex := sort.Search(len(timeline.windows), func(i int) bool { return timeline.windows[i].Start > targetTimestamp }) - 1
-	if candidateIndex >= 0 && timeline.windows[candidateIndex].Contains(targetTimestamp) {
-		return timeline.windows[candidateIndex].ModeID
-	}
-	return timeline.defaultModeID
 }

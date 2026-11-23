@@ -96,7 +96,9 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const html = renderPlanner(mockPlan)
 
     expect(html).toContain('Beagle Point Survey')
-    expect(html).toContain('WAYPOINTS VISITED')
+    expect(html).toContain('2 / 4 WAYPOINTS VISITED')
+    expect(html).toContain('FLIGHT MODE:')
+    expect(html).not.toContain('ACTIVE EXPEDITION')
     expect(html).toContain('Sol')
     expect(html).toContain('Alpha Centauri')
     expect(html).toContain('Colonia')
@@ -214,7 +216,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           distFromPrevLy: 6.0,
         },
       ],
-      modes: [],
+      modes: [{ id: 1, name: 'Travel', color: '#FF7100' } as any],
       visitedWaypointCount: 3,
       waypointCount: 3,
       activeRowId: 32,
@@ -226,6 +228,9 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const html = renderPlanner(completedPlan)
 
     expect(html).toContain('Completed Voyage')
+    expect(html).toContain('3 WAYPOINTS VISITED')
+    expect(html).not.toContain('3 / 3 WAYPOINTS VISITED')
+    expect(html).not.toContain('FLIGHT MODE:')
     expect(html).toContain('REOPEN')
     expect(html).toContain('COMPLETED ROUTE:')
     expect(html).toContain('10.3 Ly')
@@ -283,7 +288,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           distFromPrevLy: 4.3,
         },
       ],
-      modes: [],
+      modes: [{ id: 1, name: 'Travel', color: '#FF7100' } as any],
       visitedWaypointCount: 0,
       waypointCount: 2,
       activeRowId: 0,
@@ -292,6 +297,10 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     })
 
     const html = renderPlanner(planningPlan)
+
+    expect(html).toContain('2 WAYPOINTS PLANNED')
+    expect(html).not.toContain('PLANNING PHASE')
+    expect(html).toContain('FLIGHT MODE:')
 
     // Verify row styles include content-visibility and contain-intrinsic-size without virtualization spacers
     expect(html).toContain('content-visibility:auto')
@@ -424,9 +433,19 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const startModalHtml = renderToString(
       createElement(StartExpeditionModal, {
         expeditionId: 1,
+        modesList: [
+          { id: 1, name: 'Exploration', color: '#00B3FF' } as any,
+          { id: 3, name: 'Travel', color: '#FF7100' } as any,
+        ],
+        initialModeId: 3,
         onClose: () => {},
       }),
     )
+    expect(startModalHtml).toContain('Engage Expedition')
+    expect(startModalHtml).not.toContain('Lock Waypoint #1 Arrival')
+    expect(startModalHtml).not.toContain('Custom Timestamp')
     expect(startModalHtml).not.toContain('Arm and Wait for First Arrival')
+    expect(startModalHtml).toContain('Flight Mode')
+    expect(startModalHtml).toContain('applies to any systems already visited')
   })
 })

@@ -11,7 +11,7 @@ type AppEvent uint8
 const (
 	AppCommanderFilterChanged AppEvent = iota
 	AppModesChanged
-	AppModeWindowsChanged
+	AppExpeditionModesChanged
 	AppExpeditionPlanChanged
 	AppExpeditionBoundsChanged
 	AppAdjustmentsChanged
@@ -23,7 +23,7 @@ const (
 var appEventNames = [appEventCount]string{
 	AppCommanderFilterChanged:  "CommanderFilterChanged",
 	AppModesChanged:            "ModesChanged",
-	AppModeWindowsChanged:      "ModeWindowsChanged",
+	AppExpeditionModesChanged:  "ExpeditionModesChanged",
 	AppExpeditionPlanChanged:   "ExpeditionPlanChanged",
 	AppExpeditionBoundsChanged: "ExpeditionBoundsChanged",
 	AppAdjustmentsChanged:      "AdjustmentsChanged",

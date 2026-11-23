@@ -24,7 +24,8 @@ export interface WaypointDetailsDrawerProps {
   modeId?: number
   modeColor?: string
   modesList?: modes.Mode[]
-  onChangeLegMode?: (rowId: number, nextModeId: number) => void
+  canCascade?: boolean
+  onChangeLegMode?: (rowId: number, nextModeId: number, cascade?: boolean) => void
 }
 
 /**
@@ -38,12 +39,13 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
   modeId,
   modeColor,
   modesList,
+  canCascade = false,
   onChangeLegMode,
 }: WaypointDetailsDrawerProps) {
   const rowId = rowView.row.id
   const handleSelectMode = useCallback(
-    (nextModeId: number) => {
-      onChangeLegMode?.(rowId, nextModeId)
+    (nextModeId: number, cascade: boolean) => {
+      onChangeLegMode?.(rowId, nextModeId, cascade)
     },
     [onChangeLegMode, rowId],
   )
@@ -126,6 +128,7 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
               modeId={modeId || 0}
               modeColor={modeColor}
               modesList={modesList}
+              canCascade={canCascade}
               onChangeMode={handleSelectMode}
             />
           )}

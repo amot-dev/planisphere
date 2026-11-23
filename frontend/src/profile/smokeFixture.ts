@@ -16,6 +16,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
         adjustments: { carrierJumps: 1, carrierDistanceLy: 498.5, tritiumUsed: 112 },
         carrierType: 'player',
         carrierWeeklyUpkeep: 25000000,
+        activeModeId: 1,
         createdAt: '2026-01-01T10:00:00Z',
         updatedAt: '2026-01-01T10:00:00Z',
       },
@@ -126,8 +127,6 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
     },
     modesState: {
       modes: [{ id: 1, name: 'Exploration', color: '#FF7100', isDefault: true, sortOrder: 1 }],
-      activeModeId: 1,
-      windows: [],
     },
     visitedDetails: [
       {

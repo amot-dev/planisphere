@@ -129,7 +129,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 
 	// Start expedition at 2026-01-18T19:42:10Z.
 	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:42:10Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:42:10Z", 0)
 	}); startTxError != nil {
 		t.Fatal(startTxError)
 	}
@@ -201,7 +201,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		t.Fatalf("expected Caspian Explorer flown on Beagle Point leg, got %+v", beagleDetails.ShipsUsed)
 	}
 
-	// Verify mode filtering with the Travel scan/exobio override.
+	// Verify mode filtering with the Travel scan/exobio override using expedition leg modes.
 	modesList, modesError := modes.List(dbConn)
 	if modesError != nil || len(modesList) < 3 {
 		t.Fatalf("expected 3 default modes, got %v (%v)", modesList, modesError)
@@ -212,15 +212,11 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 			travelModeID = modeItem.ID
 		}
 	}
-	if modeTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return modes.SetWindow(transaction, 0, travelModeID, "2026-01-18T19:40:00Z", "2026-01-18T22:00:00Z")
-	}); modeTxError != nil {
-		t.Fatal(modeTxError)
-	}
 
 	// Hide Travel jumps and distance while retaining Travel scans and exobiology.
 	filteredSummary, computeError := proj.TimeRangeStats.Compute(replaystats.Range{After: "2026-01-18T19:42:10Z"}, &replaystats.Filter{
-		Enabled: true,
+		Enabled:      true,
+		ExpeditionID: expeditionRecord.ID,
 		Modes: []replaystats.ModeSelection{
 			{ModeID: travelModeID, Travel: false, Discovery: true},
 		},
@@ -264,7 +260,7 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 
 	// Start expedition
 	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:00:00Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-01-18T19:00:00Z", 0)
 	}); startTxError != nil {
 		t.Fatal(startTxError)
 	}
@@ -346,7 +342,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 
 	// Start at 2026-01-18T10:00:00Z, complete at final visited waypoint (2026-01-20T16:00:00Z)
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, exp.ID, "2026-01-18T10:00:00Z")
+		return expedition.Start(transaction, exp.ID, "2026-01-18T10:00:00Z", 0)
 	})
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		_, err := expedition.Reevaluate(transaction, exp.ID)
@@ -597,7 +593,7 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 
 	// Start expedition
 	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-02-01T10:00:00Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-02-01T10:00:00Z", 0)
 	})
 
 	// Commander jumps Alpha -> Interim -> Alpha (early return before Beta) -> Beta -> Gamma.
@@ -724,7 +720,7 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	// Start expedition at firstWaypoint:
 	// Visit firstWaypoint at 2026-03-01T10:00:00Z.
 	if transactionError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z", 0)
 	}); transactionError != nil {
 		t.Fatal(transactionError)
 	}
@@ -978,7 +974,7 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: barnardWaypoint.ID, FCStop: &fcTrue})
 
 	if startErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
-		return expedition.Start(tx, expeditionRecord.ID, "2026-01-18T10:00:00Z")
+		return expedition.Start(tx, expeditionRecord.ID, "2026-01-18T10:00:00Z", 0)
 	}); startErr != nil {
 		testingContext.Fatal(startErr)
 	}
@@ -1090,7 +1086,7 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}
 }
 
-func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
+func TestHubRevisitMovePreservesLegMode(testingContext *testing.T) {
 	databaseConnection := openExpeditionTestDB(testingContext)
 
 	modeList, listModesError := modes.List(databaseConnection)
@@ -1099,14 +1095,6 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 	}
 	explorationModeID := modeList[0].ID
 	travelModeID := modeList[2].ID
-	if setWindowError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		if firstWindowError := modes.SetWindow(transaction, 0, explorationModeID, "2026-03-01T10:00:00Z", "2026-03-01T11:15:00Z"); firstWindowError != nil {
-			return firstWindowError
-		}
-		return modes.SetWindow(transaction, 0, travelModeID, "2026-03-01T11:15:00Z", "2026-03-01T13:00:00Z")
-	}); setWindowError != nil {
-		testingContext.Fatal(setWindowError)
-	}
 
 	ingestJournalLines(testingContext, databaseConnection, []string{
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":2001,"StarPos":[0,0,0]}`,
@@ -1125,21 +1113,24 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 	setRowSystemName(testingContext, databaseConnection, vegaWaypoint.ID, "Vega")
 
 	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-03-01T10:00:00Z", travelModeID)
 	}); startError != nil {
 		testingContext.Fatal(startError)
+	}
+	if _, setModeError := expedition.SetLegModeTx(databaseConnection, hubWaypoint.ID, explorationModeID, false); setModeError != nil {
+		testingContext.Fatal(setModeError)
 	}
 
 	initialHub, getInitialHubError := expedition.GetRow(databaseConnection, hubWaypoint.ID)
 	if getInitialHubError != nil {
 		testingContext.Fatal(getInitialHubError)
 	}
-	if initialHub.VisitedAt != "2026-03-01T12:00:00Z" || initialHub.LegModeID != travelModeID {
-		testingContext.Fatalf("expected Hub initially at 12:00 with travel mode %d, got visitedAt=%q mode=%d", travelModeID, initialHub.VisitedAt, initialHub.LegModeID)
+	if initialHub.VisitedAt != "2026-03-01T12:00:00Z" || initialHub.LegModeID != explorationModeID {
+		testingContext.Fatalf("expected Hub initially at 12:00 with exploration mode %d, got visitedAt=%q mode=%d", explorationModeID, initialHub.VisitedAt, initialHub.LegModeID)
 	}
 
 	// Moving visited Outpost down into the unvisited section (index 3, below Vega) must succeed,
-	// re-binding Hub to its earlier 11:00 arrival and updating Hub's LegModeID to Exploration!
+	// clearing Outpost's leg mode and re-binding Hub to its earlier 11:00 arrival while preserving Hub's mode.
 	if moveOutpostError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
 		if _, moveError := expedition.MoveRow(transaction, outpostWaypoint.ID, 3); moveError != nil {
 			return moveError
@@ -1155,7 +1146,14 @@ func TestHubRevisitMoveAndLegModeReResolution(testingContext *testing.T) {
 		testingContext.Fatal(getReboundHubError)
 	}
 	if reboundHub.VisitedAt != "2026-03-01T11:00:00Z" || reboundHub.LegModeID != explorationModeID {
-		testingContext.Fatalf("expected Hub to rebind to 11:00 with exploration mode %d, got visitedAt=%q mode=%d", explorationModeID, reboundHub.VisitedAt, reboundHub.LegModeID)
+		testingContext.Fatalf("expected Hub to rebind to 11:00 preserving exploration mode %d, got visitedAt=%q mode=%d", explorationModeID, reboundHub.VisitedAt, reboundHub.LegModeID)
+	}
+	unvisitedOutpost, getOutpostError := expedition.GetRow(databaseConnection, outpostWaypoint.ID)
+	if getOutpostError != nil {
+		testingContext.Fatal(getOutpostError)
+	}
+	if unvisitedOutpost.VisitedAt != "" || unvisitedOutpost.LegModeID != 0 {
+		testingContext.Fatalf("expected unvisited Outpost to clear LegModeID, got visitedAt=%q mode=%d", unvisitedOutpost.VisitedAt, unvisitedOutpost.LegModeID)
 	}
 }
 
@@ -1185,7 +1183,7 @@ func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testi
 	}
 
 	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-11-17T01:10:00Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-11-17T01:10:00Z", 0)
 	}); startError != nil {
 		testingContext.Fatal(startError)
 	}
@@ -1246,7 +1244,7 @@ func TestCompleteRejectsActiveCarrierRouteAndDeleteClearsRoute(testingContext *t
 	expeditionRecord, originRow := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Route Lifecycle Guard", "")
 	setRowSystemName(testingContext, databaseConnection, originRow.ID, "Sol")
 
-	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2020-01-18T10:00:00Z"); startError != nil {
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2020-01-18T10:00:00Z", 0); startError != nil {
 		testingContext.Fatal(startError)
 	}
 	routeState := expedition.ActiveCarrierRouteState{
@@ -1311,7 +1309,7 @@ func TestUpdateRowTxRollbackAndCompletedRestrictions(testingContext *testing.T) 
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-01-18T12:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,100],"JumpDist":50.0}`,
 	})
-	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z"); startError != nil {
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z", 0); startError != nil {
 		testingContext.Fatal(startError)
 	}
 	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
@@ -1391,7 +1389,7 @@ func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
 			testingContext.Fatal(err)
 		}
 	}
-	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z"); startError != nil {
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z", 0); startError != nil {
 		testingContext.Fatal(startError)
 	}
 	if _, overrideError := expedition.SetCarrierArrivalOverrideTx(databaseConnection, arrivedStopWaypoint.ID, true); overrideError != nil {
@@ -1494,7 +1492,7 @@ func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
 	setRowSystemName(testingContext, databaseConnection, activeWaypoint.ID, "Beagle Point")
 
 	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-06-01T10:05:00Z")
+		return expedition.Start(transaction, expeditionRecord.ID, "2026-06-01T10:05:00Z", 0)
 	}); startError != nil {
 		testingContext.Fatal(startError)
 	}
@@ -1528,7 +1526,7 @@ func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
 	ingestJournalLines(testingContext, databaseConnection, []string{
 		`{"timestamp":"2022-05-01T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
 	})
-	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2022-05-01T10:00:00Z"); startError != nil {
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2022-05-01T10:00:00Z", 0); startError != nil {
 		testingContext.Fatalf("StartTx: %v", startError)
 	}
 

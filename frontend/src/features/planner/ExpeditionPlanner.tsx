@@ -304,6 +304,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
         plan={plan}
         hasOriginWaypointSystem={hasOriginWaypointSystem}
         carrierRouteOpen={Boolean(carrierRoute.activeCarrierRoute || carrierRoute.routePrompt)}
+        onChangeActiveMode={mutations.handleActiveModeChange}
         onOpenStartModal={onOpenStartModal}
         onLifecycleAction={mutations.handleLifecycleAction}
       />

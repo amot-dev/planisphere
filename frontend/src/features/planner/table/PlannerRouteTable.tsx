@@ -85,7 +85,7 @@ export interface PlannerTableRowActions {
   onChangeRegion: (rowId: number, regionId: number) => void
   onInsert: (afterRowId: number, rowType: 'waypoint' | 'region') => void
   onDeleteRow: (rowView: expedition.RowView) => void
-  onLegModeChange: (rowId: number, modeId: number) => void
+  onLegModeChange: (rowId: number, modeId: number, cascade?: boolean) => void
   onOriginSystemFilledChange?: (hasSystem: boolean) => void
   onFieldBlur: (
     row: expedition.Row,
@@ -272,8 +272,8 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
   )
 
   const handleChangeLegMode = useCallback(
-    (rowId: number, nextModeId: number) =>
-      latestCallbacksRef.current.onLegModeChange(rowId, nextModeId),
+    (rowId: number, nextModeId: number, cascade = false) =>
+      latestCallbacksRef.current.onLegModeChange(rowId, nextModeId, cascade),
     [],
   )
 
@@ -385,6 +385,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
                     modeId={rowView.legModeId}
                     modeColor={rowView.legModeColor}
                     modesList={modesList}
+                    canCascade={rowView.visitState === 'visited' && index < lastVisitedIndex}
                     onChangeLegMode={handleChangeLegMode}
                   />
                 </td>

@@ -28,7 +28,7 @@ func NewTimeRangeStats(
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
 	recoveredJumps *projections.RecoveredJumps,
-	modeLoader replaystats.ModeTimelineLoader,
+	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeStats {
 	return &TimeRangeStats{
 		travel:        NewTimeRangeTravel(dbConn, bus, recoveredJumps, modeLoader),
@@ -122,7 +122,7 @@ func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (
 
 // newTimeRangeDomainCache registers standard triggers for a time-window cache,
 // preserves closed windows ending strictly before live journal batches unless
-// retroactiveJournalEvents intersect the batch, and narrows AppModeWindowsChanged
+// retroactiveJournalEvents intersect the batch, and narrows AppExpeditionModesChanged
 // invalidation to mode-filtered keys.
 func newTimeRangeDomainCache[V any](
 	bus *projection.Bus,
@@ -141,7 +141,7 @@ func newTimeRangeDomainCache[V any](
 		return !projection.WindowEndsBefore(cacheKey, observed.EarliestTimestamp)
 	})
 	if bus != nil {
-		bus.OnTrigger(projection.Triggers{App: events.NewAppSet(events.AppModeWindowsChanged)}, func(_ projection.Triggers) {
+		bus.OnTrigger(projection.Triggers{App: events.NewAppSet(events.AppExpeditionModesChanged)}, func(_ projection.Triggers) {
 			entries.InvalidateWhere(func(cacheKey string) bool {
 				return !strings.HasSuffix(cacheKey, "|all")
 			})
@@ -170,13 +170,16 @@ func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bo
 	sort.Slice(selectedIDs, func(leftIndex, rightIndex int) bool {
 		return selectedIDs[leftIndex] < selectedIDs[rightIndex]
 	})
-	if len(selectedIDs) == 0 {
-		return timeRange.After + "|" + timeRange.Until + "|none"
-	}
 	var builder strings.Builder
 	builder.WriteString(timeRange.After)
 	builder.WriteByte('|')
 	builder.WriteString(timeRange.Until)
+	builder.WriteString("|exp:")
+	builder.WriteString(strconv.FormatInt(filter.ExpeditionID, 10))
+	if len(selectedIDs) == 0 {
+		builder.WriteString("|none")
+		return builder.String()
+	}
 	builder.WriteString("|modes:")
 	for index, modeID := range selectedIDs {
 		if index > 0 {

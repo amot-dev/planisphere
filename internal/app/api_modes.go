@@ -2,76 +2,47 @@ package app
 
 import (
 	"planisphere/internal/core/events"
-	"planisphere/internal/reference"
 	"planisphere/internal/store/modes"
 )
 
-// ModeWindowView is a mode window for display.
-type ModeWindowView struct {
-	ID            int64  `json:"id"`
-	ModeID        int64  `json:"modeId"`
-	ModeName      string `json:"modeName"`
-	Color         string `json:"color"`
-	Start         string `json:"start"`
-	End           string `json:"end"`
-	StartGalactic string `json:"startGalactic"`
-	EndGalactic   string `json:"endGalactic"`
-	Duration      string `json:"duration"`
-}
-
-// ModesState is everything the UI needs about modes.
+// ModesState holds the configured flight modes list for the UI.
 type ModesState struct {
-	Modes               []modes.Mode     `json:"modes"`
-	ActiveModeID        int64            `json:"activeModeId"`
-	ActiveSince         string           `json:"activeSince"`
-	ActiveSinceGalactic string           `json:"activeSinceGalactic"`
-	Windows             []ModeWindowView `json:"windows"`
+	Modes []modes.Mode `json:"modes"`
 }
 
-// GetModesState returns modes, the active mode and all windows (newest first).
+// GetModesState returns all configured flight modes in display order.
 func (app *App) GetModesState() (ModesState, error) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
 		return ModesState{}, readyError
 	}
-	var modeState ModesState
 	modesList, listError := modes.List(app.db)
 	if listError != nil {
-		return modeState, listError
+		return ModesState{}, listError
 	}
-	modeState.Modes = modesList
-	if modeState.Modes == nil {
-		modeState.Modes = []modes.Mode{}
+	if modesList == nil {
+		modesList = []modes.Mode{}
 	}
-	modesByID := map[int64]modes.Mode{}
-	for _, modeItem := range modesList {
-		modesByID[modeItem.ID] = modeItem
+	return ModesState{Modes: modesList}, nil
+}
+
+// GetModeUsage returns every expedition that currently references id on visited
+// legs or as its active flight mode.
+func (app *App) GetModeUsage(id int64) ([]modes.ExpeditionUsage, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if readyError := app.ready(); readyError != nil {
+		return nil, readyError
 	}
-	activeWindow, activeError := modes.Active(app.db)
-	if activeError != nil {
-		return modeState, activeError
+	usageList, usageError := modes.UsageByExpedition(app.db, id)
+	if usageError != nil {
+		return nil, usageError
 	}
-	if activeWindow != nil {
-		modeState.ActiveModeID, modeState.ActiveSince, modeState.ActiveSinceGalactic = activeWindow.ModeID, activeWindow.Start, reference.ToGalactic(activeWindow.Start)
-	} else {
-		modeState.ActiveModeID = modes.DefaultFallbackModeID(app.db)
+	if usageList == nil {
+		usageList = []modes.ExpeditionUsage{}
 	}
-	windowsList, windowsError := modes.ListWindows(app.db)
-	if windowsError != nil {
-		return modeState, windowsError
-	}
-	modeState.Windows = []ModeWindowView{}
-	for windowIndex := len(windowsList) - 1; windowIndex >= 0; windowIndex-- {
-		windowItem := windowsList[windowIndex]
-		modeItem := modesByID[windowItem.ModeID]
-		modeState.Windows = append(modeState.Windows, ModeWindowView{
-			ID: windowItem.ID, ModeID: windowItem.ModeID, ModeName: modeItem.Name, Color: modeItem.Color, Start: windowItem.Start, End: windowItem.End,
-			StartGalactic: reference.ToGalactic(windowItem.Start), EndGalactic: reference.ToGalactic(windowItem.End),
-			Duration: reference.Elapsed(windowItem.Start, windowItem.End),
-		})
-	}
-	return modeState, nil
+	return usageList, nil
 }
 
 // CreateMode adds a custom mode.
@@ -99,24 +70,14 @@ func (app *App) UpdateMode(id int64, name, description, color string) error {
 	return nil
 }
 
-// DeleteMode deletes a custom mode and its windows.
+// DeleteMode deletes a custom mode and reassigns any legs and expeditions
+// referencing it back to Travel.
 func (app *App) DeleteMode(id int64) error {
 	if deleteError := app.withReadyReadLock(func() error {
-		return modes.Delete(app.db, id)
+		return modes.DeleteTx(app.db, id)
 	}); deleteError != nil {
 		return deleteError
 	}
-	app.publishApp(0, events.AppModesChanged, events.AppModeWindowsChanged)
+	app.publishApp(0, events.AppModesChanged, events.AppExpeditionModesChanged)
 	return nil
-}
-
-// SwitchMode makes modeID the active mode from now (0 stops tracking a mode).
-func (app *App) SwitchMode(modeID int64) (ModesState, error) {
-	if switchError := app.withReadyReadLock(func() error {
-		return modes.SwitchTx(app.db, modeID, "")
-	}); switchError != nil {
-		return ModesState{}, switchError
-	}
-	app.publishApp(0, events.AppModesChanged, events.AppModeWindowsChanged)
-	return app.GetModesState()
 }

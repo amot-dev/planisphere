@@ -72,8 +72,7 @@ CREATE TABLE IF NOT EXISTS modes (
     created_at  TEXT NOT NULL
 );
 
--- Time windows during which a mode was active. end_timestamp NULL = still active.
--- Windows never overlap (enforced by the application when windows are written).
+-- Legacy (unused): global mode time windows replaced by per-expedition leg_mode_id and expeditions.active_mode_id.
 CREATE TABLE IF NOT EXISTS mode_windows (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     mode_id         INTEGER NOT NULL REFERENCES modes(id) ON DELETE CASCADE,
@@ -97,6 +96,7 @@ CREATE TABLE IF NOT EXISTS expeditions (
     adjustments_json TEXT NOT NULL DEFAULT '{}', -- stats.Metrics manual deltas (e.g. remote carrier jumps)
     carrier_type          TEXT NOT NULL DEFAULT 'player',
     carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0,
+    active_mode_id        INTEGER NOT NULL DEFAULT 0,
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );

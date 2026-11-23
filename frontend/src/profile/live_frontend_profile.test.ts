@@ -61,7 +61,6 @@ function mountWorkspaceTree(
           collapsed: false,
           carrierRouteOpen: false,
           onFilterChange: noop,
-          onQuickSwitchMode: noop,
         }),
         createElement(ExpeditionPlanner, {
           plan,

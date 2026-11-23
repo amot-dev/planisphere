@@ -30,7 +30,7 @@ var (
 type TimeRangeRealization struct {
 	database    *sql.DB
 	salesLedger *realization.SalesLedger
-	modeLoader  replaystats.ModeTimelineLoader
+	modeLoader  replaystats.ModeLookupLoader
 	entries     *projection.KeyedCache[string, RealizationBreakdown]
 }
 
@@ -39,7 +39,7 @@ func NewTimeRangeRealization(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	salesLedger *realization.SalesLedger,
-	modeLoader replaystats.ModeTimelineLoader,
+	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeRealization {
 	triggers := projection.Triggers{
 		Journal: realizationStatsJournalEvents,

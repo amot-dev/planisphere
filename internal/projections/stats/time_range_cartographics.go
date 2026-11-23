@@ -17,7 +17,7 @@ var timeRangeCartographicsAppEvents = events.NewAppSet(
 // (after, until] time ranges and optional Discovery Flight Mode filters.
 type TimeRangeCartographics struct {
 	database   *sql.DB
-	modeLoader replaystats.ModeTimelineLoader
+	modeLoader replaystats.ModeLookupLoader
 	entries    *projection.KeyedCache[string, CartographicsMetrics]
 }
 
@@ -25,7 +25,7 @@ type TimeRangeCartographics struct {
 func NewTimeRangeCartographics(
 	dbConn *sql.DB,
 	bus *projection.Bus,
-	modeLoader replaystats.ModeTimelineLoader,
+	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeCartographics {
 	triggers := projection.Triggers{
 		Journal: cartographicsJournalEvents,

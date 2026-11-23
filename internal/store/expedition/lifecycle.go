@@ -3,11 +3,13 @@ package expedition
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
+	"planisphere/internal/store/modes"
 )
 
 func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTimestamp, endTimestamp any) error {
@@ -35,11 +37,17 @@ func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, can
 }
 
 // Start activates the expedition with startTimestamp as the arrival at
-// Waypoint #1, then replays all journal history from that moment.
-func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error {
+// Waypoint #1, sets the expedition's starting active flight mode when
+// initialModeID is positive (falling back to the expedition's saved active
+// mode or Travel), and replays all journal history from that moment.
+func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string, initialModeID int64) error {
 	normalizedStartTimestamp, parseError := reference.NormalizeISO(startTimestamp)
 	if parseError != nil {
 		return parseError
+	}
+	expeditionRecord, getError := Get(transaction, expeditionID)
+	if getError != nil {
+		return getError
 	}
 	rows, listError := ListRows(transaction, expeditionID)
 	if listError != nil {
@@ -47,6 +55,28 @@ func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error
 	}
 	if firstIndex := firstWaypoint(rows); firstIndex < 0 || rows[firstIndex].SystemName == "" {
 		return errors.New("waypoint #1 needs a system name before the expedition can start")
+	}
+	resolvedModeID := expeditionRecord.ActiveModeID
+	if initialModeID > 0 {
+		modeExists, existsError := modes.Exists(transaction, initialModeID)
+		if existsError != nil {
+			return existsError
+		}
+		if !modeExists {
+			return fmt.Errorf("mode %d not found", initialModeID)
+		}
+		resolvedModeID = initialModeID
+	}
+	if resolvedModeID <= 0 {
+		resolvedModeID = modes.DefaultFallbackModeID(transaction)
+	}
+	if resolvedModeID != expeditionRecord.ActiveModeID {
+		if _, modeUpdateError := transaction.Exec(
+			`UPDATE expeditions SET active_mode_id = ? WHERE id = ?`,
+			resolvedModeID, expeditionID,
+		); modeUpdateError != nil {
+			return modeUpdateError
+		}
 	}
 	if lifecycleError := setLifecycle(transaction, expeditionID, StatusActive, normalizedStartTimestamp, nil); lifecycleError != nil {
 		return lifecycleError
@@ -59,9 +89,9 @@ func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string) error
 }
 
 // StartTx runs Start inside a database transaction on dbConn.
-func StartTx(dbConn *sql.DB, expeditionID int64, startTimestamp string) error {
+func StartTx(dbConn *sql.DB, expeditionID int64, startTimestamp string, initialModeID int64) error {
 	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		return Start(transaction, expeditionID, startTimestamp)
+		return Start(transaction, expeditionID, startTimestamp, initialModeID)
 	})
 }
 

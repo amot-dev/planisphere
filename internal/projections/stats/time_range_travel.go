@@ -19,7 +19,7 @@ var timeRangeTravelAppEvents = events.NewAppSet(
 type TimeRangeTravel struct {
 	database       *sql.DB
 	recoveredJumps *projections.RecoveredJumps
-	modeLoader     replaystats.ModeTimelineLoader
+	modeLoader     replaystats.ModeLookupLoader
 	entries        *projection.KeyedCache[string, TravelMetrics]
 }
 
@@ -28,7 +28,7 @@ func NewTimeRangeTravel(
 	dbConn *sql.DB,
 	bus *projection.Bus,
 	recoveredJumps *projections.RecoveredJumps,
-	modeLoader replaystats.ModeTimelineLoader,
+	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeTravel {
 	triggers := projection.Triggers{
 		Journal: travelStatsJournalEvents,

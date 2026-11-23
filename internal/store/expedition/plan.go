@@ -72,10 +72,10 @@ type planBuildContext struct {
 	currentWaypoint    *Row
 	playerPosition     *reference.Vec3
 	nextWaypointRowID  int64
-	modeTimeline       *modes.Timeline
 	modeList           []modes.Mode
 	modeByID           map[int64]modes.Mode
 	defaultModeID      int64
+	activeModeID       int64
 	previousVisitByID  map[int64]string
 	visitCountBySystem map[string]int
 	gecLookup          GECLookup
@@ -177,10 +177,6 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 	}
 	planView.NextWaypointRowID = buildContext.nextWaypointRowID
 
-	var modeError error
-	if buildContext.modeTimeline, modeError = modes.LoadTimeline(queryer); modeError != nil {
-		return nil, modeError
-	}
 	var listError error
 	if buildContext.modeList, listError = modes.List(queryer); listError != nil {
 		return nil, listError
@@ -190,6 +186,9 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		buildContext.modeByID[modeItem.ID] = modeItem
 	}
 	buildContext.defaultModeID = modes.DefaultFallbackModeID(queryer)
+	resolvedActiveModeID, _, _ := buildContext.resolveMode(expeditionRecord.ActiveModeID)
+	buildContext.activeModeID = resolvedActiveModeID
+	planView.Expedition.ActiveModeID = resolvedActiveModeID
 
 	return buildContext, nil
 }
@@ -227,22 +226,10 @@ func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, w
 	case VisitVisited:
 		rowViewItem.VisitedAtGalactic = reference.ToGalactic(rowItem.VisitedAt)
 		if _, hasPreviousVisit := buildContext.previousVisitByID[rowItem.ID]; hasPreviousVisit {
-			modeID := rowItem.LegModeID
-			if modeID == 0 && buildContext.modeTimeline != nil {
-				modeID = buildContext.modeTimeline.ModeAt(rowItem.VisitedAt)
-			}
-			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(modeID)
+			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(rowItem.LegModeID)
 		}
 	case VisitCurrent:
-		untilTimestamp := buildContext.expeditionRecord.EndTimestamp
-		if untilTimestamp == "" {
-			untilTimestamp = reference.NowISO()
-		}
-		var modeID int64
-		if buildContext.modeTimeline != nil {
-			modeID = buildContext.modeTimeline.ModeAt(untilTimestamp)
-		}
-		rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(modeID)
+		rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(buildContext.activeModeID)
 	default:
 		if waypointNumber > 1 && rowItem.LegModeID > 0 {
 			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(rowItem.LegModeID)

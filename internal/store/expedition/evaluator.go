@@ -84,7 +84,6 @@ func replayNormalizedTransitions(
 	startTimestamp string,
 	originVisitUID string,
 	transitions []Arrival,
-	modeTimeline *modes.Timeline,
 ) []Row {
 	rows[firstWaypointIndex].VisitedAt = startTimestamp
 	rows[firstWaypointIndex].VisitEventUID = originVisitUID
@@ -99,15 +98,12 @@ func replayNormalizedTransitions(
 			continue
 		}
 		rows[nextWaypointIndex].VisitedAt, rows[nextWaypointIndex].VisitEventUID = arrival.Timestamp, arrival.UID
-		if rows[nextWaypointIndex].LegModeID == 0 && modeTimeline != nil {
-			rows[nextWaypointIndex].LegModeID = modeTimeline.ModeAt(arrival.Timestamp)
-		}
 		nextWaypointIndex = nextWaypointAfter(rows, nextWaypointIndex)
 	}
 	return rows
 }
 
-func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp string, arrivals []Arrival, modeTimeline *modes.Timeline) []Row {
+func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp string, arrivals []Arrival) []Row {
 	normalizedSystemNames := make([]string, len(rows))
 	for i := range rows {
 		if rows[i].RowType == RowWaypoint {
@@ -115,38 +111,59 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 		}
 	}
 	originVisitUID, transitions := prepareNormalizedTransitions(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], startTimestamp, arrivals)
-	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, transitions, modeTimeline)
+	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, transitions)
 }
 
 // reconcileEvaluatedRowState synchronizes derived row fields after chronological
-// re-evaluation: clearing LegModeID on waypoints that became unvisited,
-// re-resolving LegModeID when a waypoint rebinds to a different arrival
-// timestamp (preserving existing or manual leg modes when VisitedAt is unchanged),
-// and clearing any FCArrived flags that sit after a pending FC stop so Fleet
-// Carrier progress remains strictly sequential.
-func reconcileEvaluatedRowState(rows []Row, originalRowsByID map[int64]Row, modeTimeline *modes.Timeline) {
-	seenPendingFCStop := false
-	for i := range rows {
+// re-evaluation. A reverse pass assigns LegModeID so waypoints splitting an
+// existing visited leg inherit that leg's mode, frontier visits inherit
+// activeModeID, unvisited rows clear LegModeID, and already-visited rows preserve
+// their existing mode even if rebound to a different arrival timestamp. A forward
+// pass clears FCArrived flags that sit after a pending FC stop so Fleet Carrier
+// progress remains strictly sequential.
+func reconcileEvaluatedRowState(rows []Row, firstWaypointIndex int, originalRowsByID map[int64]Row, activeModeID int64) {
+	var nextPreExistingLegModeID int64
+	for i := len(rows) - 1; i >= 0; i-- {
 		if !rows[i].IsWaypoint() {
 			continue
 		}
-		originalRow := originalRowsByID[rows[i].ID]
-		if rows[i].VisitedAt == "" && originalRow.VisitedAt != "" {
+		if i == firstWaypointIndex {
 			rows[i].LegModeID = 0
-		} else if rows[i].VisitedAt != "" && originalRow.VisitedAt != "" && rows[i].VisitedAt != originalRow.VisitedAt {
-			if modeTimeline != nil {
-				rows[i].LegModeID = modeTimeline.ModeAt(rows[i].VisitedAt)
-			} else {
+			continue
+		}
+		originalRow := originalRowsByID[rows[i].ID]
+		if rows[i].VisitedAt == "" {
+			if originalRow.VisitedAt != "" {
 				rows[i].LegModeID = 0
 			}
+			continue
 		}
-		if rows[i].FCStop {
-			if seenPendingFCStop && rows[i].FCArrived {
-				rows[i].FCArrived = false
+		if originalRow.VisitedAt != "" {
+			if rows[i].LegModeID == 0 {
+				rows[i].LegModeID = activeModeID
 			}
-			if !rows[i].FCArrived {
-				seenPendingFCStop = true
+			nextPreExistingLegModeID = rows[i].LegModeID
+			continue
+		}
+		if rows[i].LegModeID == 0 {
+			if nextPreExistingLegModeID > 0 {
+				rows[i].LegModeID = nextPreExistingLegModeID
+			} else {
+				rows[i].LegModeID = activeModeID
 			}
+		}
+	}
+
+	seenPendingFCStop := false
+	for i := range rows {
+		if !rows[i].IsWaypoint() || !rows[i].FCStop {
+			continue
+		}
+		if seenPendingFCStop && rows[i].FCArrived {
+			rows[i].FCArrived = false
+		}
+		if !rows[i].FCArrived {
+			seenPendingFCStop = true
 		}
 	}
 }
@@ -223,9 +240,9 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 	for i := range rows {
 		rows[i].VisitedAt, rows[i].VisitEventUID = "", ""
 	}
-	modeTimeline, timelineError := modes.LoadTimeline(queryer)
-	if timelineError != nil {
-		return false, fmt.Errorf("load mode timeline: %w", timelineError)
+	activeModeID := expeditionRecord.ActiveModeID
+	if activeModeID <= 0 {
+		activeModeID = modes.DefaultFallbackModeID(queryer)
 	}
 
 	arrivals, arrivalsError := replay.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
@@ -233,8 +250,8 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		return false, arrivalsError
 	}
 
-	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals, modeTimeline)
-	reconcileEvaluatedRowState(rows, originalRowsByID, modeTimeline)
+	rows = replayExpeditionArrivals(rows, firstWaypointIndex, expeditionRecord.StartTimestamp, arrivals)
+	reconcileEvaluatedRowState(rows, firstWaypointIndex, originalRowsByID, activeModeID)
 	return persistEvaluatedRowChanges(queryer, rows, originalRowsByID)
 }
 

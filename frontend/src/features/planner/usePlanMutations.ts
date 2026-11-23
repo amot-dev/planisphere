@@ -4,12 +4,14 @@ import {
   DeleteRow,
   MoveRow,
   OverrideCarrierStopArrival,
+  SetExpeditionFlightMode,
   SetLegMode,
   UpdateRow,
 } from '../../api/backend'
 import { expedition } from '../../api/models'
 import {
   buildOptimisticDeletedRowPlan,
+  buildOptimisticExpeditionModePlan,
   buildOptimisticFcArrivedPlan,
   buildOptimisticFcStopTogglePlan,
   buildOptimisticLegModePlan,
@@ -200,14 +202,27 @@ export function usePlanMutations({
     [plan],
   )
 
+  const handleActiveModeChange = useCallback(
+    async (modeId: number) => {
+      if (!plan) return
+      await runPlanMutation(
+        'SWITCHING FLIGHT MODE',
+        'Failed to update expedition flight mode',
+        () => SetExpeditionFlightMode(plan.expedition.id, modeId),
+        { optimisticPlan: buildOptimisticExpeditionModePlan(plan, modeId) },
+      )
+    },
+    [plan, runPlanMutation],
+  )
+
   const handleLegModeChange = useCallback(
-    async (rowId: number, modeId: number) => {
+    async (rowId: number, modeId: number, cascade = false) => {
       if (!plan) return
       await runPlanMutation(
         'UPDATING FLIGHT MODE',
         'Failed to update leg flight mode',
-        () => SetLegMode(rowId, modeId),
-        { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId) },
+        () => SetLegMode(rowId, modeId, cascade),
+        { optimisticPlan: buildOptimisticLegModePlan(plan, rowId, modeId, cascade) },
       )
     },
     [plan, runPlanMutation],
@@ -374,6 +389,7 @@ export function usePlanMutations({
     commitField,
     toggleFcStop,
     handleRequestOverrideFcArrived,
+    handleActiveModeChange,
     handleLegModeChange,
     changeRegion,
     handleInsert,

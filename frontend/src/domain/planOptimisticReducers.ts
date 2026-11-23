@@ -68,17 +68,17 @@ export function buildOptimisticFcStopTogglePlan(
 }
 
 /**
- * buildOptimisticLegModePlan returns an optimistic PlanView assigning a flight
- * mode override to a visited waypoint leg while preserving unaffected rows.
+ * buildOptimisticExpeditionModePlan returns an optimistic PlanView updating the
+ * expedition's active flight mode and any active in-progress leg row while
+ * preserving reference identity on unaffected rows.
  */
-export function buildOptimisticLegModePlan(
+export function buildOptimisticExpeditionModePlan(
   plan: expedition.PlanView,
-  rowId: number,
   modeId: number,
 ): expedition.PlanView {
   const pickedMode = (plan.modes ?? []).find((mode) => mode.id === modeId)
   const optimisticRows = plan.rows.map((rowView) => {
-    if (rowView.row.id !== rowId) return rowView
+    if (rowView.visitState !== 'current') return rowView
     return cloneWailsInstance(rowView, {
       legModeId: modeId,
       legModeName: pickedMode?.name ?? rowView.legModeName,
@@ -86,6 +86,48 @@ export function buildOptimisticLegModePlan(
     })
   })
   return cloneWailsInstance(plan, {
+    expedition: cloneWailsInstance(plan.expedition, { activeModeId: modeId }),
+    rows: optimisticRows,
+  })
+}
+
+/**
+ * buildOptimisticLegModePlan returns an optimistic PlanView assigning a flight
+ * mode override to a waypoint leg (and all subsequent visited legs when cascade
+ * is true) while preserving unaffected rows.
+ */
+export function buildOptimisticLegModePlan(
+  plan: expedition.PlanView,
+  rowId: number,
+  modeId: number,
+  cascade = false,
+): expedition.PlanView {
+  const pickedMode = (plan.modes ?? []).find((mode) => mode.id === modeId)
+  const targetIndex = plan.rows.findIndex((rowView) => rowView.row.id === rowId)
+  if (targetIndex < 0) return plan
+
+  const targetRowView = plan.rows[targetIndex]
+  const isCurrentLeg = targetRowView.visitState === 'current'
+  const optimisticRows = plan.rows.map((rowView, rowIndex) => {
+    const matchesSingle = rowView.row.id === rowId
+    const matchesCascade =
+      cascade &&
+      !isCurrentLeg &&
+      rowIndex >= targetIndex &&
+      rowView.row.rowType === 'waypoint' &&
+      rowView.visitState === 'visited' &&
+      rowView.number > 1
+    if (!matchesSingle && !matchesCascade) return rowView
+    return cloneWailsInstance(rowView, {
+      legModeId: modeId,
+      legModeName: pickedMode?.name ?? rowView.legModeName,
+      legModeColor: pickedMode?.color ?? rowView.legModeColor,
+    })
+  })
+  return cloneWailsInstance(plan, {
+    expedition: isCurrentLeg
+      ? cloneWailsInstance(plan.expedition, { activeModeId: modeId })
+      : plan.expedition,
     rows: optimisticRows,
   })
 }

@@ -62,40 +62,8 @@ export namespace app {
 	        this.currentShip = source["currentShip"];
 	    }
 	}
-	export class ModeWindowView {
-	    id: number;
-	    modeId: number;
-	    modeName: string;
-	    color: string;
-	    start: string;
-	    end: string;
-	    startGalactic: string;
-	    endGalactic: string;
-	    duration: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ModeWindowView(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.modeId = source["modeId"];
-	        this.modeName = source["modeName"];
-	        this.color = source["color"];
-	        this.start = source["start"];
-	        this.end = source["end"];
-	        this.startGalactic = source["startGalactic"];
-	        this.endGalactic = source["endGalactic"];
-	        this.duration = source["duration"];
-	    }
-	}
 	export class ModesState {
 	    modes: modes.Mode[];
-	    activeModeId: number;
-	    activeSince: string;
-	    activeSinceGalactic: string;
-	    windows: ModeWindowView[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ModesState(source);
@@ -104,10 +72,6 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.modes = this.convertValues(source["modes"], modes.Mode);
-	        this.activeModeId = source["activeModeId"];
-	        this.activeSince = source["activeSince"];
-	        this.activeSinceGalactic = source["activeSinceGalactic"];
-	        this.windows = this.convertValues(source["windows"], ModeWindowView);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -525,6 +489,7 @@ export namespace expedition {
 	    adjustments: CarrierStats;
 	    carrierType: string;
 	    carrierWeeklyUpkeep: number;
+	    activeModeId: number;
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -543,6 +508,7 @@ export namespace expedition {
 	        this.adjustments = this.convertValues(source["adjustments"], CarrierStats);
 	        this.carrierType = source["carrierType"];
 	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];
+	        this.activeModeId = source["activeModeId"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
@@ -834,6 +800,26 @@ export namespace expedition {
 
 export namespace modes {
 	
+	export class ExpeditionUsage {
+	    expeditionId: number;
+	    expeditionName: string;
+	    status: string;
+	    legCount: number;
+	    isActiveMode: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExpeditionUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.expeditionId = source["expeditionId"];
+	        this.expeditionName = source["expeditionName"];
+	        this.status = source["status"];
+	        this.legCount = source["legCount"];
+	        this.isActiveMode = source["isActiveMode"];
+	    }
+	}
 	export class Mode {
 	    id: number;
 	    name: string;
@@ -1002,6 +988,7 @@ export namespace stats {
 	}
 	export class Filter {
 	    enabled: boolean;
+	    expeditionId?: number;
 	    modes: ModeSelection[];
 	
 	    static createFrom(source: any = {}) {
@@ -1011,6 +998,7 @@ export namespace stats {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
+	        this.expeditionId = source["expeditionId"];
 	        this.modes = this.convertValues(source["modes"], ModeSelection);
 	    }
 	

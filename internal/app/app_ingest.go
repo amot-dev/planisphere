@@ -142,15 +142,18 @@ func (app *App) reevaluateActive() []int64 {
 	return expeditionIDs
 }
 
-func (app *App) reevaluate(expeditionID int64) {
+func (app *App) reevaluate(expeditionID int64) bool {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	if app.db == nil {
-		return
+		return false
 	}
-	if _, txError := expedition.ReevaluateTx(app.db, expeditionID); txError != nil {
+	changed, txError := expedition.ReevaluateTx(app.db, expeditionID)
+	if txError != nil {
 		log.Printf("reevaluate expedition %d: %v", expeditionID, txError)
+		return false
 	}
+	return changed
 }
 
 func (app *App) maybeRefreshGEC() {

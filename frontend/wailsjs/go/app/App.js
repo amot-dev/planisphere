@@ -78,6 +78,10 @@ export function GetIngestStatus() {
   return window['go']['app']['App']['GetIngestStatus']();
 }
 
+export function GetModeUsage(arg1) {
+  return window['go']['app']['App']['GetModeUsage'](arg1);
+}
+
 export function GetModesState() {
   return window['go']['app']['App']['GetModesState']();
 }
@@ -166,6 +170,10 @@ export function SetDatabasePath(arg1) {
   return window['go']['app']['App']['SetDatabasePath'](arg1);
 }
 
+export function SetExpeditionFlightMode(arg1, arg2) {
+  return window['go']['app']['App']['SetExpeditionFlightMode'](arg1, arg2);
+}
+
 export function SetExternalLinks(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetExternalLinks'](arg1, arg2, arg3);
 }
@@ -178,8 +186,8 @@ export function SetJournalDir(arg1) {
   return window['go']['app']['App']['SetJournalDir'](arg1);
 }
 
-export function SetLegMode(arg1, arg2) {
-  return window['go']['app']['App']['SetLegMode'](arg1, arg2);
+export function SetLegMode(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SetLegMode'](arg1, arg2, arg3);
 }
 
 export function SetLiveSyncPaused(arg1) {
@@ -198,12 +206,8 @@ export function SetupConfigureJournals(arg1) {
   return window['go']['app']['App']['SetupConfigureJournals'](arg1);
 }
 
-export function StartExpedition(arg1, arg2) {
-  return window['go']['app']['App']['StartExpedition'](arg1, arg2);
-}
-
-export function SwitchMode(arg1) {
-  return window['go']['app']['App']['SwitchMode'](arg1);
+export function StartExpedition(arg1, arg2, arg3) {
+  return window['go']['app']['App']['StartExpedition'](arg1, arg2, arg3);
 }
 
 export function UpdateExpedition(arg1, arg2, arg3) {

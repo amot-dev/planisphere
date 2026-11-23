@@ -20,7 +20,7 @@ type (
 	Range                = replaystats.Range
 	ModeSelection        = replaystats.ModeSelection
 	ModeLookup           = replaystats.ModeLookup
-	ModeTimelineLoader   = replaystats.ModeTimelineLoader
+	ModeLookupLoader     = replaystats.ModeLookupLoader
 	Filter               = replaystats.Filter
 	TravelMetrics        = replaystats.TravelMetrics
 	CarrierOpsMetrics    = replaystats.CarrierOpsMetrics

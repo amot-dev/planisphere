@@ -93,6 +93,9 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		sidebar.Duration = reference.Elapsed(sidebar.Start, sidebar.End)
 
 		expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
+		if filter.Enabled {
+			filter.ExpeditionID = expeditionID
+		}
 		expeditionSummary, computeError := app.timeRangeStats.Compute(expeditionRange, &filter)
 		if computeError != nil {
 			return sidebar, computeError

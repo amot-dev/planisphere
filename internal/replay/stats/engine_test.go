@@ -55,14 +55,14 @@ func TestCarrierJumpPassengerDistanceRespectsModeFilter(t *testing.T) {
 	if expModeID == 0 {
 		t.Fatalf("could not find Exploration mode in %v", modeList)
 	}
+	fallbackModeID := modes.DefaultFallbackModeID(conn)
 
-	if txError := db.WithTx(conn, func(tx *sql.Tx) error {
-		return modes.SetWindow(tx, 0, expModeID, "2026-01-18T19:20:00Z", "2026-01-18T20:00:00Z")
-	}); txError != nil {
-		t.Fatal(txError)
-	}
-
-	engine := newEngineWithModes(conn)
+	engine := newEngineWithModeLookup(conn, func(timestamp string) int64 {
+		if timestamp >= "2026-01-18T19:20:00Z" && timestamp < "2026-01-18T20:00:00Z" {
+			return expModeID
+		}
+		return fallbackModeID
+	})
 
 	// Seeded window starting after Location ("19:20:00Z") must still resolve previous StarPos ([0,0,0]) for CarrierJump.
 	unfiltered, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:20:00Z"}, nil)
@@ -121,17 +121,18 @@ func TestCarrierPassengerDistanceSpanningDifferentModes(t *testing.T) {
 	}
 	modeA := modeList[0].ID
 	modeB := modeList[1].ID
+	fallbackModeID := modes.DefaultFallbackModeID(conn)
 
-	if txError := db.WithTx(conn, func(tx *sql.Tx) error {
-		if windowError := modes.SetWindow(tx, 0, modeA, "2026-01-18T20:08:00Z", "2026-01-18T20:20:00Z"); windowError != nil {
-			return windowError
+	engine := newEngineWithModeLookup(conn, func(timestamp string) int64 {
+		switch {
+		case timestamp >= "2026-01-18T20:08:00Z" && timestamp < "2026-01-18T20:20:00Z":
+			return modeA
+		case timestamp >= "2026-01-18T20:20:00Z" && timestamp < "2026-01-18T20:40:00Z":
+			return modeB
+		default:
+			return fallbackModeID
 		}
-		return modes.SetWindow(tx, 0, modeB, "2026-01-18T20:20:00Z", "2026-01-18T20:40:00Z")
-	}); txError != nil {
-		t.Fatal(txError)
-	}
-
-	engine := newEngineWithModes(conn)
+	})
 	computeResult, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T20:00:00Z"}, &stats.Filter{
 		Enabled: true,
 		Modes: []stats.ModeSelection{
@@ -243,13 +244,14 @@ func TestComputeRecoversDisconnectedJumpsAcrossRangeAndFilter(testingContext *te
 		testingContext.Fatalf("expected default modes, got %v (%v)", modeList, listError)
 	}
 	explorationModeID := modeList[0].ID
-	if windowError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		return modes.SetWindow(transaction, 0, explorationModeID, "2026-11-17T01:10:00Z", "2026-11-17T02:00:00Z")
-	}); windowError != nil {
-		testingContext.Fatal(windowError)
-	}
+	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
 
-	engineInstance := newEngineWithModes(databaseConnection)
+	engineInstance := newEngineWithModeLookup(databaseConnection, func(timestamp string) int64 {
+		if timestamp >= "2026-11-17T01:10:00Z" && timestamp < "2026-11-17T02:00:00Z" {
+			return explorationModeID
+		}
+		return fallbackModeID
+	})
 
 	legMetrics, legError := engineInstance.ComputeTravel(stats.Range{After: "2026-11-17T01:05:00Z", Until: "2026-11-17T02:00:00Z"}, nil)
 	if legError != nil {
@@ -323,7 +325,14 @@ func TestComputeExobiologyChronologicalScanResolution(testingContext *testing.T)
 }
 
 func newEngineWithModes(queryer db.Queryer) *stats.Engine {
-	return stats.NewEngineWithSources(queryer, nil, nil, modes.LoadModeLookup)
+	fallbackModeID := modes.DefaultFallbackModeID(queryer)
+	return newEngineWithModeLookup(queryer, func(_ string) int64 { return fallbackModeID })
+}
+
+func newEngineWithModeLookup(queryer db.Queryer, lookup stats.ModeLookup) *stats.Engine {
+	return stats.NewEngineWithSources(queryer, nil, nil, func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
+		return lookup, nil
+	})
 }
 
 func expectedEfficientELWMapping(probesUsed int) (reference.ScanValue, reference.MappingIncrementBreakdown) {

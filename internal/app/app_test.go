@@ -360,7 +360,7 @@ func startExpeditionAtOrigin(testingContext *testing.T, targetApp *App, expediti
 	if updateError := targetApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &originSystemName}); updateError != nil {
 		testingContext.Fatalf("UpdateRow SystemName: %v", updateError)
 	}
-	if startError := targetApp.StartExpedition(expeditionID, "2026-01-01T00:00:00Z"); startError != nil {
+	if startError := targetApp.StartExpedition(expeditionID, "2026-01-01T00:00:00Z", 0); startError != nil {
 		testingContext.Fatalf("StartExpedition: %v", startError)
 	}
 	return originRowID
@@ -498,21 +498,21 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionBoundsChanged and AppModesChanged")
 	}
 
-	// AppModeWindowsChanged clears mode-filtered TimeRangeStats entries while preserving lifetime and carrier projections.
-	testApp.publishApp(0, events.AppModeWindowsChanged)
+	// AppExpeditionModesChanged clears mode-filtered TimeRangeStats entries while preserving lifetime and carrier projections.
+	testApp.publishApp(0, events.AppExpeditionModesChanged)
 
 	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+1 {
-		testingContext.Errorf("expected timeRangeStats generation %d after AppModeWindowsChanged, got %d",
+		testingContext.Errorf("expected timeRangeStats generation %d after AppExpeditionModesChanged, got %d",
 			initialTimeRangeGen+1, testApp.timeRangeStats.Generation())
 	}
 	if testApp.timeRangeStats.CachedCount() != 0 {
-		testingContext.Errorf("expected timeRangeStats cache to be empty after AppModeWindowsChanged, got %d", testApp.timeRangeStats.CachedCount())
+		testingContext.Errorf("expected timeRangeStats cache to be empty after AppExpeditionModesChanged, got %d", testApp.timeRangeStats.CachedCount())
 	}
 	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
-		testingContext.Errorf("expected carrierState to remain valid across AppModeWindowsChanged")
+		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionModesChanged")
 	}
 	if testApp.careerStats.Generation() != initialCareerGen || !testApp.careerStats.IsValid() {
-		testingContext.Errorf("expected careerStats to remain valid across AppModeWindowsChanged")
+		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionModesChanged")
 	}
 
 	// Re-warm timeRangeStats, then publish AppDatabaseSwitched to invalidate every projection.

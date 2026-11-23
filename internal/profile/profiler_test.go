@@ -77,7 +77,7 @@ func seedProfileTestDatabase(t *testing.T) string {
 		}
 		barnardName := "Barnards Star"
 		_, _ = expedition.UpdateRow(tx, expedition.RowPatch{ID: thirdRow.ID, SystemName: &barnardName})
-		return expedition.Start(tx, createdExp.ID, "2026-01-01T10:05:00Z")
+		return expedition.Start(tx, createdExp.ID, "2026-01-01T10:05:00Z", 0)
 	})
 
 	return dbPath

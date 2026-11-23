@@ -288,47 +288,7 @@ func buildFixtureModesState(database *sql.DB) (app.ModesState, error) {
 	if modesList == nil {
 		modesList = []modes.Mode{}
 	}
-	modesByID := make(map[int64]modes.Mode, len(modesList))
-	for _, modeItem := range modesList {
-		modesByID[modeItem.ID] = modeItem
-	}
-
-	state := app.ModesState{
-		Modes:   modesList,
-		Windows: []app.ModeWindowView{},
-	}
-	activeWindow, activeError := modes.Active(database)
-	if activeError != nil {
-		return app.ModesState{}, activeError
-	}
-	if activeWindow != nil {
-		state.ActiveModeID = activeWindow.ModeID
-		state.ActiveSince = activeWindow.Start
-		state.ActiveSinceGalactic = reference.ToGalactic(activeWindow.Start)
-	} else {
-		state.ActiveModeID = modes.DefaultFallbackModeID(database)
-	}
-
-	windowsList, windowsError := modes.ListWindows(database)
-	if windowsError != nil {
-		return app.ModesState{}, windowsError
-	}
-	for windowIndex := len(windowsList) - 1; windowIndex >= 0; windowIndex-- {
-		windowItem := windowsList[windowIndex]
-		modeItem := modesByID[windowItem.ModeID]
-		state.Windows = append(state.Windows, app.ModeWindowView{
-			ID:            windowItem.ID,
-			ModeID:        windowItem.ModeID,
-			ModeName:      modeItem.Name,
-			Color:         modeItem.Color,
-			Start:         windowItem.Start,
-			End:           windowItem.End,
-			StartGalactic: reference.ToGalactic(windowItem.Start),
-			EndGalactic:   reference.ToGalactic(windowItem.End),
-			Duration:      reference.Elapsed(windowItem.Start, windowItem.End),
-		})
-	}
-	return state, nil
+	return app.ModesState{Modes: modesList}, nil
 }
 
 func loadFixtureVisitedDetails(

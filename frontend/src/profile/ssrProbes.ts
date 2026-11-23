@@ -51,13 +51,13 @@ export function executeHydrationPass(parsedFixture: LiveFrontendFixture): {
   const hydratedSidebar = app.SidebarStats.createFrom(parsedFixture.sidebarStats)
   const hydratedModesState = parsedFixture.modesState
     ? app.ModesState.createFrom(parsedFixture.modesState)
-    : app.ModesState.createFrom({ modes: parsedFixture.modes ?? [], windows: [] })
+    : app.ModesState.createFrom({ modes: parsedFixture.modes ?? [] })
   children.push(
     makeRenderSpan(
       'app.SidebarStats + ModesState.createFrom',
       'frontend/wailsjs/go/models.ts',
       2,
-      1 + (hydratedModesState.windows?.length ?? 0),
+      1 + (hydratedModesState.modes?.length ?? 0),
       'models',
       msToNs(performance.now() - t1),
     ),
@@ -187,7 +187,6 @@ function renderSidebarBothScopesHTML(hydrated: HydratedFrontendFixture): string 
       collapsed: false,
       carrierRouteOpen: false,
       onFilterChange: noop,
-      onQuickSwitchMode: noop,
     }),
   )
   const allTimeHTML = renderToString(

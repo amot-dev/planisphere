@@ -16,13 +16,14 @@ describe('StatsSidebar', () => {
           modesState: null,
           filter: emptyFilter,
           onFilterChange: () => {},
-          onQuickSwitchMode: () => {},
           onLogCarrierJump: () => {},
           ...overrides,
         }),
       )
 
     expect(renderStatsSidebar()).not.toContain('LOG JUMP')
+    expect(renderStatsSidebar()).not.toContain('Flight Mode')
+    expect(renderStatsSidebar()).toContain('Telemetry Filter')
 
     const planningHtml = renderStatsSidebar({
       sidebarStats: app.SidebarStats.createFrom({ expeditionId: 1, status: 'planning' }),

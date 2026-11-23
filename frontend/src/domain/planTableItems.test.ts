@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { expedition } from '../api/models'
 import {
   buildOptimisticDeletedRowPlan,
+  buildOptimisticExpeditionModePlan,
   buildOptimisticFcArrivedPlan,
   buildOptimisticFcStopTogglePlan,
   buildOptimisticLegModePlan,
@@ -101,6 +102,38 @@ describe('planOptimisticReducers structural sharing', () => {
     expect(legModePlan.rows[2]).toBe(initialPlan.rows[2])
     expect(legModePlan.rows[1].row).toBe(initialPlan.rows[1].row)
     expect(legModePlan.rows[1].legModeColor).toBe('#00E5A3')
+    expect(legModePlan.expedition).toBe(initialPlan.expedition)
+
+    // Updating the active current leg syncs expedition.activeModeId; updating expedition mode updates current leg.
+    const currentLegModePlan = buildOptimisticLegModePlan(initialPlan, 12, 2)
+    expect(currentLegModePlan.expedition.activeModeId).toBe(2)
+    expect(currentLegModePlan.rows[2].legModeId).toBe(2)
+    expect(currentLegModePlan.rows[1]).toBe(initialPlan.rows[1])
+
+    const expeditionModePlan = buildOptimisticExpeditionModePlan(initialPlan, 2)
+    expect(expeditionModePlan.expedition.activeModeId).toBe(2)
+    expect(expeditionModePlan.rows[2].legModeId).toBe(2)
+    expect(expeditionModePlan.rows[2].legModeColor).toBe('#00E5A3')
+    expect(expeditionModePlan.rows[1]).toBe(initialPlan.rows[1])
+    expect(expeditionModePlan.rows[3]).toBe(initialPlan.rows[3])
+
+    // Cascade forward updates visited legs from the target onward while leaving active current leg and activeModeId untouched.
+    const multiVisitedPlan = expedition.PlanView.createFrom({
+      expedition: { id: 7, name: 'Cascade Check', status: 'active', activeModeId: 1 },
+      rows: [
+        { row: { id: 21, rowType: 'waypoint', systemName: 'Sol' }, number: 1, visitState: 'visited' },
+        { row: { id: 22, rowType: 'waypoint', systemName: 'Alpha' }, number: 2, legModeId: 1, visitState: 'visited' },
+        { row: { id: 23, rowType: 'waypoint', systemName: 'Beta' }, number: 3, legModeId: 1, visitState: 'visited' },
+        { row: { id: 24, rowType: 'waypoint', systemName: 'Gamma' }, number: 4, legModeId: 1, visitState: 'current' },
+      ],
+      modes: [{ id: 2, name: 'Exobiology', color: '#00E5A3', description: '', isDefault: false, sortOrder: 2 }],
+    })
+    const cascadedPlan = buildOptimisticLegModePlan(multiVisitedPlan, 22, 2, true)
+    expect(cascadedPlan.rows[0]).toBe(multiVisitedPlan.rows[0])
+    expect(cascadedPlan.rows[1].legModeId).toBe(2)
+    expect(cascadedPlan.rows[2].legModeId).toBe(2)
+    expect(cascadedPlan.rows[3]).toBe(multiVisitedPlan.rows[3])
+    expect(cascadedPlan.expedition).toBe(multiVisitedPlan.expedition)
 
     // Deleting row 12 preserves rows before index 2 and only renumbers subsequent waypoints.
     const deletedPlan = buildOptimisticDeletedRowPlan(initialPlan, 12)

@@ -44,6 +44,8 @@ export function GetCarrierLastLocation():Promise<string>;
 
 export function GetIngestStatus():Promise<app.IngestStatus>;
 
+export function GetModeUsage(arg1:number):Promise<Array<modes.ExpeditionUsage>>;
+
 export function GetModesState():Promise<app.ModesState>;
 
 export function GetPlan(arg1:number):Promise<expedition.PlanView>;
@@ -88,13 +90,15 @@ export function SetCommanderEnabled(arg1:string,arg2:boolean):Promise<app.Settin
 
 export function SetDatabasePath(arg1:string):Promise<app.Settings>;
 
+export function SetExpeditionFlightMode(arg1:number,arg2:number):Promise<void>;
+
 export function SetExternalLinks(arg1:string,arg2:string,arg3:string):Promise<app.Settings>;
 
 export function SetJournalDebounceMs(arg1:number):Promise<app.Settings>;
 
 export function SetJournalDir(arg1:string):Promise<app.Settings>;
 
-export function SetLegMode(arg1:number,arg2:number):Promise<void>;
+export function SetLegMode(arg1:number,arg2:number,arg3:boolean):Promise<void>;
 
 export function SetLiveSyncPaused(arg1:boolean):Promise<void>;
 
@@ -104,9 +108,7 @@ export function SetTritiumPricePerTonne(arg1:number):Promise<app.Settings>;
 
 export function SetupConfigureJournals(arg1:string):Promise<app.IngestStatus>;
 
-export function StartExpedition(arg1:number,arg2:string):Promise<void>;
-
-export function SwitchMode(arg1:number):Promise<app.ModesState>;
+export function StartExpedition(arg1:number,arg2:string,arg3:number):Promise<void>;
 
 export function UpdateExpedition(arg1:number,arg2:string,arg3:string):Promise<void>;
 

@@ -19,7 +19,6 @@ import (
 	"planisphere/internal/projections/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
-	"planisphere/internal/store/modes"
 )
 
 type profileProjections struct {
@@ -49,7 +48,7 @@ func newProfileProjections(database *sql.DB) *profileProjections {
 		carrierState:   projections.NewCarrierState(database, bus),
 		salesLedger:    salesLedger,
 		careerStats:    stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
-		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps, modes.LoadModeLookup),
+		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
 	}
 }
 

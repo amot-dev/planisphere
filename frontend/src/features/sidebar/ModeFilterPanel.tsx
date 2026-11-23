@@ -3,30 +3,26 @@ import { SquareCheckbox } from '../../components/ui/SquareCheckbox'
 
 /**
  * ModeFilterPanelProps defines the flight modes state, telemetry filter, and
- * mode-switching / collapse callbacks for the top panel of the telemetry sidebar.
+ * collapse callback for the top panel of the telemetry sidebar.
  */
 export interface ModeFilterPanelProps {
   modesState: app.ModesState | null
   filter: stats.Filter
   onFilterChange: (nextFilter: stats.Filter) => void
-  onQuickSwitchMode: (modeId: number) => void
   onToggleCollapse?: () => void
 }
 
 /**
- * ModeFilterPanel renders the active flight mode selector and tri-state
- * telemetry mode filter checkboxes (All Data, Scans Only, Off).
+ * ModeFilterPanel renders the tri-state telemetry mode filter checkboxes
+ * (All Data, Scans Only, Off) and the sidebar collapse button.
  */
 export function ModeFilterPanel({
   modesState,
   filter,
   onFilterChange,
-  onQuickSwitchMode,
   onToggleCollapse,
 }: ModeFilterPanelProps) {
   const modeList: modes.Mode[] = modesState?.modes ?? []
-  const travelMode = modeList.find((modeItem) => modeItem.name.toLowerCase() === 'travel')
-  const activeModeId = modesState?.activeModeId || travelMode?.id || modeList[0]?.id || 0
 
   function getSelection(modeId: number): stats.ModeSelection {
     const found = filter.modes?.find((modeSelection) => modeSelection.modeId === modeId)
@@ -80,51 +76,34 @@ export function ModeFilterPanel({
 
   return (
     <div className="p-3 border-b border-ed-border bg-ed-card space-y-2">
-      {/* Live Mode Quick Switcher */}
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted shrink-0">
-          Flight Mode
-        </span>
-        <select
-          value={activeModeId}
-          onChange={(event) => onQuickSwitchMode(Number(event.target.value))}
-          title="Current flight mode (logs newly recorded jumps and scans to this flight mode)"
-          className="flex-1 bg-ed-void border border-ed-border-strong border-l-2 border-l-ed-amber px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-ed-text-main focus:border-ed-amber focus:outline-none cursor-pointer"
-        >
-          {modeList.map((mode) => (
-            <option key={mode.id} value={mode.id} className="bg-ed-panel text-ed-text-main">
-              {mode.name}
-            </option>
-          ))}
-        </select>
-        {onToggleCollapse && (
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            title="Collapse Telemetry Sidebar"
-            className="h-[26px] w-[26px] flex items-center justify-center text-ed-text-muted hover:text-ed-amber bg-ed-header border border-ed-border hover:bg-ed-hover cursor-pointer shrink-0"
-          >
-            <span>◀</span>
-          </button>
-        )}
-      </div>
-
       {/* Mode Filter Checkboxes (Tri-state: All -> Scans Only -> Off) */}
-      <div className="space-y-1.5 pt-1.5 border-t border-ed-border-dim">
-        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
-          <span title="Filter sidebar metrics by which flight mode was active when events were logged">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
+          <span title="Filter expedition sidebar metrics by each leg's flight mode">
             Telemetry Filter
           </span>
-          {filter.enabled && (
-            <button
-              type="button"
-              onClick={resetAllModes}
-              className="text-ed-amber hover:underline cursor-pointer"
-              title="Include all flight modes in sidebar metrics"
-            >
-              [Reset]
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {filter.enabled && (
+              <button
+                type="button"
+                onClick={resetAllModes}
+                className="text-ed-amber hover:underline cursor-pointer"
+                title="Include all flight modes in sidebar metrics"
+              >
+                [Reset]
+              </button>
+            )}
+            {onToggleCollapse && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                title="Collapse Telemetry Sidebar"
+                className="h-[26px] w-[26px] flex items-center justify-center text-ed-text-muted hover:text-ed-amber bg-ed-header border border-ed-border hover:bg-ed-hover cursor-pointer shrink-0"
+              >
+                <span>◀</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-1.5">
@@ -184,4 +163,3 @@ export function ModeFilterPanel({
     </div>
   )
 }
-

@@ -37,7 +37,6 @@ export default function App() {
     isClockSuspended,
     handleToggleSyncPause,
     handleSelectExpedition,
-    handleQuickSwitchMode,
     refreshAll,
     handleRefreshPlan,
     refreshSettings,
@@ -117,7 +116,6 @@ export default function App() {
             carrierRouteOpen={carrierRouteOpen}
             clockSuspended={isClockSuspended}
             onFilterChange={setFilter}
-            onQuickSwitchMode={handleQuickSwitchMode}
             onToggleCollapse={toggleSidebarCollapsed}
             onLogCarrierJump={handleLogCarrierJump}
           />
@@ -144,6 +142,8 @@ export default function App() {
       {activeModal === 'start' && activeExpeditionId > 0 && (
         <StartExpeditionModal
           expeditionId={activeExpeditionId}
+          modesList={plan?.modes ?? modesState?.modes ?? []}
+          initialModeId={plan?.expedition?.activeModeId ?? 0}
           onClose={() => setActiveModal(null)}
         />
       )}

@@ -244,7 +244,6 @@ export function hydrateFrontendFixture(parsedFixture: LiveFrontendFixture): Hydr
         modes: (Array.isArray(parsedFixture.modes) ? parsedFixture.modes : []).map((item) =>
           modes.Mode.createFrom(item),
         ),
-        windows: [],
       })
   const modesList = modesState.modes?.length ? modesState.modes : (plan.modes ?? [])
 

@@ -26,7 +26,7 @@ type RecoveredJumpsSource interface {
 type Engine struct {
 	DB             db.Queryer
 	Odyssey        bool
-	ModeLoader     ModeTimelineLoader
+	ModeLoader     ModeLookupLoader
 	salesLedger    LedgerSource
 	recoveredJumps RecoveredJumpsSource
 }
@@ -41,7 +41,7 @@ func NewEngineWithSources(
 	queryer db.Queryer,
 	salesLedger LedgerSource,
 	recoveredJumps RecoveredJumpsSource,
-	modeLoader ModeTimelineLoader,
+	modeLoader ModeLookupLoader,
 ) *Engine {
 	return &Engine{
 		DB:             queryer,

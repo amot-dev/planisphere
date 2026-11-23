@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
-	"planisphere/internal/store/modes"
 )
 
 // Row types.
@@ -637,79 +635,6 @@ func MoveRowTx(dbConn *sql.DB, rowID int64, toIndex int) (int64, error) {
 		var moveError error
 		expeditionID, moveError = MoveRow(transaction, rowID, toIndex)
 		return moveError
-	})
-	return expeditionID, txError
-}
-
-// addOneSecond shifts an ISO timestamp forward by one second. Leg telemetry
-// uses half-open arrival intervals (prevVisit, rowVisit], whereas modes.SetWindow
-// stores half-open [StartsAt, EndsAt) intervals at 1-second resolution; shifting
-// both bounds maps (prevVisit, rowVisit] onto [prevVisit+1s, rowVisit+1s) and
-// (latestVisit, +inf) onto [latestVisit+1s, "") so arrival-second events stay in the arriving leg.
-func addOneSecond(isoTimestamp string) string {
-	parsedTime, parseError := reference.ParseISO(isoTimestamp)
-	if parseError != nil {
-		return isoTimestamp
-	}
-	return parsedTime.Add(time.Second).UTC().Format("2006-01-02T15:04:05Z")
-}
-
-// SetLegMode updates the single mode assigned to the leg arriving at rowID.
-// When the waypoint has been visited (after a previous visited waypoint), it
-// updates the closed time window (prevVisit, rowVisit] in mode_windows; when
-// the waypoint is the active in-progress leg, it updates the open-ended window
-// (latestVisit, +inf) so filtered expedition and all-time stats immediately
-// reflect the change.
-func SetLegMode(transaction *sql.Tx, rowID int64, modeID int64) (int64, error) {
-	targetRow, rowError := GetRow(transaction, rowID)
-	if rowError != nil {
-		return 0, rowError
-	}
-	rows, listError := ListRows(transaction, targetRow.ExpeditionID)
-	if listError != nil {
-		return targetRow.ExpeditionID, listError
-	}
-	if targetRow.VisitedAt != "" {
-		if _, updateError := UpdateRow(transaction, RowPatch{ID: rowID, LegModeID: &modeID}); updateError != nil {
-			return 0, updateError
-		}
-		previousTimestamp := ""
-		for _, candidateRow := range rows {
-			if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt < targetRow.VisitedAt && candidateRow.VisitedAt > previousTimestamp {
-				previousTimestamp = candidateRow.VisitedAt
-			}
-		}
-		if previousTimestamp != "" {
-			startISO := addOneSecond(previousTimestamp)
-			endISO := addOneSecond(targetRow.VisitedAt)
-			if endISO > startISO {
-				if windowError := modes.SetWindow(transaction, 0, modeID, startISO, endISO); windowError != nil {
-					return targetRow.ExpeditionID, windowError
-				}
-			}
-		}
-		return targetRow.ExpeditionID, nil
-	}
-
-	latestTimestamp := ""
-	for _, candidateRow := range rows {
-		if candidateRow.IsWaypoint() && candidateRow.VisitedAt != "" && candidateRow.VisitedAt > latestTimestamp {
-			latestTimestamp = candidateRow.VisitedAt
-		}
-	}
-	if latestTimestamp != "" {
-		return targetRow.ExpeditionID, modes.SetWindow(transaction, 0, modeID, addOneSecond(latestTimestamp), "")
-	}
-	return targetRow.ExpeditionID, modes.Switch(transaction, modeID, "")
-}
-
-// SetLegModeTx runs SetLegMode inside a database transaction on dbConn.
-func SetLegModeTx(dbConn *sql.DB, rowID int64, modeID int64) (int64, error) {
-	var expeditionID int64
-	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		var setError error
-		expeditionID, setError = SetLegMode(transaction, rowID, modeID)
-		return setError
 	})
 	return expeditionID, txError
 }

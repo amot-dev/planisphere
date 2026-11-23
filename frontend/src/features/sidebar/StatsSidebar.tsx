@@ -18,7 +18,6 @@ export interface StatsSidebarProps {
   carrierRouteOpen?: boolean
   clockSuspended?: boolean
   onFilterChange: (next: stats.Filter) => void
-  onQuickSwitchMode: (modeId: number) => void
   onToggleCollapse?: () => void
   onLogCarrierJump?: () => void
 }
@@ -36,7 +35,6 @@ export const StatsSidebar = memo(function StatsSidebar({
   carrierRouteOpen = false,
   clockSuspended = false,
   onFilterChange,
-  onQuickSwitchMode,
   onToggleCollapse,
   onLogCarrierJump,
 }: StatsSidebarProps) {
@@ -87,7 +85,6 @@ export const StatsSidebar = memo(function StatsSidebar({
         modesState={modesState}
         filter={filter}
         onFilterChange={onFilterChange}
-        onQuickSwitchMode={onQuickSwitchMode}
         onToggleCollapse={onToggleCollapse}
       />
 

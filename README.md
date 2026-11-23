@@ -23,12 +23,12 @@ That's where Planisphere comes in.
 ## Features
 
 ### Flight Modes
-When an expedition spans months, you don't always fly the same way. Flight Modes let you isolate your stats depending on what you're doing in the cockpit.
+When an expedition spans months, you don't always fly the same way. Flight Modes let you isolate your stats per expedition leg depending on what you're doing in the cockpit.
 
-- **Separate Travel Profiles:** Switch modes when you take a high-speed detour back to the Bubble so neutron highway jumps don't skew your expedition's average jump range or distance totals.
-- **Partial Filtering:** Toggle any mode in the sidebar between full inclusion, scan-only inclusion, or complete exclusion. Scan-only mode lets cartography and exobiology discoveries count toward your wallet while keeping travel mileage isolated.
-- **Per-Leg Tracking:** Assign flight modes to individual expedition legs to record how you travelled between each stop. Leg flight modes can always be changed later, even after a waypoint has been visited.
-- **Custom Flight Modes:** Create your own flight modes in Config with custom names, descriptions, and colour tags.
+- **Per-Expedition Leg Modes:** Each expedition tracks its own active flight mode in the planner header (defaulting to `Travel` on creation and hidden once completed) and stamps each visited leg independently so overlapping expeditions never interfere with one another. Switch modes when you take a high-speed detour back to the Bubble so neutron highway jumps don't skew your expedition's average jump range or distance totals.
+- **Partial Filtering:** Toggle any mode in the sidebar Telemetry Filter between full inclusion, scan-only inclusion, or complete exclusion. Scan-only mode lets cartography and exobiology discoveries count toward your wallet while keeping travel mileage isolated.
+- **Per-Leg and Cascade Editing:** Reassign flight modes on any individual visited or in-progress leg from its telemetry drawer, or apply a flight mode from any visited leg onward across all subsequent visited legs to reclassify multi-phase routes in a few clicks without changing your active flight mode.
+- **Custom Flight Modes:** Create your own flight modes in Config with custom names, descriptions, and colour tags. Deleting a custom mode prompts for confirmation with a breakdown of affected expeditions and leg counts before reassigning them back to `Travel`.
 
 ### Expedition Planning
 Plan your route stop by stop without juggling external spreadsheets.
@@ -37,7 +37,7 @@ Plan your route stop by stop without juggling external spreadsheets.
 - **Waypoints and Region Headers:** Build your expedition with system names, coordinates, and personal notes, and organize stops with Region Headers that automatically suggest the region matching your next waypoint and prioritize adjacent regions.
 - **Coordinate Resolution and Visit History:** Waypoint coordinates resolve from your local journal history first and fall back to EDSM for unvisited systems. The status indicator shows the system's galactic region, coordinates, and how many times you have visited it (`Never Visited` via EDSM or visit count via Journal), automatically switching from EDSM to Journal and incrementing your visit count when you jump into the system.
 - **Built-in POI Catalog and External Links:** Systems matching EDAstro's Galactic Exploration Catalog (GEC) and Galactic Mapping Project (GMP) are flagged automatically alongside configurable one-click waypoint links to Inara, EDSM (defaulting to `If No GEC`), and GEC.
-- **Flexible Expedition Start:** Engage an expedition from a recorded historical visit to Waypoint #1 (retroactively replaying all subsequent journal events across your route) or enter a custom Galactic Standard Time timestamp. Complete an expedition to lock its end timestamp to your final visited waypoint's arrival, or reopen it if you closed it early by mistake.
+- **Flexible Expedition Start:** Engage an expedition from a recorded historical visit to Waypoint #1 and choose the starting flight mode applied to any already-visited systems and live flight (retroactively replaying all subsequent journal events across your route). Complete an expedition to lock its end timestamp to your final visited waypoint's arrival, or reopen it if you closed it early by mistake.
 - **Sequential Automatic Progression:** Planisphere watches your journal in the background. When you jump into the immediate next planned destination system, that waypoint is marked visited and the planner advances to the next leg, updating remaining distance to the next stop and total remaining route mileage in real time.
 - **Chronologically Bounded Route Editing:** Reorder, insert, or remove waypoints on the fly during an active expedition, slotting missed historical stops into matching journal arrival windows or moving stops back into the unvisited route plan.
 - **Per-Leg Telemetry Drawer:** Expand any visited waypoint or the active next waypoint to inspect that leg's elapsed duration, vessels jumped, distance split between ship FSD and carrier passenger travel, hyperspace jumps, scans, and leg-specific estimated vs. realized earnings. Expanding Waypoint #1 displays your pre-expedition historical baseline.

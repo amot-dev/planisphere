@@ -1,28 +1,31 @@
 import { CompleteExpedition, ReopenExpedition } from '../../api/backend'
 import { expedition } from '../../api/models'
 import { formatLy } from '../../domain/galacticTime'
-import { StatusBadge } from './table/widgets/StatusBadge'
+import { LegModeDropdown } from './table/widgets/LegModeDropdown'
 
 /**
  * PlannerHeaderBarProps defines the active expedition plan, carrier plotter
- * open state, and lifecycle action callbacks for the top bar of the planner.
+ * open state, flight mode handler, and lifecycle action callbacks for the top bar of the planner.
  */
 export interface PlannerHeaderBarProps {
   plan: expedition.PlanView
   hasOriginWaypointSystem: boolean
   carrierRouteOpen?: boolean
+  onChangeActiveMode?: (modeId: number) => void
   onOpenStartModal: () => void
   onLifecycleAction: (label: string, actionFunction: () => Promise<void>) => Promise<void>
 }
 
 /**
- * PlannerHeaderBar renders the expedition status badge, title, waypoint progress,
- * planned/covered/remaining distance strip, and Engage / Complete / Reopen buttons.
+ * PlannerHeaderBar renders the expedition title, status-styled waypoint count badge,
+ * per-expedition flight mode selector (hidden when completed), planned/covered/remaining
+ * distance strip, and Engage / Complete / Reopen buttons.
  */
 export function PlannerHeaderBar({
   plan,
   hasOriginWaypointSystem,
   carrierRouteOpen = false,
+  onChangeActiveMode,
   onOpenStartModal,
   onLifecycleAction,
 }: PlannerHeaderBarProps) {
@@ -32,6 +35,11 @@ export function PlannerHeaderBar({
   const isCompleted = currentExpedition.status === 'completed'
   const canComplete = (plan.visitedWaypointCount ?? 0) >= 2
   const completeDisabled = !canComplete || Boolean(carrierRouteOpen)
+
+  const modesList = plan.modes ?? []
+  const travelMode = modesList.find((modeItem) => modeItem.name.toLowerCase() === 'travel')
+  const activeModeId = currentExpedition.activeModeId || travelMode?.id || modesList[0]?.id || 0
+  const activeMode = modesList.find((modeItem) => modeItem.id === activeModeId) ?? modesList[0]
 
   const coveredLy =
     plan.coveredLy ??
@@ -44,18 +52,40 @@ export function PlannerHeaderBar({
     0
   const completedLy = coveredLy > 0 ? coveredLy : plan.plannedLy
 
+  const waypointCount = plan.waypointCount ?? 0
+  const visitedWaypointCount = plan.visitedWaypointCount ?? 0
+
   return (
     <div className="px-5 py-3 bg-ed-card-alt border-b border-ed-border flex flex-wrap items-center justify-between gap-4">
       <div className="flex flex-wrap items-center gap-3.5">
-        <StatusBadge status={currentExpedition.status} />
         <div className="border-l-2 border-ed-amber/60 pl-3">
           <div className="flex items-center gap-2.5">
             <h2 className="text-base font-extrabold uppercase tracking-[0.1em] text-ed-text-main">
               {currentExpedition.name}
             </h2>
-            <span className="text-[11px] font-mono-tabular px-2 py-0.5 bg-ed-control border border-ed-border text-ed-amber">
-              {plan.visitedWaypointCount} / {plan.waypointCount} WAYPOINTS VISITED
-            </span>
+            {isActive ? (
+              <span
+                title="Active expedition"
+                className="inline-flex items-center gap-1.5 text-[11px] font-mono-tabular font-extrabold uppercase tracking-wider px-2 py-0.5 bg-ed-amber-tint border border-ed-amber border-l-3 text-ed-amber"
+              >
+                <span className="w-1.5 h-1.5 bg-ed-amber animate-pulse" />
+                {`${visitedWaypointCount} / ${waypointCount} WAYPOINTS VISITED`}
+              </span>
+            ) : isCompleted ? (
+              <span
+                title="Completed expedition"
+                className="inline-flex items-center text-[11px] font-mono-tabular font-extrabold uppercase tracking-wider px-2 py-0.5 bg-ed-cyan-tint border border-ed-cyan border-l-3 text-ed-cyan"
+              >
+                {`${visitedWaypointCount} ${visitedWaypointCount === 1 ? 'WAYPOINT' : 'WAYPOINTS'} VISITED`}
+              </span>
+            ) : (
+              <span
+                title="Planning phase"
+                className="inline-flex items-center text-[11px] font-mono-tabular font-extrabold uppercase tracking-wider px-2 py-0.5 bg-ed-control border border-ed-border-strong border-l-3 border-l-ed-cyan text-ed-text-main"
+              >
+                {`${waypointCount} ${waypointCount === 1 ? 'WAYPOINT' : 'WAYPOINTS'} PLANNED`}
+              </span>
+            )}
           </div>
           {currentExpedition.description && (
             <p className="text-xs text-ed-text-muted mt-0.5">{currentExpedition.description}</p>
@@ -64,6 +94,22 @@ export function PlannerHeaderBar({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
+        {/* Per-expedition Flight Mode switcher (planning and active only) */}
+        {!isCompleted && modesList.length > 0 && (
+          <LegModeDropdown
+            variant="header"
+            modeId={activeModeId}
+            modeColor={activeMode?.color}
+            modesList={modesList}
+            title={
+              isPlanning
+                ? 'Default flight mode for this expedition when engaged'
+                : 'Flight mode for the current in-progress leg and upcoming visits'
+            }
+            onChangeMode={(nextModeId) => onChangeActiveMode?.(nextModeId)}
+          />
+        )}
+
         {/* Route distance readout */}
         <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 border border-ed-border border-l-2 border-l-ed-amber bg-ed-rail text-xs">
           {isCompleted ? (
@@ -170,4 +216,3 @@ export function PlannerHeaderBar({
     </div>
   )
 }
-

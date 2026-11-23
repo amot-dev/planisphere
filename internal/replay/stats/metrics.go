@@ -271,14 +271,15 @@ type ModeSelection struct {
 // ModeLookup resolves the active Flight Mode ID at a given ISO-8601 timestamp.
 type ModeLookup = func(timestamp string) int64
 
-// ModeTimelineLoader loads a ModeLookup closure for querying mode filters against queryer.
-type ModeTimelineLoader = func(queryer db.Queryer) (ModeLookup, error)
+// ModeLookupLoader loads a ModeLookup closure scoped to expeditionID against queryer.
+type ModeLookupLoader = func(queryer db.Queryer, expeditionID int64) (ModeLookup, error)
 
 // Filter restricts metrics to events that occurred while selected modes were
 // active. A nil Filter (or Enabled == false) includes everything.
 type Filter struct {
-	Enabled bool            `json:"enabled"`
-	Modes   []ModeSelection `json:"modes"`
+	Enabled      bool            `json:"enabled"`
+	ExpeditionID int64           `json:"expeditionId,omitempty"`
+	Modes        []ModeSelection `json:"modes"`
 }
 
 type filterSets struct {
@@ -286,14 +287,14 @@ type filterSets struct {
 	modeLookup        ModeLookup
 }
 
-func (filter *Filter) prepare(queryer db.Queryer, modeLoader ModeTimelineLoader) (*filterSets, error) {
+func (filter *Filter) prepare(queryer db.Queryer, modeLoader ModeLookupLoader) (*filterSets, error) {
 	if filter == nil || !filter.Enabled {
 		return nil, nil
 	}
 	if modeLoader == nil {
-		return nil, errors.New("mode timeline loader is required when mode filter is enabled")
+		return nil, errors.New("mode lookup loader is required when mode filter is enabled")
 	}
-	lookup, loadError := modeLoader(queryer)
+	lookup, loadError := modeLoader(queryer, filter.ExpeditionID)
 	if loadError != nil {
 		return nil, loadError
 	}
