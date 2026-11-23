@@ -1,7 +1,7 @@
 import { expedition, realization, stats } from '../../api/models'
 
 /**
- * ExportTelemetrySnapshot mirrors Go export.TelemetrySnapshot for canonical JSON payloads.
+ * ExportTelemetrySnapshot mirrors Go exporter.TelemetrySnapshot for canonical JSON payloads.
  */
 export interface ExportTelemetrySnapshot {
   metrics: stats.Metrics
@@ -9,7 +9,7 @@ export interface ExportTelemetrySnapshot {
 }
 
 /**
- * ExportCarrierCost mirrors Go export.CarrierCost for expedition carrier cost readouts.
+ * ExportCarrierCost mirrors Go expedition.CarrierCost for expedition carrier cost readouts.
  */
 export interface ExportCarrierCost {
   carrierType: string
@@ -34,7 +34,7 @@ export interface ExportModeBucket {
 }
 
 /**
- * ExpeditionExportData mirrors the canonical Go export.ExpeditionExport payload.
+ * ExpeditionExportData mirrors the canonical Go exporter.ExpeditionExport payload.
  */
 export interface ExpeditionExportData {
   schemaVersion: number
@@ -64,7 +64,7 @@ export interface ExpeditionExportData {
 }
 
 /**
- * ExportBundleFile matches Go export.BundleFile for single-file and zip exports.
+ * ExportBundleFile matches Go exporter.BundleFile for single-file and zip exports.
  */
 export interface ExportBundleFile {
   name: string
