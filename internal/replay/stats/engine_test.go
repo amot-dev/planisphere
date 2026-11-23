@@ -366,3 +366,59 @@ func TestComputeExcludesPlanetaryRingMappings(testingContext *testing.T) {
 			computedMetrics.BodiesMapped, computedMetrics.EfficientMappings, computedMetrics.FirstMapped, computedMetrics.ScanValueTotal, expectedTotal)
 	}
 }
+
+func TestTravelMulticrewDoesNotPolluteCarrierJumpBaseline(testingContext *testing.T) {
+	testingContext.Run("in-window multicrew arrivals leave baseline intact while taxi updates it", func(subTest *testing.T) {
+		journalLines := []string{
+			`{"timestamp":"2026-08-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+			`{"timestamp":"2026-08-01T10:10:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":1002,"StarPos":[9000,0,0],"Multicrew":true}`,
+			`{"timestamp":"2026-08-01T10:20:00Z","event":"CarrierJump","StarSystem":"CarrierLeg1","SystemAddress":1003,"StarPos":[100,0,0]}`,
+			`{"timestamp":"2026-08-01T10:30:00Z","event":"FSDJump","StarSystem":"Sagittarius A*","SystemAddress":1004,"StarPos":[0,9000,0],"JumpDist":50.0,"Multicrew":true}`,
+			`{"timestamp":"2026-08-01T10:40:00Z","event":"CarrierJump","StarSystem":"CarrierLeg2","SystemAddress":1005,"StarPos":[120,0,0]}`,
+			`{"timestamp":"2026-08-01T10:50:00Z","event":"FSDJump","StarSystem":"ShuttleStop","SystemAddress":1006,"StarPos":[150,0,0],"JumpDist":30.0,"Taxi":true}`,
+			`{"timestamp":"2026-08-01T11:00:00Z","event":"CarrierJump","StarSystem":"CarrierLeg3","SystemAddress":1007,"StarPos":[200,0,0]}`,
+		}
+		databaseConnection := seedStatsDBFromLines(subTest, journalLines)
+		engineInstance := newEngineWithModes(databaseConnection)
+
+		travelMetrics, computeError := engineInstance.ComputeTravel(stats.Range{After: "2026-08-01T09:50:00Z"}, nil)
+		if computeError != nil {
+			subTest.Fatalf("ComputeTravel failed: %v", computeError)
+		}
+		if travelMetrics.Jumps != 0 || travelMetrics.ShipDistanceLy != 0 {
+			subTest.Fatalf("expected zero piloted jumps and ship distance, got %+v", travelMetrics)
+		}
+		if travelMetrics.CarrierPassengerLy != 170.0 || travelMetrics.DistanceLy != 170.0 {
+			subTest.Fatalf("expected CarrierPassengerLy=170.0 and DistanceLy=170.0, got %+v", travelMetrics)
+		}
+	})
+
+	testingContext.Run("pre-window baseline lookup skips multicrew arrivals", func(subTest *testing.T) {
+		journalLines := []string{
+			`{"timestamp":"2026-08-02T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":2001,"StarPos":[0,0,0]}`,
+			`{"timestamp":"2026-08-02T10:10:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[5000,0,0],"Multicrew":true}`,
+			`{"timestamp":"2026-08-02T10:20:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":2003,"StarPos":[8000,0,0],"JumpDist":25.0,"Multicrew":true}`,
+			`{"timestamp":"2026-08-02T10:40:00Z","event":"CarrierJump","StarSystem":"CarrierDest","SystemAddress":2004,"StarPos":[100,0,0]}`,
+		}
+		databaseConnection := seedStatsDBFromLines(subTest, journalLines)
+		engineInstance := newEngineWithModes(databaseConnection)
+
+		// Window starting after both multicrew arrivals tests skipping Multicrew FSDJump first.
+		afterBothMetrics, afterBothError := engineInstance.ComputeTravel(stats.Range{After: "2026-08-02T10:30:00Z"}, nil)
+		if afterBothError != nil {
+			subTest.Fatalf("ComputeTravel after both multicrew arrivals failed: %v", afterBothError)
+		}
+		if afterBothMetrics.CarrierPassengerLy != 100.0 || afterBothMetrics.DistanceLy != 100.0 {
+			subTest.Fatalf("expected CarrierPassengerLy=100.0 and DistanceLy=100.0 after multicrew FSDJump, got %+v", afterBothMetrics)
+		}
+
+		// Window starting between multicrew Location and multicrew FSDJump tests skipping Multicrew Location in SQL.
+		afterLocationMetrics, afterLocationError := engineInstance.ComputeTravel(stats.Range{After: "2026-08-02T10:15:00Z"}, nil)
+		if afterLocationError != nil {
+			subTest.Fatalf("ComputeTravel after multicrew Location failed: %v", afterLocationError)
+		}
+		if afterLocationMetrics.CarrierPassengerLy != 100.0 || afterLocationMetrics.DistanceLy != 100.0 {
+			subTest.Fatalf("expected CarrierPassengerLy=100.0 and DistanceLy=100.0 after multicrew Location, got %+v", afterLocationMetrics)
+		}
+	})
+}

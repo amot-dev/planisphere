@@ -82,6 +82,12 @@ type computeAccumulator struct {
 func (accumulator *computeAccumulator) processTravelEvent(rowItem replay.Row, metrics *Metrics) error {
 	switch rowItem.Type {
 	case journal.EventLocation:
+		if rowItem.RawJSON != "" {
+			var locationEvent journal.LocationEvent
+			if json.Unmarshal([]byte(rowItem.RawJSON), &locationEvent) == nil && locationEvent.Multicrew {
+				return nil
+			}
+		}
 		accumulator.recordStarPosition(rowItem.StarPos)
 	case journal.EventFSDJump:
 		accumulator.processFSDJump(rowItem, metrics)
@@ -110,7 +116,7 @@ func (accumulator *computeAccumulator) ensurePreviousPosition() error {
 	var starX, starY, starZ sql.NullFloat64
 	queryError := accumulator.engine.DB.QueryRow(`SELECT star_x, star_y, star_z FROM journal_events
 		WHERE event IN ('FSDJump', 'Location', 'CarrierJump') AND star_x IS NOT NULL
-		AND timestamp <= ? AND `+replay.CmdrFilterSQL+`
+		AND timestamp <= ? AND `+replay.CmdrFilterSQL+` AND `+replay.NonMulticrewSQLFilter+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`, accumulator.after).Scan(&starX, &starY, &starZ)
 	if queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
 		return fmt.Errorf("seed previous star position before %s: %w", accumulator.after, queryError)
@@ -141,12 +147,18 @@ func creditJump(timestamp string, distanceLy float64, boostUsed int, filterSet *
 }
 
 func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metrics *Metrics) {
-	accumulator.recordStarPosition(rowItem.StarPos)
 	var jumpEvent journal.FSDJumpEvent
 	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
 		return
 	}
-	if jumpEvent.Taxi || jumpEvent.Multicrew {
+	if jumpEvent.Multicrew {
+		return
+	}
+	// Apex Interstellar Taxis physically move the player across systems, whereas
+	// Telepresence Multicrew leaves the player's ship behind, so Taxi jumps still
+	// update previousPosition while Multicrew jumps must not.
+	accumulator.recordStarPosition(rowItem.StarPos)
+	if jumpEvent.Taxi {
 		return
 	}
 	creditJump(rowItem.Timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)

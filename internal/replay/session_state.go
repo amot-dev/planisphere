@@ -75,7 +75,7 @@ func (state *SessionState) ApplyLoadGame(rawJSON string) {
 // from a Location JSON payload.
 func (state *SessionState) ApplyLocation(rawJSON string) {
 	var locationEvent journal.LocationEvent
-	if json.Unmarshal([]byte(rawJSON), &locationEvent) != nil {
+	if json.Unmarshal([]byte(rawJSON), &locationEvent) != nil || locationEvent.Multicrew {
 		return
 	}
 	wasPendingConcourseRespawn := state.pendingConcourseRespawn
@@ -126,6 +126,9 @@ func (state *SessionState) ApplyUndocked() {
 
 // ApplyFSDJumpEvent updates system population and clears docking state on jump.
 func (state *SessionState) ApplyFSDJumpEvent(jumpEvent *journal.FSDJumpEvent) {
+	if jumpEvent == nil || jumpEvent.Multicrew {
+		return
+	}
 	if jumpEvent.SystemAddress != 0 {
 		state.populationBySystem[jumpEvent.SystemAddress] = jumpEvent.Population
 	}
