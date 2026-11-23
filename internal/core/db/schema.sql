@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS expedition_rows (
     z               REAL,
     coords_source   TEXT NOT NULL DEFAULT '', -- '', 'journal', 'edsm', 'notfound', 'error'
     visited_at      TEXT,
+    departed_at     TEXT,
     visit_event_uid TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL

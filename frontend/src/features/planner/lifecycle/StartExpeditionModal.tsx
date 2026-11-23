@@ -109,7 +109,7 @@ export function StartExpeditionModal({
             </div>
           )}
           <p className="text-[11px] text-ed-text-muted">
-            Starts the expedition from this visit and replays subsequent journal events.
+            Anchors Waypoint #1 to this recorded visit and replays subsequent journal events. Expedition telemetry and duration begin upon your first departure from Waypoint #1.
           </p>
         </div>
 

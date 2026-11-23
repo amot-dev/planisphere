@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { expedition } from '../../api/models'
+import { expedition, modes } from '../../api/models'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { StartExpeditionModal } from './lifecycle/StartExpeditionModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
@@ -216,7 +216,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           distFromPrevLy: 6.0,
         },
       ],
-      modes: [{ id: 1, name: 'Travel', color: '#FF7100' } as any],
+      modes: [modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#FF7100' })],
       visitedWaypointCount: 3,
       waypointCount: 3,
       activeRowId: 32,
@@ -288,7 +288,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           distFromPrevLy: 4.3,
         },
       ],
-      modes: [{ id: 1, name: 'Travel', color: '#FF7100' } as any],
+      modes: [modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#FF7100' })],
       visitedWaypointCount: 0,
       waypointCount: 2,
       activeRowId: 0,
@@ -434,8 +434,8 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       createElement(StartExpeditionModal, {
         expeditionId: 1,
         modesList: [
-          { id: 1, name: 'Exploration', color: '#00B3FF' } as any,
-          { id: 3, name: 'Travel', color: '#FF7100' } as any,
+          modes.Mode.createFrom({ id: 1, name: 'Exploration', color: '#00B3FF' }),
+          modes.Mode.createFrom({ id: 3, name: 'Travel', color: '#FF7100' }),
         ],
         initialModeId: 3,
         onClose: () => {},
@@ -446,6 +446,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(startModalHtml).not.toContain('Custom Timestamp')
     expect(startModalHtml).not.toContain('Arm and Wait for First Arrival')
     expect(startModalHtml).toContain('Flight Mode')
+    expect(startModalHtml).toContain('first departure from Waypoint #1')
     expect(startModalHtml).toContain('applies to any systems already visited')
   })
 })

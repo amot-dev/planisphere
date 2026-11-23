@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { expedition, modes, realization as realizationModel, stats } from '../../../api/models'
 import { CartographicsValueBreakdown } from '../../../components/ui/CartographicsValueBreakdown'
 import { ExobiologyValueBreakdown } from '../../../components/ui/ExobiologyValueBreakdown'
@@ -6,6 +6,7 @@ import { RealizationLossBreakdown } from '../../../components/ui/RealizationLoss
 import {
   computeShipDistanceLy,
   formatCredits,
+  formatElapsedDuration,
   formatInt,
   formatLy,
 } from '../../../domain/galacticTime'
@@ -25,6 +26,7 @@ export interface WaypointDetailsDrawerProps {
   modeColor?: string
   modesList?: modes.Mode[]
   canCascade?: boolean
+  clockSuspended?: boolean
   onChangeLegMode?: (rowId: number, nextModeId: number, cascade?: boolean) => void
 }
 
@@ -40,6 +42,7 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
   modeColor,
   modesList,
   canCascade = false,
+  clockSuspended = false,
   onChangeLegMode,
 }: WaypointDetailsDrawerProps) {
   const rowId = rowView.row.id
@@ -106,7 +109,7 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
           {`${details.fromGalactic || 'Earliest Archive'} `}
           <span className="relative -top-0.5">→</span>{' '}
           <span className="text-ed-cyan font-bold">
-            {details.toGalactic || 'IN PROGRESS'}
+            {details.toGalactic || (details.inSystem ? 'IN SYSTEM' : 'IN PROGRESS')}
           </span>
           {details.elapsed && <span className="ml-2 text-ed-text-main">{`[${details.elapsed}]`}</span>}
         </div>
@@ -132,6 +135,13 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
               onChangeMode={handleSelectMode}
             />
           )}
+
+          <WaypointInSystemBadge
+            arrivedAt={details.arrivedAt}
+            endAt={details.departedAt || details.to}
+            inSystem={details.inSystem}
+            clockSuspended={clockSuspended}
+          />
         </div>
       )}
 
@@ -161,6 +171,48 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
     </div>
   )
 })
+
+function WaypointInSystemBadge({
+  arrivedAt,
+  endAt,
+  inSystem,
+  clockSuspended,
+}: {
+  arrivedAt?: string
+  endAt?: string
+  inSystem?: boolean
+  clockSuspended: boolean
+}) {
+  const isLiveInSystem = Boolean(inSystem && arrivedAt)
+  const [nowMs, setNowMs] = useState<number>(() => Date.now())
+
+  useEffect(() => {
+    if (!isLiveInSystem || clockSuspended) {
+      return
+    }
+    setNowMs(Date.now())
+    const intervalHandle = setInterval(() => {
+      setNowMs(Date.now())
+    }, 60_000)
+    return () => clearInterval(intervalHandle)
+  }, [clockSuspended, isLiveInSystem])
+
+  const inSystemDuration = isLiveInSystem
+    ? formatElapsedDuration(arrivedAt, '', nowMs)
+    : endAt
+      ? formatElapsedDuration(arrivedAt, endAt)
+      : ''
+  if (!inSystemDuration) {
+    return null
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular tracking-wider border border-ed-border-strong border-l-2 border-l-ed-cyan bg-ed-control text-ed-cyan">
+      <span className="font-bold uppercase">[IN SYSTEM]:</span>
+      <span className="font-bold text-ed-text-main">{inSystemDuration}</span>
+    </div>
+  )
+}
 
 function WaypointValuationCards({
   metrics,

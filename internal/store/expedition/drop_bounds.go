@@ -304,7 +304,7 @@ func prepareBoundsEvaluation(
 		}
 	}
 
-	originVisitUID, rawTransitions := prepareNormalizedTransitions(
+	originVisitUID, _, rawTransitions := prepareNormalizedTransitions(
 		&rows[firstWaypointIndex],
 		normalizedSystemNames[firstWaypointIndex],
 		expeditionRecord.StartTimestamp,

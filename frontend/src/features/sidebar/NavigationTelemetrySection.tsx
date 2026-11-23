@@ -51,7 +51,9 @@ export function NavigationTelemetrySection({
   onLogCarrierJump,
   onOpenCarrierConfig,
 }: NavigationTelemetrySectionProps) {
-  const isActiveExpeditionClock = Boolean(sidebarStats?.started && sidebarStats?.endIsNow)
+  const isActiveExpeditionClock = Boolean(
+    sidebarStats?.started && sidebarStats?.departed && sidebarStats?.endIsNow,
+  )
   const [currentGalacticTime, setCurrentGalacticTime] = useState<string>(() => nowGalacticTime())
   const carrierCost = sidebarStats?.carrierCost ?? new app.CarrierCostBreakdown()
 
@@ -126,11 +128,21 @@ export function NavigationTelemetrySection({
           <>
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
               <span>Expedition Duration</span>
-              <span className="font-mono-tabular text-ed-text-main font-bold">
-                {sidebarStats?.started ? sidebarStats.duration : 'NOT STARTED'}
+              <span
+                className={`font-mono-tabular font-bold ${
+                  sidebarStats?.started && !sidebarStats?.departed
+                    ? 'text-ed-cyan'
+                    : 'text-ed-text-main'
+                }`}
+              >
+                {!sidebarStats?.started
+                  ? 'NOT STARTED'
+                  : sidebarStats.departed
+                    ? sidebarStats.duration
+                    : 'AWAITING DEPARTURE'}
               </span>
             </div>
-            {sidebarStats?.started && (
+            {sidebarStats?.started && sidebarStats?.departed && (
               <div className="mt-1.5 font-mono-tabular text-[11px] text-ed-text-main space-y-0.5">
                 <div className="flex items-center justify-between">
                   <span className="text-ed-text-muted">START:</span>

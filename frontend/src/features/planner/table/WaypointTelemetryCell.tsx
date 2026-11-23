@@ -85,9 +85,66 @@ function renderDistanceValue(
   )
 }
 
+function renderVisitedTimestamp(rowView: expedition.RowView) {
+  const arrivedGalactic = rowView.visitedAtGalactic
+  const departedGalactic = rowView.departedAtGalactic
+
+  if (rowView.number === 1) {
+    if (departedGalactic) {
+      const originTooltip = arrivedGalactic
+        ? `Arrived ${arrivedGalactic} · Departed ${departedGalactic}`
+        : `Departed ${departedGalactic}`
+      return (
+        <div
+          title={originTooltip}
+          className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5"
+        >
+          <span className="font-extrabold uppercase tracking-wider text-ed-amber shrink-0">
+            DEPARTED
+          </span>
+          <span className="text-ed-text-muted shrink-0">{departedGalactic}</span>
+        </div>
+      )
+    }
+
+    const stagedTooltip = arrivedGalactic
+      ? `Staged at Waypoint #1 since ${arrivedGalactic} (awaiting departure)`
+      : 'Awaiting departure from Waypoint #1'
+    return (
+      <div
+        title={stagedTooltip}
+        className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5"
+      >
+        <span className="font-extrabold uppercase tracking-wider text-ed-cyan shrink-0">
+          AWAITING DEPARTURE
+        </span>
+      </div>
+    )
+  }
+
+  const visitTooltip =
+    arrivedGalactic && departedGalactic
+      ? `Arrived ${arrivedGalactic} · Departed ${departedGalactic}`
+      : arrivedGalactic
+        ? `Arrived ${arrivedGalactic}`
+        : undefined
+  return (
+    <div
+      title={visitTooltip}
+      className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5"
+    >
+      <span className="font-extrabold uppercase tracking-wider text-ed-amber shrink-0">
+        LOGGED VISIT
+      </span>
+      <span className="text-ed-text-muted shrink-0">{arrivedGalactic}</span>
+    </div>
+  )
+}
+
 /**
- * WaypointTelemetryCell renders either the logged galactic visit timestamp for
- * visited waypoints or straight-line distance estimates for upcoming waypoints.
+ * WaypointTelemetryCell renders the origin departure status, logged galactic
+ * visit timestamp for visited waypoints, or straight-line distance estimates
+ * for upcoming waypoints.
  */
 export function WaypointTelemetryCell({
   rowView,
@@ -100,12 +157,7 @@ export function WaypointTelemetryCell({
   return (
     <td className="px-3 py-1.5 align-top border-b border-ed-border-subtle whitespace-nowrap">
       {isVisited ? (
-        <div className="h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5">
-          <span className="font-extrabold uppercase tracking-wider text-ed-amber shrink-0">
-            LOGGED VISIT
-          </span>
-          <span className="text-ed-text-muted shrink-0">{rowView.visitedAtGalactic}</span>
-        </div>
+        renderVisitedTimestamp(rowView)
       ) : (
         <div className="h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px] text-ed-text-muted leading-5">
           {renderDistanceValue(isNext, rowView, row, playerSystem)}

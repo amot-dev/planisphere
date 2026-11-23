@@ -1,7 +1,9 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
-import { expedition } from '../../../api/models'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { expedition, stats } from '../../../api/models'
 import { ExpeditionPlanner } from '../ExpeditionPlanner'
 import { PlannerRouteTable } from '../table/PlannerRouteTable'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
@@ -232,6 +234,179 @@ describe('WaypointDetailsDrawer', () => {
       '3312-01-19 12:00 UTC <span class="relative -top-0.5">→</span> <span class="text-ed-cyan font-bold">IN PROGRESS</span>',
     )
     expect(html).toContain('[4h 15m]')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders [IN SYSTEM]: duration for departed, completed, and live stays without arrived or departed indicators', () => {
+    const legRowView = expedition.RowView.createFrom({
+      row: { id: 25, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini' },
+      number: 2,
+      visitState: 'visited',
+    })
+
+    const departedHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: expedition.WaypointDetails.createFrom({
+          kind: 'leg',
+          number: 2,
+          prevSystem: 'Sol',
+          fromGalactic: '3312-01-19 12:00 UTC',
+          toGalactic: '3312-01-19 16:30 UTC',
+          arrivedAt: '2026-01-19T15:00:00Z',
+          departedAt: '2026-01-19T16:30:00Z',
+          elapsed: '4h 30m',
+          metrics: stats.Metrics.createFrom({}),
+        }),
+        loading: false,
+        rowView: legRowView,
+      }),
+    )
+    expect(departedHtml).toContain('[IN SYSTEM]:')
+    expect(departedHtml).toContain('1h 30m')
+    expect(departedHtml).not.toContain('[ARRIVED]:')
+    expect(departedHtml).not.toContain('[DEPARTED]:')
+    expect(departedHtml).not.toContain('[FINAL ACTIVITY]:')
+
+    const completedFinalHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: expedition.WaypointDetails.createFrom({
+          kind: 'leg',
+          number: 2,
+          prevSystem: 'Sol',
+          fromGalactic: '3312-01-19 12:00 UTC',
+          to: '2026-01-19T15:40:00Z',
+          toGalactic: '3312-01-19 15:40 UTC',
+          arrivedAt: '2026-01-19T15:00:00Z',
+          departedAt: '',
+          inSystem: false,
+          elapsed: '3h 40m',
+          metrics: stats.Metrics.createFrom({}),
+        }),
+        loading: false,
+        rowView: legRowView,
+      }),
+    )
+    expect(completedFinalHtml).toContain('[IN SYSTEM]:')
+    expect(completedFinalHtml).toContain('0h 40m')
+    expect(completedFinalHtml).not.toContain('[ARRIVED]:')
+    expect(completedFinalHtml).not.toContain('[FINAL ACTIVITY]:')
+
+    const unvisitedCurrentHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: expedition.WaypointDetails.createFrom({
+          kind: 'leg',
+          number: 2,
+          prevSystem: 'Sol',
+          fromGalactic: '3312-01-19 12:00 UTC',
+          toGalactic: '',
+          arrivedAt: '',
+          inSystem: false,
+          elapsed: '2h 00m',
+          metrics: stats.Metrics.createFrom({}),
+        }),
+        loading: false,
+        rowView: legRowView,
+      }),
+    )
+    expect(unvisitedCurrentHtml).not.toContain('[IN SYSTEM]:')
+
+    const stagedOriginHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: expedition.WaypointDetails.createFrom({
+          kind: 'origin',
+          number: 1,
+          fromGalactic: '3310-01-01 00:00 UTC',
+          toGalactic: '',
+          arrivedAt: '2026-01-19T10:00:00Z',
+          inSystem: true,
+          metrics: stats.Metrics.createFrom({}),
+        }),
+        loading: false,
+        rowView: createOriginRowView(),
+      }),
+    )
+    expect(stagedOriginHtml).toContain(
+      '3310-01-01 00:00 UTC <span class="relative -top-0.5">→</span> <span class="text-ed-cyan font-bold">IN SYSTEM</span>',
+    )
+    expect(stagedOriginHtml).not.toContain('[IN SYSTEM]:')
+  })
+
+  it('updates live [IN SYSTEM]: duration every minute while in system and pauses when clockSuspended is true', async () => {
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-19T15:10:00Z'))
+
+    const legRowView = expedition.RowView.createFrom({
+      row: { id: 26, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini' },
+      number: 2,
+      visitState: 'visited',
+    })
+    const liveDetails = expedition.WaypointDetails.createFrom({
+      kind: 'leg',
+      number: 2,
+      prevSystem: 'Sol',
+      fromGalactic: '3312-01-19 12:00 UTC',
+      toGalactic: '',
+      arrivedAt: '2026-01-19T15:00:00Z',
+      inSystem: true,
+      elapsed: '3h 10m',
+      metrics: stats.Metrics.createFrom({}),
+    })
+
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(WaypointDetailsDrawer, {
+          details: liveDetails,
+          loading: false,
+          rowView: legRowView,
+          clockSuspended: false,
+        }),
+      )
+    })
+    expect(container.textContent).toContain('[IN SYSTEM]:0h 10m')
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
+
+    // Pausing live sync suspends the 60-second timer until resumed.
+    await act(async () => {
+      root.render(
+        createElement(WaypointDetailsDrawer, {
+          details: liveDetails,
+          loading: false,
+          rowView: legRowView,
+          clockSuspended: true,
+        }),
+      )
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(180_000)
+    })
+    expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
+
+    // Resuming immediately refreshes to current elapsed duration.
+    await act(async () => {
+      root.render(
+        createElement(WaypointDetailsDrawer, {
+          details: liveDetails,
+          loading: false,
+          rowView: legRowView,
+          clockSuspended: false,
+        }),
+      )
+    })
+    expect(container.textContent).toContain('[IN SYSTEM]:0h 14m')
+
+    await act(async () => {
+      root.unmount()
+    })
   })
 })
 

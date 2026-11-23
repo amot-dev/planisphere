@@ -9,6 +9,11 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
+// nonMulticrewSQLFilter excludes Telepresence (Multicrew: true) events where the
+// commander never physically relocated their ship or body. Short-circuiting with
+// instr avoids parsing raw_json on the vast majority of non-multicrew rows.
+const nonMulticrewSQLFilter = `(instr(raw_json, '"Multicrew"') = 0 OR NOT COALESCE(json_extract(raw_json, '$.Multicrew'), 0))`
+
 // ArrivalEvents is the set of journal events that place the commander in a system.
 var ArrivalEvents = journal.NewEventSet(
 	journal.EventFSDJump,
@@ -24,6 +29,7 @@ type Arrival struct {
 	Event         string `json:"event"`
 	SystemName    string `json:"systemName"`
 	SystemAddress int64  `json:"systemAddress"`
+	Commander     string `json:"-"`
 }
 
 // QueryArrivalsInWindow queries chronological arrivals within [startTimestamp, endTimestamp].
@@ -68,6 +74,7 @@ func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, err
 			FROM journal_events
 			WHERE event = 'FSDJump'
 			  AND ` + CmdrFilterSQL + `
+			  AND ` + nonMulticrewSQLFilter + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1
 		)
 		UNION ALL
@@ -76,6 +83,7 @@ func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, err
 			FROM journal_events
 			WHERE event = 'Location'
 			  AND ` + CmdrFilterSQL + `
+			  AND ` + nonMulticrewSQLFilter + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1
 		)
 		UNION ALL
@@ -84,6 +92,7 @@ func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, err
 			FROM journal_events
 			WHERE event = 'CarrierJump'
 			  AND ` + CmdrFilterSQL + `
+			  AND ` + nonMulticrewSQLFilter + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1
 		)
 	) ORDER BY timestamp DESC, id DESC LIMIT 1`
@@ -100,10 +109,36 @@ func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, err
 	return &reference.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}, systemName.String, nil
 }
 
+// QueryLastInSystemActivityTimestamp returns the latest exploration activity
+// timestamp (non-belt body Scan, planet SAAScanComplete, or ScanOrganic Analyse)
+// within (afterTimestamp, untilTimestamp], or an empty string when none exist.
+func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, untilTimestamp string) (string, error) {
+	query := `SELECT COALESCE(MAX(timestamp), '')
+		FROM journal_events
+		WHERE timestamp > ?`
+	queryArgs := []any{afterTimestamp}
+	if untilTimestamp != "" {
+		query += ` AND timestamp <= ?`
+		queryArgs = append(queryArgs, untilTimestamp)
+	}
+	query += `
+		  AND (
+			(event = 'Scan' AND COALESCE(body_name, '') NOT LIKE '%Belt Cluster%' AND (COALESCE(json_extract(raw_json, '$.StarType'), '') != '' OR COALESCE(json_extract(raw_json, '$.PlanetClass'), '') != ''))
+			OR (event = 'SAAScanComplete' AND COALESCE(json_extract(raw_json, '$.EfficiencyTarget'), 0) > 0)
+			OR (event = 'ScanOrganic' AND LOWER(COALESCE(json_extract(raw_json, '$.ScanType'), '')) = 'analyse')
+		  )` + commanderFilterPredicate(queryer)
+
+	var lastTimestamp string
+	if scanError := queryer.QueryRow(query, queryArgs...).Scan(&lastTimestamp); scanError != nil {
+		return "", scanError
+	}
+	return lastTimestamp, nil
+}
+
 func loadArrivalsWhere(queryer db.Queryer, whereClause string, queryArgs ...any) ([]Arrival, error) {
 	databaseRows, queryError := queryer.Query(
-		`SELECT event_uid, timestamp, event, COALESCE(system_name,''), COALESCE(system_address,0)
-		FROM journal_events WHERE event IN (`+journal.FormatSQLInClause(ArrivalEvents)+`) AND `+CmdrFilterSQL+` AND `+whereClause+` ORDER BY timestamp, id`,
+		`SELECT event_uid, timestamp, event, COALESCE(system_name,''), COALESCE(system_address,0), COALESCE(commander,'')
+		FROM journal_events WHERE event IN (`+journal.FormatSQLInClause(ArrivalEvents)+`) AND (`+whereClause+`) AND `+CmdrFilterSQL+` AND `+nonMulticrewSQLFilter+` ORDER BY timestamp, id`,
 		queryArgs...,
 	)
 	if queryError != nil {
@@ -113,7 +148,7 @@ func loadArrivalsWhere(queryer db.Queryer, whereClause string, queryArgs ...any)
 	var arrivals []Arrival
 	for databaseRows.Next() {
 		var arrival Arrival
-		if scanError := databaseRows.Scan(&arrival.UID, &arrival.Timestamp, &arrival.Event, &arrival.SystemName, &arrival.SystemAddress); scanError != nil {
+		if scanError := databaseRows.Scan(&arrival.UID, &arrival.Timestamp, &arrival.Event, &arrival.SystemName, &arrival.SystemAddress, &arrival.Commander); scanError != nil {
 			return nil, scanError
 		}
 		arrival.Galactic = reference.ToGalactic(arrival.Timestamp)

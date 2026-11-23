@@ -166,7 +166,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		t.Fatal(planError)
 	}
 	// Expected waypoint sequence after user reorders Beagle Point to #3:
-	// #1 Sol (visited) -> #2 Dryooe Prou FF-Z d696 (visited) -> #3 Beagle Point (visited) -> #4 Outotz LS-K d8-3 (current; pre-start visit ignored) -> #5 Sagittarius A* (future).
+	// #1 Sol (visited, departed) -> #2 Dryooe Prou FF-Z d696 (visited, departed) -> #3 Beagle Point (visited, still in system) -> #4 Outotz LS-K d8-3 (future until departing #3) -> #5 Sagittarius A* (future).
 	var waypointSystems []string
 	var waypointNumbers []int
 	var waypointStates []string
@@ -186,16 +186,29 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 			t.Fatalf("waypoint numbering = %v", waypointNumbers)
 		}
 	}
-	wantStates := []string{expedition.VisitVisited, expedition.VisitVisited, expedition.VisitVisited, expedition.VisitCurrent, expedition.VisitFuture}
+	wantStates := []string{expedition.VisitVisited, expedition.VisitVisited, expedition.VisitVisited, expedition.VisitFuture, expedition.VisitFuture}
 	if strings.Join(waypointStates, "|") != strings.Join(wantStates, "|") {
 		t.Fatalf("visit states = %v, want %v", waypointStates, wantStates)
 	}
 
-	// Verify vessel flown on leg details between #2 and #3.
+	// Verify in-system exploration of WP #2 (Dryooe Prou FF-Z d696) lands in WP #2's drawer rather than WP #3's drawer.
+	dryooeView := plan.Rows[1]
+	dryooeDetails, dryooeDetailsError := expedition.Details(dbConn, dryooeView.Row.ID, proj)
+	if dryooeDetailsError != nil {
+		t.Fatalf("Details for Dryooe Prou failed: %v", dryooeDetailsError)
+	}
+	if dryooeDetails.Metrics.BodiesScanned != 1 || dryooeDetails.Metrics.BodiesMapped != 1 || dryooeDetails.Metrics.OrganicSamples != 1 {
+		t.Fatalf("expected Dryooe Prou in-system exploration in WP #2 drawer, got %+v", dryooeDetails.Metrics)
+	}
+
+	// Verify vessel flown on leg details between #2 and #3, and that Beagle Point is currently in-system.
 	beagleView := plan.Rows[2]
 	beagleDetails, beagleDetailsError := expedition.Details(dbConn, beagleView.Row.ID, proj)
 	if beagleDetailsError != nil {
 		t.Fatalf("Details for Beagle Point failed: %v", beagleDetailsError)
+	}
+	if !beagleDetails.InSystem || beagleDetails.Metrics.BodiesScanned != 0 {
+		t.Fatalf("expected Beagle Point in-system with 0 Dryooe scans, got inSystem=%v metrics=%+v", beagleDetails.InSystem, beagleDetails.Metrics)
 	}
 	if len(beagleDetails.ShipsUsed) != 1 || beagleDetails.ShipsUsed[0] != "Caspian Explorer" {
 		t.Fatalf("expected Caspian Explorer flown on Beagle Point leg, got %+v", beagleDetails.ShipsUsed)
@@ -409,25 +422,27 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 	exp, wp1 := createExpeditionWithOriginRow(t, dbConn, "Details Test Expedition", "")
 	solName := "Sol"
 	solVis := "2026-01-18T10:00:00Z"
+	solDep := "2026-01-19T06:00:00Z"
 	if _, err := dbConn.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = ? WHERE id = ?`, solVis, exp.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, solVis, wp1.ID); err != nil {
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, departed_at = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, solVis, solDep, wp1.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	// Insert region header row
 	regionRow := mustInsert(t, dbConn, exp.ID, wp1.ID, expedition.RowRegion, 1)
 
-	// Insert WP2 (visited leg)
+	// Insert WP2 (visited and departed leg)
 	wp2 := mustInsert(t, dbConn, exp.ID, regionRow.ID, expedition.RowWaypoint, 0)
 	alphaName := "Alpha Centauri"
 	alphaVis := "2026-01-19T12:00:00Z"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, x = 10, y = 0, z = 0 WHERE id = ?`, alphaName, alphaVis, wp2.ID); err != nil {
+	alphaDep := "2026-01-19T14:00:00Z"
+	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, departed_at = ?, x = 10, y = 0, z = 0 WHERE id = ?`, alphaName, alphaVis, alphaDep, wp2.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	// Insert WP3 (active current leg)
+	// Insert WP3 (active current leg after departing WP2)
 	wp3 := mustInsert(t, dbConn, exp.ID, wp2.ID, expedition.RowWaypoint, 0)
 	barnardName := "Barnard's Star"
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 16, y = 0, z = 0 WHERE id = ?`, barnardName, wp3.ID); err != nil {
@@ -460,14 +475,15 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 	if wp1Details.Number != 1 {
 		t.Errorf("expected wp1 number 1, got %d", wp1Details.Number)
 	}
-	if wp1Details.To != solVis {
-		t.Errorf("expected wp1 To %q, got %q", solVis, wp1Details.To)
+	if wp1Details.To != solDep || wp1Details.ArrivedAt != solVis || wp1Details.DepartedAt != solDep {
+		t.Errorf("expected wp1 To=%q ArrivedAt=%q DepartedAt=%q, got To=%q ArrivedAt=%q DepartedAt=%q",
+			solDep, solVis, solDep, wp1Details.To, wp1Details.ArrivedAt, wp1Details.DepartedAt)
 	}
 	if wp1Details.From != "2026-01-01T10:00:00Z" {
 		t.Errorf("expected wp1 From '2026-01-01T10:00:00Z', got %q", wp1Details.From)
 	}
 
-	// Details for WP2 (visited leg)
+	// Details for WP2 (visited and departed leg)
 	wp2Details, err := expedition.Details(dbConn, wp2.ID, proj)
 	if err != nil {
 		t.Fatalf("Details for wp2 failed: %v", err)
@@ -478,11 +494,12 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 	if wp2Details.Number != 2 {
 		t.Errorf("expected wp2 number 2, got %d", wp2Details.Number)
 	}
-	if wp2Details.From != solVis {
-		t.Errorf("expected wp2 leg start %q, got %q", solVis, wp2Details.From)
+	if wp2Details.From != solDep {
+		t.Errorf("expected wp2 leg start %q, got %q", solDep, wp2Details.From)
 	}
-	if wp2Details.To != alphaVis {
-		t.Errorf("expected wp2 leg end %q, got %q", alphaVis, wp2Details.To)
+	if wp2Details.To != alphaDep || wp2Details.ArrivedAt != alphaVis || wp2Details.DepartedAt != alphaDep {
+		t.Errorf("expected wp2 To=%q ArrivedAt=%q DepartedAt=%q, got To=%q ArrivedAt=%q DepartedAt=%q",
+			alphaDep, alphaVis, alphaDep, wp2Details.To, wp2Details.ArrivedAt, wp2Details.DepartedAt)
 	}
 	if wp2Details.PrevSystem != solName {
 		t.Errorf("expected wp2 prev system %q, got %q", solName, wp2Details.PrevSystem)
@@ -491,7 +508,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 		t.Errorf("expected non-empty elapsed duration for wp2 leg")
 	}
 
-	// Details for WP3 (active current leg)
+	// Details for WP3 (active current leg after departing WP2)
 	wp3Details, err := expedition.Details(dbConn, wp3.ID, proj)
 	if err != nil {
 		t.Fatalf("Details for wp3 failed: %v", err)
@@ -502,8 +519,8 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 	if wp3Details.Number != 3 {
 		t.Errorf("expected wp3 number 3, got %d", wp3Details.Number)
 	}
-	if wp3Details.From != alphaVis {
-		t.Errorf("expected wp3 leg start %q, got %q", alphaVis, wp3Details.From)
+	if wp3Details.From != alphaDep {
+		t.Errorf("expected wp3 leg start %q, got %q", alphaDep, wp3Details.From)
 	}
 	if wp3Details.To != "" {
 		t.Errorf("expected wp3 leg end empty for active leg, got %q", wp3Details.To)
@@ -740,11 +757,10 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if planAtOrigin.NextWaypointRowID != secondWaypoint.ID {
-		t.Errorf("expected NextWaypointRowID %d (secondWaypoint), got %d", secondWaypoint.ID, planAtOrigin.NextWaypointRowID)
+	// Before departing origin WP #1, NextWaypointRowID stays 0 and WP #2 stays future while RemainingLy is still 250.
+	if planAtOrigin.NextWaypointRowID != 0 {
+		t.Errorf("expected NextWaypointRowID 0 before departing origin, got %d", planAtOrigin.NextWaypointRowID)
 	}
-	// secondWaypoint is next waypoint, distance from player (0,0,0) to secondWaypoint (100,0,0) is 100.
-	// RemainingLy = 100 (player to secondWaypoint) + 150 (secondWaypoint to thirdWaypoint) = 250.
 	if planAtOrigin.RemainingLy != 250.0 {
 		t.Errorf("expected remaining ly 250.0, got %v", planAtOrigin.RemainingLy)
 	}
@@ -758,11 +774,11 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 			thirdWaypointRow = waypointRowView
 		}
 	}
-	if !secondWaypointRow.IsNextWaypoint {
-		t.Errorf("expected secondWaypoint to be next waypoint")
+	if secondWaypointRow.IsNextWaypoint || secondWaypointRow.VisitState != expedition.VisitFuture {
+		t.Errorf("expected secondWaypoint to stay future before leaving origin, got state=%q next=%v", secondWaypointRow.VisitState, secondWaypointRow.IsNextWaypoint)
 	}
-	if secondWaypointRow.DistFromCurrentLy == nil || *secondWaypointRow.DistFromCurrentLy != 100.0 {
-		t.Errorf("expected secondWaypoint dist from player 100.0, got %v", secondWaypointRow.DistFromCurrentLy)
+	if secondWaypointRow.DistFromPrevLy == nil || *secondWaypointRow.DistFromPrevLy != 100.0 {
+		t.Errorf("expected secondWaypoint dist from prev 100.0, got %v", secondWaypointRow.DistFromPrevLy)
 	}
 	if thirdWaypointRow.IsNextWaypoint {
 		t.Errorf("expected thirdWaypoint NOT to be next waypoint")
@@ -771,16 +787,22 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 		t.Errorf("expected thirdWaypoint dist from prev 150.0, got %v", thirdWaypointRow.DistFromPrevLy)
 	}
 
-	// Player jumps closer to secondWaypoint: Waypoint "Interim System" at (60, 0, 0)
+	// Player departs Sol and jumps closer to secondWaypoint: "Interim System" at (60, 0, 0).
 	_, err = dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, star_x, star_y, star_z, raw_json, ingested_at)
 		VALUES ('ev-jump1', '2026-03-01T11:00:00Z', 'FSDJump', 'Interim System', 60.0, 0.0, 0.0, '{}', '2026-03-01T11:00:00Z')`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, reevalError := expedition.ReevaluateTx(dbConn, expeditionRecord.ID); reevalError != nil {
+		t.Fatalf("ReevaluateTx after origin departure: %v", reevalError)
+	}
 
 	planAfterFirstJump, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if planAfterFirstJump.NextWaypointRowID != secondWaypoint.ID {
+		t.Errorf("expected NextWaypointRowID %d after departing origin, got %d", secondWaypoint.ID, planAfterFirstJump.NextWaypointRowID)
 	}
 	// Distance from player (60,0,0) to secondWaypoint (100,0,0) is 40.0 Ly.
 	// secondWaypoint to thirdWaypoint is 150.0 Ly.
@@ -1644,4 +1666,134 @@ func TestCreateWithWaypoints(testingContext *testing.T) {
 	if seededRows[2].Position != 3 || seededRows[2].SystemName != "Shinrarta Dezhra" {
 		testingContext.Fatalf("unexpected row 2: %+v", seededRows[2])
 	}
+}
+
+func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-09-01T09:00:00Z","event":"LoadGame","Commander":"CmdrA","FID":"FA","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-09-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":5001,"StarPos":[0,0,0]}`,
+		// Pre-departure scan inside WP #1 (must remain in Historical Baseline once WP #1 departs).
+		`{"timestamp":"2026-09-01T10:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Sol A 1","BodyID":1,"StarSystem":"Sol","SystemAddress":5001,"PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		// Telepresence multicrew arrival elsewhere must be ignored completely.
+		`{"timestamp":"2026-09-01T10:12:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":9999,"StarPos":[9000,0,9000],"Multicrew":true}`,
+	})
+
+	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Departure Flow", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol"},
+		{SystemName: "Alpha"},
+		{SystemName: "Beta"},
+	})
+	if createError != nil {
+		testingContext.Fatalf("CreateWithWaypoints: %v", createError)
+	}
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-09-01T10:00:00Z", 0); startError != nil {
+		testingContext.Fatalf("StartTx: %v", startError)
+	}
+
+	rowsBeforeDepart, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if rowsBeforeDepart[0].DepartedAt != "" {
+		testingContext.Fatalf("expected WP #1 DepartedAt empty before leaving Sol (multicrew ignored), got %q", rowsBeforeDepart[0].DepartedAt)
+	}
+	planBeforeDepart, _ := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, expeditionProjections)
+	if planBeforeDepart.NextWaypointRowID != 0 || planBeforeDepart.Rows[1].VisitState != expedition.VisitFuture {
+		testingContext.Fatalf("expected WP #2 to remain future before leaving WP #1, got next=%d state=%q", planBeforeDepart.NextWaypointRowID, planBeforeDepart.Rows[1].VisitState)
+	}
+	wp1PreDetails, _ := expedition.Details(databaseConnection, rowsBeforeDepart[0].ID, expeditionProjections)
+	if !wp1PreDetails.InSystem || wp1PreDetails.Metrics.BodiesScanned != 1 {
+		testingContext.Fatalf("expected WP #1 Historical Baseline InSystem=true with pre-departure scan, got inSystem=%v metrics=%+v", wp1PreDetails.InSystem, wp1PreDetails.Metrics)
+	}
+	wp2PreDetails, _ := expedition.Details(databaseConnection, rowsBeforeDepart[1].ID, expeditionProjections)
+	if wp2PreDetails.Kind != "" {
+		testingContext.Fatalf("expected WP #2 drawer empty before WP #1 departs, got %+v", wp2PreDetails)
+	}
+
+	// Depart Sol directly to Alpha, scan Alpha while Commander B logs in elsewhere (must not depart CmdrA),
+	// resurrect inside Alpha (must not depart), swap ships inside Alpha, then jump straight to Beta.
+	// At Beta, scan a planet, scan a belt cluster later (must not extend end), depart Beta to SideHop,
+	// return to Beta and scan again (must stay excluded from first-stay Complete).
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrA', 'FA', 1), ('CmdrB', 'FB', 1)
+		ON CONFLICT(name) DO UPDATE SET enabled = 1`); execError != nil {
+		testingContext.Fatalf("seed commanders: %v", execError)
+	}
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO journal_events(event_uid, timestamp, event, system_name, system_address, body_id, body_name, star_x, star_y, star_z, commander, source_file, raw_json, ingested_at) VALUES
+		('dep-alpha-arr', '2026-09-01T11:00:00Z', 'FSDJump', 'Alpha', 5002, NULL, '', 10, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":5002,"StarPos":[10,0,0],"JumpDist":10.0}', '2026-09-01T11:00:00Z'),
+		('dep-cmdrb-loc', '2026-09-01T11:05:00Z', 'Location', 'OtherSys', 8001, NULL, '', 500, 0, 0, 'CmdrB', 't.log', '{"timestamp":"2026-09-01T11:05:00Z","event":"Location","StarSystem":"OtherSys","SystemAddress":8001,"StarPos":[500,0,0]}', '2026-09-01T11:05:00Z'),
+		('dep-alpha-resurrect', '2026-09-01T11:08:00Z', 'Location', 'Alpha', 5002, NULL, '', 10, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T11:08:00Z","event":"Location","StarSystem":"Alpha","SystemAddress":5002,"StarPos":[10,0,0]}', '2026-09-01T11:08:00Z'),
+		('dep-alpha-scan', '2026-09-01T11:10:00Z', 'Scan', 'Alpha', 5002, 1, 'Alpha 1', NULL, NULL, NULL, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T11:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Alpha 1","BodyID":1,"StarSystem":"Alpha","SystemAddress":5002,"PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}', '2026-09-01T11:10:00Z'),
+		('dep-alpha-swap', '2026-09-01T11:15:00Z', 'ShipyardSwap', '', NULL, NULL, '', NULL, NULL, NULL, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T11:15:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}', '2026-09-01T11:15:00Z'),
+		('dep-beta-arr', '2026-09-01T12:00:00Z', 'FSDJump', 'Beta', 5003, NULL, '', 30, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":5003,"StarPos":[30,0,0],"JumpDist":20.0}', '2026-09-01T12:00:00Z'),
+		('dep-beta-scan1', '2026-09-01T12:20:00Z', 'Scan', 'Beta', 5003, 2, 'Beta 2', NULL, NULL, NULL, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T12:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta 2","BodyID":2,"StarSystem":"Beta","SystemAddress":5003,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}', '2026-09-01T12:20:00Z'),
+		('dep-beta-belt', '2026-09-01T12:25:00Z', 'Scan', 'Beta', 5003, 9, 'Beta A Belt Cluster 1', NULL, NULL, NULL, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T12:25:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta A Belt Cluster 1","BodyID":9,"StarSystem":"Beta","SystemAddress":5003}', '2026-09-01T12:25:00Z'),
+		('dep-beta-sidehop', '2026-09-01T12:30:00Z', 'FSDJump', 'SideHop', 5004, NULL, '', 35, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T12:30:00Z","event":"FSDJump","StarSystem":"SideHop","SystemAddress":5004,"StarPos":[35,0,0],"JumpDist":5.0}', '2026-09-01T12:30:00Z'),
+		('dep-beta-return', '2026-09-01T13:00:00Z', 'FSDJump', 'Beta', 5003, NULL, '', 30, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T13:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":5003,"StarPos":[30,0,0],"JumpDist":5.0}', '2026-09-01T13:00:00Z'),
+		('dep-beta-scan2', '2026-09-01T13:10:00Z', 'Scan', 'Beta', 5003, 3, 'Beta 3', NULL, NULL, NULL, 'CmdrA', 't.log', '{"timestamp":"2026-09-01T13:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta 3","BodyID":3,"StarSystem":"Beta","SystemAddress":5003,"PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}', '2026-09-01T13:10:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("insert departure test events: %v", execError)
+	}
+	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
+		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
+	}
+
+	rowsAfter, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if rowsAfter[0].DepartedAt != "2026-09-01T11:00:00Z" || rowsAfter[1].DepartedAt != "2026-09-01T12:00:00Z" || rowsAfter[2].DepartedAt != "2026-09-01T12:30:00Z" {
+		testingContext.Fatalf("unexpected DepartedAt sequence: wp1=%q wp2=%q wp3=%q", rowsAfter[0].DepartedAt, rowsAfter[1].DepartedAt, rowsAfter[2].DepartedAt)
+	}
+
+	wp1Details, _ := expedition.Details(databaseConnection, rowsAfter[0].ID, expeditionProjections)
+	if wp1Details.To != "2026-09-01T11:00:00Z" || wp1Details.Metrics.BodiesScanned != 1 || wp1Details.Metrics.Jumps != 0 {
+		testingContext.Fatalf("expected WP #1 baseline to keep Sol scan and exclude departure jump, got to=%q metrics=%+v", wp1Details.To, wp1Details.Metrics)
+	}
+	wp2Details, _ := expedition.Details(databaseConnection, rowsAfter[1].ID, expeditionProjections)
+	if wp2Details.Metrics.Jumps != 1 || wp2Details.Metrics.BodiesScanned != 1 || strings.Join(wp2Details.ShipsUsed, "|") != "Mandalay" {
+		testingContext.Fatalf("expected WP #2 to include direct jump, Alpha scan (ignoring CmdrB), and Mandalay only, got metrics=%+v ships=%v", wp2Details.Metrics, wp2Details.ShipsUsed)
+	}
+	wp3ActiveDetails, _ := expedition.Details(databaseConnection, rowsAfter[2].ID, expeditionProjections)
+	if wp3ActiveDetails.Metrics.Jumps != 1 || wp3ActiveDetails.Metrics.BodiesScanned != 1 || strings.Join(wp3ActiveDetails.ShipsUsed, "|") != "Anaconda" {
+		testingContext.Fatalf("expected WP #3 to include Beta jump, Beta 2 scan only (first stay), and Anaconda, got metrics=%+v ships=%v", wp3ActiveDetails.Metrics, wp3ActiveDetails.ShipsUsed)
+	}
+
+	// Complete locks end_timestamp to Beta 2 (12:20), ignoring belt cluster (12:25) and post-departure return scan (13:10).
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx: %v", completeError)
+	}
+	completedExp, _ := expedition.Get(databaseConnection, expeditionRecord.ID)
+	if completedExp.EndTimestamp != "2026-09-01T12:20:00Z" {
+		testingContext.Fatalf("expected completed EndTimestamp=2026-09-01T12:20:00Z, got %q", completedExp.EndTimestamp)
+	}
+	wp3CompletedDetails, _ := expedition.Details(databaseConnection, rowsAfter[2].ID, expeditionProjections)
+	if wp3CompletedDetails.To != "2026-09-01T12:20:00Z" || wp3CompletedDetails.Metrics.BodiesScanned != 1 || wp3CompletedDetails.InSystem {
+		testingContext.Fatalf("expected completed WP #3 drawer clamped to 12:20 with 1 scan, got to=%q inSystem=%v metrics=%+v",
+			wp3CompletedDetails.To, wp3CompletedDetails.InSystem, wp3CompletedDetails.Metrics)
+	}
+
+	// Chained expedition starting at Beta (12:00) begins at Beta departure (12:30), causing zero overlap with Beta 2 (12:20).
+	chainedExp, _ := expedition.CreateWithWaypoints(databaseConnection, "Chained Leg 2", "", []expedition.SeedWaypoint{
+		{SystemName: "Beta"},
+		{SystemName: "SideHop"},
+	})
+	if startChainErr := expedition.StartTx(databaseConnection, chainedExp.ID, "2026-09-01T12:00:00Z", 0); startChainErr != nil {
+		testingContext.Fatalf("StartTx chained: %v", startChainErr)
+	}
+	chainQueryAfter, chainDisplayStart, chainDeparted, chainStartErr := expedition.EffectiveStart(databaseConnection, mustGetExpedition(testingContext, databaseConnection, chainedExp.ID))
+	if chainStartErr != nil || !chainDeparted || chainDisplayStart != "2026-09-01T12:30:00Z" || chainQueryAfter != "2026-09-01T12:29:59Z" {
+		testingContext.Fatalf("unexpected chained EffectiveStart: after=%q display=%q departed=%v err=%v", chainQueryAfter, chainDisplayStart, chainDeparted, chainStartErr)
+	}
+	chainSummary, _ := expeditionProjections.TimeRangeStats.Compute(replaystats.Range{After: chainQueryAfter, Until: "2026-09-01T12:59:59Z"}, nil)
+	if chainSummary.Metrics.Jumps != 1 || chainSummary.Metrics.BodiesScanned != 0 {
+		testingContext.Fatalf("expected chained expedition to exclude Exp 1 Beta scan and include SideHop departure jump, got %+v", chainSummary.Metrics)
+	}
+}
+
+func mustGetExpedition(testingContext *testing.T, databaseConnection *sql.DB, expeditionID int64) expedition.Expedition {
+	testingContext.Helper()
+	record, getError := expedition.Get(databaseConnection, expeditionID)
+	if getError != nil {
+		testingContext.Fatalf("expedition.Get(%d): %v", expeditionID, getError)
+	}
+	return record
 }

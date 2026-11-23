@@ -139,6 +139,35 @@ func Get(queryer db.Queryer, expeditionID int64) (Expedition, error) {
 	return expeditionRecord, queryError
 }
 
+// EffectiveStart resolves an expedition's telemetry start from Origin Waypoint #1's
+// departure timestamp. queryAfter is an exclusive lower bound placed 1 second
+// before departed_at (clamped at visitedAt) so half-open (after, until] queries
+// include the departure jump, while displayStart is the exact departed_at
+// timestamp for duration and upkeep calculations.
+func EffectiveStart(queryer db.Queryer, expeditionRecord Expedition) (queryAfter, displayStart string, departed bool, loadError error) {
+	if expeditionRecord.StartTimestamp == "" {
+		return "", "", false, nil
+	}
+	var visitedAt, departedAt string
+	queryError := queryer.QueryRow(
+		`SELECT COALESCE(visited_at, ''), COALESCE(departed_at, '')
+		 FROM expedition_rows
+		 WHERE expedition_id = ? AND row_type = 'waypoint'
+		 ORDER BY position, id LIMIT 1`,
+		expeditionRecord.ID,
+	).Scan(&visitedAt, &departedAt)
+	if errors.Is(queryError, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if queryError != nil {
+		return "", "", false, fmt.Errorf("load origin departure for expedition %d: %w", expeditionRecord.ID, queryError)
+	}
+	if departedAt == "" {
+		return "", "", false, nil
+	}
+	return exclusiveBoundaryBefore(departedAt, visitedAt), departedAt, true, nil
+}
+
 // SeedWaypoint describes a waypoint row to seed when creating a new expedition,
 // optionally carrying pre-resolved local coordinates and GEC POI metadata.
 type SeedWaypoint struct {

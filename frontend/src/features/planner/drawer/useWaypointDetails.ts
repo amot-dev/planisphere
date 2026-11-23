@@ -14,19 +14,38 @@ export interface WaypointDetailsState {
 }
 
 function computeLegStartTimestamp(plan: expedition.PlanView, targetVisitedAt: string): string {
-  let afterTimestamp = ''
+  let latestVisitedAt = ''
+  let latestDepartedAt = ''
   for (const rowView of plan.rows ?? []) {
     const candidateVisitedAt = rowView.row.visitedAt ?? ''
     if (
       rowView.row.rowType === 'waypoint' &&
       candidateVisitedAt !== '' &&
       (targetVisitedAt === '' || candidateVisitedAt < targetVisitedAt) &&
-      candidateVisitedAt > afterTimestamp
+      candidateVisitedAt > latestVisitedAt
     ) {
-      afterTimestamp = candidateVisitedAt
+      latestVisitedAt = candidateVisitedAt
+      latestDepartedAt = rowView.row.departedAt ?? ''
     }
   }
-  return afterTimestamp || (plan.expedition?.startTimestamp ?? '')
+  return latestDepartedAt || latestVisitedAt || (plan.expedition?.startTimestamp ?? '')
+}
+
+function computeExpectedDrawerTo(plan: expedition.PlanView, rowView: expedition.RowView): string {
+  const departedAt = rowView.row.departedAt ?? ''
+  if (departedAt !== '') {
+    return departedAt
+  }
+  const visitedAt = rowView.row.visitedAt ?? ''
+  if (
+    rowView.number > 1 &&
+    visitedAt !== '' &&
+    plan.expedition?.status === 'completed' &&
+    plan.expedition?.endTimestamp
+  ) {
+    return plan.expedition.endTimestamp
+  }
+  return ''
 }
 
 /**
@@ -137,10 +156,17 @@ export function useWaypointDetails(
         loadedDetails.number === rowView.number &&
         loadedArchiveRevisionByIdRef.current[rowId] === archiveRevision
       ) {
-        const expectedTo = rowView.row.visitedAt ?? ''
+        const expectedArrivedAt = rowView.row.visitedAt ?? ''
+        const expectedTo = computeExpectedDrawerTo(plan, rowView)
         const expectedFrom =
-          rowView.number === 1 ? loadedDetails.from : computeLegStartTimestamp(plan, expectedTo)
-        if (loadedDetails.to === expectedTo && loadedDetails.from === expectedFrom) {
+          rowView.number === 1
+            ? loadedDetails.from
+            : computeLegStartTimestamp(plan, expectedArrivedAt)
+        if (
+          loadedDetails.to === expectedTo &&
+          loadedDetails.from === expectedFrom &&
+          (loadedDetails.arrivedAt ?? '') === expectedArrivedAt
+        ) {
           continue
         }
       }

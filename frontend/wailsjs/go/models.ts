@@ -208,6 +208,7 @@ export namespace app {
 	    expeditionId: number;
 	    status: string;
 	    started: boolean;
+	    departed: boolean;
 	    start: string;
 	    end: string;
 	    startGalactic: string;
@@ -235,6 +236,7 @@ export namespace app {
 	        this.expeditionId = source["expeditionId"];
 	        this.status = source["status"];
 	        this.started = source["started"];
+	        this.departed = source["departed"];
 	        this.start = source["start"];
 	        this.end = source["end"];
 	        this.startGalactic = source["startGalactic"];
@@ -571,6 +573,7 @@ export namespace expedition {
 	    z: number;
 	    coordsSource: string;
 	    visitedAt: string;
+	    departedAt: string;
 	    visitEventUid: string;
 	
 	    static createFrom(source: any = {}) {
@@ -598,6 +601,7 @@ export namespace expedition {
 	        this.z = source["z"];
 	        this.coordsSource = source["coordsSource"];
 	        this.visitedAt = source["visitedAt"];
+	        this.departedAt = source["departedAt"];
 	        this.visitEventUid = source["visitEventUid"];
 	    }
 	}
@@ -610,6 +614,7 @@ export namespace expedition {
 	    visitCount: number;
 	    visitState: string;
 	    visitedAtGalactic: string;
+	    departedAtGalactic?: string;
 	    distFromPrevLy?: number;
 	    distFromCurrentLy?: number;
 	    isNextWaypoint?: boolean;
@@ -632,6 +637,7 @@ export namespace expedition {
 	        this.visitCount = source["visitCount"];
 	        this.visitState = source["visitState"];
 	        this.visitedAtGalactic = source["visitedAtGalactic"];
+	        this.departedAtGalactic = source["departedAtGalactic"];
 	        this.distFromPrevLy = source["distFromPrevLy"];
 	        this.distFromCurrentLy = source["distFromCurrentLy"];
 	        this.isNextWaypoint = source["isNextWaypoint"];
@@ -751,6 +757,9 @@ export namespace expedition {
 	    to: string;
 	    fromGalactic: string;
 	    toGalactic: string;
+	    arrivedAt?: string;
+	    departedAt?: string;
+	    inSystem?: boolean;
 	    elapsed: string;
 	    prevSystem: string;
 	    shipsUsed: string[];
@@ -770,6 +779,9 @@ export namespace expedition {
 	        this.to = source["to"];
 	        this.fromGalactic = source["fromGalactic"];
 	        this.toGalactic = source["toGalactic"];
+	        this.arrivedAt = source["arrivedAt"];
+	        this.departedAt = source["departedAt"];
+	        this.inSystem = source["inSystem"];
 	        this.elapsed = source["elapsed"];
 	        this.prevSystem = source["prevSystem"];
 	        this.shipsUsed = source["shipsUsed"];

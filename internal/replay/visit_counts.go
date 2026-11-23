@@ -33,6 +33,7 @@ func QuerySystemVisitCounts(
 		WHERE system_name COLLATE NOCASE IN (` + strings.Join(placeholders, ",") + `)
 		  AND (event IN ('FSDJump', 'Location', 'CarrierJump') OR star_x IS NOT NULL)
 		  AND ` + CmdrFilterSQL + `
+		  AND ` + nonMulticrewSQLFilter + `
 		GROUP BY system_name COLLATE NOCASE`
 	databaseRows, queryError := queryer.Query(query, queryArgs...)
 	if queryError != nil {

@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/reference"
 	"planisphere/internal/replay"
 	"planisphere/internal/store/modes"
 )
@@ -41,17 +43,75 @@ func matchesNormalizedWaypoint(rowItem *Row, normalizedRowSystem string, arrival
 	return normalizedRowSystem == normalizedArrivalSystem
 }
 
-// prepareNormalizedTransitions extracts the origin visit event UID and filters
-// arrivals into chronological system-change transitions with normalized names.
-func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startTimestamp string, arrivals []Arrival) (string, []Arrival) {
+// exclusiveBoundaryBefore converts a stored departure jump timestamp into an
+// inclusive upper bound strictly preceding departedAt so half-open (after, until]
+// telemetry queries separate a waypoint stay from its outbound departure jump.
+func exclusiveBoundaryBefore(departedAt, visitedAt string) string {
+	if departedAt == "" {
+		return ""
+	}
+	parsedDeparture, parseError := reference.ParseISO(departedAt)
+	if parseError != nil {
+		return departedAt
+	}
+	boundedTimestamp := reference.FormatISO(parsedDeparture.Add(-time.Second))
+	if visitedAt != "" && boundedTimestamp < visitedAt {
+		return visitedAt
+	}
+	return boundedTimestamp
+}
+
+func sameStayCommander(stayCommander, candidateCommander string) bool {
+	if stayCommander == "" || candidateCommander == "" {
+		return true
+	}
+	return strings.EqualFold(stayCommander, candidateCommander)
+}
+
+func sameNormalizedSystem(leftName string, leftAddress int64, rightName string, rightAddress int64) bool {
+	if leftAddress != 0 && rightAddress != 0 && leftAddress == rightAddress {
+		return true
+	}
+	return leftName != "" && leftName == rightName
+}
+
+func findDepartureTimestamp(
+	waypointRow *Row,
+	normalizedWaypointSystem string,
+	stayCommander string,
+	transitions []Arrival,
+	startIndex int,
+) string {
+	for index := startIndex; index < len(transitions); index++ {
+		candidate := transitions[index]
+		if !sameStayCommander(stayCommander, candidate.Commander) {
+			continue
+		}
+		if matchesNormalizedWaypoint(waypointRow, normalizedWaypointSystem, candidate.SystemAddress, candidate.SystemName) {
+			continue
+		}
+		return candidate.Timestamp
+	}
+	return ""
+}
+
+// prepareNormalizedTransitions extracts the origin visit event UID and commander
+// and filters arrivals into chronological system-change transitions with normalized names.
+func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startTimestamp string, arrivals []Arrival) (string, string, []Arrival) {
 	originVisitUID := ""
+	originCommander := ""
 	lastSystemName := normalizedOriginSystem
+	lastSystemAddress := originRow.SystemAddress
 	for _, arrival := range arrivals {
 		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
 		if arrival.Timestamp == startTimestamp && matchesNormalizedWaypoint(originRow, normalizedOriginSystem, arrival.SystemAddress, normalizedArrivalSystem) {
 			originVisitUID = arrival.UID
+			originCommander = arrival.Commander
 			if normalizedArrivalSystem != "" {
 				lastSystemName = normalizedArrivalSystem
+			}
+			if arrival.SystemAddress != 0 {
+				lastSystemAddress = arrival.SystemAddress
 			}
 			break
 		}
@@ -66,15 +126,16 @@ func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startT
 			continue
 		}
 		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
-		if normalizedArrivalSystem == "" || normalizedArrivalSystem == lastSystemName {
+		if normalizedArrivalSystem == "" || sameNormalizedSystem(lastSystemName, lastSystemAddress, normalizedArrivalSystem, arrival.SystemAddress) {
 			continue // not an actual change of system
 		}
 		lastSystemName = normalizedArrivalSystem
+		lastSystemAddress = arrival.SystemAddress
 		transitionItem := arrival
 		transitionItem.SystemName = normalizedArrivalSystem
 		transitions = append(transitions, transitionItem)
 	}
-	return originVisitUID, transitions
+	return originVisitUID, originCommander, transitions
 }
 
 func replayNormalizedTransitions(
@@ -83,10 +144,18 @@ func replayNormalizedTransitions(
 	firstWaypointIndex int,
 	startTimestamp string,
 	originVisitUID string,
+	originCommander string,
 	transitions []Arrival,
 ) []Row {
 	rows[firstWaypointIndex].VisitedAt = startTimestamp
 	rows[firstWaypointIndex].VisitEventUID = originVisitUID
+	rows[firstWaypointIndex].DepartedAt = findDepartureTimestamp(
+		&rows[firstWaypointIndex],
+		normalizedSystemNames[firstWaypointIndex],
+		originCommander,
+		transitions,
+		0,
+	)
 	nextWaypointIndex := nextWaypointAfter(rows, firstWaypointIndex)
 
 	for i := range transitions {
@@ -98,6 +167,13 @@ func replayNormalizedTransitions(
 			continue
 		}
 		rows[nextWaypointIndex].VisitedAt, rows[nextWaypointIndex].VisitEventUID = arrival.Timestamp, arrival.UID
+		rows[nextWaypointIndex].DepartedAt = findDepartureTimestamp(
+			&rows[nextWaypointIndex],
+			normalizedSystemNames[nextWaypointIndex],
+			arrival.Commander,
+			transitions,
+			i+1,
+		)
 		nextWaypointIndex = nextWaypointAfter(rows, nextWaypointIndex)
 	}
 	return rows
@@ -110,8 +186,8 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 			normalizedSystemNames[i] = strings.ToLower(strings.TrimSpace(rows[i].SystemName))
 		}
 	}
-	originVisitUID, transitions := prepareNormalizedTransitions(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], startTimestamp, arrivals)
-	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, transitions)
+	originVisitUID, originCommander, transitions := prepareNormalizedTransitions(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], startTimestamp, arrivals)
+	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, originCommander, transitions)
 }
 
 // reconcileEvaluatedRowState synchronizes derived row fields after chronological
@@ -177,6 +253,7 @@ func persistEvaluatedRowChanges(queryer db.Queryer, rows []Row, originalRowsByID
 		newPosition := i + 1
 		if originalRow.Position == newPosition &&
 			originalRow.VisitedAt == rowItem.VisitedAt &&
+			originalRow.DepartedAt == rowItem.DepartedAt &&
 			originalRow.VisitEventUID == rowItem.VisitEventUID &&
 			originalRow.FCArrived == rowItem.FCArrived &&
 			originalRow.LegModeID == rowItem.LegModeID {
@@ -186,21 +263,24 @@ func persistEvaluatedRowChanges(queryer db.Queryer, rows []Row, originalRowsByID
 		changed = true
 		if updateStatement == nil {
 			var prepError error
-			updateStatement, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ?, visited_at = ?, visit_event_uid = ?, fc_arrived = ?, leg_mode_id = ? WHERE id = ?`)
+			updateStatement, prepError = queryer.Prepare(`UPDATE expedition_rows SET position = ?, visited_at = ?, departed_at = ?, visit_event_uid = ?, fc_arrived = ?, leg_mode_id = ? WHERE id = ?`)
 			if prepError != nil {
 				return false, fmt.Errorf("prepare update row: %w", prepError)
 			}
 			defer updateStatement.Close()
 		}
 
-		var visitedAtValue, visitUIDValue any
+		var visitedAtValue, departedAtValue, visitUIDValue any
 		if rowItem.VisitedAt != "" {
 			visitedAtValue = rowItem.VisitedAt
+		}
+		if rowItem.DepartedAt != "" {
+			departedAtValue = rowItem.DepartedAt
 		}
 		if rowItem.VisitEventUID != "" {
 			visitUIDValue = rowItem.VisitEventUID
 		}
-		if _, updateError := updateStatement.Exec(newPosition, visitedAtValue, visitUIDValue, rowItem.FCArrived, rowItem.LegModeID, rowItem.ID); updateError != nil {
+		if _, updateError := updateStatement.Exec(newPosition, visitedAtValue, departedAtValue, visitUIDValue, rowItem.FCArrived, rowItem.LegModeID, rowItem.ID); updateError != nil {
 			return false, fmt.Errorf("update row %d: %w", rowItem.ID, updateError)
 		}
 	}
@@ -238,7 +318,7 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		originalRowsByID[rowItem.ID] = rowItem
 	}
 	for i := range rows {
-		rows[i].VisitedAt, rows[i].VisitEventUID = "", ""
+		rows[i].VisitedAt, rows[i].DepartedAt, rows[i].VisitEventUID = "", "", ""
 	}
 	activeModeID := expeditionRecord.ActiveModeID
 	if activeModeID <= 0 {

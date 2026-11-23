@@ -118,8 +118,10 @@ func SetLegModeTx(dbConn *sql.DB, rowID, modeID int64, cascade bool) (int64, err
 }
 
 // LoadModeLookup constructs an O(log N) timestamp-to-modeID lookup closure
-// directly from expeditionID's visited waypoint legs (prevVisit, visit] and,
-// for active expeditions, its trailing in-progress leg active_mode_id.
+// from expeditionID's visited waypoint legs. Visited legs end 1 second before
+// departed_at (exclusiveBoundaryBefore(departedAt, visitedAt), clamped at
+// visitedAt) so outbound departure jumps map to the next leg (or trailing
+// active_mode_id once departed from the latest visited waypoint).
 func LoadModeLookup(queryer db.Queryer, expeditionID int64) (replaystats.ModeLookup, error) {
 	fallbackModeID := modes.DefaultFallbackModeID(queryer)
 	if expeditionID <= 0 {
@@ -135,7 +137,7 @@ func LoadModeLookup(queryer db.Queryer, expeditionID int64) (replaystats.ModeLoo
 	}
 
 	rows, queryError := queryer.Query(
-		`SELECT COALESCE(visited_at, ''), COALESCE(leg_mode_id, 0)
+		`SELECT COALESCE(visited_at, ''), COALESCE(departed_at, ''), COALESCE(leg_mode_id, 0)
 		 FROM expedition_rows
 		 WHERE expedition_id = ? AND row_type = 'waypoint' AND COALESCE(visited_at, '') != ''
 		 ORDER BY position, id`,
@@ -149,9 +151,9 @@ func LoadModeLookup(queryer db.Queryer, expeditionID int64) (replaystats.ModeLoo
 	var spans []legModeSpan
 	seenOrigin := false
 	for rows.Next() {
-		var visitedAt string
+		var visitedAt, departedAt string
 		var legModeID int64
-		if scanError := rows.Scan(&visitedAt, &legModeID); scanError != nil {
+		if scanError := rows.Scan(&visitedAt, &departedAt, &legModeID); scanError != nil {
 			return nil, fmt.Errorf("scan leg mode span for expedition %d: %w", expeditionID, scanError)
 		}
 		if !seenOrigin {
@@ -161,7 +163,11 @@ func LoadModeLookup(queryer db.Queryer, expeditionID int64) (replaystats.ModeLoo
 		if legModeID <= 0 {
 			legModeID = fallbackModeID
 		}
-		spans = append(spans, legModeSpan{until: visitedAt, modeID: legModeID})
+		spanUntil := "9999-12-31T23:59:59Z"
+		if departedAt != "" {
+			spanUntil = exclusiveBoundaryBefore(departedAt, visitedAt)
+		}
+		spans = append(spans, legModeSpan{until: spanUntil, modeID: legModeID})
 	}
 	if iterationError := rows.Err(); iterationError != nil {
 		return nil, iterationError

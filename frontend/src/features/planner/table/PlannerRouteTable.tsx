@@ -105,6 +105,7 @@ export interface PlannerRouteTableProps {
   plan: expedition.PlanView
   isPlanning: boolean
   isCompleted: boolean
+  clockSuspended?: boolean
   frontier: PlannerFrontierIndices
   columns: PlannerColumnLayout
   externalLinks: ExternalLinkVisibilityConfig
@@ -123,6 +124,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
   plan,
   isPlanning,
   isCompleted,
+  clockSuspended = false,
   frontier,
   columns,
   externalLinks,
@@ -386,6 +388,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
                     modeColor={rowView.legModeColor}
                     modesList={modesList}
                     canCascade={rowView.visitState === 'visited' && index < lastVisitedIndex}
+                    clockSuspended={clockSuspended}
                     onChangeLegMode={handleChangeLegMode}
                   />
                 </td>

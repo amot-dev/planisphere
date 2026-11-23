@@ -105,6 +105,11 @@ var migrations = []migration{
 		description: "Backfill per-expedition active_mode_id and visited leg_mode_id from legacy mode_windows",
 		apply:       migrateLegModesV11,
 	},
+	{
+		key:         "departed_at_v12",
+		description: "Backfill waypoint departed_at timestamps and normalize completed expedition end timestamps to final in-system activity",
+		apply:       migrateDepartedAtV12,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -114,6 +119,7 @@ func Migrate(dbConn *sql.DB) error {
 	_, _ = dbConn.Exec(`ALTER TABLE journal_events ADD COLUMN commander TEXT`)
 	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN fc_arrived INTEGER NOT NULL DEFAULT 0`)
 	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN leg_mode_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = dbConn.Exec(`ALTER TABLE expedition_rows ADD COLUMN departed_at TEXT`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_type TEXT NOT NULL DEFAULT 'player'`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN active_mode_id INTEGER NOT NULL DEFAULT 0`)

@@ -12,18 +12,21 @@ import (
 
 // WaypointDetails is the content of a waypoint's expandable drawer.
 type WaypointDetails struct {
-	RowID        int64                            `json:"rowId"`
-	Kind         string                           `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
-	Number       int                              `json:"number"`
-	From         string                           `json:"from"`
-	To           string                           `json:"to"`
-	FromGalactic string                           `json:"fromGalactic"`
-	ToGalactic   string                           `json:"toGalactic"`
-	Elapsed      string                           `json:"elapsed"`
-	PrevSystem   string                           `json:"prevSystem"`
-	ShipsUsed    []string                         `json:"shipsUsed"`
-	Metrics      replaystats.Metrics              `json:"metrics"`
-	Realization  replaystats.RealizationBreakdown `json:"realization"`
+	RowID              int64                            `json:"rowId"`
+	Kind               string                           `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
+	Number             int                              `json:"number"`
+	From               string                           `json:"from"`
+	To                 string                           `json:"to"`
+	FromGalactic       string                           `json:"fromGalactic"`
+	ToGalactic         string                           `json:"toGalactic"`
+	ArrivedAt   string                           `json:"arrivedAt,omitempty"`
+	DepartedAt  string                           `json:"departedAt,omitempty"`
+	InSystem    bool                             `json:"inSystem,omitempty"`
+	Elapsed            string                           `json:"elapsed"`
+	PrevSystem         string                           `json:"prevSystem"`
+	ShipsUsed          []string                         `json:"shipsUsed"`
+	Metrics            replaystats.Metrics              `json:"metrics"`
+	Realization        replaystats.RealizationBreakdown `json:"realization"`
 }
 
 func populateWindowTelemetry(expeditionProjections *Projections, timeRange replaystats.Range, waypointDetails *WaypointDetails) error {
@@ -38,10 +41,19 @@ func populateWindowTelemetry(expeditionProjections *Projections, timeRange repla
 
 func populateOriginWaypointDetails(dbConn *sql.DB, targetRow Row, waypointDetails *WaypointDetails, expeditionProjections *Projections) error {
 	waypointDetails.Kind = "origin"
-	waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, reference.ToGalactic(targetRow.VisitedAt)
+	waypointDetails.ArrivedAt = targetRow.VisitedAt
 	firstTimestamp := replay.FirstEventTimestamp(dbConn)
 	waypointDetails.From, waypointDetails.FromGalactic = firstTimestamp, reference.ToGalactic(firstTimestamp)
-	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: targetRow.VisitedAt}, waypointDetails)
+	untilQuery := ""
+	if targetRow.DepartedAt != "" {
+		untilQuery = exclusiveBoundaryBefore(targetRow.DepartedAt, targetRow.VisitedAt)
+		waypointDetails.To = targetRow.DepartedAt
+		waypointDetails.ToGalactic = reference.ToGalactic(targetRow.DepartedAt)
+		waypointDetails.DepartedAt = targetRow.DepartedAt
+	} else {
+		waypointDetails.InSystem = true
+	}
+	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: untilQuery}, waypointDetails)
 }
 
 func resolveLegShipsUsed(
@@ -91,27 +103,72 @@ func resolveLegShipsUsed(
 	return shipsUsed, nil
 }
 
-func populateLegDetails(dbConn *sql.DB, targetRow Row, rows []Row, waypointDetails *WaypointDetails, expeditionProjections *Projections) error {
-	waypointDetails.Kind = "leg"
-	// The leg starts at the visit of the waypoint visited immediately before this one.
-	afterTimestamp := ""
-	for _, rowItem := range rows {
-		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && (targetRow.VisitedAt == "" || rowItem.VisitedAt < targetRow.VisitedAt) && rowItem.VisitedAt > afterTimestamp {
-			afterTimestamp = rowItem.VisitedAt
-			waypointDetails.PrevSystem = rowItem.SystemName
+func findPrecedingVisitedWaypoint(rows []Row, targetRow Row) *Row {
+	var precedingRow *Row
+	for index := range rows {
+		candidate := &rows[index]
+		if !candidate.IsWaypoint() || candidate.VisitedAt == "" {
+			continue
+		}
+		if targetRow.VisitedAt != "" && candidate.VisitedAt >= targetRow.VisitedAt {
+			continue
+		}
+		if precedingRow == nil || candidate.VisitedAt > precedingRow.VisitedAt {
+			precedingRow = candidate
 		}
 	}
-	if afterTimestamp == "" {
-		var startTimestamp sql.NullString
-		_ = dbConn.QueryRow(`SELECT COALESCE(start_timestamp, '') FROM expeditions WHERE id = ?`, targetRow.ExpeditionID).Scan(&startTimestamp)
-		afterTimestamp = startTimestamp.String
+	return precedingRow
+}
+
+func resolveLegUpperBound(expeditionRecord Expedition, targetRow Row, waypointDetails *WaypointDetails) string {
+	if targetRow.VisitedAt == "" {
+		return ""
 	}
-	waypointDetails.From, waypointDetails.FromGalactic = afterTimestamp, reference.ToGalactic(afterTimestamp)
-	waypointDetails.To, waypointDetails.ToGalactic = targetRow.VisitedAt, reference.ToGalactic(targetRow.VisitedAt)
-	if telemetryError := populateWindowTelemetry(expeditionProjections, replaystats.Range{After: afterTimestamp, Until: targetRow.VisitedAt}, waypointDetails); telemetryError != nil {
+	waypointDetails.ArrivedAt = targetRow.VisitedAt
+	if targetRow.DepartedAt != "" {
+		waypointDetails.To = targetRow.DepartedAt
+		waypointDetails.ToGalactic = reference.ToGalactic(targetRow.DepartedAt)
+		waypointDetails.DepartedAt = targetRow.DepartedAt
+		return exclusiveBoundaryBefore(targetRow.DepartedAt, targetRow.VisitedAt)
+	}
+	if expeditionRecord.Status == StatusCompleted && expeditionRecord.EndTimestamp != "" {
+		waypointDetails.To = expeditionRecord.EndTimestamp
+		waypointDetails.ToGalactic = reference.ToGalactic(expeditionRecord.EndTimestamp)
+		return expeditionRecord.EndTimestamp
+	}
+	waypointDetails.InSystem = true
+	return ""
+}
+
+func populateLegDetails(
+	dbConn *sql.DB,
+	expeditionRecord Expedition,
+	targetRow Row,
+	rows []Row,
+	waypointDetails *WaypointDetails,
+	expeditionProjections *Projections,
+) error {
+	waypointDetails.Kind = "leg"
+	afterQuery := expeditionRecord.StartTimestamp
+	displayFrom := expeditionRecord.StartTimestamp
+	if precedingRow := findPrecedingVisitedWaypoint(rows, targetRow); precedingRow != nil {
+		waypointDetails.PrevSystem = precedingRow.SystemName
+		if precedingRow.DepartedAt != "" {
+			afterQuery = exclusiveBoundaryBefore(precedingRow.DepartedAt, precedingRow.VisitedAt)
+			displayFrom = precedingRow.DepartedAt
+		} else {
+			afterQuery = precedingRow.VisitedAt
+			displayFrom = precedingRow.VisitedAt
+		}
+	}
+	waypointDetails.From = displayFrom
+	waypointDetails.FromGalactic = reference.ToGalactic(displayFrom)
+	untilQuery := resolveLegUpperBound(expeditionRecord, targetRow, waypointDetails)
+
+	if telemetryError := populateWindowTelemetry(expeditionProjections, replaystats.Range{After: afterQuery, Until: untilQuery}, waypointDetails); telemetryError != nil {
 		return telemetryError
 	}
-	shipsUsed, shipsError := resolveLegShipsUsed(dbConn, expeditionProjections, afterTimestamp, targetRow.VisitedAt, waypointDetails.Metrics.Jumps)
+	shipsUsed, shipsError := resolveLegShipsUsed(dbConn, expeditionProjections, afterQuery, untilQuery, waypointDetails.Metrics.Jumps)
 	if shipsError != nil {
 		return shipsError
 	}
@@ -146,6 +203,10 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 	if !targetRow.IsWaypoint() {
 		return WaypointDetails{}, nil
 	}
+	expeditionRecord, expError := Get(dbConn, targetRow.ExpeditionID)
+	if expError != nil {
+		return WaypointDetails{}, expError
+	}
 
 	rows, listError := ListRows(dbConn, targetRow.ExpeditionID)
 	if listError != nil {
@@ -153,10 +214,10 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 	}
 
 	var (
-		waypointNumber     int
-		selfNumber         int
-		hasVisitedWaypoint bool
-		nextWaypointID     int64
+		waypointNumber   int
+		selfNumber       int
+		latestVisitedRow *Row
+		nextWaypointID   int64
 	)
 	for i := range rows {
 		rowItem := &rows[i]
@@ -168,7 +229,9 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 			selfNumber = waypointNumber
 		}
 		if rowItem.VisitedAt != "" {
-			hasVisitedWaypoint = true
+			if latestVisitedRow == nil || rowItem.VisitedAt > latestVisitedRow.VisitedAt {
+				latestVisitedRow = rowItem
+			}
 		} else if nextWaypointID == 0 {
 			nextWaypointID = rowItem.ID
 		}
@@ -178,12 +241,8 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 		return WaypointDetails{}, nil
 	}
 	if targetRow.VisitedAt == "" {
-		if !hasVisitedWaypoint || nextWaypointID != rowID {
+		if latestVisitedRow == nil || latestVisitedRow.DepartedAt == "" || nextWaypointID != rowID || expeditionRecord.Status != StatusActive {
 			return WaypointDetails{}, nil
-		}
-		expeditionRecord, getError := Get(dbConn, targetRow.ExpeditionID)
-		if getError != nil || expeditionRecord.Status != StatusActive {
-			return WaypointDetails{}, getError
 		}
 	}
 
@@ -198,7 +257,7 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 			return waypointDetails, originError
 		}
 	} else {
-		if legError := populateLegDetails(dbConn, targetRow, rows, &waypointDetails, expeditionProjections); legError != nil {
+		if legError := populateLegDetails(dbConn, expeditionRecord, targetRow, rows, &waypointDetails, expeditionProjections); legError != nil {
 			return waypointDetails, legError
 		}
 	}

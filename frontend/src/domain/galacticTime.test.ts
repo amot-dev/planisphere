@@ -5,6 +5,7 @@ import {
   formatCredits,
   formatEfficiencyBonusLabel,
   formatEfficiencyBonusTooltip,
+  formatElapsedDuration,
   formatLoss,
   formatLy,
   fromGalacticTime,
@@ -58,6 +59,23 @@ describe('Galactic Standard Time (+1286 years)', () => {
     expect(formatEfficiencyBonusTooltip(168, 184)).toBe(
       '168 of 184 mapped bodies met the DSS probe efficiency target (91.3%)',
     )
+  })
+
+  it('formats elapsed durations across minutes, days, years, and live now fallback', () => {
+    expect(formatElapsedDuration('')).toBe('')
+    expect(formatElapsedDuration('2026-01-19T15:00:00Z', '2026-01-19T15:00:00Z')).toBe('0h 00m')
+    expect(formatElapsedDuration('2026-01-19T15:00:00Z', '2026-01-19T16:35:45Z')).toBe('1h 35m')
+    expect(formatElapsedDuration('2026-01-19T15:00:00Z', '2026-01-21T18:05:00Z')).toBe('2d 03h 05m')
+    expect(formatElapsedDuration('2026-01-01T00:00:00Z', '2027-01-01T00:00:00Z')).toBe('1y 00h 00m')
+    expect(formatElapsedDuration('2026-01-01T00:00:00Z', '2027-01-06T04:09:00Z')).toBe('1y 5d 04h 09m')
+    expect(formatElapsedDuration('2026-01-19T16:00:00Z', '2026-01-19T15:00:00Z')).toBe('0h 00m')
+    expect(
+      formatElapsedDuration(
+        '2026-01-19T15:00:00Z',
+        '',
+        Date.parse('2026-01-19T15:42:30Z'),
+      ),
+    ).toBe('0h 42m')
   })
 })
 

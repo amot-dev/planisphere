@@ -125,6 +125,7 @@ export default function App() {
           <ExpeditionPlanner
             plan={plan}
             archiveRevision={archiveRevision}
+            clockSuspended={isClockSuspended}
             externalLinkInara={settings?.externalLinkInara}
             externalLinkEdsm={settings?.externalLinkEdsm}
             externalLinkGec={settings?.externalLinkGec}

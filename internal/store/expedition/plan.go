@@ -34,10 +34,11 @@ type RowView struct {
 	RegionName        string       `json:"regionName"`
 	DetectedRegionID  int          `json:"detectedRegionId"` // region containing the coordinates
 	DetectedRegion    string       `json:"detectedRegion"`
-	VisitCount        int          `json:"visitCount"`
-	VisitState        string       `json:"visitState"`
-	VisitedAtGalactic string       `json:"visitedAtGalactic"`
-	DistFromPrevLy    *float64     `json:"distFromPrevLy,omitempty"`
+	VisitCount         int          `json:"visitCount"`
+	VisitState         string       `json:"visitState"`
+	VisitedAtGalactic  string       `json:"visitedAtGalactic"`
+	DepartedAtGalactic string       `json:"departedAtGalactic,omitempty"`
+	DistFromPrevLy     *float64     `json:"distFromPrevLy,omitempty"`
 	DistFromCurrentLy *float64 `json:"distFromCurrentLy,omitempty"`
 	IsNextWaypoint    bool     `json:"isNextWaypoint,omitempty"`
 	LegModeID         int64    `json:"legModeId"`
@@ -144,6 +145,10 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		gecLookup:          gecLookup,
 	}
 
+	if firstIndex := firstWaypoint(rows); firstIndex >= 0 && rows[firstIndex].DepartedAt != "" {
+		planView.StartGalactic = reference.ToGalactic(rows[firstIndex].DepartedAt)
+	}
+
 	// Current waypoint is the visited waypoint with the latest visit time.
 	for i := range rows {
 		rowItem := &rows[i]
@@ -167,7 +172,8 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 	buildContext.playerPosition = playerPosition
 	planView.PlayerSystem = playerSystem
 
-	if expeditionRecord.Status == StatusActive {
+	// Advance the active current leg only once the commander has departed the latest visited waypoint.
+	if expeditionRecord.Status == StatusActive && buildContext.currentWaypoint != nil && buildContext.currentWaypoint.DepartedAt != "" {
 		for _, rowItem := range rows {
 			if rowItem.IsWaypoint() && rowItem.VisitedAt == "" {
 				buildContext.nextWaypointRowID = rowItem.ID
@@ -225,6 +231,9 @@ func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, w
 	switch rowViewItem.VisitState {
 	case VisitVisited:
 		rowViewItem.VisitedAtGalactic = reference.ToGalactic(rowItem.VisitedAt)
+		if rowItem.DepartedAt != "" {
+			rowViewItem.DepartedAtGalactic = reference.ToGalactic(rowItem.DepartedAt)
+		}
 		if _, hasPreviousVisit := buildContext.previousVisitByID[rowItem.ID]; hasPreviousVisit {
 			rowViewItem.LegModeID, rowViewItem.LegModeName, rowViewItem.LegModeColor = buildContext.resolveMode(rowItem.LegModeID)
 		}
@@ -311,9 +320,8 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expe
 		return PlanView{}, rowsError
 	}
 	planView := PlanView{
-		Expedition:    expeditionRecord,
-		StartGalactic: reference.ToGalactic(expeditionRecord.StartTimestamp),
-		EndGalactic:   reference.ToGalactic(expeditionRecord.EndTimestamp),
+		Expedition:  expeditionRecord,
+		EndGalactic: reference.ToGalactic(expeditionRecord.EndTimestamp),
 	}
 
 	buildContext, contextError := loadPlanBuildContext(queryer, expeditionRecord, rows, gecLookup, &planView, expeditionProjections)

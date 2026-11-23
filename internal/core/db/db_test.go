@@ -429,3 +429,99 @@ func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
 		testingContext.Errorf("expected watermark to advance to '2099-01-01T00:00:00Z', got %q", updatedWatermark)
 	}
 }
+
+func TestMigrateDepartedAtV12(testingContext *testing.T) {
+	dbConn, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatalf("Open: %v", openError)
+	}
+	defer dbConn.Close()
+
+	// Seed journal history: Sol -> Alpha (with scan) -> Beta (with scan + later departure + post-departure scan) + multicrew noise.
+	if _, execError := dbConn.Exec(`
+		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
+		('v12-sol', '2026-08-01T10:00:00Z', 'Location', 'Sol', 1001, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001}', '2026-08-01T10:00:00Z'),
+		('v12-mc', '2026-08-01T10:05:00Z', 'FSDJump', 'Colonia', 9999, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T10:05:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":9999,"Multicrew":true}', '2026-08-01T10:05:00Z'),
+		('v12-alpha', '2026-08-01T11:00:00Z', 'FSDJump', 'Alpha', 1002, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":1002}', '2026-08-01T11:00:00Z'),
+		('v12-beta', '2026-08-01T12:00:00Z', 'FSDJump', 'Beta', 1003, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":1003}', '2026-08-01T12:00:00Z'),
+		('v12-beta-scan', '2026-08-01T12:25:00Z', 'Scan', 'Beta', 1003, 1, 'Beta 1', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:25:00Z","event":"Scan","BodyName":"Beta 1","PlanetClass":"Water world"}', '2026-08-01T12:25:00Z'),
+		('v12-after', '2026-08-05T18:00:00Z', 'FSDJump', 'Gamma', 1004, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-05T18:00:00Z","event":"FSDJump","StarSystem":"Gamma","SystemAddress":1004}', '2026-08-05T18:00:00Z'),
+		('v12-after-scan', '2026-08-05T18:10:00Z', 'Scan', 'Gamma', 1004, 1, 'Gamma 1', 'CmdrA', 't.log', '{"timestamp":"2026-08-05T18:10:00Z","event":"Scan","BodyName":"Gamma 1","PlanetClass":"Earthlike body"}', '2026-08-05T18:10:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed v12 journal events: %v", execError)
+	}
+
+	// Create 3 pre-v12 expeditions: active, completed post-7fabd35 (end == arrival), completed pre-7fabd35 (end > departure, with trailing unvisited row).
+	insertExpedition := func(name, status, startTS, endTS string) int64 {
+		res, err := dbConn.Exec(`INSERT INTO expeditions(name, status, start_timestamp, end_timestamp, created_at, updated_at) VALUES(?, ?, ?, NULLIF(?, ''), '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+			name, status, startTS, endTS)
+		if err != nil {
+			testingContext.Fatalf("insert expedition %s: %v", name, err)
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	activeID := insertExpedition("V12 Active", "active", "2026-08-01T10:00:00Z", "")
+	compArrivalID := insertExpedition("V12 Completed Arrival", "completed", "2026-08-01T10:00:00Z", "2026-08-01T12:00:00Z")
+	compLegacyID := insertExpedition("V12 Completed Legacy", "completed", "2026-08-01T10:00:00Z", "2026-08-06T00:00:00Z")
+
+	seedRows := func(expID int64, includeTrailingUnvisited bool) {
+		if _, err := dbConn.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, system_name, system_address, visited_at, departed_at, created_at, updated_at) VALUES
+			(?, 1, 'waypoint', 'Sol', 1001, '2026-08-01T10:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
+			(?, 2, 'waypoint', 'Alpha', 1002, '2026-08-01T11:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
+			(?, 3, 'waypoint', 'Beta', 1003, '2026-08-01T12:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
+			expID, expID, expID); err != nil {
+			testingContext.Fatalf("seed rows exp %d: %v", expID, err)
+		}
+		if includeTrailingUnvisited {
+			if _, err := dbConn.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, system_name, system_address, visited_at, departed_at, created_at, updated_at) VALUES
+				(?, 4, 'waypoint', 'Gamma', 1004, NULL, NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`, expID); err != nil {
+				testingContext.Fatalf("seed unvisited row exp %d: %v", expID, err)
+			}
+		}
+	}
+	seedRows(activeID, false)
+	seedRows(compArrivalID, false)
+	seedRows(compLegacyID, true)
+
+	// Re-trigger migration v12.
+	if _, err := dbConn.Exec(`DELETE FROM settings WHERE key = 'departed_at_v12'`); err != nil {
+		testingContext.Fatalf("delete departed_at_v12 key: %v", err)
+	}
+	if migrateError := db.Migrate(dbConn); migrateError != nil {
+		testingContext.Fatalf("db.Migrate v12: %v", migrateError)
+	}
+
+	readDepartures := func(expID int64) (endTS string, departures []string, visited []string) {
+		_ = dbConn.QueryRow(`SELECT COALESCE(end_timestamp, '') FROM expeditions WHERE id = ?`, expID).Scan(&endTS)
+		rows, _ := dbConn.Query(`SELECT COALESCE(visited_at, ''), COALESCE(departed_at, '') FROM expedition_rows WHERE expedition_id = ? ORDER BY position`, expID)
+		defer rows.Close()
+		for rows.Next() {
+			var vis, dep string
+			_ = rows.Scan(&vis, &dep)
+			visited = append(visited, vis)
+			departures = append(departures, dep)
+		}
+		return endTS, departures, visited
+	}
+
+	// Active expedition keeps all 3 departures (ignoring multicrew at 10:05).
+	activeEnd, activeDeps, _ := readDepartures(activeID)
+	if activeEnd != "" || len(activeDeps) != 3 || activeDeps[0] != "2026-08-01T11:00:00Z" || activeDeps[1] != "2026-08-01T12:00:00Z" || activeDeps[2] != "2026-08-05T18:00:00Z" {
+		testingContext.Fatalf("unexpected active v12 result: end=%q deps=%v", activeEnd, activeDeps)
+	}
+
+	// Both completed expeditions normalize end_timestamp to Beta 1 scan (12:25), clear post-end departure on Beta, and leave trailing Gamma unvisited.
+	for _, completedID := range []int64{compArrivalID, compLegacyID} {
+		compEnd, compDeps, compVisited := readDepartures(completedID)
+		if compEnd != "2026-08-01T12:25:00Z" {
+			testingContext.Fatalf("exp %d expected normalized end_timestamp=2026-08-01T12:25:00Z, got %q", completedID, compEnd)
+		}
+		if compDeps[0] != "2026-08-01T11:00:00Z" || compDeps[1] != "2026-08-01T12:00:00Z" || compDeps[2] != "" {
+			testingContext.Fatalf("exp %d unexpected completed departures: %v", completedID, compDeps)
+		}
+		if completedID == compLegacyID && (len(compVisited) != 4 || compVisited[3] != "" || compDeps[3] != "") {
+			testingContext.Fatalf("exp %d trailing unvisited row must remain untouched: visited=%v deps=%v", completedID, compVisited, compDeps)
+		}
+	}
+}

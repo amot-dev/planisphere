@@ -108,5 +108,67 @@ describe('StatsSidebar', () => {
     expect(allTimeSectionHtml).not.toContain('Personal Carrier Tritium')
     expect(allTimeSectionHtml).not.toContain('Carrier Cost')
   })
+
+  it('renders NOT STARTED, AWAITING DEPARTURE, and active elapsed duration states in Expedition Duration', () => {
+    const emptyMetrics = stats.Metrics.createFrom({})
+
+    const planningHtml = renderToString(
+      createElement(NavigationTelemetrySection, {
+        viewScope: 'expedition',
+        sidebarStats: app.SidebarStats.createFrom({
+          expeditionId: 1,
+          status: 'planning',
+          started: false,
+          departed: false,
+        }),
+        displayedMetrics: emptyMetrics,
+        carrierRouteOpen: false,
+      }),
+    )
+    expect(planningHtml).toContain('NOT STARTED')
+    expect(planningHtml).not.toContain('AWAITING DEPARTURE')
+    expect(planningHtml).not.toContain('START:')
+
+    const stagedHtml = renderToString(
+      createElement(NavigationTelemetrySection, {
+        viewScope: 'expedition',
+        sidebarStats: app.SidebarStats.createFrom({
+          expeditionId: 1,
+          status: 'active',
+          started: true,
+          departed: false,
+          endIsNow: false,
+        }),
+        displayedMetrics: emptyMetrics,
+        carrierRouteOpen: false,
+      }),
+    )
+    expect(stagedHtml).toContain('AWAITING DEPARTURE')
+    expect(stagedHtml).not.toContain('NOT STARTED')
+    expect(stagedHtml).not.toContain('START:')
+    expect(stagedHtml).not.toContain('CURRENT:')
+
+    const underwayHtml = renderToString(
+      createElement(NavigationTelemetrySection, {
+        viewScope: 'expedition',
+        sidebarStats: app.SidebarStats.createFrom({
+          expeditionId: 1,
+          status: 'active',
+          started: true,
+          departed: true,
+          startGalactic: '3312-01-18 12:00 UTC',
+          endIsNow: true,
+          duration: '2h 15m',
+        }),
+        displayedMetrics: emptyMetrics,
+        carrierRouteOpen: false,
+      }),
+    )
+    expect(underwayHtml).toContain('2h 15m')
+    expect(underwayHtml).toContain('START:')
+    expect(underwayHtml).toContain('3312-01-18 12:00 UTC')
+    expect(underwayHtml).toContain('CURRENT:')
+    expect(underwayHtml).not.toContain('AWAITING DEPARTURE')
+  })
 })
 

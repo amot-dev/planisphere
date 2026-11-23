@@ -207,7 +207,6 @@ func buildFixtureSidebarStats(
 		ExpeditionID:           expeditionRecord.ID,
 		Status:                 expeditionRecord.Status,
 		Started:                expeditionRecord.StartTimestamp != "",
-		Start:                  expeditionRecord.StartTimestamp,
 		End:                    expeditionRecord.EndTimestamp,
 		StartGalactic:          planView.StartGalactic,
 		EndGalactic:            planView.EndGalactic,
@@ -224,23 +223,34 @@ func buildFixtureSidebarStats(
 	}
 
 	referenceNow := time.Now().UTC()
+	var effectiveDisplayStart string
 	if sidebar.Started {
-		if sidebar.End == "" {
-			sidebar.EndIsNow = true
-			sidebar.EndGalactic = reference.TimeToGalactic(referenceNow)
+		queryAfter, displayStart, departed, startError := expedition.EffectiveStart(database, expeditionRecord)
+		if startError != nil {
+			return app.SidebarStats{}, startError
 		}
-		sidebar.Duration = reference.Elapsed(sidebar.Start, sidebar.End)
-		expeditionRange := projstats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
-		expeditionSummary, rangeError := proj.timeRangeStats.Compute(expeditionRange, nil)
-		if rangeError != nil {
-			return app.SidebarStats{}, rangeError
+		sidebar.Departed = departed
+		effectiveDisplayStart = displayStart
+		if departed {
+			sidebar.Start = displayStart
+			sidebar.StartGalactic = reference.ToGalactic(displayStart)
+			if sidebar.End == "" {
+				sidebar.EndIsNow = true
+				sidebar.EndGalactic = reference.TimeToGalactic(referenceNow)
+			}
+			sidebar.Duration = reference.Elapsed(displayStart, sidebar.End)
+			expeditionRange := projstats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
+			expeditionSummary, rangeError := proj.timeRangeStats.Compute(expeditionRange, nil)
+			if rangeError != nil {
+				return app.SidebarStats{}, rangeError
+			}
+			sidebar.Live = expeditionSummary.Metrics
+			sidebar.Expedition = expeditionSummary.Metrics.Add(manualAdjustments)
+			sidebar.Realization = expeditionSummary.Realization
 		}
-		sidebar.Live = expeditionSummary.Metrics
-		sidebar.Expedition = expeditionSummary.Metrics.Add(manualAdjustments)
-		sidebar.Realization = expeditionSummary.Realization
 	}
 
-	sidebar.CarrierCost = computeFixtureCarrierCost(database, expeditionRecord, sidebar.Expedition, sidebar.Started, referenceNow)
+	sidebar.CarrierCost = computeFixtureCarrierCost(database, expeditionRecord, sidebar.Expedition, effectiveDisplayStart, sidebar.Departed, referenceNow)
 	return sidebar, nil
 }
 
@@ -248,7 +258,8 @@ func computeFixtureCarrierCost(
 	database *sql.DB,
 	expeditionRecord expedition.Expedition,
 	expeditionMetrics projstats.Metrics,
-	expeditionStarted bool,
+	effectiveStartTimestamp string,
+	expeditionDeparted bool,
 	referenceNow time.Time,
 ) app.CarrierCostBreakdown {
 	tritiumPrice := settings.TritiumPricePerTonne(database)
@@ -259,9 +270,9 @@ func computeFixtureCarrierCost(
 	tritiumCost := tritiumTonnes * tritiumPrice
 	jumpCost := int64(expeditionMetrics.CarrierJumps) * reference.CarrierJumpMaintenanceCost
 	var upkeepCost int64
-	if expeditionStarted && expeditionRecord.CarrierWeeklyUpkeep > 0 {
+	if expeditionDeparted && effectiveStartTimestamp != "" && expeditionRecord.CarrierWeeklyUpkeep > 0 {
 		upkeepCost = reference.CarrierProratedUpkeep(
-			expeditionRecord.StartTimestamp,
+			effectiveStartTimestamp,
 			expeditionRecord.EndTimestamp,
 			expeditionRecord.CarrierWeeklyUpkeep,
 			referenceNow,

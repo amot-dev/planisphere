@@ -37,6 +37,7 @@ type Row struct {
 	Z             float64 `json:"z"`
 	CoordsSource  string  `json:"coordsSource"`
 	VisitedAt     string  `json:"visitedAt"`
+	DepartedAt    string  `json:"departedAt"`
 	VisitEventUID string  `json:"visitEventUid"`
 }
 
@@ -49,13 +50,13 @@ func (row Row) Coords() (reference.Vec3, bool) {
 func (row Row) IsWaypoint() bool { return row.RowType == RowWaypoint }
 
 const rowCols = `id, expedition_id, position, row_type, COALESCE(region_id, 0), fc_stop, COALESCE(fc_arrived, 0), COALESCE(leg_mode_id, 0),
-	system_name, poi_name, notes, COALESCE(system_address, 0), COALESCE(edsm_id, 0), x, y, z, coords_source, COALESCE(visited_at, ''), COALESCE(visit_event_uid, '')`
+	system_name, poi_name, notes, COALESCE(system_address, 0), COALESCE(edsm_id, 0), x, y, z, coords_source, COALESCE(visited_at, ''), COALESCE(departed_at, ''), COALESCE(visit_event_uid, '')`
 
 func scanRow(scanner interface{ Scan(...any) error }) (Row, error) {
 	var rowItem Row
 	var coordX, coordY, coordZ sql.NullFloat64
 	scanError := scanner.Scan(&rowItem.ID, &rowItem.ExpeditionID, &rowItem.Position, &rowItem.RowType, &rowItem.RegionID, &rowItem.FCStop, &rowItem.FCArrived, &rowItem.LegModeID, &rowItem.SystemName, &rowItem.POIName,
-		&rowItem.Notes, &rowItem.SystemAddress, &rowItem.EDSMID, &coordX, &coordY, &coordZ, &rowItem.CoordsSource, &rowItem.VisitedAt, &rowItem.VisitEventUID)
+		&rowItem.Notes, &rowItem.SystemAddress, &rowItem.EDSMID, &coordX, &coordY, &coordZ, &rowItem.CoordsSource, &rowItem.VisitedAt, &rowItem.DepartedAt, &rowItem.VisitEventUID)
 	if scanError != nil {
 		return rowItem, scanError
 	}
@@ -372,7 +373,7 @@ func UpdateRow(queryer db.Queryer, patch RowPatch) (systemChanged bool, updateEr
 	}
 	if systemChanged {
 		if _, execError := queryer.Exec(`UPDATE expedition_rows SET system_name = ?, system_address = NULL, edsm_id = NULL,
-			x = NULL, y = NULL, z = NULL, coords_source = '', visited_at = NULL, visit_event_uid = NULL, updated_at = ?
+			x = NULL, y = NULL, z = NULL, coords_source = '', visited_at = NULL, departed_at = NULL, visit_event_uid = NULL, updated_at = ?
 			WHERE id = ?`, normalizedSystemName, now, patch.ID); execError != nil {
 			return false, execError
 		}

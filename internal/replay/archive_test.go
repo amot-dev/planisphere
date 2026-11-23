@@ -278,3 +278,42 @@ func TestListCommandersEventCounts(testingContext *testing.T) {
 		})
 	}
 }
+
+func TestMulticrewIgnoredAcrossArrivalsLocationAndVisitCounts(testingContext *testing.T) {
+	databaseConnection := openReplayTestDB(testingContext)
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, commander, source_file, raw_json, ingested_at) VALUES
+		('mc-sol', '2026-06-01T10:00:00Z', 'Location', 'Sol', 1001, 0, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}', '2026-06-01T10:00:00Z'),
+		('mc-taxi', '2026-06-01T10:10:00Z', 'FSDJump', 'Alpha Centauri', 1002, 4, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:10:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"Taxi":true}', '2026-06-01T10:10:00Z'),
+		('mc-loc', '2026-06-01T10:20:00Z', 'Location', 'Colonia', 1003, 9000, 0, 9000, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:20:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":1003,"StarPos":[9000,0,9000],"Multicrew":true}', '2026-06-01T10:20:00Z'),
+		('mc-jump', '2026-06-01T10:30:00Z', 'FSDJump', 'Beagle Point', 1004, 0, 0, 65000, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:30:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1004,"StarPos":[0,0,65000],"Multicrew":true}', '2026-06-01T10:30:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed multicrew and taxi events: %v", execError)
+	}
+
+	windowArrivals, windowError := replay.QueryArrivalsInWindow(databaseConnection, "2026-06-01T09:00:00Z", "")
+	if windowError != nil {
+		testingContext.Fatalf("QueryArrivalsInWindow: %v", windowError)
+	}
+	if len(windowArrivals) != 2 || windowArrivals[0].SystemName != "Sol" || windowArrivals[1].SystemName != "Alpha Centauri" || windowArrivals[0].Commander != "CmdrA" {
+		testingContext.Fatalf("expected only physical Sol and Taxi Alpha Centauri arrivals, got %+v", windowArrivals)
+	}
+
+	beagleCandidates, candError := replay.QuerySystemArrivalCandidates(databaseConnection, "Beagle Point", 1004)
+	if candError != nil || len(beagleCandidates) != 0 {
+		testingContext.Fatalf("expected Multicrew Beagle Point excluded from StartCandidates, got %+v err=%v", beagleCandidates, candError)
+	}
+
+	latestPos, latestSys, locError := replay.QueryLatestPlayerLocation(databaseConnection)
+	if locError != nil || latestPos == nil || latestSys != "Alpha Centauri" || latestPos.X != 4 {
+		testingContext.Fatalf("expected latest physical location Alpha Centauri (4,0,0), got sys=%q pos=%+v err=%v", latestSys, latestPos, locError)
+	}
+
+	counts, countError := replay.QuerySystemVisitCounts(databaseConnection, []string{"sol", "alpha centauri", "colonia", "beagle point"}, nil)
+	if countError != nil {
+		testingContext.Fatalf("QuerySystemVisitCounts: %v", countError)
+	}
+	if counts["sol"] != 1 || counts["alpha centauri"] != 1 || counts["colonia"] != 0 || counts["beagle point"] != 0 {
+		testingContext.Fatalf("expected multicrew systems to have 0 visits and taxi/sol 1 visit, got %+v", counts)
+	}
+}

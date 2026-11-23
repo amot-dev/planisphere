@@ -42,6 +42,8 @@ func TestPerExpeditionLegModesEngageCascadeAndActiveSync(testingContext *testing
 		`{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":1003,"StarPos":[20,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-01T13:00:00Z","event":"FSDJump","StarSystem":"Gamma","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-04-01T13:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Gamma 1","BodyID":1,"StarSystem":"Gamma","SystemAddress":1004,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-04-01T13:30:00Z","event":"FSDJump","StarSystem":"Transit Out","SystemAddress":1005,"StarPos":[35,0,0],"JumpDist":5.0}`,
 	})
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Bulk Engage Test", "", []expedition.SeedWaypoint{
@@ -307,5 +309,67 @@ func TestMigrateLegModesV11BackfillFromLegacyModeWindows(testingContext *testing
 	if migratedRows[1].LegModeID != explorationID || migratedRows[2].LegModeID != travelID {
 		testingContext.Fatalf("expected Alpha=%d (covered window) and Beta=%d (Travel fallback), got Alpha=%d Beta=%d",
 			explorationID, travelID, migratedRows[1].LegModeID, migratedRows[2].LegModeID)
+	}
+}
+
+func TestLoadModeLookupDepartureSpansAndInSystemFrontier(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+	explorationID, _, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
+
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-10-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":6001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-10-01T11:00:00Z","event":"FSDJump","StarSystem":"Vela","SystemAddress":6002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-10-01T11:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Vela 1","BodyID":1,"StarSystem":"Vela","SystemAddress":6002,"PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	})
+
+	expeditionRecord, _ := expedition.CreateWithWaypoints(databaseConnection, "In-System Mode Test", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol"},
+		{SystemName: "Vela"},
+		{SystemName: "Colonia"},
+	})
+	if startErr := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-10-01T10:00:00Z", explorationID); startErr != nil {
+		testingContext.Fatalf("StartTx: %v", startErr)
+	}
+	// Pre-select Travel for the upcoming Colonia leg while still parked inside Vela.
+	if setErr := expedition.SetActiveModeTx(databaseConnection, expeditionRecord.ID, travelID); setErr != nil {
+		testingContext.Fatalf("SetActiveModeTx: %v", setErr)
+	}
+
+	// While still inside Vela, Vela's in-system scan (11:15) must belong to Vela's Exploration mode, not active_mode_id Travel.
+	lookupWhileInSystem, lookupErr := expedition.LoadModeLookup(databaseConnection, expeditionRecord.ID)
+	if lookupErr != nil {
+		testingContext.Fatalf("LoadModeLookup in-system: %v", lookupErr)
+	}
+	if gotMode := lookupWhileInSystem("2026-10-01T11:15:00Z"); gotMode != explorationID {
+		testingContext.Fatalf("expected Vela in-system scan to map to Exploration (%d), got %d", explorationID, gotMode)
+	}
+
+	// Depart Vela for Colonia: Vela's scan remains Exploration while the departure jump maps to Travel.
+	if _, execErr := databaseConnection.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, raw_json, source_file, ingested_at)
+		 VALUES ('ev-mode-depart-vela', '2026-10-01T11:30:00Z', 'FSDJump', 'Transit', 6003, 20, 0, 0, '{"timestamp":"2026-10-01T11:30:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":6003,"StarPos":[20,0,0],"JumpDist":10.0}', 't.log', '2026-10-01T11:30:00Z')`,
+	); execErr != nil {
+		testingContext.Fatalf("insert departure jump: %v", execErr)
+	}
+	if _, reevalErr := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalErr != nil {
+		testingContext.Fatalf("ReevaluateTx: %v", reevalErr)
+	}
+
+	lookupAfterDepart, lookupAfterErr := expedition.LoadModeLookup(databaseConnection, expeditionRecord.ID)
+	if lookupAfterErr != nil {
+		testingContext.Fatalf("LoadModeLookup after departure: %v", lookupAfterErr)
+	}
+	if gotScanMode := lookupAfterDepart("2026-10-01T11:15:00Z"); gotScanMode != explorationID {
+		testingContext.Fatalf("expected Vela scan after departure to stay Exploration (%d), got %d", explorationID, gotScanMode)
+	}
+	if gotDepartMode := lookupAfterDepart("2026-10-01T11:30:00Z"); gotDepartMode != travelID {
+		testingContext.Fatalf("expected departure jump to map to Travel (%d), got %d", travelID, gotDepartMode)
+	}
+
+	planView, _ := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, expeditionProjections)
+	if planView.Rows[2].VisitState != expedition.VisitCurrent || planView.Rows[2].LegModeID != travelID {
+		testingContext.Fatalf("expected Colonia to advance to VisitCurrent with Travel (%d) after departing Vela, got state=%q mode=%d",
+			travelID, planView.Rows[2].VisitState, planView.Rows[2].LegModeID)
 	}
 }

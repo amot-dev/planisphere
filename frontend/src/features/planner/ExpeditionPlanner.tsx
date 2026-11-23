@@ -27,6 +27,7 @@ import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMuta
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
   archiveRevision?: string
+  clockSuspended?: boolean
   externalLinkInara?: string
   externalLinkEdsm?: string
   externalLinkGec?: string
@@ -45,6 +46,7 @@ export interface ExpeditionPlannerProps {
 export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   plan,
   archiveRevision = '',
+  clockSuspended = false,
   externalLinkInara,
   externalLinkEdsm,
   externalLinkGec,
@@ -318,6 +320,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
           plan={plan}
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}
+          clockSuspended={clockSuspended}
           frontier={frontier}
           columns={tableColumns}
           externalLinks={externalLinks}

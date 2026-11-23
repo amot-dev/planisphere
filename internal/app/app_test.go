@@ -297,8 +297,9 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T
 		testingContext.Errorf("expected unstarted AllJournalsRealization.TotalRealized 19,010,800, got %d", unstartedSidebarStats.AllJournalsRealization.TotalRealized)
 	}
 
-	// Start expedition at 2026-01-01T00:00:00Z
-	_, _ = testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T00:00:00Z' WHERE id = ?`, expeditionRecord.ID)
+	// Start expedition at 2025-12-31T23:55:00Z and depart WP #1 at 2026-01-01T00:00:00Z.
+	_, _ = testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2025-12-31T23:55:00Z' WHERE id = ?`, expeditionRecord.ID)
+	_, _ = testApp.db.Exec(`UPDATE expedition_rows SET system_name = 'Sol', visited_at = '2025-12-31T23:55:00Z', departed_at = '2026-01-01T00:00:00Z' WHERE expedition_id = ?`, expeditionRecord.ID)
 
 	// Scan 2: During expedition (2026)
 	insertTestJournalEvent(testingContext, testApp, "2026-03-01T10:00:00Z", "ScanOrganic", "2",
@@ -458,6 +459,8 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	expeditionID := createAndStartExpedition(testingContext, testApp, "Generation Test", "Sol")
+	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:05:00Z", "FSDJump", "gen-depart-sol",
+		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`)
 
 	modeFilter := stats.Filter{
 		Enabled: true,

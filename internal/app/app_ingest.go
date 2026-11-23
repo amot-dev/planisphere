@@ -109,9 +109,14 @@ func (app *App) warmInitialStats() {
 				log.Printf("warm initial stats load expedition %d: %v", activeID, getError)
 			}
 		} else if expeditionRecord.StartTimestamp != "" {
-			expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
-			if _, statsError := app.timeRangeStats.Compute(expeditionRange, &stats.Filter{}); statsError != nil {
-				log.Printf("warm initial stats compute expedition %d: %v", activeID, statsError)
+			queryAfter, _, departed, startError := expedition.EffectiveStart(app.db, expeditionRecord)
+			if startError != nil {
+				log.Printf("warm initial stats resolve effective start %d: %v", activeID, startError)
+			} else if departed {
+				expeditionRange := stats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
+				if _, statsError := app.timeRangeStats.Compute(expeditionRange, &stats.Filter{}); statsError != nil {
+					log.Printf("warm initial stats compute expedition %d: %v", activeID, statsError)
+				}
 			}
 		}
 	}
@@ -135,9 +140,17 @@ func (app *App) reevaluateActive() []int64 {
 		log.Printf("reevaluate: %v", getIDsError)
 		return nil
 	}
+	anyChanged := false
 	for _, expeditionID := range expeditionIDs {
-		app.reevaluate(expeditionID)
+		if app.reevaluate(expeditionID) {
+			anyChanged = true
+		}
 		app.kickResolution(expeditionID, false)
+	}
+	if anyChanged {
+		if bus := app.currentBus(); bus != nil {
+			bus.PublishApp(events.AppExpeditionModesChanged)
+		}
 	}
 	return expeditionIDs
 }

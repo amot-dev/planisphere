@@ -24,10 +24,10 @@ describe('useWaypointDetails', () => {
     getWaypointDetailsMock.mockReset()
   })
 
-  it('shows loading on first expand but preserves loaded telemetry without loading flash on background refresh', async () => {
+  it('shows loading on first expand, skips redundant fetches, and refreshes without loading flash on archive or departure updates', async () => {
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-    const activePlan = expedition.PlanView.createFrom({
+    const activePlanInSystem = expedition.PlanView.createFrom({
       expedition: {
         id: 7,
         name: 'Selective Refresh Test',
@@ -42,6 +42,7 @@ describe('useWaypointDetails', () => {
             rowType: 'waypoint',
             systemName: 'Sol',
             visitedAt: '2026-01-01T10:00:00Z',
+            departedAt: '2026-01-01T10:15:00Z',
           },
           number: 1,
           visitState: 'visited',
@@ -53,6 +54,7 @@ describe('useWaypointDetails', () => {
             rowType: 'waypoint',
             systemName: 'Alpha Centauri',
             visitedAt: '2026-01-01T11:00:00Z',
+            departedAt: '',
           },
           number: 2,
           visitState: 'visited',
@@ -60,22 +62,39 @@ describe('useWaypointDetails', () => {
       ],
     })
 
+    const activePlanDeparted = expedition.PlanView.createFrom({
+      ...activePlanInSystem,
+      rows: activePlanInSystem.rows.map((rowView) =>
+        rowView.row.id === 102
+          ? { ...rowView, row: { ...rowView.row, departedAt: '2026-01-01T11:30:00Z' } }
+          : rowView,
+      ),
+    })
+
     const firstLoad = createDeferred<expedition.WaypointDetails>()
     const backgroundRefresh = createDeferred<expedition.WaypointDetails>()
+    const departureRefresh = createDeferred<expedition.WaypointDetails>()
     getWaypointDetailsMock
       .mockReturnValueOnce(firstLoad.promise)
       .mockReturnValueOnce(backgroundRefresh.promise)
+      .mockReturnValueOnce(departureRefresh.promise)
 
     let latestState!: WaypointDetailsState
-    function Harness({ archiveRevision }: { archiveRevision: string }) {
-      latestState = useWaypointDetails(activePlan, false, archiveRevision)
+    function Harness({
+      plan,
+      archiveRevision,
+    }: {
+      plan: expedition.PlanView
+      archiveRevision: string
+    }) {
+      latestState = useWaypointDetails(plan, false, archiveRevision)
       return null
     }
 
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => {
-      root.render(createElement(Harness, { archiveRevision: 'rev-1' }))
+      root.render(createElement(Harness, { plan: activePlanInSystem, archiveRevision: 'rev-1' }))
     })
 
     // First expand has no cached details yet, so loading must activate.
@@ -89,8 +108,10 @@ describe('useWaypointDetails', () => {
       rowId: 102,
       kind: 'leg',
       number: 2,
-      from: '2026-01-01T10:00:00Z',
-      to: '2026-01-01T11:00:00Z',
+      from: '2026-01-01T10:15:00Z',
+      to: '',
+      arrivedAt: '2026-01-01T11:00:00Z',
+      inSystem: true,
       shipsUsed: ['Mandalay'],
       metrics: { jumps: 4 },
     })
@@ -103,7 +124,7 @@ describe('useWaypointDetails', () => {
 
     // Subsequent archiveRevision refresh must keep existing details visible without toggling loading true.
     await act(async () => {
-      root.render(createElement(Harness, { archiveRevision: 'rev-2' }))
+      root.render(createElement(Harness, { plan: activePlanInSystem, archiveRevision: 'rev-2' }))
     })
     expect(getWaypointDetailsMock).toHaveBeenCalledTimes(2)
     expect(latestState.loadingDetails[102]).toBe(false)
@@ -113,8 +134,10 @@ describe('useWaypointDetails', () => {
       rowId: 102,
       kind: 'leg',
       number: 2,
-      from: '2026-01-01T10:00:00Z',
-      to: '2026-01-01T11:00:00Z',
+      from: '2026-01-01T10:15:00Z',
+      to: '',
+      arrivedAt: '2026-01-01T11:00:00Z',
+      inSystem: true,
       shipsUsed: ['Mandalay'],
       metrics: { jumps: 4 },
       realization: { totalRealized: 5000000 },
@@ -125,6 +148,32 @@ describe('useWaypointDetails', () => {
     })
     expect(latestState.loadingDetails[102]).toBe(false)
     expect(latestState.detailsById[102]?.realization.totalRealized).toBe(5000000)
+
+    // Departure transition on the open drawer must trigger a flicker-free refresh even on the same archiveRevision.
+    await act(async () => {
+      root.render(createElement(Harness, { plan: activePlanDeparted, archiveRevision: 'rev-2' }))
+    })
+    expect(getWaypointDetailsMock).toHaveBeenCalledTimes(3)
+    expect(latestState.loadingDetails[102]).toBe(false)
+
+    const departedDetails = expedition.WaypointDetails.createFrom({
+      rowId: 102,
+      kind: 'leg',
+      number: 2,
+      from: '2026-01-01T10:15:00Z',
+      to: '2026-01-01T11:30:00Z',
+      arrivedAt: '2026-01-01T11:00:00Z',
+      departedAt: '2026-01-01T11:30:00Z',
+      shipsUsed: ['Mandalay'],
+      metrics: { jumps: 4, bodiesScanned: 7 },
+    })
+    await act(async () => {
+      departureRefresh.resolve(departedDetails)
+      await departureRefresh.promise
+    })
+    expect(latestState.loadingDetails[102]).toBe(false)
+    expect(latestState.detailsById[102]?.to).toBe('2026-01-01T11:30:00Z')
+    expect(latestState.detailsById[102]?.metrics.bodiesScanned).toBe(7)
 
     await act(async () => {
       root.unmount()

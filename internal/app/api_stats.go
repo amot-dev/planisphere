@@ -25,6 +25,7 @@ type SidebarStats struct {
 	ExpeditionID           int64                      `json:"expeditionId"`
 	Status                 string                     `json:"status"`
 	Started                bool                       `json:"started"`
+	Departed               bool                       `json:"departed"`
 	Start                  string                     `json:"start"`
 	End                    string                     `json:"end"`
 	StartGalactic          string                     `json:"startGalactic"`
@@ -60,7 +61,6 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		ExpeditionID: expeditionRecord.ID,
 		Status:       expeditionRecord.Status,
 		Started:      expeditionRecord.StartTimestamp != "",
-		Start:        expeditionRecord.StartTimestamp,
 		End:          expeditionRecord.EndTimestamp,
 		FilterActive: filter.Enabled,
 		Adjustments:  manualAdjustments,
@@ -82,40 +82,53 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		sidebar.CareerDuration = reference.Elapsed(careerStart, "")
 	}
 
+	var effectiveDisplayStart string
 	if sidebar.Started {
-		if sidebar.End == "" {
-			sidebar.EndIsNow = true
-			sidebar.EndGalactic = reference.TimeToGalactic(timeNow())
-		} else {
-			sidebar.EndGalactic = reference.ToGalactic(sidebar.End)
+		queryAfter, displayStart, departed, startError := expedition.EffectiveStart(app.db, expeditionRecord)
+		if startError != nil {
+			return sidebar, startError
 		}
-		sidebar.StartGalactic = reference.ToGalactic(sidebar.Start)
-		sidebar.Duration = reference.Elapsed(sidebar.Start, sidebar.End)
+		sidebar.Departed = departed
+		effectiveDisplayStart = displayStart
+		if departed {
+			sidebar.Start = displayStart
+			sidebar.StartGalactic = reference.ToGalactic(displayStart)
+			if sidebar.End == "" {
+				sidebar.EndIsNow = true
+				sidebar.EndGalactic = reference.TimeToGalactic(timeNow())
+			} else {
+				sidebar.EndGalactic = reference.ToGalactic(sidebar.End)
+			}
+			sidebar.Duration = reference.Elapsed(displayStart, sidebar.End)
 
-		expeditionRange := stats.Range{After: expeditionRecord.StartTimestamp, Until: expeditionRecord.EndTimestamp}
-		if filter.Enabled {
-			filter.ExpeditionID = expeditionID
+			expeditionRange := stats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
+			if filter.Enabled {
+				filter.ExpeditionID = expeditionID
+			}
+			expeditionSummary, computeError := app.timeRangeStats.Compute(expeditionRange, &filter)
+			if computeError != nil {
+				return sidebar, computeError
+			}
+			// Expedition carrier operations (CarrierJumps, CarrierDistanceLy, and TritiumUsed)
+			// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments).
+			sidebar.Live = expeditionSummary.Metrics
+			sidebar.Expedition = expeditionSummary.Metrics.Add(manualAdjustments)
+			sidebar.Realization = expeditionSummary.Realization
+		} else {
+			sidebar.Expedition = manualAdjustments
 		}
-		expeditionSummary, computeError := app.timeRangeStats.Compute(expeditionRange, &filter)
-		if computeError != nil {
-			return sidebar, computeError
-		}
-		// Expedition carrier operations (CarrierJumps, CarrierDistanceLy, and TritiumUsed)
-		// come exclusively from the Spansh or manual route logger (expeditionRecord.Adjustments).
-		sidebar.Live = expeditionSummary.Metrics
-		sidebar.Expedition = expeditionSummary.Metrics.Add(manualAdjustments)
-		sidebar.Realization = expeditionSummary.Realization
 	} else {
 		sidebar.Expedition = manualAdjustments
 	}
-	sidebar.CarrierCost = app.computeExpeditionCarrierCost(expeditionRecord, sidebar.Expedition, sidebar.Started)
+	sidebar.CarrierCost = app.computeExpeditionCarrierCost(expeditionRecord, sidebar.Expedition, effectiveDisplayStart, sidebar.Departed)
 	return sidebar, nil
 }
 
 func (app *App) computeExpeditionCarrierCost(
 	expeditionRecord expedition.Expedition,
 	expeditionMetrics stats.Metrics,
-	expeditionStarted bool,
+	effectiveStartTimestamp string,
+	expeditionDeparted bool,
 ) CarrierCostBreakdown {
 	tritiumPrice := settings.TritiumPricePerTonne(app.db)
 	var tritiumTonnes int64
@@ -125,9 +138,9 @@ func (app *App) computeExpeditionCarrierCost(
 	tritiumCost := tritiumTonnes * tritiumPrice
 	jumpCost := int64(expeditionMetrics.CarrierJumps) * reference.CarrierJumpMaintenanceCost
 	var upkeepCost int64
-	if expeditionStarted && expeditionRecord.CarrierWeeklyUpkeep > 0 {
+	if expeditionDeparted && effectiveStartTimestamp != "" && expeditionRecord.CarrierWeeklyUpkeep > 0 {
 		upkeepCost = reference.CarrierProratedUpkeep(
-			expeditionRecord.StartTimestamp,
+			effectiveStartTimestamp,
 			expeditionRecord.EndTimestamp,
 			expeditionRecord.CarrierWeeklyUpkeep,
 			timeNow(),

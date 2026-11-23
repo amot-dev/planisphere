@@ -132,10 +132,26 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 
 	filter := stats.Filter{Enabled: false}
 
-	// First call to GetSidebarStats should populate liveStatsCache
+	// Before departing WP #1, sidebar reports Started=true, Departed=false and skips TimeRangeStats.
+	preDepartureSidebar, preErr := testApp.GetSidebarStats(expeditionID, filter)
+	if preErr != nil {
+		testingContext.Fatalf("GetSidebarStats pre-departure failed: %v", preErr)
+	}
+	if !preDepartureSidebar.Started || preDepartureSidebar.Departed {
+		testingContext.Fatalf("expected Started=true Departed=false before leaving WP #1, got %+v", preDepartureSidebar)
+	}
+
+	// Depart WP #1 so expedition telemetry begins.
+	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:05:00Z", "FSDJump", "depart-sol",
+		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`)
+
+	// First call to GetSidebarStats after departure should populate liveStatsCache
 	sidebar1, err := testApp.GetSidebarStats(expeditionID, filter)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats failed: %v", err)
+	}
+	if !sidebar1.Departed || sidebar1.Start != "2026-01-01T00:05:00Z" {
+		testingContext.Fatalf("expected Departed=true and Start=2026-01-01T00:05:00Z, got departed=%v start=%q", sidebar1.Departed, sidebar1.Start)
 	}
 	if sidebar1.Expedition.CarrierJumps != 0 {
 		testingContext.Errorf("expected 0 carrier jumps, got %d", sidebar1.Expedition.CarrierJumps)
@@ -223,8 +239,20 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 			clonedExpedition.CarrierType, clonedExpedition.CarrierWeeklyUpkeep)
 	}
 
-	// Start and complete expedition over exactly 7 days, and log 2 carrier jumps consuming 150t of tritium.
-	originRowID := startExpeditionAtOrigin(testingContext, testApp, expeditionRecord.ID, "Sol")
+	// Start and complete expedition spanning exactly 7 days from WP #1 departure
+	// (2026-01-01T00:00:00Z) to final arrival (2026-01-08T00:00:00Z), and log 2 carrier jumps consuming 150t of tritium.
+	planView, planErr := testApp.GetPlan(expeditionRecord.ID)
+	if planErr != nil || len(planView.Rows) == 0 {
+		testingContext.Fatalf("GetPlan failed: len=%d err=%v", len(planView.Rows), planErr)
+	}
+	originRowID := planView.Rows[0].Row.ID
+	originName := "Sol"
+	if updateErr := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &originName}); updateErr != nil {
+		testingContext.Fatalf("UpdateRow origin failed: %v", updateErr)
+	}
+	if startErr := testApp.StartExpedition(expeditionRecord.ID, "2025-12-31T23:55:00Z", 0); startErr != nil {
+		testingContext.Fatalf("StartExpedition failed: %v", startErr)
+	}
 	destinationRow, insertErr := testApp.AddRow(expeditionRecord.ID, originRowID, expedition.RowWaypoint, 0)
 	if insertErr != nil {
 		testingContext.Fatalf("AddRow failed: %v", insertErr)
@@ -235,9 +263,10 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 	}
 	if _, execErr := testApp.db.Exec(
 		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
-		 VALUES ('ev-carrier-cost-dest', '2026-01-08T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2026-01-08T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2026-01-08T00:00:00Z')`,
+		 VALUES ('ev-carrier-cost-depart', '2026-01-01T00:00:00Z', 'FSDJump', 'Transit', 1005, '{"timestamp":"2026-01-01T00:00:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1005,"StarPos":[0.5,0,0],"JumpDist":2.0}', 'test.log', '2026-01-01T00:00:00Z'),
+		        ('ev-carrier-cost-dest', '2026-01-08T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2026-01-08T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2026-01-08T00:00:00Z')`,
 	); execErr != nil {
-		testingContext.Fatalf("insert destination arrival failed: %v", execErr)
+		testingContext.Fatalf("insert departure and destination arrivals failed: %v", execErr)
 	}
 	if _, reevalErr := expedition.ReevaluateTx(testApp.db, expeditionRecord.ID); reevalErr != nil {
 		testingContext.Fatalf("ReevaluateTx failed: %v", reevalErr)

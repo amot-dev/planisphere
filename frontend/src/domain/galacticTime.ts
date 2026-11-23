@@ -75,6 +75,40 @@ export function nowGalacticTime(): string {
 }
 
 /**
+ * Formats an elapsed duration between two ISO-8601 UTC timestamps (using nowMs
+ * when endTimestamp is omitted) matching the backend DurationLabel format.
+ */
+export function formatElapsedDuration(
+  startTimestamp: string | null | undefined,
+  endTimestamp?: string | null,
+  nowMs: number = Date.now(),
+): string {
+  if (!startTimestamp) return ''
+  const startMs = Date.parse(startTimestamp)
+  if (Number.isNaN(startMs)) return ''
+  const endMs = endTimestamp ? Date.parse(endTimestamp) : nowMs
+  if (Number.isNaN(endMs)) return ''
+
+  const totalMinutes = Math.max(0, Math.floor((endMs - startMs) / 60_000))
+  const totalHours = Math.floor(totalMinutes / 60)
+  const totalDays = Math.floor(totalHours / 24)
+  const hours = totalHours % 24
+  const minutes = totalMinutes % 60
+  if (totalDays >= 365) {
+    const years = Math.floor(totalDays / 365)
+    const days = totalDays % 365
+    if (days > 0) {
+      return `${years}y ${days}d ${pad2(hours)}h ${pad2(minutes)}m`
+    }
+    return `${years}y ${pad2(hours)}h ${pad2(minutes)}m`
+  }
+  if (totalDays > 0) {
+    return `${totalDays}d ${pad2(hours)}h ${pad2(minutes)}m`
+  }
+  return `${hours}h ${pad2(minutes)}m`
+}
+
+/**
  * computeShipDistanceLy returns the ship FSD jump distance in light-years,
  * falling back to total distance minus carrier passenger distance when unset.
  */

@@ -424,4 +424,65 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(copiedHtml).toMatch(/Copied [^"]*Sagittarius A\*[^"]*!/)
     expect(copiedHtml).toContain('text-ed-cyan')
   })
+
+  it('renders DEPARTED and AWAITING DEPARTURE on origin #1 while preserving LOGGED VISIT on waypoints > 1', () => {
+    const stagedOriginHtml = renderRowItem({
+      rowView: createOriginRowView({
+        row: { id: 60, visitedAt: '2026-01-18T10:00:00Z', departedAt: '' },
+        visitedAtGalactic: '3312-01-18 10:00 UTC',
+        departedAtGalactic: '',
+      }),
+      index: 0,
+      lastVisitedIndex: 0,
+    })
+    expect(stagedOriginHtml).toContain('AWAITING DEPARTURE')
+    expect(stagedOriginHtml).not.toContain('LOGGED VISIT')
+    expect(stagedOriginHtml).toContain(
+      'title="Staged at Waypoint #1 since 3312-01-18 10:00 UTC (awaiting departure)"',
+    )
+
+    const departedOriginHtml = renderRowItem({
+      rowView: createOriginRowView({
+        row: {
+          id: 61,
+          visitedAt: '2026-01-18T10:00:00Z',
+          departedAt: '2026-01-18T12:00:00Z',
+        },
+        visitedAtGalactic: '3312-01-18 10:00 UTC',
+        departedAtGalactic: '3312-01-18 12:00 UTC',
+      }),
+      index: 0,
+      lastVisitedIndex: 1,
+    })
+    expect(departedOriginHtml).toContain('DEPARTED')
+    expect(departedOriginHtml).toContain('3312-01-18 12:00 UTC')
+    expect(departedOriginHtml).not.toContain('LOGGED VISIT')
+    expect(departedOriginHtml).toContain(
+      'title="Arrived 3312-01-18 10:00 UTC · Departed 3312-01-18 12:00 UTC"',
+    )
+
+    const visitedDestinationHtml = renderRowItem({
+      rowView: expedition.RowView.createFrom({
+        row: {
+          id: 62,
+          expeditionId: 1,
+          rowType: 'waypoint',
+          systemName: 'Alpha Centauri',
+          visitedAt: '2026-01-18T13:00:00Z',
+          departedAt: '2026-01-18T14:30:00Z',
+        },
+        number: 2,
+        visitState: 'visited',
+        visitedAtGalactic: '3312-01-18 13:00 UTC',
+        departedAtGalactic: '3312-01-18 14:30 UTC',
+      }),
+      index: 1,
+      lastVisitedIndex: 1,
+    })
+    expect(visitedDestinationHtml).toContain('LOGGED VISIT')
+    expect(visitedDestinationHtml).toContain('3312-01-18 13:00 UTC')
+    expect(visitedDestinationHtml).toContain(
+      'title="Arrived 3312-01-18 13:00 UTC · Departed 3312-01-18 14:30 UTC"',
+    )
+  })
 })

@@ -95,7 +95,9 @@ func StartTx(dbConn *sql.DB, expeditionID int64, startTimestamp string, initialM
 	})
 }
 
-// Complete ends the expedition at the final visited waypoint's arrival timestamp.
+// Complete ends the expedition at the final visited waypoint's last in-system
+// exploration activity (or its arrival timestamp when no exploration activity
+// occurred before departure).
 func Complete(transaction *sql.Tx, expeditionID int64) error {
 	expeditionRecord, getError := Get(transaction, expeditionID)
 	if getError != nil {
@@ -116,20 +118,30 @@ func Complete(transaction *sql.Tx, expeditionID int64) error {
 		return listError
 	}
 	visitedWaypointCount := 0
-	finalVisitedAt := ""
-	for _, rowItem := range rows {
+	var finalRow *Row
+	for index := range rows {
+		rowItem := &rows[index]
 		if !rowItem.IsWaypoint() || rowItem.VisitedAt == "" {
 			continue
 		}
 		visitedWaypointCount++
-		if rowItem.VisitedAt > finalVisitedAt {
-			finalVisitedAt = rowItem.VisitedAt
+		if finalRow == nil || rowItem.VisitedAt > finalRow.VisitedAt {
+			finalRow = rowItem
 		}
 	}
-	if visitedWaypointCount < 2 || finalVisitedAt == "" {
+	if visitedWaypointCount < 2 || finalRow == nil {
 		return errors.New("at least 2 visited waypoints are required to complete an expedition")
 	}
-	normalizedEndTimestamp, parseError := reference.NormalizeISO(finalVisitedAt)
+	stayUpperBound := exclusiveBoundaryBefore(finalRow.DepartedAt, finalRow.VisitedAt)
+	lastActivity, activityError := replay.QueryLastInSystemActivityTimestamp(transaction, finalRow.VisitedAt, stayUpperBound)
+	if activityError != nil {
+		return activityError
+	}
+	finalEndTimestamp := finalRow.VisitedAt
+	if lastActivity > finalEndTimestamp {
+		finalEndTimestamp = lastActivity
+	}
+	normalizedEndTimestamp, parseError := reference.NormalizeISO(finalEndTimestamp)
 	if parseError != nil {
 		return parseError
 	}

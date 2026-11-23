@@ -230,22 +230,28 @@ func findExpeditionWindow(database *sql.DB, summary DatasetSummary) (Representat
 			return RepresentativeWindow{}, false, getError
 		}
 		if expeditionRecord.StartTimestamp != "" {
-			untilTimestamp := expeditionRecord.EndTimestamp
-			if untilTimestamp == "" {
-				untilTimestamp = "9999-12-31T23:59:59Z"
+			queryAfter, _, departed, startError := expedition.EffectiveStart(database, expeditionRecord)
+			if startError != nil {
+				return RepresentativeWindow{}, false, startError
 			}
-			metricCount, realCount, countError := countWindowEvents(database, expeditionRecord.StartTimestamp, untilTimestamp)
-			if countError != nil {
-				return RepresentativeWindow{}, false, countError
-			}
-			if metricCount > 0 {
-				return RepresentativeWindow{
-					Label:          "ExpeditionWindow",
-					AfterTimestamp: expeditionRecord.StartTimestamp,
-					UntilTimestamp: untilTimestamp,
-					MetricEvents:   metricCount,
-					RealEvents:     realCount,
-				}, true, nil
+			if departed {
+				untilTimestamp := expeditionRecord.EndTimestamp
+				if untilTimestamp == "" {
+					untilTimestamp = "9999-12-31T23:59:59Z"
+				}
+				metricCount, realCount, countError := countWindowEvents(database, queryAfter, untilTimestamp)
+				if countError != nil {
+					return RepresentativeWindow{}, false, countError
+				}
+				if metricCount > 0 {
+					return RepresentativeWindow{
+						Label:          "ExpeditionWindow",
+						AfterTimestamp: queryAfter,
+						UntilTimestamp: untilTimestamp,
+						MetricEvents:   metricCount,
+						RealEvents:     realCount,
+					}, true, nil
+				}
 			}
 		}
 	}
