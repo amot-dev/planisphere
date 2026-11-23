@@ -21,18 +21,6 @@ type TelemetrySnapshot struct {
 	Realization replaystats.RealizationBreakdown `json:"realization"`
 }
 
-// CarrierCost holds the expedition Fleet Carrier credit cost breakdown.
-type CarrierCost struct {
-	CarrierType    string `json:"carrierType"`
-	WeeklyUpkeep   int64  `json:"weeklyUpkeep"`
-	TritiumPrice   int64  `json:"tritiumPrice"`
-	TritiumCost    int64  `json:"tritiumCost"`
-	JumpCost       int64  `json:"jumpCost"`
-	UpkeepCost     int64  `json:"upkeepCost"`
-	TotalCost      int64  `json:"totalCost"`
-	TotalEstimated bool   `json:"totalEstimated"`
-}
-
 // ModeBucket holds expedition telemetry aggregated for a single flight mode.
 type ModeBucket struct {
 	ModeID      int64                            `json:"modeId"`
@@ -63,7 +51,7 @@ type ExpeditionExport struct {
 	Expedition             TelemetrySnapshot            `json:"expedition"`
 	Live                   replaystats.Metrics          `json:"live"`
 	Adjustments            replaystats.Metrics          `json:"adjustments"`
-	CarrierCost            CarrierCost                  `json:"carrierCost"`
+	CarrierCost            expedition.CarrierCost       `json:"carrierCost"`
 	OriginBaseline         *expedition.WaypointDetails  `json:"originBaseline,omitempty"`
 	PostCareer             TelemetrySnapshot            `json:"postCareer"`
 	ModeBuckets            []ModeBucket                 `json:"modeBuckets"`
@@ -79,12 +67,11 @@ type BundleFile struct {
 
 // BuilderDeps injects the read-only projections and helpers required to assemble an export snapshot.
 type BuilderDeps struct {
-	Projections        *expedition.Projections
-	CareerStats        *projstats.CareerStats
-	GECLookup          expedition.GECLookup
-	ComputeCarrierCost func(expeditionRecord expedition.Expedition, expeditionMetrics replaystats.Metrics, effectiveStart string, departed bool) CarrierCost
-	AppVersion         string
-	Now                func() time.Time
+	Projections *expedition.Projections
+	CareerStats *projstats.CareerStats
+	GECLookup   expedition.GECLookup
+	AppVersion  string
+	Now         func() time.Time
 }
 
 func validateBuilderDeps(databaseConnection *sql.DB, dependencies BuilderDeps) error {

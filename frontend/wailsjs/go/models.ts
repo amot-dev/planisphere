@@ -1,31 +1,5 @@
 export namespace app {
 	
-	export class CarrierCostBreakdown {
-	    carrierType: string;
-	    weeklyUpkeep: number;
-	    tritiumPrice: number;
-	    tritiumCost: number;
-	    jumpCost: number;
-	    upkeepCost: number;
-	    totalCost: number;
-	    totalEstimated: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierCostBreakdown(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.carrierType = source["carrierType"];
-	        this.weeklyUpkeep = source["weeklyUpkeep"];
-	        this.tritiumPrice = source["tritiumPrice"];
-	        this.tritiumCost = source["tritiumCost"];
-	        this.jumpCost = source["jumpCost"];
-	        this.upkeepCost = source["upkeepCost"];
-	        this.totalCost = source["totalCost"];
-	        this.totalEstimated = source["totalEstimated"];
-	    }
-	}
 	export class IngestStatus {
 	    scanning: boolean;
 	    watcherActive: boolean;
@@ -225,7 +199,7 @@ export namespace app {
 	    allJournals: stats.Metrics;
 	    realization: realization.Breakdown;
 	    allJournalsRealization: realization.Breakdown;
-	    carrierCost: CarrierCostBreakdown;
+	    carrierCost: expedition.CarrierCost;
 	
 	    static createFrom(source: any = {}) {
 	        return new SidebarStats(source);
@@ -253,7 +227,7 @@ export namespace app {
 	        this.allJournals = this.convertValues(source["allJournals"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
 	        this.allJournalsRealization = this.convertValues(source["allJournalsRealization"], realization.Breakdown);
-	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCostBreakdown);
+	        this.carrierCost = this.convertValues(source["carrierCost"], expedition.CarrierCost);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -325,6 +299,32 @@ export namespace app {
 
 export namespace expedition {
 	
+	export class CarrierCost {
+	    carrierType: string;
+	    weeklyUpkeep: number;
+	    tritiumPrice: number;
+	    tritiumCost: number;
+	    jumpCost: number;
+	    upkeepCost: number;
+	    totalCost: number;
+	    totalEstimated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierCost(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.carrierType = source["carrierType"];
+	        this.weeklyUpkeep = source["weeklyUpkeep"];
+	        this.tritiumPrice = source["tritiumPrice"];
+	        this.tritiumCost = source["tritiumCost"];
+	        this.jumpCost = source["jumpCost"];
+	        this.upkeepCost = source["upkeepCost"];
+	        this.totalCost = source["totalCost"];
+	        this.totalEstimated = source["totalEstimated"];
+	    }
+	}
 	export class CarrierRouteJump {
 	    systemName: string;
 	    distanceLy: number;
@@ -828,32 +828,6 @@ export namespace exporter {
 	        this.contentText = source["contentText"];
 	    }
 	}
-	export class CarrierCost {
-	    carrierType: string;
-	    weeklyUpkeep: number;
-	    tritiumPrice: number;
-	    tritiumCost: number;
-	    jumpCost: number;
-	    upkeepCost: number;
-	    totalCost: number;
-	    totalEstimated: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierCost(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.carrierType = source["carrierType"];
-	        this.weeklyUpkeep = source["weeklyUpkeep"];
-	        this.tritiumPrice = source["tritiumPrice"];
-	        this.tritiumCost = source["tritiumCost"];
-	        this.jumpCost = source["jumpCost"];
-	        this.upkeepCost = source["upkeepCost"];
-	        this.totalCost = source["totalCost"];
-	        this.totalEstimated = source["totalEstimated"];
-	    }
-	}
 	export class ModeBucket {
 	    modeId: number;
 	    modeName: string;
@@ -944,7 +918,7 @@ export namespace exporter {
 	    expedition: TelemetrySnapshot;
 	    live: stats.Metrics;
 	    adjustments: stats.Metrics;
-	    carrierCost: CarrierCost;
+	    carrierCost: expedition.CarrierCost;
 	    originBaseline?: expedition.WaypointDetails;
 	    postCareer: TelemetrySnapshot;
 	    modeBuckets: ModeBucket[];
@@ -975,7 +949,7 @@ export namespace exporter {
 	        this.expedition = this.convertValues(source["expedition"], TelemetrySnapshot);
 	        this.live = this.convertValues(source["live"], stats.Metrics);
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
-	        this.carrierCost = this.convertValues(source["carrierCost"], CarrierCost);
+	        this.carrierCost = this.convertValues(source["carrierCost"], expedition.CarrierCost);
 	        this.originBaseline = this.convertValues(source["originBaseline"], expedition.WaypointDetails);
 	        this.postCareer = this.convertValues(source["postCareer"], TelemetrySnapshot);
 	        this.modeBuckets = this.convertValues(source["modeBuckets"], ModeBucket);

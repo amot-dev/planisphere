@@ -117,18 +117,7 @@ func Complete(transaction *sql.Tx, expeditionID int64) error {
 	if listError != nil {
 		return listError
 	}
-	visitedWaypointCount := 0
-	var finalRow *Row
-	for index := range rows {
-		rowItem := &rows[index]
-		if !rowItem.IsWaypoint() || rowItem.VisitedAt == "" {
-			continue
-		}
-		visitedWaypointCount++
-		if finalRow == nil || rowItem.VisitedAt > finalRow.VisitedAt {
-			finalRow = rowItem
-		}
-	}
+	finalRow, visitedWaypointCount := latestVisitedWaypoint(rows)
 	if visitedWaypointCount < 2 || finalRow == nil {
 		return errors.New("at least 2 visited waypoints are required to complete an expedition")
 	}

@@ -44,7 +44,7 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 	}
 	exportSnapshot := initializeExportHeader(databaseConnection, expeditionRecord, planView, dependencies, currentTime, displayStart, departed)
 
-	if populateError := populateExpeditionTelemetry(databaseConnection, expeditionRecord, queryAfter, displayStart, departed, dependencies, &exportSnapshot); populateError != nil {
+	if populateError := populateExpeditionTelemetry(databaseConnection, expeditionRecord, queryAfter, displayStart, departed, currentTime, dependencies, &exportSnapshot); populateError != nil {
 		return ExpeditionExport{}, populateError
 	}
 	if detailsError := populateRowDetailsAndBaseline(databaseConnection, planView.Rows, dependencies.Projections, &exportSnapshot); detailsError != nil {
@@ -130,6 +130,7 @@ func populateExpeditionTelemetry(
 	expeditionRecord expedition.Expedition,
 	queryAfter, displayStart string,
 	departed bool,
+	currentTime time.Time,
 	dependencies BuilderDeps,
 	exportSnapshot *ExpeditionExport,
 ) error {
@@ -149,9 +150,7 @@ func populateExpeditionTelemetry(
 		exportSnapshot.Expedition = TelemetrySnapshot{Metrics: manualAdjustments}
 	}
 
-	if dependencies.ComputeCarrierCost != nil {
-		exportSnapshot.CarrierCost = dependencies.ComputeCarrierCost(expeditionRecord, exportSnapshot.Expedition.Metrics, displayStart, departed)
-	}
+	exportSnapshot.CarrierCost = expedition.ComputeCarrierCost(databaseConnection, expeditionRecord, exportSnapshot.Expedition.Metrics, displayStart, departed, currentTime)
 	return populatePostCareer(expeditionRecord, dependencies, exportSnapshot)
 }
 

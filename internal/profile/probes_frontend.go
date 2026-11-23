@@ -19,7 +19,6 @@ import (
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
-	"planisphere/internal/store/settings"
 )
 
 type frontendLiveFixture struct {
@@ -250,45 +249,8 @@ func buildFixtureSidebarStats(
 		}
 	}
 
-	sidebar.CarrierCost = computeFixtureCarrierCost(database, expeditionRecord, sidebar.Expedition, effectiveDisplayStart, sidebar.Departed, referenceNow)
+	sidebar.CarrierCost = expedition.ComputeCarrierCost(database, expeditionRecord, sidebar.Expedition, effectiveDisplayStart, sidebar.Departed, referenceNow)
 	return sidebar, nil
-}
-
-func computeFixtureCarrierCost(
-	database *sql.DB,
-	expeditionRecord expedition.Expedition,
-	expeditionMetrics projstats.Metrics,
-	effectiveStartTimestamp string,
-	expeditionDeparted bool,
-	referenceNow time.Time,
-) app.CarrierCostBreakdown {
-	tritiumPrice := settings.TritiumPricePerTonne(database)
-	var tritiumTonnes int64
-	if expeditionMetrics.TritiumUsed != nil && *expeditionMetrics.TritiumUsed > 0 {
-		tritiumTonnes = int64(*expeditionMetrics.TritiumUsed)
-	}
-	tritiumCost := tritiumTonnes * tritiumPrice
-	jumpCost := int64(expeditionMetrics.CarrierJumps) * reference.CarrierJumpMaintenanceCost
-	var upkeepCost int64
-	if expeditionDeparted && effectiveStartTimestamp != "" && expeditionRecord.CarrierWeeklyUpkeep > 0 {
-		upkeepCost = reference.CarrierProratedUpkeep(
-			effectiveStartTimestamp,
-			expeditionRecord.EndTimestamp,
-			expeditionRecord.CarrierWeeklyUpkeep,
-			referenceNow,
-		)
-	}
-	totalCost := tritiumCost + jumpCost + upkeepCost
-	return app.CarrierCostBreakdown{
-		CarrierType:    expeditionRecord.CarrierType,
-		WeeklyUpkeep:   expeditionRecord.CarrierWeeklyUpkeep,
-		TritiumPrice:   tritiumPrice,
-		TritiumCost:    tritiumCost,
-		JumpCost:       jumpCost,
-		UpkeepCost:     upkeepCost,
-		TotalCost:      totalCost,
-		TotalEstimated: tritiumCost > 0 || upkeepCost > 0,
-	}
 }
 
 func buildFixtureModesState(database *sql.DB) (app.ModesState, error) {

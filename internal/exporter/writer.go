@@ -119,8 +119,8 @@ func deduplicateEntryName(candidateName string, usedNames map[string]int) string
 	}
 }
 
-func writeBytesAtomically(targetPath string, contentBytes []byte) error {
-	tempFile, createError := os.CreateTemp(filepath.Dir(targetPath), ".planisphere-export-*")
+func writeViaTempFile(targetPath, tempPattern string, writeContent func(tempFile *os.File) error) error {
+	tempFile, createError := os.CreateTemp(filepath.Dir(targetPath), tempPattern)
 	if createError != nil {
 		return fmt.Errorf("create temporary export file: %w", createError)
 	}
@@ -132,9 +132,8 @@ func writeBytesAtomically(targetPath string, contentBytes []byte) error {
 		}
 	}()
 
-	if _, writeError := tempFile.Write(contentBytes); writeError != nil {
-		closeError := tempFile.Close()
-		return errors.Join(fmt.Errorf("write export file %q: %w", targetPath, writeError), closeError)
+	if writeError := writeContent(tempFile); writeError != nil {
+		return errors.Join(writeError, tempFile.Close())
 	}
 	if closeError := tempFile.Close(); closeError != nil {
 		return fmt.Errorf("close export file %q: %w", targetPath, closeError)
@@ -146,34 +145,26 @@ func writeBytesAtomically(targetPath string, contentBytes []byte) error {
 	return nil
 }
 
-func writeZipBundleAtomically(targetPath string, files []BundleFile) error {
-	tempFile, createError := os.CreateTemp(filepath.Dir(targetPath), ".planisphere-export-*.zip")
-	if createError != nil {
-		return fmt.Errorf("create temporary zip archive: %w", createError)
-	}
-	tempPath := tempFile.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			os.Remove(tempPath)
+func writeBytesAtomically(targetPath string, contentBytes []byte) error {
+	return writeViaTempFile(targetPath, ".planisphere-export-*", func(tempFile *os.File) error {
+		if _, writeError := tempFile.Write(contentBytes); writeError != nil {
+			return fmt.Errorf("write export file %q: %w", targetPath, writeError)
 		}
-	}()
+		return nil
+	})
+}
 
-	archiveWriter := zip.NewWriter(tempFile)
-	if writeEntriesError := writeZipEntries(archiveWriter, files); writeEntriesError != nil {
-		return errors.Join(writeEntriesError, archiveWriter.Close(), tempFile.Close())
-	}
-	if closeZipError := archiveWriter.Close(); closeZipError != nil {
-		return errors.Join(fmt.Errorf("finalize zip archive %q: %w", targetPath, closeZipError), tempFile.Close())
-	}
-	if closeFileError := tempFile.Close(); closeFileError != nil {
-		return fmt.Errorf("close zip archive %q: %w", targetPath, closeFileError)
-	}
-	if renameError := os.Rename(tempPath, targetPath); renameError != nil {
-		return fmt.Errorf("move zip archive to %q: %w", targetPath, renameError)
-	}
-	committed = true
-	return nil
+func writeZipBundleAtomically(targetPath string, files []BundleFile) error {
+	return writeViaTempFile(targetPath, ".planisphere-export-*.zip", func(tempFile *os.File) error {
+		archiveWriter := zip.NewWriter(tempFile)
+		if writeEntriesError := writeZipEntries(archiveWriter, files); writeEntriesError != nil {
+			return errors.Join(writeEntriesError, archiveWriter.Close())
+		}
+		if closeZipError := archiveWriter.Close(); closeZipError != nil {
+			return fmt.Errorf("finalize zip archive %q: %w", targetPath, closeZipError)
+		}
+		return nil
+	})
 }
 
 func writeZipEntries(archiveWriter *zip.Writer, files []BundleFile) error {

@@ -7,8 +7,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"planisphere/internal/exporter"
-	replaystats "planisphere/internal/replay/stats"
-	"planisphere/internal/store/expedition"
 	"planisphere/internal/version"
 )
 
@@ -23,21 +21,8 @@ func (app *App) GetExpeditionExportData(expeditionID int64) (exporter.Expedition
 		Projections: app.expeditionProjections(),
 		CareerStats: app.careerStats,
 		GECLookup:   app.gecLookup,
-		ComputeCarrierCost: func(expeditionRecord expedition.Expedition, expeditionMetrics replaystats.Metrics, effectiveStart string, departed bool) exporter.CarrierCost {
-			cost := app.computeExpeditionCarrierCost(expeditionRecord, expeditionMetrics, effectiveStart, departed)
-			return exporter.CarrierCost{
-				CarrierType:    cost.CarrierType,
-				WeeklyUpkeep:   cost.WeeklyUpkeep,
-				TritiumPrice:   cost.TritiumPrice,
-				TritiumCost:    cost.TritiumCost,
-				JumpCost:       cost.JumpCost,
-				UpkeepCost:     cost.UpkeepCost,
-				TotalCost:      cost.TotalCost,
-				TotalEstimated: cost.TotalEstimated,
-			}
-		},
-		AppVersion: version.Version,
-		Now:        timeNow,
+		AppVersion:  version.Version,
+		Now:         timeNow,
 	})
 }
 

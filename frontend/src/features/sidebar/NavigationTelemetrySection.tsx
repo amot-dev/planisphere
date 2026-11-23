@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { app, stats } from '../../api/models'
+import { app, expedition, stats } from '../../api/models'
 import { CollapsibleSectionCard } from '../../components/ui/CollapsibleSectionCard'
 import { ExpandableMetricRow } from '../../components/ui/ExpandableMetricRow'
 import { CogIcon } from '../../components/ui/HudIcons'
@@ -55,7 +55,7 @@ export function NavigationTelemetrySection({
     sidebarStats?.started && sidebarStats?.departed && sidebarStats?.endIsNow,
   )
   const [currentGalacticTime, setCurrentGalacticTime] = useState<string>(() => nowGalacticTime())
-  const carrierCost = sidebarStats?.carrierCost ?? new app.CarrierCostBreakdown()
+  const carrierCost = sidebarStats?.carrierCost ?? new expedition.CarrierCost()
 
   useEffect(() => {
     if (!isActiveExpeditionClock || clockSuspended) {

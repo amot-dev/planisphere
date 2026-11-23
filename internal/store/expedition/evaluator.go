@@ -33,6 +33,22 @@ func nextWaypointAfter(rows []Row, afterIndex int) int {
 	return -1
 }
 
+func latestVisitedWaypoint(rows []Row) (*Row, int) {
+	var latestVisited *Row
+	visitedCount := 0
+	for index := range rows {
+		rowItem := &rows[index]
+		if !rowItem.IsWaypoint() || rowItem.VisitedAt == "" {
+			continue
+		}
+		visitedCount++
+		if latestVisited == nil || rowItem.VisitedAt > latestVisited.VisitedAt {
+			latestVisited = rowItem
+		}
+	}
+	return latestVisited, visitedCount
+}
+
 func matchesNormalizedWaypoint(rowItem *Row, normalizedRowSystem string, arrivalSystemAddress int64, normalizedArrivalSystem string) bool {
 	if rowItem.RowType != RowWaypoint || normalizedRowSystem == "" {
 		return false

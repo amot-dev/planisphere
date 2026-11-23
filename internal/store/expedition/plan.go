@@ -150,12 +150,7 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 	}
 
 	// Current waypoint is the visited waypoint with the latest visit time.
-	for i := range rows {
-		rowItem := &rows[i]
-		if rowItem.IsWaypoint() && rowItem.VisitedAt != "" && (buildContext.currentWaypoint == nil || rowItem.VisitedAt > buildContext.currentWaypoint.VisitedAt) {
-			buildContext.currentWaypoint = rowItem
-		}
-	}
+	buildContext.currentWaypoint, _ = latestVisitedWaypoint(rows)
 	if buildContext.currentWaypoint != nil {
 		planView.CurrentRowID = buildContext.currentWaypoint.ID
 	}
