@@ -187,7 +187,6 @@ func buildFrontendFixture(database *sql.DB, proj *profileProjections, dataset Da
 	var exportData *exporter.ExpeditionExport
 	builtExport, exportError := exporter.Build(database, dataset.PrimaryExpeditionID, exporter.BuilderDeps{
 		Projections: expProjections,
-		CareerStats: proj.careerStats,
 		GECLookup:   gecLookup,
 		AppVersion:  "profile",
 		Now:         profileExportNow,

@@ -430,7 +430,6 @@ type exportBuildProbeValue struct {
 	HasOriginBaseline bool                       `json:"hasOriginBaseline"`
 	Live              replaystats.Metrics        `json:"live"`
 	Expedition        exporter.TelemetrySnapshot `json:"expedition"`
-	PostCareer        replaystats.Metrics        `json:"postCareer"`
 	CarrierCostTotal  int64                      `json:"carrierCostTotal"`
 }
 
@@ -453,7 +452,6 @@ func profileExportBuild(
 		func() (singleExecOutcome, error) {
 			snapshot, buildError := exporter.Build(database, dataset.PrimaryExpeditionID, exporter.BuilderDeps{
 				Projections: proj.expeditionProjections(),
-				CareerStats: proj.careerStats,
 				GECLookup:   gecLookup,
 				AppVersion:  "profile",
 				Now:         profileExportNow,
@@ -483,7 +481,6 @@ func buildExportProbeOutcome(snapshot exporter.ExpeditionExport) singleExecOutco
 		HasOriginBaseline: snapshot.OriginBaseline != nil,
 		Live:              snapshot.Live,
 		Expedition:        snapshot.Expedition,
-		PostCareer:        snapshot.PostCareer.Metrics,
 		CarrierCostTotal:  snapshot.CarrierCost.TotalCost,
 	}
 	summary := fmt.Sprintf("Rows=%d RowDetails=%d ModeBuckets=%d Jumps=%d Realized=%d",

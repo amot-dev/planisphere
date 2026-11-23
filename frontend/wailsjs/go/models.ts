@@ -920,7 +920,6 @@ export namespace exporter {
 	    adjustments: stats.Metrics;
 	    carrierCost: expedition.CarrierCost;
 	    originBaseline?: expedition.WaypointDetails;
-	    postCareer: TelemetrySnapshot;
 	    modeBuckets: ModeBucket[];
 	    rowDetails: expedition.WaypointDetails[];
 	
@@ -951,7 +950,6 @@ export namespace exporter {
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
 	        this.carrierCost = this.convertValues(source["carrierCost"], expedition.CarrierCost);
 	        this.originBaseline = this.convertValues(source["originBaseline"], expedition.WaypointDetails);
-	        this.postCareer = this.convertValues(source["postCareer"], TelemetrySnapshot);
 	        this.modeBuckets = this.convertValues(source["modeBuckets"], ModeBucket);
 	        this.rowDetails = this.convertValues(source["rowDetails"], expedition.WaypointDetails);
 	    }

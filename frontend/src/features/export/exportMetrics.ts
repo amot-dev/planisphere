@@ -87,7 +87,7 @@ export interface DerivedMetrics {
   avgRealizedCreditsPer1000Ly: number | null
 }
 
-/** One inline Career Diff entry comparing pre-expedition baseline, expedition delta, and post-expedition career. */
+/** One inline Career Diff entry comparing pre-expedition baseline and expedition growth. */
 export interface CareerDiffItem {
   id:
     | 'distanceLy'
@@ -98,10 +98,7 @@ export interface CareerDiffItem {
     | 'bodiesMapped'
     | 'organicSamples'
   baseline: number
-  delta: number
-  postCareer: number
   growthPercent: number | null
-  careerSharePercent: number | null
   isNewBaseline: boolean
 }
 
@@ -988,24 +985,21 @@ function buildCareerDiff(exportData: ExpeditionExportData): CareerDiffItem[] | n
   }
   const baseMetrics = baseline.metrics
   const expMetrics = exportData.live
-  const postMetrics = exportData.postCareer.metrics
   const baseRealized = baseline.realization.totalRealized
   const expRealized = exportData.expedition.realization.totalRealized
-  const postRealized = exportData.postCareer.realization.totalRealized
 
   return [
-    makeCareerDiffItem('distanceLy', baseMetrics.distanceLy, expMetrics.distanceLy, postMetrics.distanceLy),
-    makeCareerDiffItem('jumps', baseMetrics.jumps, expMetrics.jumps, postMetrics.jumps),
+    makeCareerDiffItem('distanceLy', baseMetrics.distanceLy, expMetrics.distanceLy),
+    makeCareerDiffItem('jumps', baseMetrics.jumps, expMetrics.jumps),
     makeCareerDiffItem(
       'estimatedValue',
       baseMetrics.scanValueTotal + baseMetrics.organicValueTotal,
       expMetrics.scanValueTotal + expMetrics.organicValueTotal,
-      postMetrics.scanValueTotal + postMetrics.organicValueTotal,
     ),
-    makeCareerDiffItem('realizedValue', baseRealized, expRealized, postRealized),
-    makeCareerDiffItem('bodiesScanned', baseMetrics.bodiesScanned, expMetrics.bodiesScanned, postMetrics.bodiesScanned),
-    makeCareerDiffItem('bodiesMapped', baseMetrics.bodiesMapped, expMetrics.bodiesMapped, postMetrics.bodiesMapped),
-    makeCareerDiffItem('organicSamples', baseMetrics.organicSamples, expMetrics.organicSamples, postMetrics.organicSamples),
+    makeCareerDiffItem('realizedValue', baseRealized, expRealized),
+    makeCareerDiffItem('bodiesScanned', baseMetrics.bodiesScanned, expMetrics.bodiesScanned),
+    makeCareerDiffItem('bodiesMapped', baseMetrics.bodiesMapped, expMetrics.bodiesMapped),
+    makeCareerDiffItem('organicSamples', baseMetrics.organicSamples, expMetrics.organicSamples),
   ]
 }
 
@@ -1013,16 +1007,12 @@ function makeCareerDiffItem(
   id: CareerDiffItem['id'],
   baseline: number,
   delta: number,
-  postCareer: number,
 ): CareerDiffItem {
   const isNewBaseline = baseline <= 0 && delta > 0
   return {
     id,
     baseline,
-    delta,
-    postCareer,
     growthPercent: baseline > 0 ? (delta / baseline) * 100 : null,
-    careerSharePercent: postCareer > 0 ? (delta / postCareer) * 100 : null,
     isNewBaseline,
   }
 }

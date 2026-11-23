@@ -145,18 +145,6 @@ export function buildSampleExportData(
   })
   const originRealization = makeRealization({ totalRealized: 310_000_000 })
 
-  const postCareerMetrics = makeMetrics({
-    distanceLy: 14_800,
-    shipDistanceLy: 14_600,
-    carrierPassengerLy: 200,
-    jumps: 280,
-    bodiesScanned: 345,
-    scanValueTotal: 126_000_000,
-    organicSamples: 39,
-    organicValueTotal: 390_000_000,
-  })
-  const postCareerRealization = makeRealization({ totalRealized: 465_000_000 })
-
   const plan = expedition.PlanView.createFrom({
     expedition: {
       id: 7,
@@ -407,7 +395,6 @@ export function buildSampleExportData(
       totalEstimated: true,
     },
     originBaseline,
-    postCareer: { metrics: postCareerMetrics, realization: postCareerRealization },
     modeBuckets: [
       {
         modeId: 1,

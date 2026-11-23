@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"time"
 
-	projstats "planisphere/internal/projections/stats"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 )
@@ -53,7 +52,6 @@ type ExpeditionExport struct {
 	Adjustments            replaystats.Metrics          `json:"adjustments"`
 	CarrierCost            expedition.CarrierCost       `json:"carrierCost"`
 	OriginBaseline         *expedition.WaypointDetails  `json:"originBaseline,omitempty"`
-	PostCareer             TelemetrySnapshot            `json:"postCareer"`
 	ModeBuckets            []ModeBucket                 `json:"modeBuckets"`
 	RowDetails             []expedition.WaypointDetails `json:"rowDetails"`
 }
@@ -68,7 +66,6 @@ type BundleFile struct {
 // BuilderDeps injects the read-only projections and helpers required to assemble an export snapshot.
 type BuilderDeps struct {
 	Projections *expedition.Projections
-	CareerStats *projstats.CareerStats
 	GECLookup   expedition.GECLookup
 	AppVersion  string
 	Now         func() time.Time

@@ -58,7 +58,6 @@ export interface ExpeditionExportData {
   adjustments: stats.Metrics
   carrierCost: ExportCarrierCost
   originBaseline?: expedition.WaypointDetails | null
-  postCareer: ExportTelemetrySnapshot
   modeBuckets: ExportModeBucket[]
   rowDetails: expedition.WaypointDetails[]
 }

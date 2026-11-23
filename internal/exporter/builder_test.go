@@ -12,7 +12,6 @@ import (
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
-	projstats "planisphere/internal/projections/stats"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
@@ -23,7 +22,6 @@ type exportTestFixture struct {
 	databaseConnection    *sql.DB
 	bus                   *projection.Bus
 	expeditionProjections *expedition.Projections
-	careerStats           *projstats.CareerStats
 }
 
 func setupExportFixture(testingContext *testing.T) *exportTestFixture {
@@ -41,17 +39,10 @@ func setupExportFixture(testingContext *testing.T) *exportTestFixture {
 
 	bus := projection.NewBus()
 	expeditionProjections := expedition.NewProjections(databaseConnection, bus)
-	careerStats := projstats.NewCareerStats(
-		databaseConnection,
-		bus,
-		expeditionProjections.SalesLedger,
-		expeditionProjections.RecoveredJumps,
-	)
 	return &exportTestFixture{
 		databaseConnection:    databaseConnection,
 		bus:                   bus,
 		expeditionProjections: expeditionProjections,
-		careerStats:           careerStats,
 	}
 }
 
@@ -93,7 +84,6 @@ func (fixture *exportTestFixture) lookupModeID(testingContext *testing.T, target
 func (fixture *exportTestFixture) builderDeps(fixedTime time.Time) exporter.BuilderDeps {
 	return exporter.BuilderDeps{
 		Projections: fixture.expeditionProjections,
-		CareerStats: fixture.careerStats,
 		AppVersion:  "0.6.2-test",
 		Now:         func() time.Time { return fixedTime },
 	}
@@ -129,7 +119,7 @@ func TestBuildRejectsPlanningAndStagedExpeditions(testingContext *testing.T) {
 	}
 }
 
-func TestBuildCompletedExpeditionBoundariesModeBucketsAndExactPostCareer(testingContext *testing.T) {
+func TestBuildCompletedExpeditionBoundariesAndModeBuckets(testingContext *testing.T) {
 	fixture := setupExportFixture(testingContext)
 	fixedTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	explorationID := fixture.lookupModeID(testingContext, "Exploration")
@@ -148,7 +138,7 @@ func TestBuildCompletedExpeditionBoundariesModeBucketsAndExactPostCareer(testing
 	fixture.insertEvent(testingContext, "2026-04-02T10:00:00Z", "FSDJump", "leg2-a", `{"timestamp":"2026-04-02T10:00:00Z","event":"FSDJump","StarSystem":"Beta Waypoint","SystemAddress":3003,"StarPos":[200,0,0],"JumpDist":80.0}`)
 	fixture.insertEvent(testingContext, "2026-04-02T10:20:00Z", "Scan", "beta-scan", `{"timestamp":"2026-04-02T10:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta Waypoint A 1","BodyID":1,"StarSystem":"Beta Waypoint","SystemAddress":3003,"PlanetClass":"Water world","MassEM":1.5,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`)
 
-	// Subsequent post-expedition flight that must NOT leak into PostCareer for this completed expedition.
+	// Subsequent post-expedition flight that must NOT leak into completed expedition telemetry.
 	fixture.insertEvent(testingContext, "2026-05-10T15:00:00Z", "FSDJump", "later-trip", `{"timestamp":"2026-05-10T15:00:00Z","event":"FSDJump","StarSystem":"Distant Star","SystemAddress":9009,"StarPos":[400,0,0],"JumpDist":200.0}`)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(
@@ -199,13 +189,12 @@ func TestBuildCompletedExpeditionBoundariesModeBucketsAndExactPostCareer(testing
 		testingContext.Fatalf("expected 2 leg drawers, got %d", len(snapshot.RowDetails))
 	}
 
-	// Verify exact historical accounting: OriginBaseline + Live == PostCareer (excluding May 10 flight).
-	expectedPostDistance := snapshot.OriginBaseline.Metrics.DistanceLy + snapshot.Live.DistanceLy
-	if math.Abs(snapshot.PostCareer.Metrics.DistanceLy-expectedPostDistance) > 0.001 {
-		testingContext.Fatalf("PostCareer distance %.2f != OriginBaseline %.2f + Live %.2f", snapshot.PostCareer.Metrics.DistanceLy, snapshot.OriginBaseline.Metrics.DistanceLy, snapshot.Live.DistanceLy)
+	// Verify completed expedition boundaries exclude the May 10 post-expedition flight while preserving origin baseline.
+	if math.Abs(snapshot.Live.DistanceLy-200.0) > 0.001 || snapshot.Live.Jumps != 3 {
+		testingContext.Fatalf("expected completed Live distance 200.0 Ly and 3 jumps, got %.2f Ly and %d jumps", snapshot.Live.DistanceLy, snapshot.Live.Jumps)
 	}
-	if snapshot.PostCareer.Metrics.Jumps != snapshot.OriginBaseline.Metrics.Jumps+snapshot.Live.Jumps {
-		testingContext.Fatalf("PostCareer jumps %d != OriginBaseline %d + Live %d", snapshot.PostCareer.Metrics.Jumps, snapshot.OriginBaseline.Metrics.Jumps, snapshot.Live.Jumps)
+	if math.Abs(snapshot.OriginBaseline.Metrics.DistanceLy-25.0) > 0.001 || snapshot.OriginBaseline.Metrics.Jumps != 1 {
+		testingContext.Fatalf("expected OriginBaseline distance 25.0 Ly and 1 jump, got %.2f Ly and %d jumps", snapshot.OriginBaseline.Metrics.DistanceLy, snapshot.OriginBaseline.Metrics.Jumps)
 	}
 
 	// Verify ModeBuckets additivity equals Full Expedition Live totals.

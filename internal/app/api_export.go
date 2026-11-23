@@ -19,7 +19,6 @@ func (app *App) GetExpeditionExportData(expeditionID int64) (exporter.Expedition
 	}
 	return exporter.Build(app.db, expeditionID, exporter.BuilderDeps{
 		Projections: app.expeditionProjections(),
-		CareerStats: app.careerStats,
 		GECLookup:   app.gecLookup,
 		AppVersion:  version.Version,
 		Now:         timeNow,

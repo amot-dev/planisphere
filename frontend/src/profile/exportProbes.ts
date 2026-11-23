@@ -147,10 +147,6 @@ function synthesizeExportData(hydrated: HydratedFrontendFixture): ExpeditionExpo
       totalEstimated: false,
     },
     originBaseline,
-    postCareer: {
-      metrics: normalizeMetrics(sidebar.allJournals),
-      realization: normalizeRealization(sidebar.allJournalsRealization),
-    },
     modeBuckets: activeModeBuckets,
     rowDetails,
   }

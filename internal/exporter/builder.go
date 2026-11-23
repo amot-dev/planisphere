@@ -151,49 +151,6 @@ func populateExpeditionTelemetry(
 	}
 
 	exportSnapshot.CarrierCost = expedition.ComputeCarrierCost(databaseConnection, expeditionRecord, exportSnapshot.Expedition.Metrics, displayStart, departed, currentTime)
-	return populatePostCareer(expeditionRecord, dependencies, exportSnapshot)
-}
-
-func populatePostCareer(
-	expeditionRecord expedition.Expedition,
-	dependencies BuilderDeps,
-	exportSnapshot *ExpeditionExport,
-) error {
-	// Completed expeditions snapshot career totals strictly at EndTimestamp so
-	// OriginBaseline + Full Expedition equals PostCareer even after later trips.
-	if expeditionRecord.EndTimestamp != "" {
-		postSummary, computeError := dependencies.Projections.TimeRangeStats.Compute(
-			replaystats.Range{After: "", Until: expeditionRecord.EndTimestamp},
-			nil,
-		)
-		if computeError != nil {
-			return fmt.Errorf("compute post-expedition career telemetry: %w", computeError)
-		}
-		exportSnapshot.PostCareer = TelemetrySnapshot{
-			Metrics:     postSummary.Metrics,
-			Realization: postSummary.Realization,
-		}
-		return nil
-	}
-	if dependencies.CareerStats != nil {
-		careerSummary, careerError := dependencies.CareerStats.Get()
-		if careerError != nil {
-			return fmt.Errorf("load active career telemetry: %w", careerError)
-		}
-		exportSnapshot.PostCareer = TelemetrySnapshot{
-			Metrics:     careerSummary.Metrics,
-			Realization: careerSummary.Realization,
-		}
-		return nil
-	}
-	allTimeSummary, computeError := dependencies.Projections.TimeRangeStats.Compute(replaystats.Range{}, nil)
-	if computeError != nil {
-		return fmt.Errorf("compute fallback career telemetry: %w", computeError)
-	}
-	exportSnapshot.PostCareer = TelemetrySnapshot{
-		Metrics:     allTimeSummary.Metrics,
-		Realization: allTimeSummary.Realization,
-	}
 	return nil
 }
 

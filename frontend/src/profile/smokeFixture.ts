@@ -120,21 +120,6 @@ function buildSmokeExportData(): Record<string, unknown> {
       metrics: originMetrics,
       realization: originRealization,
     },
-    postCareer: {
-      metrics: {
-        ...liveMetrics,
-        distanceLy: originMetrics.distanceLy + liveMetrics.distanceLy,
-        shipDistanceLy: originMetrics.shipDistanceLy + liveMetrics.shipDistanceLy,
-        jumps: originMetrics.jumps + liveMetrics.jumps,
-        bodiesScanned: originMetrics.bodiesScanned + liveMetrics.bodiesScanned,
-        scanValueTotal: originMetrics.scanValueTotal + liveMetrics.scanValueTotal,
-      },
-      realization: {
-        ...zeroRealization,
-        totalRealized: originRealization.totalRealized + expeditionRealization.totalRealized,
-        pendingValue: expeditionRealization.pendingValue,
-      },
-    },
     modeBuckets: [
       { modeId: 1, modeName: 'Exploration', modeColor: '#FF7100', metrics: leg2Metrics, realization: leg2Realization },
       { modeId: 2, modeName: 'Travel', modeColor: '#00D2FF', metrics: leg3Metrics, realization: leg3Realization },
