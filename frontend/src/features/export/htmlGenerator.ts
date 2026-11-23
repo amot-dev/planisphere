@@ -231,7 +231,7 @@ function renderInlineCareerDiff(
   if (!diffItem || mode === 'hide') return ''
   const parts: string[] = []
   if (mode === 'absolute' || mode === 'both') {
-    parts.push(`PRE ${formatValue(diffItem.baseline)} -> POST ${formatValue(diffItem.postCareer)}`)
+    parts.push(`PRE ${formatValue(diffItem.baseline)}`)
   }
   if (mode === 'percentage' || mode === 'both') {
     const growth = diffItem.isNewBaseline
@@ -239,9 +239,7 @@ function renderInlineCareerDiff(
       : diffItem.growthPercent != null
         ? `+${diffItem.growthPercent.toFixed(1)}%`
         : '—'
-    const share =
-      diffItem.careerSharePercent != null ? `${diffItem.careerSharePercent.toFixed(1)}% career` : ''
-    parts.push(share ? `${growth} (${share})` : growth)
+    parts.push(growth)
   }
   return `<div class="diff-pill mono">${escapeHtml(parts.join(' · '))}</div>`
 }

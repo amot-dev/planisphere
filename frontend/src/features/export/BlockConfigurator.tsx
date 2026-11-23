@@ -94,7 +94,7 @@ export function BlockConfigurator({
                     : undefined
                 }
                 onClick={() => onSelectBlockKind(option.id)}
-                className={`px-2 py-1.5 text-[10px] font-extrabold uppercase tracking-wider border transition ${
+                className={`flex items-center justify-center px-1 py-1.5 text-[10px] font-extrabold uppercase tracking-wide border transition ${
                   isDisabled
                     ? 'bg-ed-void border-ed-border-subtle text-ed-text-disabled cursor-not-allowed'
                     : isSelected

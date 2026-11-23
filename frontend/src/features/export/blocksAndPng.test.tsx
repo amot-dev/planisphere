@@ -24,7 +24,9 @@ describe('export visual blocks and PNG SVG serializer', () => {
     )
     expect(summaryMarkup).toContain('4,800.0 Ly')
     expect(summaryMarkup).toContain('PRE 10,000.0 Ly')
-    expect(summaryMarkup).toContain('career')
+    expect(summaryMarkup).toContain('+48.0%')
+    expect(summaryMarkup).not.toContain('POST')
+    expect(summaryMarkup).not.toContain('career')
 
     const emptyDetailsMarkup = renderToStaticMarkup(
       createElement(ExportBlockRenderer, {

@@ -275,7 +275,7 @@ function InlineCareerDiff({
   if (!item || displayMode === 'hide') return null
   const parts: string[] = []
   if (displayMode === 'absolute' || displayMode === 'both') {
-    parts.push(`PRE ${formatValue(item.baseline)} -> POST ${formatValue(item.postCareer)}`)
+    parts.push(`PRE ${formatValue(item.baseline)}`)
   }
   if (displayMode === 'percentage' || displayMode === 'both') {
     const growth = item.isNewBaseline
@@ -283,9 +283,7 @@ function InlineCareerDiff({
       : item.growthPercent != null
         ? `+${item.growthPercent.toFixed(1)}%`
         : '—'
-    const share =
-      item.careerSharePercent != null ? `${item.careerSharePercent.toFixed(1)}% career` : ''
-    parts.push(share ? `${growth} (${share})` : growth)
+    parts.push(growth)
   }
   return <div className="ed-exp-diff ed-exp-mono">{parts.join(' · ')}</div>
 }
