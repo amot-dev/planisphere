@@ -21,10 +21,10 @@ import {
 } from './exportMetrics'
 import {
   CartBlockItem,
+  ConfiguratorBlockConfig,
   createDefaultBlockConfig,
   DETAILS_SECTION_METRICS,
   ExpeditionExportData,
-  ExportBlockConfig,
   ExportBlockKind,
   ExportBundleFile,
   ExportOutputOptions,
@@ -47,7 +47,9 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [config, setConfig] = useState<ExportBlockConfig>(() => createDefaultBlockConfig('summary'))
+  const [config, setConfig] = useState<ConfiguratorBlockConfig>(() =>
+    createDefaultBlockConfig('summary'),
+  )
   const [cartItems, setCartItems] = useState<CartBlockItem[]>([])
   const [inspectedCartItemId, setInspectedCartItemId] = useState<string | null>(null)
   const [previewSliceIndex, setPreviewSliceIndex] = useState(0)
@@ -137,18 +139,13 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
     if (config.kind === 'highlights') {
       return config.selectedCards.length > 0
     }
-    if (config.kind === 'details') {
-      if (config.section === 'all') {
-        return expandedPreviewItems.length > 0
-      }
-      if (configuratorPreviewContext) {
-        const selectedSet = new Set(config.selectedMetrics)
-        return DETAILS_SECTION_METRICS[config.section].some(
-          (descriptor) =>
-            selectedSet.has(descriptor.id) &&
-            isDetailsMetricAvailable(descriptor, configuratorPreviewContext, config.scope.kind),
-        )
-      }
+    if (config.kind === 'details' && config.section !== 'all' && configuratorPreviewContext) {
+      const selectedSet = new Set(config.selectedMetrics)
+      return DETAILS_SECTION_METRICS[config.section].some(
+        (descriptor) =>
+          selectedSet.has(descriptor.id) &&
+          isDetailsMetricAvailable(descriptor, configuratorPreviewContext, config.scope.kind),
+      )
     }
     return true
   }, [config, configuratorPreviewContext, expandedPreviewItems.length, exportData])
@@ -174,7 +171,7 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
     setConfig(createDefaultBlockConfig(nextKind))
   }
 
-  function handleConfigChange(nextConfig: ExportBlockConfig) {
+  function handleConfigChange(nextConfig: ConfiguratorBlockConfig) {
     setInspectedCartItemId(null)
     setConfig(nextConfig)
   }

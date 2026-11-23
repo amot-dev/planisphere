@@ -17,7 +17,6 @@ import {
   DETAILS_SECTIONS,
   DetailsBlockConfig,
   DetailsMetricId,
-  DetailsSection,
   ExpeditionExportData,
 } from '../exportTypes'
 
@@ -40,10 +39,9 @@ export function DetailsBlock({
     config.scope,
     config.selectedModeId,
   )
-  const concreteSection: DetailsSection = config.section === 'all' ? 'flight' : config.section
-  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === concreteSection)!
+  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === config.section)!
   const selectedSet = new Set<DetailsMetricId>(config.selectedMetrics)
-  const activeDescriptors = DETAILS_SECTION_METRICS[concreteSection].filter(
+  const activeDescriptors = DETAILS_SECTION_METRICS[config.section].filter(
     (descriptor) =>
       selectedSet.has(descriptor.id) &&
       isDetailsMetricAvailable(descriptor, context, config.scope.kind),

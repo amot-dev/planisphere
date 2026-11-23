@@ -212,12 +212,24 @@ export interface SummaryBlockConfig {
 /** Configuration for a Details block. */
 export interface DetailsBlockConfig {
   kind: 'details'
-  section: DetailsSectionSelection
+  section: DetailsSection
   scope: ExportScopeSpec
   modeGrouping: ModeGrouping
   selectedModeId?: number
   selectedMetrics: DetailsMetricId[]
 }
+
+/** Configurator draft state for queueing all applicable Details sections at once. */
+export interface AllDetailsSectionsConfig {
+  kind: 'details'
+  section: 'all'
+  scope: ExportScopeSpec
+  modeGrouping: ModeGrouping
+  selectedModeId?: number
+}
+
+/** Union of concrete and batch Details configurations accepted by BlockConfigurator. */
+export type DetailsConfiguratorConfig = DetailsBlockConfig | AllDetailsSectionsConfig
 
 /** Configuration for a Waypoints table block. */
 export interface WaypointsBlockConfig {
@@ -239,6 +251,13 @@ export interface HighlightsBlockConfig {
 export type ExportBlockConfig =
   | SummaryBlockConfig
   | DetailsBlockConfig
+  | WaypointsBlockConfig
+  | HighlightsBlockConfig
+
+/** Discriminated union of all Export Studio configurator draft states (including batch Details). */
+export type ConfiguratorBlockConfig =
+  | SummaryBlockConfig
+  | DetailsConfiguratorConfig
   | WaypointsBlockConfig
   | HighlightsBlockConfig
 

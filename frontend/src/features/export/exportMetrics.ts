@@ -6,6 +6,7 @@ import {
 } from '../../domain/galacticTime'
 import {
   CartBlockItem,
+  ConfiguratorBlockConfig,
   defaultMetricsForSection,
   DETAILS_SECTIONS,
   DetailsMetricDescriptor,
@@ -423,7 +424,7 @@ export function resolveTelemetryContext(
 /** Expands a configurator block (including All Legs, All Regions, and Separate modes) into concrete cart items. */
 export function expandConfigToCartItems(
   exportData: ExpeditionExportData,
-  config: ExportBlockConfig,
+  config: ConfiguratorBlockConfig,
   idPrefix: string,
 ): CartBlockItem[] {
   if (config.kind === 'waypoints') {
@@ -568,7 +569,7 @@ function expandTelemetryBlockConfig(
   const blockLabel =
     config.kind === 'summary'
       ? 'Summary'
-      : `Details: ${DETAILS_SECTIONS.find((section) => section.id === config.section)?.label ?? config.section}`
+      : `Details: ${DETAILS_SECTIONS.find((section) => section.id === config.section)!.label}`
   const blockSlug = config.kind === 'summary' ? 'summary' : slugifyCamelCase(config.section)
 
   if (config.scope.kind === 'allLegs') {

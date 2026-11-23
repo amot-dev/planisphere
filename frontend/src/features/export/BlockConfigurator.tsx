@@ -9,13 +9,13 @@ import {
 } from './exportMetrics'
 import {
   CareerDiffDisplay,
+  ConfiguratorBlockConfig,
   DETAILS_SECTION_METRICS,
   DETAILS_SECTIONS,
-  DetailsBlockConfig,
+  DetailsConfiguratorConfig,
   DetailsMetricId,
   DetailsSectionSelection,
   ExpeditionExportData,
-  ExportBlockConfig,
   ExportBlockKind,
   ExportScopeKind,
   HIGHLIGHT_CARDS,
@@ -31,13 +31,13 @@ import {
 /** Props for the left-column sticky Export Studio block configurator. */
 export interface BlockConfiguratorProps {
   exportData: ExpeditionExportData
-  config: ExportBlockConfig
+  config: ConfiguratorBlockConfig
   resolvedPreviewContext: ResolvedTelemetryContext | null
   addCount: number
   canAddToCart: boolean
   disabled?: boolean
   onSelectBlockKind: (nextKind: ExportBlockKind) => void
-  onChangeConfig: (nextConfig: ExportBlockConfig) => void
+  onChangeConfig: (nextConfig: ConfiguratorBlockConfig) => void
   onAddToCart: () => void
 }
 
@@ -170,7 +170,7 @@ function ScopeAndModeControls({
   onUpdateModeGrouping,
 }: {
   exportData: ExpeditionExportData
-  config: SummaryBlockConfig | DetailsBlockConfig
+  config: SummaryBlockConfig | DetailsConfiguratorConfig
   hasVisitedLegs: boolean
   lockedFullOnly: boolean
   disabled: boolean
@@ -362,26 +362,27 @@ function DetailsControls({
   onChange,
 }: {
   exportData: ExpeditionExportData
-  config: DetailsBlockConfig
+  config: DetailsConfiguratorConfig
   resolvedContext: ResolvedTelemetryContext | null
   hasVisitedLegs: boolean
   disabled: boolean
-  onChange: (next: DetailsBlockConfig) => void
+  onChange: (next: DetailsConfiguratorConfig) => void
 }) {
-  const isAllSections = config.section === 'all'
   const descriptors = config.section === 'all' ? [] : DETAILS_SECTION_METRICS[config.section]
-  const selectedSet = new Set<DetailsMetricId>(config.selectedMetrics)
+  const selectedSet = new Set<DetailsMetricId>(
+    config.section === 'all' ? [] : config.selectedMetrics,
+  )
   const isCarrierSection = config.section === 'carrier'
 
   function handleSectionChange(nextSection: DetailsSectionSelection) {
     if (nextSection === 'all') {
       onChange({
-        ...config,
+        kind: 'details',
         section: 'all',
+        scope: config.scope,
         modeGrouping: !scopeSupportsModeSplit(exportData, config.scope, 'all')
           ? 'combined'
           : config.modeGrouping,
-        selectedMetrics: [],
       })
       return
     }
@@ -402,6 +403,7 @@ function DetailsControls({
   }
 
   function toggleMetric(metricId: DetailsMetricId) {
+    if (config.section === 'all') return
     const nextSelected = selectedSet.has(metricId)
       ? config.selectedMetrics.filter((id) => id !== metricId)
       : [...config.selectedMetrics, metricId]
@@ -417,16 +419,23 @@ function DetailsControls({
         lockedFullOnly={isCarrierSection}
         disabled={disabled}
         detailsSection={config.section}
-        onUpdateScope={(nextScope) =>
-          onChange({
-            ...config,
-            scope: nextScope,
-            modeGrouping: scopeSupportsModeSplit(exportData, nextScope, config.section)
-              ? config.modeGrouping
-              : 'combined',
-          })
+        onUpdateScope={(nextScope) => {
+          const nextModeGrouping = scopeSupportsModeSplit(exportData, nextScope, config.section)
+            ? config.modeGrouping
+            : 'combined'
+          onChange(
+            config.section === 'all'
+              ? { ...config, scope: nextScope, modeGrouping: nextModeGrouping }
+              : { ...config, scope: nextScope, modeGrouping: nextModeGrouping },
+          )
+        }}
+        onUpdateModeGrouping={(nextGrouping) =>
+          onChange(
+            config.section === 'all'
+              ? { ...config, modeGrouping: nextGrouping }
+              : { ...config, modeGrouping: nextGrouping },
+          )
         }
-        onUpdateModeGrouping={(nextGrouping) => onChange({ ...config, modeGrouping: nextGrouping })}
       />
 
       <div>
@@ -448,7 +457,7 @@ function DetailsControls({
         </select>
       </div>
 
-      {isAllSections ? (
+      {config.section === 'all' ? (
         <div className="bg-ed-void border border-ed-border-subtle px-2.5 py-2 text-[11px] text-ed-text-muted">
           Adds one block for each applicable section using its default data points.
         </div>

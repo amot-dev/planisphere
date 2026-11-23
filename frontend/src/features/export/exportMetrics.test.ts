@@ -119,7 +119,6 @@ describe('exportMetrics', () => {
         section: 'all',
         scope: { kind: 'full' },
         modeGrouping: 'combined',
-        selectedMetrics: [],
       },
       'all-sec',
     )
@@ -137,7 +136,6 @@ describe('exportMetrics', () => {
         section: 'all',
         scope: { kind: 'leg', rowId: 2 },
         modeGrouping: 'combined',
-        selectedMetrics: [],
       },
       'leg-sec',
     )
@@ -151,7 +149,6 @@ describe('exportMetrics', () => {
         section: 'all',
         scope: { kind: 'allLegs' },
         modeGrouping: 'combined',
-        selectedMetrics: [],
       },
       'all-legs-sec',
     )
