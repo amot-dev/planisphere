@@ -1797,3 +1797,60 @@ func mustGetExpedition(testingContext *testing.T, databaseConnection *sql.DB, ex
 	}
 	return record
 }
+
+func TestCompleteOpenStayScopesToSystemCommanderAndNonMulticrew(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	ingestJournalLines(testingContext, databaseConnection, []string{
+		`{"timestamp":"2026-10-01T09:00:00Z","event":"LoadGame","Commander":"CmdrA","FID":"FA","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-10-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":6001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-10-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":6002,"StarPos":[20,0,0],"JumpDist":20.0}`,
+		`{"timestamp":"2026-10-01T12:15:00Z","event":"SAAScanComplete","BodyName":"Beta 1","SystemAddress":6002,"BodyID":1,"ProbesUsed":4,"EfficiencyTarget":6}`,
+	})
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrB', 'FB', 1)
+		ON CONFLICT(name) DO UPDATE SET enabled = 1;
+		INSERT INTO journal_events(event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
+		('open-other-sys-scan', '2026-10-01T12:30:00Z', 'Scan', 'OtherSys', 6099, 1, 'OtherSys 1', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:30:00Z","event":"Scan","BodyName":"OtherSys 1","PlanetClass":"Water world"}', '2026-10-01T12:30:00Z'),
+		('open-other-cmdr-saa', '2026-10-01T12:35:00Z', 'SAAScanComplete', NULL, 6002, 2, 'Beta 2', 'CmdrB', 't.log', '{"timestamp":"2026-10-01T12:35:00Z","event":"SAAScanComplete","BodyName":"Beta 2","SystemAddress":6002,"BodyID":2,"ProbesUsed":4,"EfficiencyTarget":6}', '2026-10-01T12:35:00Z'),
+		('open-multicrew-org', '2026-10-01T12:40:00Z', 'ScanOrganic', NULL, 6002, 2, '', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:40:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":6002,"Body":2,"Multicrew":true}', '2026-10-01T12:40:00Z'),
+		('open-other-cmdr-scan', '2026-10-01T12:45:00Z', 'Scan', 'Beta', 6002, 3, 'Beta 3', 'CmdrB', 't.log', '{"timestamp":"2026-10-01T12:45:00Z","event":"Scan","BodyName":"Beta 3","PlanetClass":"Earthlike body"}', '2026-10-01T12:45:00Z'),
+		('open-other-sys-org', '2026-10-01T12:50:00Z', 'ScanOrganic', NULL, 6099, 1, '', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:50:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":6099,"Body":1}', '2026-10-01T12:50:00Z');
+	`); execError != nil {
+		testingContext.Fatalf("seed open-stay distractors: %v", execError)
+	}
+
+	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Open Stay Scoping", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol"},
+		{SystemName: "Beta"},
+	})
+	if createError != nil {
+		testingContext.Fatalf("CreateWithWaypoints: %v", createError)
+	}
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-10-01T10:00:00Z", 0); startError != nil {
+		testingContext.Fatalf("StartTx: %v", startError)
+	}
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx after SAAScanComplete: %v", completeError)
+	}
+	completedAfterSAA := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID)
+	if completedAfterSAA.EndTimestamp != "2026-10-01T12:15:00Z" {
+		testingContext.Fatalf("EndTimestamp after SAAScanComplete = %q, want %q", completedAfterSAA.EndTimestamp, "2026-10-01T12:15:00Z")
+	}
+
+	if reopenError := expedition.ReopenTx(databaseConnection, expeditionRecord.ID); reopenError != nil {
+		testingContext.Fatalf("ReopenTx: %v", reopenError)
+	}
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO journal_events(event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
+		('open-beta-org', '2026-10-01T12:20:00Z', 'ScanOrganic', NULL, 6002, 1, '', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:20:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":6002,"Body":1}', '2026-10-01T12:20:00Z')`,
+	); execError != nil {
+		testingContext.Fatalf("insert in-system ScanOrganic: %v", execError)
+	}
+	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx after ScanOrganic: %v", completeError)
+	}
+	completedAfterOrganic := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID)
+	if completedAfterOrganic.EndTimestamp != "2026-10-01T12:20:00Z" {
+		testingContext.Fatalf("EndTimestamp after ScanOrganic = %q, want %q", completedAfterOrganic.EndTimestamp, "2026-10-01T12:20:00Z")
+	}
+}

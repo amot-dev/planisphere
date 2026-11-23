@@ -88,18 +88,29 @@ func backfillExpeditionDeparturesV12(transaction *sql.Tx, expeditionItem migrati
 	}
 
 	finalIndex := 0
+	var finalSystemAddress int64
+	var finalStayCommander string
 	for index := range visitedRows {
-		stayCommander := resolveRowArrivalCommanderV12(visitedRows[index], arrivals)
+		resolvedAddress, stayCommander := resolveRowArrivalContextV12(visitedRows[index], arrivals)
 		visitedRows[index].departedAt = findFirstDepartureV12(visitedRows[index], stayCommander, arrivals)
-		if visitedRows[index].visitedAt > visitedRows[finalIndex].visitedAt {
+		if index == 0 || visitedRows[index].visitedAt > visitedRows[finalIndex].visitedAt {
 			finalIndex = index
+			finalSystemAddress = resolvedAddress
+			finalStayCommander = stayCommander
 		}
 	}
 
 	if expeditionItem.status == "completed" {
 		finalRow := &visitedRows[finalIndex]
 		stayUpperBound := subtractOneSecondClampedV12(finalRow.departedAt, finalRow.visitedAt)
-		lastActivity, activityError := queryLastInSystemActivityV12(transaction, finalRow.visitedAt, stayUpperBound)
+		lastActivity, activityError := queryLastInSystemActivityV12(
+			transaction,
+			finalRow.visitedAt,
+			stayUpperBound,
+			finalRow.systemName,
+			finalSystemAddress,
+			finalStayCommander,
+		)
 		if activityError != nil {
 			return activityError
 		}
@@ -198,18 +209,25 @@ func sameCommanderForV12(leftCommander, rightCommander string) bool {
 	return strings.EqualFold(leftCommander, rightCommander)
 }
 
-func resolveRowArrivalCommanderV12(rowItem migrationVisitedRow, arrivals []migrationArrivalRow) string {
+func resolveRowArrivalContextV12(rowItem migrationVisitedRow, arrivals []migrationArrivalRow) (int64, string) {
+	resolvedAddress := rowItem.systemAddress
 	for _, arrival := range arrivals {
 		if rowItem.visitEventUID != "" && arrival.uid == rowItem.visitEventUID {
-			return arrival.commander
+			if resolvedAddress == 0 {
+				resolvedAddress = arrival.systemAddress
+			}
+			return resolvedAddress, arrival.commander
 		}
 	}
 	for _, arrival := range arrivals {
 		if arrival.timestamp == rowItem.visitedAt && sameSystemForV12(rowItem.systemName, rowItem.systemAddress, arrival.systemName, arrival.systemAddress) {
-			return arrival.commander
+			if resolvedAddress == 0 {
+				resolvedAddress = arrival.systemAddress
+			}
+			return resolvedAddress, arrival.commander
 		}
 	}
-	return ""
+	return resolvedAddress, ""
 }
 
 func findFirstDepartureV12(rowItem migrationVisitedRow, stayCommander string, arrivals []migrationArrivalRow) string {
@@ -246,7 +264,7 @@ func subtractOneSecondClampedV12(departedAt, visitedAt string) string {
 	return bounded
 }
 
-func queryLastInSystemActivityV12(queryer Queryer, afterTimestamp, untilTimestamp string) (string, error) {
+func queryLastInSystemActivityV12(queryer Queryer, afterTimestamp, untilTimestamp, systemName string, systemAddress int64, stayCommander string) (string, error) {
 	query := `SELECT COALESCE(MAX(timestamp), '')
 		FROM journal_events
 		WHERE timestamp > ?`
@@ -260,8 +278,21 @@ func queryLastInSystemActivityV12(queryer Queryer, afterTimestamp, untilTimestam
 			(event = 'Scan' AND COALESCE(body_name, '') NOT LIKE '%Belt Cluster%' AND (COALESCE(json_extract(raw_json, '$.StarType'), '') != '' OR COALESCE(json_extract(raw_json, '$.PlanetClass'), '') != ''))
 			OR (event = 'SAAScanComplete' AND COALESCE(json_extract(raw_json, '$.EfficiencyTarget'), 0) > 0)
 			OR (event = 'ScanOrganic' AND LOWER(COALESCE(json_extract(raw_json, '$.ScanType'), '')) = 'analyse')
-		  )
-		  AND ` + migrationCmdrFilterSQL
+		  )`
+	if systemAddress != 0 {
+		query += ` AND system_address = ?`
+		queryArgs = append(queryArgs, systemAddress)
+	} else if trimmedSystemName := strings.TrimSpace(systemName); trimmedSystemName != "" {
+		query += ` AND system_name = ? COLLATE NOCASE`
+		queryArgs = append(queryArgs, trimmedSystemName)
+	}
+	if trimmedCommander := strings.TrimSpace(stayCommander); trimmedCommander != "" {
+		query += ` AND (COALESCE(commander, '') = '' OR commander = ? COLLATE NOCASE)`
+		queryArgs = append(queryArgs, trimmedCommander)
+	}
+	query += `
+		  AND ` + migrationCmdrFilterSQL + `
+		  AND ` + migrationNonMulticrewSQL
 
 	var lastActivity string
 	if scanError := queryer.QueryRow(query, queryArgs...).Scan(&lastActivity); scanError != nil {

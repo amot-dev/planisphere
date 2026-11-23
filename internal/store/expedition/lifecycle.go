@@ -121,8 +121,25 @@ func Complete(transaction *sql.Tx, expeditionID int64) error {
 	if visitedWaypointCount < 2 || finalRow == nil {
 		return errors.New("at least 2 visited waypoints are required to complete an expedition")
 	}
+	resolvedAddress, stayCommander, contextError := replay.ResolveArrivalStayContext(
+		transaction,
+		finalRow.VisitEventUID,
+		finalRow.VisitedAt,
+		finalRow.SystemName,
+		finalRow.SystemAddress,
+	)
+	if contextError != nil {
+		return contextError
+	}
 	stayUpperBound := exclusiveBoundaryBefore(finalRow.DepartedAt, finalRow.VisitedAt)
-	lastActivity, activityError := replay.QueryLastInSystemActivityTimestamp(transaction, finalRow.VisitedAt, stayUpperBound)
+	lastActivity, activityError := replay.QueryLastInSystemActivityTimestamp(
+		transaction,
+		finalRow.VisitedAt,
+		stayUpperBound,
+		finalRow.SystemName,
+		resolvedAddress,
+		stayCommander,
+	)
 	if activityError != nil {
 		return activityError
 	}

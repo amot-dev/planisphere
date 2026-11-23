@@ -524,4 +524,71 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 			testingContext.Fatalf("exp %d trailing unvisited row must remain untouched: visited=%v deps=%v", completedID, compVisited, compDeps)
 		}
 	}
+
+	testingContext.Run("open_final_stay_scoping", func(subtestContext *testing.T) {
+		openStayConn, subOpenError := db.Open(":memory:")
+		if subOpenError != nil {
+			subtestContext.Fatalf("Open: %v", subOpenError)
+		}
+		defer openStayConn.Close()
+
+		if _, execError := openStayConn.Exec(`
+			INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrA', 'FA', 1), ('CmdrB', 'FB', 1);
+			INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
+			('open-sol', '2026-08-01T10:00:00Z', 'Location', 'Sol', 1001, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001}', '2026-08-01T10:00:00Z'),
+			('open-beta', '2026-08-01T12:00:00Z', 'FSDJump', 'Beta', 1003, NULL, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":1003}', '2026-08-01T12:00:00Z'),
+			('open-beta-saa', '2026-08-01T12:15:00Z', 'SAAScanComplete', NULL, 1003, 1, 'Beta 1', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:15:00Z","event":"SAAScanComplete","BodyName":"Beta 1","SystemAddress":1003,"BodyID":1,"EfficiencyTarget":6}', '2026-08-01T12:15:00Z'),
+			('open-other-sys', '2026-08-01T12:30:00Z', 'Scan', 'Gamma', 1004, 1, 'Gamma 1', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:30:00Z","event":"Scan","BodyName":"Gamma 1","PlanetClass":"Water world"}', '2026-08-01T12:30:00Z'),
+			('open-other-cmdr', '2026-08-01T12:35:00Z', 'SAAScanComplete', NULL, 1003, 2, 'Beta 2', 'CmdrB', 't.log', '{"timestamp":"2026-08-01T12:35:00Z","event":"SAAScanComplete","BodyName":"Beta 2","SystemAddress":1003,"BodyID":2,"EfficiencyTarget":6}', '2026-08-01T12:35:00Z'),
+			('open-multicrew', '2026-08-01T12:40:00Z', 'ScanOrganic', NULL, 1003, 1, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:40:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":1003,"Body":1,"Multicrew":true}', '2026-08-01T12:40:00Z');
+		`); execError != nil {
+			subtestContext.Fatalf("seed open final stay events: %v", execError)
+		}
+		insertResult, expInsertError := openStayConn.Exec(`
+			INSERT INTO expeditions(name, status, start_timestamp, end_timestamp, created_at, updated_at)
+			VALUES ('Open Stay', 'completed', '2026-08-01T10:00:00Z', '2026-08-01T12:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`)
+		if expInsertError != nil {
+			subtestContext.Fatalf("insert open stay expedition: %v", expInsertError)
+		}
+		openStayID, lastIDError := insertResult.LastInsertId()
+		if lastIDError != nil {
+			subtestContext.Fatalf("LastInsertId: %v", lastIDError)
+		}
+		if _, execError := openStayConn.Exec(`
+			INSERT INTO expedition_rows(expedition_id, position, row_type, system_name, system_address, visited_at, departed_at, created_at, updated_at) VALUES
+			(?, 1, 'waypoint', 'Sol', 1001, '2026-08-01T10:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
+			(?, 2, 'waypoint', 'Beta', NULL, '2026-08-01T12:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+			DELETE FROM settings WHERE key = 'departed_at_v12';
+		`, openStayID, openStayID); execError != nil {
+			subtestContext.Fatalf("seed open final stay rows: %v", execError)
+		}
+		if subMigrateError := db.Migrate(openStayConn); subMigrateError != nil {
+			subtestContext.Fatalf("db.Migrate open stay SAAScanComplete: %v", subMigrateError)
+		}
+		var endAfterSAA string
+		if scanError := openStayConn.QueryRow(`SELECT COALESCE(end_timestamp, '') FROM expeditions WHERE id = ?`, openStayID).Scan(&endAfterSAA); scanError != nil {
+			subtestContext.Fatalf("query end_timestamp after SAAScanComplete: %v", scanError)
+		}
+		if endAfterSAA != "2026-08-01T12:15:00Z" {
+			subtestContext.Fatalf("end_timestamp after SAAScanComplete = %q, want %q", endAfterSAA, "2026-08-01T12:15:00Z")
+		}
+
+		if _, execError := openStayConn.Exec(`
+			INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
+			('open-beta-org', '2026-08-01T12:20:00Z', 'ScanOrganic', NULL, 1003, 1, '', 'CmdrA', 't.log', '{"timestamp":"2026-08-01T12:20:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":1003,"Body":1}', '2026-08-01T12:20:00Z');
+			DELETE FROM settings WHERE key = 'departed_at_v12';
+		`); execError != nil {
+			subtestContext.Fatalf("insert in-system ScanOrganic: %v", execError)
+		}
+		if subMigrateError := db.Migrate(openStayConn); subMigrateError != nil {
+			subtestContext.Fatalf("db.Migrate open stay ScanOrganic: %v", subMigrateError)
+		}
+		var endAfterOrganic string
+		if scanError := openStayConn.QueryRow(`SELECT COALESCE(end_timestamp, '') FROM expeditions WHERE id = ?`, openStayID).Scan(&endAfterOrganic); scanError != nil {
+			subtestContext.Fatalf("query end_timestamp after ScanOrganic: %v", scanError)
+		}
+		if endAfterOrganic != "2026-08-01T12:20:00Z" {
+			subtestContext.Fatalf("end_timestamp after ScanOrganic = %q, want %q", endAfterOrganic, "2026-08-01T12:20:00Z")
+		}
+	})
 }

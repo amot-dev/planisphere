@@ -3,16 +3,20 @@ package replay
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 	"planisphere/internal/sources/journal"
 )
 
-// nonMulticrewSQLFilter excludes Telepresence (Multicrew: true) events where the
+// NonMulticrewSQLFilter excludes Telepresence (Multicrew: true) events where the
 // commander never physically relocated their ship or body. Short-circuiting with
 // instr avoids parsing raw_json on the vast majority of non-multicrew rows.
-const nonMulticrewSQLFilter = `(instr(raw_json, '"Multicrew"') = 0 OR NOT COALESCE(json_extract(raw_json, '$.Multicrew'), 0))`
+const NonMulticrewSQLFilter = `(instr(raw_json, '"Multicrew"') = 0 OR NOT COALESCE(json_extract(raw_json, '$.Multicrew'), 0))`
+
+const nonMulticrewSQLFilter = NonMulticrewSQLFilter
 
 // ArrivalEvents is the set of journal events that place the commander in a system.
 var ArrivalEvents = journal.NewEventSet(
@@ -109,10 +113,61 @@ func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, err
 	return &reference.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}, systemName.String, nil
 }
 
-// QueryLastInSystemActivityTimestamp returns the latest exploration activity
-// timestamp (non-belt body Scan, planet SAAScanComplete, or ScanOrganic Analyse)
-// within (afterTimestamp, untilTimestamp], or an empty string when none exist.
-func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, untilTimestamp string) (string, error) {
+// ResolveArrivalStayContext resolves the star system address and stay commander
+// for a waypoint arrival by visitEventUID first, falling back to a matching
+// arrival event at visitedAt when visitEventUID is absent or missing.
+func ResolveArrivalStayContext(queryer db.Queryer, visitEventUID, visitedAt, systemName string, systemAddress int64) (int64, string, error) {
+	if visitEventUID != "" {
+		var arrivalAddress int64
+		var stayCommander string
+		lookupError := queryer.QueryRow(
+			`SELECT COALESCE(system_address, 0), COALESCE(commander, '')
+			 FROM journal_events WHERE event_uid = ? AND `+NonMulticrewSQLFilter,
+			visitEventUID,
+		).Scan(&arrivalAddress, &stayCommander)
+		if lookupError == nil {
+			if systemAddress != 0 {
+				return systemAddress, stayCommander, nil
+			}
+			return arrivalAddress, stayCommander, nil
+		}
+		if !errors.Is(lookupError, sql.ErrNoRows) {
+			return 0, "", fmt.Errorf("resolve arrival stay context by uid %q: %w", visitEventUID, lookupError)
+		}
+	}
+
+	trimmedSystemName := strings.TrimSpace(systemName)
+	if visitedAt == "" || (systemAddress == 0 && trimmedSystemName == "") {
+		return systemAddress, "", nil
+	}
+	systemPredicate, queryArgs := `system_name = ? COLLATE NOCASE`, []any{visitedAt, trimmedSystemName}
+	if systemAddress != 0 {
+		systemPredicate, queryArgs = `system_address = ?`, []any{visitedAt, systemAddress}
+	}
+	fallbackQuery := `SELECT COALESCE(system_address, 0), COALESCE(commander, '')
+		FROM journal_events
+		WHERE event IN (` + journal.FormatSQLInClause(ArrivalEvents) + `)
+		  AND timestamp = ? AND ` + systemPredicate + ` AND ` + CmdrFilterSQL + ` AND ` + NonMulticrewSQLFilter + `
+		ORDER BY id LIMIT 1`
+	var arrivalAddress int64
+	var stayCommander string
+	if fallbackError := queryer.QueryRow(fallbackQuery, queryArgs...).Scan(&arrivalAddress, &stayCommander); fallbackError != nil {
+		if errors.Is(fallbackError, sql.ErrNoRows) {
+			return systemAddress, "", nil
+		}
+		return 0, "", fmt.Errorf("resolve arrival stay context at %s: %w", visitedAt, fallbackError)
+	}
+	if systemAddress != 0 {
+		return systemAddress, stayCommander, nil
+	}
+	return arrivalAddress, stayCommander, nil
+}
+
+// QueryLastInSystemActivityTimestamp returns the latest non-multicrew exploration
+// activity timestamp (non-belt body Scan, planet SAAScanComplete, or ScanOrganic
+// Analyse) for the target system and stayCommander within (afterTimestamp, untilTimestamp],
+// or an empty string when none exist.
+func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, untilTimestamp, systemName string, systemAddress int64, stayCommander string) (string, error) {
 	query := `SELECT COALESCE(MAX(timestamp), '')
 		FROM journal_events
 		WHERE timestamp > ?`
@@ -126,11 +181,23 @@ func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, unti
 			(event = 'Scan' AND COALESCE(body_name, '') NOT LIKE '%Belt Cluster%' AND (COALESCE(json_extract(raw_json, '$.StarType'), '') != '' OR COALESCE(json_extract(raw_json, '$.PlanetClass'), '') != ''))
 			OR (event = 'SAAScanComplete' AND COALESCE(json_extract(raw_json, '$.EfficiencyTarget'), 0) > 0)
 			OR (event = 'ScanOrganic' AND LOWER(COALESCE(json_extract(raw_json, '$.ScanType'), '')) = 'analyse')
-		  )` + commanderFilterPredicate(queryer)
+		  )`
+	if systemAddress != 0 {
+		query += ` AND system_address = ?`
+		queryArgs = append(queryArgs, systemAddress)
+	} else if trimmedSystemName := strings.TrimSpace(systemName); trimmedSystemName != "" {
+		query += ` AND system_name = ? COLLATE NOCASE`
+		queryArgs = append(queryArgs, trimmedSystemName)
+	}
+	if trimmedCommander := strings.TrimSpace(stayCommander); trimmedCommander != "" {
+		query += ` AND (COALESCE(commander, '') = '' OR commander = ? COLLATE NOCASE)`
+		queryArgs = append(queryArgs, trimmedCommander)
+	}
+	query += commanderFilterPredicate(queryer) + ` AND ` + NonMulticrewSQLFilter
 
 	var lastTimestamp string
 	if scanError := queryer.QueryRow(query, queryArgs...).Scan(&lastTimestamp); scanError != nil {
-		return "", scanError
+		return "", fmt.Errorf("query last in-system activity after %s: %w", afterTimestamp, scanError)
 	}
 	return lastTimestamp, nil
 }
