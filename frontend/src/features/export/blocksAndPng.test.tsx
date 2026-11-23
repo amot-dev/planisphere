@@ -25,6 +25,12 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(summaryMarkup).toContain('4,800.0 Ly')
     expect(summaryMarkup).toContain('PRE 10,000.0 Ly')
     expect(summaryMarkup).toContain('+48.0%')
+    expect(summaryMarkup).toContain('Bodies Scanned')
+    expect(summaryMarkup).toContain('Bodies Mapped')
+    expect(summaryMarkup).toContain('Organic Samples')
+    expect(summaryMarkup).toContain('NET PROFIT:')
+    expect(summaryMarkup).toContain('~129,000,000 Cr')
+    expect(summaryMarkup).not.toContain('ESTIMATED PROFIT:')
     expect(summaryMarkup).not.toContain('POST')
     expect(summaryMarkup).not.toContain('career')
 

@@ -137,13 +137,18 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
     if (config.kind === 'highlights') {
       return config.selectedCards.length > 0
     }
-    if (config.kind === 'details' && configuratorPreviewContext) {
-      const selectedSet = new Set(config.selectedMetrics)
-      return DETAILS_SECTION_METRICS[config.section].some(
-        (descriptor) =>
-          selectedSet.has(descriptor.id) &&
-          isDetailsMetricAvailable(descriptor, configuratorPreviewContext, config.scope.kind),
-      )
+    if (config.kind === 'details') {
+      if (config.section === 'all') {
+        return expandedPreviewItems.length > 0
+      }
+      if (configuratorPreviewContext) {
+        const selectedSet = new Set(config.selectedMetrics)
+        return DETAILS_SECTION_METRICS[config.section].some(
+          (descriptor) =>
+            selectedSet.has(descriptor.id) &&
+            isDetailsMetricAvailable(descriptor, configuratorPreviewContext, config.scope.kind),
+        )
+      }
     }
     return true
   }, [config, configuratorPreviewContext, expandedPreviewItems.length, exportData])

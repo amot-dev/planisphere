@@ -84,6 +84,9 @@ export type DetailsSection =
   | 'exobiology'
   | 'realized'
 
+/** Pillar section selection in Export Studio, including batch expansion of all sections. */
+export type DetailsSectionSelection = DetailsSection | 'all'
+
 /** Time and spatial scopes selectable for Summary and Details blocks. */
 export type ExportScopeKind =
   | 'full'
@@ -210,7 +213,7 @@ export interface SummaryBlockConfig {
 /** Configuration for a Details block. */
 export interface DetailsBlockConfig {
   kind: 'details'
-  section: DetailsSection
+  section: DetailsSectionSelection
   scope: ExportScopeSpec
   modeGrouping: ModeGrouping
   selectedModeId?: number

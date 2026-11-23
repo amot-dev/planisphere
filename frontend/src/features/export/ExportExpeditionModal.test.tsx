@@ -138,7 +138,7 @@ describe('ExportExpeditionModal', () => {
 
       const selects = Array.from(container.querySelectorAll('select'))
       expect(selects.length).toBeGreaterThanOrEqual(2)
-      const sectionSelect = selects[0]
+      const sectionSelect = selects[1]
       await act(async () => {
         setSelectValue(sectionSelect, 'realized')
         await flushMicrotasks()

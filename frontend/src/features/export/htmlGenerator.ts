@@ -22,6 +22,7 @@ import {
   DETAILS_SECTIONS,
   DetailsBlockConfig,
   DetailsMetricId,
+  DetailsSection,
   ExpeditionExportData,
   HighlightsBlockConfig,
   SummaryBlockConfig,
@@ -155,6 +156,12 @@ function renderSummarySection(
   const hasCarrier =
     context.carrierCost != null &&
     (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
+  const netProfit =
+    context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
+  const netProfitIsEstimated = Boolean(
+    context.carrierCost && context.carrierCost.totalCost > 0 && context.carrierCost.totalEstimated,
+  )
+  const formattedNetProfit = `${netProfitIsEstimated ? '~' : ''}${formatCredits(netProfit)}`
 
   const routeItems: string[] = []
   if (exportData.commanders.length > 0) {
@@ -176,14 +183,14 @@ function renderSummarySection(
   return `<section id="section-${sectionIndex}" class="card"${sectionStyle}>
   ${renderTelemetryHeader('SUMMARY', `${context.routeTitle} — ${context.scopeLabel}`, context, 'accent-amber')}
   ${routeItems.length > 0 ? `<div class="strip-bar">${routeItems.join('<span class="sep">|</span>')}</div>` : ''}
-  <div class="kpi-grid cols-4">
+  <div class="kpi-grid cols-4" style="padding-bottom:10px">
     <div class="kpi-tile accent-left-amber">
       <div class="kpi-label">Distance Travelled</div>
       <div class="kpi-val amber mono">${escapeHtml(formatLy(context.metrics.distanceLy, 1))}</div>
       <div class="kpi-sub mono">Ship ${escapeHtml(formatLy(context.derived.shipDistanceLy, 1))} · Carrier ${escapeHtml(formatLy(context.metrics.carrierPassengerLy, 1))}</div>
       ${renderInlineCareerDiff(diffMap.get('distanceLy'), config.careerDiff, (val) => formatLy(val, 1))}
     </div>
-    <div class="kpi-tile">
+    <div class="kpi-tile accent-left-amber">
       <div class="kpi-label">Hyperspace Jumps</div>
       <div class="kpi-val mono">${escapeHtml(formatInt(context.metrics.jumps))}</div>
       <div class="kpi-sub mono">${context.derived.avgJumpRangeLy != null ? `${formatLy(context.derived.avgJumpRangeLy, 1)} avg` : 'No piloted jumps'}</div>
@@ -202,24 +209,38 @@ function renderSummarySection(
       ${renderInlineCareerDiff(diffMap.get('realizedValue'), config.careerDiff, formatCredits)}
     </div>
   </div>
-  <div class="strip-bar">
-    <span>SCANNED / MAPPED: <strong class="mono cyan">${formatInt(context.metrics.bodiesScanned)} / ${formatInt(context.metrics.bodiesMapped)}</strong> (${formatInt(context.metrics.firstDiscoveries)} first)</span>
-    <span class="sep">|</span>
-    <span>ORGANIC SAMPLES: <strong class="mono emerald">${formatInt(context.metrics.organicSamples)}</strong> (${formatInt(context.metrics.firstLogged)} first logged)</span>
+  <div class="kpi-grid ${hasCarrier ? 'cols-4' : 'cols-3'}" style="padding-top:0">
+    <div class="kpi-tile accent-left-cyan">
+      <div class="kpi-label">Bodies Scanned</div>
+      <div class="kpi-val cyan mono">${formatInt(context.metrics.bodiesScanned)}</div>
+      <div class="kpi-sub mono">${formatInt(context.metrics.firstDiscoveries)} first discovered</div>
+      ${renderInlineCareerDiff(diffMap.get('bodiesScanned'), config.careerDiff, formatInt)}
+    </div>
+    <div class="kpi-tile accent-left-cyan">
+      <div class="kpi-label">Bodies Mapped</div>
+      <div class="kpi-val cyan mono">${formatInt(context.metrics.bodiesMapped)}</div>
+      <div class="kpi-sub mono">${formatInt(context.metrics.firstMapped)} first mapped</div>
+      ${renderInlineCareerDiff(diffMap.get('bodiesMapped'), config.careerDiff, formatInt)}
+    </div>
+    <div class="kpi-tile accent-left-emerald">
+      <div class="kpi-label">Organic Samples</div>
+      <div class="kpi-val emerald mono">${formatInt(context.metrics.organicSamples)}</div>
+      <div class="kpi-sub mono">${formatInt(context.metrics.firstLogged)} first logged</div>
+      ${renderInlineCareerDiff(diffMap.get('organicSamples'), config.careerDiff, formatInt)}
+    </div>
+    ${
+      hasCarrier && context.carrierCost
+        ? `<div class="kpi-tile accent-left-amber">
+      <div class="kpi-label">Carrier</div>
+      <div class="kpi-val amber mono">${escapeHtml(formatEstimatedCarrierCredits(context.carrierCost.totalCost, Boolean(context.carrierCost.totalEstimated)))}</div>
+      <div class="kpi-sub mono">${formatInt(context.metrics.carrierJumps)} jumps · ${escapeHtml(formatLy(context.metrics.carrierDistanceLy, 1))} · ${formatInt(context.metrics.tritiumUsed ?? 0)} t</div>
+    </div>`
+        : ''
+    }
   </div>
-  ${
-    hasCarrier && context.carrierCost
-      ? `<div class="strip-bar">
-    <span>CARRIER JUMPS: <strong class="mono">${formatInt(context.metrics.carrierJumps)}</strong></span>
-    <span class="sep">|</span>
-    <span>CARRIER DIST: <strong class="mono">${escapeHtml(formatLy(context.metrics.carrierDistanceLy, 1))}</strong></span>
-    <span class="sep">|</span>
-    <span>TRITIUM: <strong class="mono">${formatInt(context.metrics.tritiumUsed ?? 0)} t</strong></span>
-    <span class="sep">|</span>
-    <span>CARRIER COST: <strong class="mono amber">${escapeHtml(formatEstimatedCarrierCredits(context.carrierCost.totalCost, Boolean(context.carrierCost.totalEstimated)))}</strong></span>
-  </div>`
-      : ''
-  }
+  <div class="strip-bar" style="border-top:1px solid #2e1f12">
+    <span>NET PROFIT: <strong class="mono cyan">${escapeHtml(formattedNetProfit)}</strong></span>
+  </div>
 </section>`
 }
 
@@ -254,9 +275,10 @@ function renderDetailsSection(
     config.scope,
     config.selectedModeId,
   )
-  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === config.section)!
+  const concreteSection: DetailsSection = config.section === 'all' ? 'flight' : config.section
+  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === concreteSection)!
   const selectedSet = new Set<DetailsMetricId>(config.selectedMetrics)
-  const descriptors = DETAILS_SECTION_METRICS[config.section].filter(
+  const descriptors = DETAILS_SECTION_METRICS[concreteSection].filter(
     (descriptor) =>
       selectedSet.has(descriptor.id) &&
       isDetailsMetricAvailable(descriptor, context, config.scope.kind),

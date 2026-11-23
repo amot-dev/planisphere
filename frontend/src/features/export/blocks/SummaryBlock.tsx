@@ -41,9 +41,15 @@ export function SummaryBlock({
       diffById.set(item.id, item)
     }
   }
-  const showCarrierStrip =
+  const showCarrierTile =
     context.carrierCost != null &&
     (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
+  const netProfit =
+    context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
+  const netProfitIsEstimated = Boolean(
+    context.carrierCost && context.carrierCost.totalCost > 0 && context.carrierCost.totalEstimated,
+  )
+  const formattedNetProfit = `${netProfitIsEstimated ? '~' : ''}${formatCredits(netProfit)}`
   const safeModeColor = context.modeBadge
     ? sanitizeExportHexColor(context.modeBadge.modeColor)
     : null
@@ -94,7 +100,7 @@ export function SummaryBlock({
         commanders={exportData.commanders}
       />
 
-      <div className="ed-exp-grid ed-exp-cols-4">
+      <div className="ed-exp-grid ed-exp-cols-4" style={{ paddingBottom: '10px' }}>
         <div className="ed-exp-tile ed-exp-left-amber">
           <div className="ed-exp-kpi-label">Distance Travelled</div>
           <div className="ed-exp-kpi-value ed-exp-amber ed-exp-mono">
@@ -111,7 +117,7 @@ export function SummaryBlock({
           />
         </div>
 
-        <div className="ed-exp-tile">
+        <div className="ed-exp-tile ed-exp-left-amber">
           <div className="ed-exp-kpi-label">Hyperspace Jumps</div>
           <div className="ed-exp-kpi-value ed-exp-mono">{formatInt(context.metrics.jumps)}</div>
           <div className="ed-exp-kpi-sub ed-exp-mono">
@@ -160,56 +166,79 @@ export function SummaryBlock({
         </div>
       </div>
 
-      <div className="ed-exp-strip">
-        <span>
-          SCANNED / MAPPED:{' '}
-          <strong className="ed-exp-mono ed-exp-cyan">
-            {formatInt(context.metrics.bodiesScanned)} / {formatInt(context.metrics.bodiesMapped)}
-          </strong>{' '}
-          ({formatInt(context.metrics.firstDiscoveries)} first)
-        </span>
-        <span className="ed-exp-sep">|</span>
-        <span>
-          ORGANIC SAMPLES:{' '}
-          <strong className="ed-exp-mono ed-exp-emerald">
-            {formatInt(context.metrics.organicSamples)}
-          </strong>{' '}
-          ({formatInt(context.metrics.firstLogged)} first logged)
-        </span>
-      </div>
+      <div
+        className={`ed-exp-grid ${showCarrierTile ? 'ed-exp-cols-4' : 'ed-exp-cols-3'}`}
+        style={{ paddingTop: 0 }}
+      >
+        <div className="ed-exp-tile ed-exp-left-cyan">
+          <div className="ed-exp-kpi-label">Bodies Scanned</div>
+          <div className="ed-exp-kpi-value ed-exp-cyan ed-exp-mono">
+            {formatInt(context.metrics.bodiesScanned)}
+          </div>
+          <div className="ed-exp-kpi-sub ed-exp-mono">
+            {formatInt(context.metrics.firstDiscoveries)} first discovered
+          </div>
+          <InlineCareerDiff
+            item={diffById.get('bodiesScanned')}
+            displayMode={config.careerDiff}
+            formatValue={formatInt}
+          />
+        </div>
 
-      {showCarrierStrip && context.carrierCost && (
-        <div className="ed-exp-strip">
-          <span>
-            CARRIER JUMPS:{' '}
-            <strong className="ed-exp-mono">{formatInt(context.metrics.carrierJumps)}</strong>
-          </span>
-          <span className="ed-exp-sep">|</span>
-          <span>
-            CARRIER DIST:{' '}
-            <strong className="ed-exp-mono">
-              {formatLy(context.metrics.carrierDistanceLy, 1)}
-            </strong>
-          </span>
-          <span className="ed-exp-sep">|</span>
-          <span>
-            TRITIUM:{' '}
-            <strong className="ed-exp-mono">
-              {formatInt(context.metrics.tritiumUsed ?? 0)} t
-            </strong>
-          </span>
-          <span className="ed-exp-sep">|</span>
-          <span>
-            CARRIER COST:{' '}
-            <strong className="ed-exp-mono ed-exp-amber">
+        <div className="ed-exp-tile ed-exp-left-cyan">
+          <div className="ed-exp-kpi-label">Bodies Mapped</div>
+          <div className="ed-exp-kpi-value ed-exp-cyan ed-exp-mono">
+            {formatInt(context.metrics.bodiesMapped)}
+          </div>
+          <div className="ed-exp-kpi-sub ed-exp-mono">
+            {formatInt(context.metrics.firstMapped)} first mapped
+          </div>
+          <InlineCareerDiff
+            item={diffById.get('bodiesMapped')}
+            displayMode={config.careerDiff}
+            formatValue={formatInt}
+          />
+        </div>
+
+        <div className="ed-exp-tile ed-exp-left-emerald">
+          <div className="ed-exp-kpi-label">Organic Samples</div>
+          <div className="ed-exp-kpi-value ed-exp-emerald ed-exp-mono">
+            {formatInt(context.metrics.organicSamples)}
+          </div>
+          <div className="ed-exp-kpi-sub ed-exp-mono">
+            {formatInt(context.metrics.firstLogged)} first logged
+          </div>
+          <InlineCareerDiff
+            item={diffById.get('organicSamples')}
+            displayMode={config.careerDiff}
+            formatValue={formatInt}
+          />
+        </div>
+
+        {showCarrierTile && context.carrierCost && (
+          <div className="ed-exp-tile ed-exp-left-amber">
+            <div className="ed-exp-kpi-label">Carrier</div>
+            <div className="ed-exp-kpi-value ed-exp-amber ed-exp-mono">
               {formatEstimatedCarrierCredits(
                 context.carrierCost.totalCost,
                 Boolean(context.carrierCost.totalEstimated),
               )}
-            </strong>
-          </span>
-        </div>
-      )}
+            </div>
+            <div className="ed-exp-kpi-sub ed-exp-mono">
+              {formatInt(context.metrics.carrierJumps)} jumps ·{' '}
+              {formatLy(context.metrics.carrierDistanceLy, 1)} ·{' '}
+              {formatInt(context.metrics.tritiumUsed ?? 0)} t
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="ed-exp-strip" style={{ borderTop: '1px solid #2e1f12' }}>
+        <span>
+          NET PROFIT:{' '}
+          <strong className="ed-exp-mono ed-exp-cyan">{formattedNetProfit}</strong>
+        </span>
+      </div>
 
       <div className="ed-exp-footer ed-exp-mono">
         <span>PLANISPHERE // ASTROMETRIC TELEMETRY TERMINAL</span>

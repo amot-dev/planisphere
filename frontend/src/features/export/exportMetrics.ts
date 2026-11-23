@@ -6,9 +6,10 @@ import {
 } from '../../domain/galacticTime'
 import {
   CartBlockItem,
+  defaultMetricsForSection,
   DETAILS_SECTIONS,
   DetailsMetricDescriptor,
-  DetailsSection,
+  DetailsSectionSelection,
   ExpeditionExportData,
   ExportBlockConfig,
   ExportCarrierCost,
@@ -88,7 +89,14 @@ export interface DerivedMetrics {
 
 /** One inline Career Diff entry comparing pre-expedition baseline, expedition delta, and post-expedition career. */
 export interface CareerDiffItem {
-  id: 'distanceLy' | 'jumps' | 'estimatedValue' | 'realizedValue' | 'bodiesScanned' | 'organicSamples'
+  id:
+    | 'distanceLy'
+    | 'jumps'
+    | 'estimatedValue'
+    | 'realizedValue'
+    | 'bodiesScanned'
+    | 'bodiesMapped'
+    | 'organicSamples'
   baseline: number
   delta: number
   postCareer: number
@@ -303,7 +311,7 @@ export function getDistinctModesForScope(
 export function scopeSupportsModeSplit(
   exportData: ExpeditionExportData,
   scope: ExportScopeSpec,
-  detailsSection?: DetailsSection,
+  detailsSection?: DetailsSectionSelection,
 ): boolean {
   if (detailsSection === 'carrier') {
     return false
@@ -445,6 +453,54 @@ export function expandConfigToCartItems(
         config: { ...config, selectedCards: [...config.selectedCards] },
       },
     ]
+  }
+  if (config.kind === 'details' && config.section === 'all') {
+    const items: CartBlockItem[] = []
+    if (config.scope.kind === 'allLegs') {
+      const applicableSections = DETAILS_SECTIONS.filter(
+        (sectionMeta) => sectionMeta.id !== 'carrier',
+      )
+      for (const [legIndex, leg] of getVisitedLegs(exportData).entries()) {
+        const legTitle = `Leg #${leg.details.number - 1} to #${leg.details.number}`
+        const legSubtitle = `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`
+        for (const sectionMeta of applicableSections) {
+          const blockLabel = `Details: ${sectionMeta.label}`
+          const blockSlug = `details-${slugify(sectionMeta.id)}`
+          items.push({
+            id: `${idPrefix}-leg-${leg.rowView.row.id}-${legIndex}-${sectionMeta.id}`,
+            title: `${blockLabel} — ${legTitle}`,
+            subtitle: legSubtitle,
+            filenameSlug: `${String(legIndex + 1).padStart(2, '0')}-${blockSlug}-wp${leg.details.number}`,
+            subfolder: 'by-leg',
+            config: {
+              kind: 'details',
+              section: sectionMeta.id,
+              scope: { kind: 'leg', rowId: leg.rowView.row.id },
+              modeGrouping: 'combined',
+              selectedMetrics: defaultMetricsForSection(sectionMeta.id),
+            },
+          })
+        }
+      }
+      return items
+    }
+    for (const sectionMeta of DETAILS_SECTIONS) {
+      if (sectionMeta.id === 'carrier' && config.scope.kind !== 'full') {
+        continue
+      }
+      items.push(
+        ...expandTelemetryBlockConfig(
+          exportData,
+          {
+            ...config,
+            section: sectionMeta.id,
+            selectedMetrics: defaultMetricsForSection(sectionMeta.id),
+          },
+          `${idPrefix}-${sectionMeta.id}`,
+        ),
+      )
+    }
+    return items
   }
   return expandTelemetryBlockConfig(exportData, config, idPrefix)
 }
@@ -944,6 +1000,7 @@ function buildCareerDiff(exportData: ExpeditionExportData): CareerDiffItem[] | n
     ),
     makeCareerDiffItem('realizedValue', baseRealized, expRealized, postRealized),
     makeCareerDiffItem('bodiesScanned', baseMetrics.bodiesScanned, expMetrics.bodiesScanned, postMetrics.bodiesScanned),
+    makeCareerDiffItem('bodiesMapped', baseMetrics.bodiesMapped, expMetrics.bodiesMapped, postMetrics.bodiesMapped),
     makeCareerDiffItem('organicSamples', baseMetrics.organicSamples, expMetrics.organicSamples, postMetrics.organicSamples),
   ]
 }

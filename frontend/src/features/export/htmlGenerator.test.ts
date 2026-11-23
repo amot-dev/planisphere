@@ -50,7 +50,8 @@ describe('htmlGenerator', () => {
 
     // Summary commander strip item and separate-mode left accent border.
     expect(html).toContain('<span>CMDR: <strong class="mono">CMDR Horizon</strong></span>')
-    expect(html).toContain('CARRIER COST: <strong class="mono amber">~26,000,000 Cr</strong>')
+    expect(html).toContain('<div class="kpi-val amber mono">~26,000,000 Cr</div>')
+    expect(html).toContain('NET PROFIT: <strong class="mono cyan">~129,000,000 Cr</strong>')
     expect(html).toContain('<section id="section-2" class="card" style="border-left:3px solid #00D2FF">')
     expect(html).toContain('<section id="section-6" class="card" style="border-left:3px solid #00D2FF">')
 
@@ -97,7 +98,7 @@ describe('htmlGenerator', () => {
 
     const html = generateSelfContainedHtmlReport(hardenedData, cartItems)
 
-    expect(html).toContain('CARRIER COST: <strong class="mono amber">26,000,000 Cr</strong>')
+    expect(html).toContain('<div class="kpi-val amber mono">26,000,000 Cr</div>')
     expect(html).toContain('Carrier cost: 26,000,000 Cr')
     expect(html).not.toContain('~26,000,000 Cr')
 

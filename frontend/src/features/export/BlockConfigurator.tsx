@@ -13,7 +13,7 @@ import {
   DETAILS_SECTIONS,
   DetailsBlockConfig,
   DetailsMetricId,
-  DetailsSection,
+  DetailsSectionSelection,
   ExpeditionExportData,
   ExportBlockConfig,
   ExportBlockKind,
@@ -174,7 +174,7 @@ function ScopeAndModeControls({
   hasVisitedLegs: boolean
   lockedFullOnly: boolean
   disabled: boolean
-  detailsSection?: DetailsSection
+  detailsSection?: DetailsSectionSelection
   onUpdateScope: (nextScope: SummaryBlockConfig['scope']) => void
   onUpdateModeGrouping: (nextGrouping: 'combined' | 'separate') => void
 }) {
@@ -368,11 +368,23 @@ function DetailsControls({
   disabled: boolean
   onChange: (next: DetailsBlockConfig) => void
 }) {
-  const descriptors = DETAILS_SECTION_METRICS[config.section]
+  const isAllSections = config.section === 'all'
+  const descriptors = config.section === 'all' ? [] : DETAILS_SECTION_METRICS[config.section]
   const selectedSet = new Set<DetailsMetricId>(config.selectedMetrics)
   const isCarrierSection = config.section === 'carrier'
 
-  function handleSectionChange(nextSection: DetailsSection) {
+  function handleSectionChange(nextSection: DetailsSectionSelection) {
+    if (nextSection === 'all') {
+      onChange({
+        ...config,
+        section: 'all',
+        modeGrouping: !scopeSupportsModeSplit(exportData, config.scope, 'all')
+          ? 'combined'
+          : config.modeGrouping,
+        selectedMetrics: [],
+      })
+      return
+    }
     const nextMetrics = DETAILS_SECTION_METRICS[nextSection]
       .filter((metric) => metric.defaultChecked)
       .map((metric) => metric.id)
@@ -398,24 +410,6 @@ function DetailsControls({
 
   return (
     <div className="space-y-3">
-      <div>
-        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-text-muted mb-1">
-          Section
-        </div>
-        <select
-          value={config.section}
-          disabled={disabled}
-          onChange={(event) => handleSectionChange(event.target.value as DetailsSection)}
-          className="w-full bg-ed-void border border-ed-border-strong border-l-2 border-l-ed-cyan px-2.5 py-1.5 text-xs font-bold text-ed-text-main focus:border-ed-cyan focus:outline-none disabled:opacity-50"
-        >
-          {DETAILS_SECTIONS.map((section) => (
-            <option key={section.id} value={section.id}>
-              {section.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       <ScopeAndModeControls
         exportData={exportData}
         config={config}
@@ -436,64 +430,89 @@ function DetailsControls({
       />
 
       <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-text-muted">
-            Data Points
-          </span>
-          <div className="flex items-center gap-2 text-[10px] font-mono-tabular">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() =>
-                onChange({ ...config, selectedMetrics: descriptors.map((item) => item.id) })
-              }
-              className={`text-ed-amber ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:underline cursor-pointer'}`}
-            >
-              [All]
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onChange({ ...config, selectedMetrics: [] })}
-              className={`text-ed-text-muted ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:text-ed-text-main hover:underline cursor-pointer'}`}
-            >
-              [None]
-            </button>
+        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-text-muted mb-1">
+          Section
+        </div>
+        <select
+          value={config.section}
+          disabled={disabled}
+          onChange={(event) => handleSectionChange(event.target.value as DetailsSectionSelection)}
+          className="w-full bg-ed-void border border-ed-border-strong border-l-2 border-l-ed-cyan px-2.5 py-1.5 text-xs font-bold text-ed-text-main focus:border-ed-cyan focus:outline-none disabled:opacity-50"
+        >
+          <option value="all">All (1 per section)</option>
+          {DETAILS_SECTIONS.map((section) => (
+            <option key={section.id} value={section.id}>
+              {section.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {isAllSections ? (
+        <div className="bg-ed-void border border-ed-border-subtle px-2.5 py-2 text-[11px] text-ed-text-muted">
+          Adds one block for each applicable section using its default data points.
+        </div>
+      ) : (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-text-muted">
+              Data Points
+            </span>
+            <div className="flex items-center gap-2 text-[10px] font-mono-tabular">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  onChange({ ...config, selectedMetrics: descriptors.map((item) => item.id) })
+                }
+                className={`text-ed-amber ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:underline cursor-pointer'}`}
+              >
+                [All]
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange({ ...config, selectedMetrics: [] })}
+                className={`text-ed-text-muted ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:text-ed-text-main hover:underline cursor-pointer'}`}
+              >
+                [None]
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+            {descriptors.map((descriptor) => {
+              const available = resolvedContext
+                ? isDetailsMetricAvailable(descriptor, resolvedContext, config.scope.kind)
+                : true
+              const checked = selectedSet.has(descriptor.id)
+              const isMetricDisabled = disabled || !available
+              return (
+                <button
+                  key={descriptor.id}
+                  type="button"
+                  disabled={isMetricDisabled}
+                  title={
+                    !available
+                      ? 'Not available for the currently selected scope, mode split, or sub-24h duration'
+                      : undefined
+                  }
+                  onClick={() => toggleMetric(descriptor.id)}
+                  className={`w-full flex items-center gap-2 px-2 py-1 border text-left text-[11px] ${
+                    isMetricDisabled
+                      ? 'bg-ed-void border-ed-border-subtle text-ed-text-disabled opacity-50 cursor-not-allowed'
+                      : checked
+                        ? 'bg-ed-control border-ed-border-strong text-ed-text-main cursor-pointer'
+                        : 'bg-ed-void border-ed-border-subtle text-ed-text-muted hover:text-ed-text-main cursor-pointer'
+                  }`}
+                >
+                  <SquareCheckbox checked={checked && available} size="xs" />
+                  <span className="truncate">{descriptor.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
-        <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-          {descriptors.map((descriptor) => {
-            const available = resolvedContext
-              ? isDetailsMetricAvailable(descriptor, resolvedContext, config.scope.kind)
-              : true
-            const checked = selectedSet.has(descriptor.id)
-            const isMetricDisabled = disabled || !available
-            return (
-              <button
-                key={descriptor.id}
-                type="button"
-                disabled={isMetricDisabled}
-                title={
-                  !available
-                    ? 'Not available for the currently selected scope, mode split, or sub-24h duration'
-                    : undefined
-                }
-                onClick={() => toggleMetric(descriptor.id)}
-                className={`w-full flex items-center gap-2 px-2 py-1 border text-left text-[11px] ${
-                  isMetricDisabled
-                    ? 'bg-ed-void border-ed-border-subtle text-ed-text-disabled opacity-50 cursor-not-allowed'
-                    : checked
-                      ? 'bg-ed-control border-ed-border-strong text-ed-text-main cursor-pointer'
-                      : 'bg-ed-void border-ed-border-subtle text-ed-text-muted hover:text-ed-text-main cursor-pointer'
-                }`}
-              >
-                <SquareCheckbox checked={checked && available} size="xs" />
-                <span className="truncate">{descriptor.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      )}
     </div>
   )
 }

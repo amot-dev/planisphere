@@ -109,5 +109,64 @@ describe('exportMetrics', () => {
 
     const quickShare = createQuickShareCart(data)
     expect(quickShare.map((item) => item.config.kind)).toEqual(['summary', 'highlights', 'waypoints'])
+
+    const allFullSections = expandConfigToCartItems(
+      data,
+      {
+        kind: 'details',
+        section: 'all',
+        scope: { kind: 'full' },
+        modeGrouping: 'combined',
+        selectedMetrics: [],
+      },
+      'all-sec',
+    )
+    expect(allFullSections).toHaveLength(6)
+    expect(
+      allFullSections.map((item) =>
+        item.config.kind === 'details' ? item.config.section : item.config.kind,
+      ),
+    ).toEqual(['flight', 'carrier', 'explorationValue', 'cartographics', 'exobiology', 'realized'])
+
+    const allLegSections = expandConfigToCartItems(
+      data,
+      {
+        kind: 'details',
+        section: 'all',
+        scope: { kind: 'leg', rowId: 2 },
+        modeGrouping: 'combined',
+        selectedMetrics: [],
+      },
+      'leg-sec',
+    )
+    // Carrier Operations is Full Expedition only, so leg scope expands to the 5 applicable sections.
+    expect(allLegSections).toHaveLength(5)
+
+    const allLegsAllSections = expandConfigToCartItems(
+      data,
+      {
+        kind: 'details',
+        section: 'all',
+        scope: { kind: 'allLegs' },
+        modeGrouping: 'combined',
+        selectedMetrics: [],
+      },
+      'all-legs-sec',
+    )
+    // 3 visited legs x 5 applicable sections, grouped by leg (every section for leg 1 before leg 2).
+    expect(allLegsAllSections).toHaveLength(15)
+    expect(
+      allLegsAllSections.slice(0, 6).map((item) => ({
+        rowId: item.config.kind === 'details' ? item.config.scope.rowId : undefined,
+        section: item.config.kind === 'details' ? item.config.section : undefined,
+      })),
+    ).toEqual([
+      { rowId: 2, section: 'flight' },
+      { rowId: 2, section: 'explorationValue' },
+      { rowId: 2, section: 'cartographics' },
+      { rowId: 2, section: 'exobiology' },
+      { rowId: 2, section: 'realized' },
+      { rowId: 3, section: 'flight' },
+    ])
   })
 })

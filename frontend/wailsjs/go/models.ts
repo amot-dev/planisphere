@@ -299,32 +299,6 @@ export namespace app {
 
 export namespace expedition {
 	
-	export class CarrierCost {
-	    carrierType: string;
-	    weeklyUpkeep: number;
-	    tritiumPrice: number;
-	    tritiumCost: number;
-	    jumpCost: number;
-	    upkeepCost: number;
-	    totalCost: number;
-	    totalEstimated: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierCost(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.carrierType = source["carrierType"];
-	        this.weeklyUpkeep = source["weeklyUpkeep"];
-	        this.tritiumPrice = source["tritiumPrice"];
-	        this.tritiumCost = source["tritiumCost"];
-	        this.jumpCost = source["jumpCost"];
-	        this.upkeepCost = source["upkeepCost"];
-	        this.totalCost = source["totalCost"];
-	        this.totalEstimated = source["totalEstimated"];
-	    }
-	}
 	export class CarrierRouteJump {
 	    systemName: string;
 	    distanceLy: number;
@@ -444,6 +418,32 @@ export namespace expedition {
 		    }
 		    return a;
 		}
+	}
+	export class CarrierCost {
+	    carrierType: string;
+	    weeklyUpkeep: number;
+	    tritiumPrice: number;
+	    tritiumCost: number;
+	    jumpCost: number;
+	    upkeepCost: number;
+	    totalCost: number;
+	    totalEstimated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierCost(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.carrierType = source["carrierType"];
+	        this.weeklyUpkeep = source["weeklyUpkeep"];
+	        this.tritiumPrice = source["tritiumPrice"];
+	        this.tritiumCost = source["tritiumCost"];
+	        this.jumpCost = source["jumpCost"];
+	        this.upkeepCost = source["upkeepCost"];
+	        this.totalCost = source["totalCost"];
+	        this.totalEstimated = source["totalEstimated"];
+	    }
 	}
 	
 	
