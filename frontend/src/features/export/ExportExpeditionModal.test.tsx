@@ -269,4 +269,88 @@ describe('ExportExpeditionModal', () => {
       container.remove()
     }
   })
+
+  it('keeps 24h-gated Details metrics selectable and addable when Slice 0 is under 24h and a later slice reaches 24h', async () => {
+    if (typeof globalThis.ResizeObserver === 'undefined') {
+      globalThis.ResizeObserver = class implements ResizeObserver {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    }
+
+    const baseData = buildSampleExportData()
+    const sub24hFirstLegData = buildSampleExportData({
+      rowDetails: baseData.rowDetails.map((detail, index) =>
+        index === 0
+          ? ({ ...detail, from: '2026-04-01T10:00:00Z', to: '2026-04-01T16:00:00Z', elapsed: '06h 00m' } as typeof detail)
+          : detail,
+      ),
+    })
+
+    ;(window as unknown as MockGoWindow).go = {
+      app: {
+        App: {
+          GetExpeditionExportData: vi.fn(async () => sub24hFirstLegData) as never,
+          PickExportSavePath: vi.fn(async () => '') as never,
+          WriteExportOutput: vi.fn(async (targetPath: string) => targetPath) as never,
+        },
+      },
+    }
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const clickAndFlush = async (element: HTMLElement) => {
+      await act(async () => {
+        element.click()
+        await flushMicrotasks()
+      })
+    }
+
+    try {
+      await act(async () => {
+        root.render(createElement(ExportExpeditionModal, { expeditionId: 7, onClose: () => {} }))
+        await flushMicrotasks()
+      })
+
+      await clickAndFlush(findButtonByExactText(container, 'Details'))
+      const [scopeSelect, sectionSelect] = Array.from(container.querySelectorAll('select'))
+      await act(async () => {
+        setSelectValue(scopeSelect, 'allLegs')
+        await flushMicrotasks()
+      })
+
+      // Slice 0 lasted 6h (< 24h), while Slice 1 lasted 50h (>= 24h): Avg Distance per Day must stay enabled.
+      expect(findButtonByText(container, 'Avg Distance per Day').disabled).toBe(false)
+      await clickAndFlush(findButtonByExactText(container, '[None]'))
+      expect(findButtonByText(container, '+ ADD 3 BLOCKS TO CART').disabled).toBe(true)
+      await clickAndFlush(findButtonByText(container, 'Avg Distance per Day'))
+      expect(findButtonByText(container, '+ ADD 3 BLOCKS TO CART').disabled).toBe(false)
+
+      // Exploration Value likewise keeps Avg Credits per Day enabled and addable across All Legs.
+      await act(async () => {
+        setSelectValue(sectionSelect, 'explorationValue')
+        await flushMicrotasks()
+      })
+      expect(findButtonByText(container, 'Avg Credits per Day').disabled).toBe(false)
+      await clickAndFlush(findButtonByExactText(container, '[None]'))
+      await clickAndFlush(findButtonByText(container, 'Avg Credits per Day'))
+      await clickAndFlush(findButtonByText(container, '+ ADD 3 BLOCKS TO CART'))
+      expect(container.textContent).toContain('Export Cart (6)')
+
+      // Scoping down to the single 6h leg alone disables Avg Credits per Day and blocks + ADD TO CART.
+      await act(async () => {
+        setSelectValue(scopeSelect, 'leg')
+        await flushMicrotasks()
+      })
+      expect(findButtonByText(container, 'Avg Credits per Day').disabled).toBe(true)
+      expect(findButtonByText(container, '+ ADD TO CART').disabled).toBe(true)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
 })

@@ -114,6 +114,20 @@ func TestWriteExportRejectsInvalidInputs(testingContext *testing.T) {
 	}); badBase64Error == nil {
 		testingContext.Fatalf("expected error for malformed base64 payload")
 	}
+	truncatedPNGPath := filepath.Join(temporaryDir, "truncated.png")
+	if _, emptyDataURIError := exporter.WriteExport(truncatedPNGPath, []exporter.BundleFile{
+		{Name: "truncated.png", ContentBase64: "data:,"},
+	}); emptyDataURIError == nil {
+		testingContext.Fatalf("expected error for empty data:, base64 payload")
+	}
+	if _, statError := os.Stat(truncatedPNGPath); !errors.Is(statError, os.ErrNotExist) {
+		testingContext.Fatalf("expected no output file %q after empty base64 failure, stat error=%v", truncatedPNGPath, statError)
+	}
+	if _, emptyZipDataURIError := exporter.WriteExport(filepath.Join(temporaryDir, "truncated.zip"), []exporter.BundleFile{
+		{Name: "images/01-summary.png", ContentBase64: "data:,"},
+	}); emptyZipDataURIError == nil {
+		testingContext.Fatalf("expected error for empty data:, base64 payload inside zip")
+	}
 }
 
 func TestWriteExportNormalizesMixedCaseDirectoryHeaders(testingContext *testing.T) {

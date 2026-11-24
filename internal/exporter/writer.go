@@ -95,6 +95,9 @@ func decodeBundleFile(bundleFile BundleFile) ([]byte, error) {
 		if decodeError != nil {
 			return nil, fmt.Errorf("decode base64 content for %q: %w", bundleFile.Name, decodeError)
 		}
+		if len(decodedBytes) == 0 {
+			return nil, fmt.Errorf("decoded base64 content for %q is empty", bundleFile.Name)
+		}
 		return decodedBytes, nil
 	}
 	return []byte(bundleFile.ContentText), nil
@@ -172,6 +175,9 @@ func writeZipBundleAtomically(targetPath string, files []BundleFile) error {
 	})
 }
 
+// writeZipEntries populates the archive via CreateHeader rather than Create so
+// every entry records a valid UTC Modified timestamp, explicit Unix permissions,
+// and zip.Store bypass for pre-compressed PNG images.
 func writeZipEntries(archiveWriter *zip.Writer, files []BundleFile) error {
 	exportTimestamp := time.Now().UTC()
 	usedNames := make(map[string]int, len(files))
@@ -231,10 +237,7 @@ func canonicalizeZipEntryPath(
 	for segmentStart <= len(directoryPath) {
 		var segment string
 		segment, segmentStart = nextPathSegment(directoryPath, segmentStart)
-		candidatePrefix := segment
-		if canonicalPrefix != "" {
-			candidatePrefix = canonicalPrefix + "/" + segment
-		}
+		candidatePrefix := path.Join(canonicalPrefix, segment)
 		prefixKey := strings.ToLower(candidatePrefix)
 		if usedNames[prefixKey] > 0 {
 			return "", fmt.Errorf("zip directory %q collides with existing file entry", candidatePrefix+"/")
@@ -248,6 +251,8 @@ func canonicalizeZipEntryPath(
 	return canonicalPrefix + "/" + path.Base(sanitizedName), nil
 }
 
+// ensureZipDirectoryHeaders emits explicit os.ModeDir headers via CreateHeader
+// so archive extractors see canonical directory entries with UTC Modified timestamps.
 func ensureZipDirectoryHeaders(
 	archiveWriter *zip.Writer,
 	entryName string,
@@ -266,11 +271,7 @@ func ensureZipDirectoryHeaders(
 	for segmentStart <= len(directoryPath) {
 		var segment string
 		segment, segmentStart = nextPathSegment(directoryPath, segmentStart)
-		if canonicalPrefix == "" {
-			canonicalPrefix = segment
-		} else {
-			canonicalPrefix = canonicalPrefix + "/" + segment
-		}
+		canonicalPrefix = path.Join(canonicalPrefix, segment)
 		directoryKey := strings.ToLower(canonicalPrefix)
 		if existingCanonical, alreadyCreated := canonicalDirectories[directoryKey]; alreadyCreated {
 			canonicalPrefix = existingCanonical

@@ -5,11 +5,16 @@ import {
   formatElapsedDuration,
 } from '../../domain/galacticTime'
 import {
+  AllDetailsSectionsConfig,
   CartBlockItem,
   ConfiguratorBlockConfig,
   defaultMetricsForSection,
+  DETAILS_SECTION_METRICS,
   DETAILS_SECTIONS,
+  DetailsBlockConfig,
   DetailsMetricDescriptor,
+  DetailsMetricId,
+  DetailsSection,
   DetailsSectionSelection,
   ExpeditionExportData,
   ExportBlockConfig,
@@ -388,6 +393,46 @@ export function isDetailsMetricAvailable(
   return true
 }
 
+/**
+ * Computes the union of Details metric IDs available across at least one
+ * expanded preview slice, returning null for non-concrete Details configs.
+ */
+export function computeAvailableDetailsMetricIds(
+  exportData: ExpeditionExportData,
+  config: ConfiguratorBlockConfig,
+  expandedItems: ReadonlyArray<CartBlockItem>,
+  nowMs: number = Date.now(),
+): ReadonlySet<DetailsMetricId> | null {
+  if (config.kind !== 'details' || config.section === 'all' || expandedItems.length === 0) {
+    return null
+  }
+  const descriptors = DETAILS_SECTION_METRICS[config.section]
+  const availableMetricIds = new Set<DetailsMetricId>()
+  for (const item of expandedItems) {
+    if (item.config.kind !== 'details') {
+      continue
+    }
+    const sliceContext = resolveTelemetryContext(
+      exportData,
+      item.config.scope,
+      item.config.selectedModeId,
+      nowMs,
+    )
+    for (const descriptor of descriptors) {
+      if (
+        !availableMetricIds.has(descriptor.id) &&
+        isDetailsMetricAvailable(descriptor, sliceContext, item.config.scope.kind)
+      ) {
+        availableMetricIds.add(descriptor.id)
+      }
+    }
+    if (availableMetricIds.size === descriptors.length) {
+      break
+    }
+  }
+  return availableMetricIds
+}
+
 /** Computes all derived averages, percentages, and net profits with safe division and sub-24h guards. */
 export function computeDerivedMetrics(
   metrics: stats.Metrics,
@@ -504,51 +549,7 @@ export function expandConfigToCartItems(
     ]
   }
   if (config.kind === 'details' && config.section === 'all') {
-    const items: CartBlockItem[] = []
-    if (config.scope.kind === 'allLegs') {
-      const applicableSections = DETAILS_SECTIONS.filter(
-        (sectionMeta) => sectionMeta.id !== 'carrier',
-      )
-      for (const [legIndex, leg] of getVisitedLegs(exportData).entries()) {
-        const legTitle = `Leg #${leg.details.number - 1} to #${leg.details.number}`
-        const legSubtitle = `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`
-        for (const sectionMeta of applicableSections) {
-          const blockLabel = `Details: ${sectionMeta.label}`
-          const blockSlug = slugifyCamelCase(sectionMeta.id)
-          items.push({
-            id: `${idPrefix}-leg-${leg.rowView.row.id}-${legIndex}-${sectionMeta.id}`,
-            title: `${blockLabel} — ${legTitle}`,
-            subtitle: legSubtitle,
-            filenameSlug: `wp${leg.details.number}-${blockSlug}`,
-            config: {
-              kind: 'details',
-              section: sectionMeta.id,
-              scope: { kind: 'leg', rowId: leg.rowView.row.id },
-              modeGrouping: 'combined',
-              selectedMetrics: defaultMetricsForSection(sectionMeta.id),
-            },
-          })
-        }
-      }
-      return items
-    }
-    for (const sectionMeta of DETAILS_SECTIONS) {
-      if (sectionMeta.id === 'carrier' && config.scope.kind !== 'full') {
-        continue
-      }
-      items.push(
-        ...expandTelemetryBlockConfig(
-          exportData,
-          {
-            ...config,
-            section: sectionMeta.id,
-            selectedMetrics: defaultMetricsForSection(sectionMeta.id),
-          },
-          `${idPrefix}-${sectionMeta.id}`,
-        ),
-      )
-    }
-    return items
+    return expandAllDetailsSections(exportData, config, idPrefix)
   }
   return expandTelemetryBlockConfig(exportData, config, idPrefix)
 }
@@ -614,16 +615,141 @@ function slugifyCamelCase(rawText: string): string {
   return slugify(rawText.replace(/([a-z0-9])([A-Z])/g, '$1-$2'))
 }
 
+function expandAllDetailsSections(
+  exportData: ExpeditionExportData,
+  config: AllDetailsSectionsConfig,
+  idPrefix: string,
+): CartBlockItem[] {
+  const allowCarrier = includeCarrierSection(exportData, config)
+  const applicableSections = DETAILS_SECTIONS.filter(
+    (sectionMeta) => sectionMeta.id !== 'carrier' || allowCarrier,
+  )
+  if (config.scope.kind === 'allLegs') {
+    return expandAllLegsDetailsSections(exportData, applicableSections, idPrefix)
+  }
+  const perSectionItems = applicableSections.map((sectionMeta) =>
+    expandTelemetryBlockConfig(
+      exportData,
+      {
+        ...config,
+        section: sectionMeta.id,
+        selectedMetrics: defaultMetricsForSection(sectionMeta.id),
+      },
+      `${idPrefix}-${sectionMeta.id}`,
+    ),
+  )
+  // Transpose into entity-outer and section-inner order so all applicable sections
+  // for each region or flight mode stay grouped together before the next slice.
+  const sliceCount = perSectionItems[0]?.length ?? 0
+  const orderedItems: CartBlockItem[] = []
+  for (let sliceIndex = 0; sliceIndex < sliceCount; sliceIndex++) {
+    for (const sectionItems of perSectionItems) {
+      if (sectionItems[sliceIndex]) {
+        orderedItems.push(sectionItems[sliceIndex])
+      }
+    }
+  }
+  return orderedItems
+}
+
+function expandAllLegsDetailsSections(
+  exportData: ExpeditionExportData,
+  applicableSections: typeof DETAILS_SECTIONS,
+  idPrefix: string,
+): CartBlockItem[] {
+  const sectionTemplates = applicableSections.map((sectionMeta) => ({
+    sectionId: sectionMeta.id,
+    ...formatDetailsSectionMeta(sectionMeta.id),
+    selectedMetrics: defaultMetricsForSection(sectionMeta.id),
+  }))
+  const items: CartBlockItem[] = []
+  // Iterate entity-outer (visited leg) and section-inner so each leg's sections stay grouped.
+  for (const [legIndex, leg] of getVisitedLegs(exportData).entries()) {
+    for (const template of sectionTemplates) {
+      const legSectionConfig: DetailsBlockConfig = {
+        kind: 'details',
+        section: template.sectionId,
+        scope: { kind: 'leg', rowId: leg.rowView.row.id },
+        modeGrouping: 'combined',
+        selectedMetrics: template.selectedMetrics,
+      }
+      items.push(
+        buildLegCartItem(
+          leg,
+          legIndex,
+          legSectionConfig,
+          `${idPrefix}-${template.sectionId}`,
+          template.blockLabel,
+          template.blockSlug,
+        ),
+      )
+    }
+  }
+  return items
+}
+
+function includeCarrierSection(
+  exportData: ExpeditionExportData,
+  config: AllDetailsSectionsConfig,
+): boolean {
+  if (config.scope.kind !== 'full') {
+    return false
+  }
+  if (
+    config.modeGrouping === 'separate' &&
+    getDistinctModesForScope(exportData, config.scope).length >= 2
+  ) {
+    return false
+  }
+  return (
+    (exportData.expedition.metrics.carrierJumps ?? 0) > 0 ||
+    (exportData.carrierCost?.totalCost ?? 0) > 0
+  )
+}
+
+function formatDetailsSectionMeta(sectionId: DetailsSection): {
+  blockLabel: string
+  blockSlug: string
+} {
+  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === sectionId)
+  return {
+    blockLabel: `Details: ${sectionMeta?.label ?? sectionId}`,
+    blockSlug: slugifyCamelCase(sectionId),
+  }
+}
+
+function buildLegCartItem(
+  leg: VisitedLegRecord,
+  legIndex: number,
+  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
+  idPrefix: string,
+  blockLabel: string,
+  blockSlug: string,
+): CartBlockItem {
+  const legTitle = `Leg #${leg.details.number - 1} to #${leg.details.number}`
+  return {
+    id: `${idPrefix}-leg-${leg.rowView.row.id}-${legIndex}`,
+    title: `${blockLabel} — ${legTitle}`,
+    subtitle: `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`,
+    filenameSlug: `wp${leg.details.number}-${blockSlug}`,
+    config: cloneConcreteTelemetryConfig(
+      config,
+      { kind: 'leg', rowId: leg.rowView.row.id },
+      undefined,
+      'hide',
+    ),
+  }
+}
+
 function expandTelemetryBlockConfig(
   exportData: ExpeditionExportData,
   config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
   idPrefix: string,
 ): CartBlockItem[] {
-  const blockLabel =
+  const { blockLabel, blockSlug } =
     config.kind === 'summary'
-      ? 'Summary'
-      : `Details: ${DETAILS_SECTIONS.find((section) => section.id === config.section)!.label}`
-  const blockSlug = config.kind === 'summary' ? 'summary' : slugifyCamelCase(config.section)
+      ? { blockLabel: 'Summary', blockSlug: 'summary' }
+      : formatDetailsSectionMeta(config.section)
 
   if (config.scope.kind === 'allLegs') {
     return expandAllLegsItems(exportData, config, idPrefix, blockLabel, blockSlug)
@@ -647,22 +773,9 @@ function expandAllLegsItems(
   blockLabel: string,
   blockSlug: string,
 ): CartBlockItem[] {
-  return getVisitedLegs(exportData).map((leg, index) => {
-    const concreteConfig = cloneConcreteTelemetryConfig(
-      config,
-      { kind: 'leg', rowId: leg.rowView.row.id },
-      undefined,
-      'hide',
-    )
-    const legTitle = `Leg #${leg.details.number - 1} to #${leg.details.number}`
-    return {
-      id: `${idPrefix}-leg-${leg.rowView.row.id}-${index}`,
-      title: `${blockLabel} — ${legTitle}`,
-      subtitle: `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`,
-      filenameSlug: `wp${leg.details.number}-${blockSlug}`,
-      config: concreteConfig,
-    }
-  })
+  return getVisitedLegs(exportData).map((leg, index) =>
+    buildLegCartItem(leg, index, config, idPrefix, blockLabel, blockSlug),
+  )
 }
 
 function expandAllRegionsItems(
@@ -723,8 +836,7 @@ function expandSingleScopeItems(
     config.modeGrouping === 'separate' &&
     (config.kind !== 'details' || config.section !== 'carrier') &&
     availableModes.length >= 2
-  const scopeText = describeScopeShort(exportData, config.scope)
-  const scopeSlug = describeScopeSlug(exportData, config.scope, scopeText)
+  const { label: scopeText, slug: scopeSlug } = describeScope(exportData, config.scope)
 
   if (shouldSplitByMode) {
     return availableModes.map((modeTag) => ({
@@ -753,18 +865,6 @@ function expandSingleScopeItems(
   ]
 }
 
-function describeScopeSlug(
-  exportData: ExpeditionExportData,
-  scope: ExportScopeSpec,
-  fallbackScopeText: string,
-): string {
-  if (scope.kind === 'leg') {
-    const leg = getVisitedLegs(exportData).find((item) => item.rowView.row.id === scope.rowId)
-    return leg ? `wp${leg.details.number}` : 'selected-leg'
-  }
-  return slugify(fallbackScopeText)
-}
-
 function cloneConcreteTelemetryConfig(
   config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
   concreteScope: ExportScopeSpec,
@@ -790,22 +890,32 @@ function cloneConcreteTelemetryConfig(
   }
 }
 
-function describeScopeShort(exportData: ExpeditionExportData, scope: ExportScopeSpec): string {
+function describeScope(
+  exportData: ExpeditionExportData,
+  scope: ExportScopeSpec,
+): { label: string; slug: string } {
   switch (scope.kind) {
     case 'full':
-      return 'Full Expedition'
+      return { label: 'Full Expedition', slug: 'full-expedition' }
     case 'baseline':
-      return 'Pre-Expedition Baseline'
+      return { label: 'Pre-Expedition Baseline', slug: 'pre-expedition-baseline' }
     case 'leg': {
       const leg = getVisitedLegs(exportData).find((item) => item.rowView.row.id === scope.rowId)
-      return leg ? `Leg #${leg.details.number - 1} to #${leg.details.number}` : 'Selected Leg'
+      return leg
+        ? {
+            label: `Leg #${leg.details.number - 1} to #${leg.details.number}`,
+            slug: `wp${leg.details.number}`,
+          }
+        : { label: 'Selected Leg', slug: 'selected-leg' }
     }
-    case 'region':
-      return scope.regionName || 'Selected Region'
+    case 'region': {
+      const label = scope.regionName || 'Selected Region'
+      return { label, slug: slugify(label) }
+    }
     case 'allLegs':
-      return 'All Legs'
+      return { label: 'All Legs', slug: 'all-legs' }
     case 'allRegions':
-      return 'All Galactic Regions'
+      return { label: 'All Galactic Regions', slug: 'all-galactic-regions' }
   }
 }
 

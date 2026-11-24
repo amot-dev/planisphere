@@ -154,24 +154,96 @@ describe('exportMetrics', () => {
       },
       'all-legs-sec',
     )
-    // 3 visited legs x 5 applicable sections, grouped by leg (every section for leg 1 before leg 2).
+    // 3 visited legs x 5 applicable sections, grouped entity-outer and section-inner.
     expect(allLegsAllSections).toHaveLength(15)
-    expect(allLegsAllSections[0].filenameSlug).toBe('wp2-flight')
-    expect(allLegsAllSections[1].filenameSlug).toBe('wp2-exploration-value')
-    expect(allLegsAllSections[2].filenameSlug).toBe('wp2-cartographics')
-    expect(
-      allLegsAllSections.slice(0, 6).map((item) => ({
-        rowId: item.config.kind === 'details' ? item.config.scope.rowId : undefined,
-        section: item.config.kind === 'details' ? item.config.section : undefined,
-      })),
-    ).toEqual([
-      { rowId: 2, section: 'flight' },
-      { rowId: 2, section: 'explorationValue' },
-      { rowId: 2, section: 'cartographics' },
-      { rowId: 2, section: 'exobiology' },
-      { rowId: 2, section: 'realized' },
-      { rowId: 3, section: 'flight' },
+    expect(allLegsAllSections.slice(0, 6).map((item) => item.filenameSlug)).toEqual([
+      'wp2-flight',
+      'wp2-exploration-value',
+      'wp2-cartographics',
+      'wp2-exobiology',
+      'wp2-realized',
+      'wp3-flight',
     ])
+
+    const shipOnlyData = buildSampleExportData({
+      expedition: {
+        metrics: {
+          ...data.expedition.metrics,
+          carrierJumps: 0,
+          carrierDistanceLy: 0,
+          tritiumUsed: 0,
+        },
+        realization: data.expedition.realization,
+      },
+      carrierCost: {
+        ...data.carrierCost,
+        carrierType: 'none',
+        weeklyUpkeep: 0,
+        tritiumPrice: 0,
+        tritiumCost: 0,
+        jumpCost: 0,
+        upkeepCost: 0,
+        totalCost: 0,
+        totalEstimated: false,
+      },
+    })
+    const shipOnlyAllSections = expandConfigToCartItems(
+      shipOnlyData,
+      {
+        kind: 'details',
+        section: 'all',
+        scope: { kind: 'full' },
+        modeGrouping: 'combined',
+      },
+      'ship-only-sec',
+    )
+    expect(
+      shipOnlyAllSections.map((item) =>
+        item.config.kind === 'details' ? item.config.section : item.config.kind,
+      ),
+    ).toEqual(['flight', 'explorationValue', 'cartographics', 'exobiology', 'realized'])
+
+    const fullSeparateAllSections = expandConfigToCartItems(
+      data,
+      {
+        kind: 'details',
+        section: 'all',
+        scope: { kind: 'full' },
+        modeGrouping: 'separate',
+      },
+      'full-sep-sec',
+    )
+    // Multi-mode Separate omits carrier and groups all 5 sections per mode before advancing.
+    expect(fullSeparateAllSections).toHaveLength(10)
+    expect(fullSeparateAllSections.slice(0, 6).map((item) => item.filenameSlug)).toEqual([
+      'full-expedition-exploration-flight',
+      'full-expedition-exploration-exploration-value',
+      'full-expedition-exploration-cartographics',
+      'full-expedition-exploration-exobiology',
+      'full-expedition-exploration-realized',
+      'full-expedition-travel-flight',
+    ])
+
+    const allRegionsSeparateSections = expandConfigToCartItems(
+      data,
+      {
+        kind: 'details',
+        section: 'all',
+        scope: { kind: 'allRegions' },
+        modeGrouping: 'separate',
+      },
+      'reg-sep-sec',
+    )
+    expect(allRegionsSeparateSections).toHaveLength(15)
+    expect(allRegionsSeparateSections.slice(0, 6).map((item) => item.filenameSlug)).toEqual([
+      'inner-orion-spur-exploration-flight',
+      'inner-orion-spur-exploration-exploration-value',
+      'inner-orion-spur-exploration-cartographics',
+      'inner-orion-spur-exploration-exobiology',
+      'inner-orion-spur-exploration-realized',
+      'inner-orion-spur-travel-flight',
+    ])
+    expect(allRegionsSeparateSections[10].filenameSlug).toBe('odin-s-hold-flight')
   })
 
   it('formats signed estimated credits and resolves Full Expedition Combined net profit safely', () => {

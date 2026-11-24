@@ -13,17 +13,15 @@ import { EXPORT_CARD_CSS, EXPORT_CARD_WIDTH } from './exportCardStyles'
 import { ExportCartQueue } from './ExportCartQueue'
 import { buildCanonicalJsonSnapshot } from './exportHighlights'
 import {
+  computeAvailableDetailsMetricIds,
   createQuickShareCart,
   expandConfigToCartItems,
-  isDetailsMetricAvailable,
-  resolveTelemetryContext,
   slugify,
 } from './exportMetrics'
 import {
   CartBlockItem,
   ConfiguratorBlockConfig,
   createDefaultBlockConfig,
-  DETAILS_SECTION_METRICS,
   ExpeditionExportData,
   ExportBlockKind,
   ExportBundleFile,
@@ -123,32 +121,21 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
     return expandedPreviewItems[clampedIndex]
   }, [cartItems, expandedPreviewItems, inspectedCartItemId, previewSliceIndex])
 
-  const configuratorPreviewContext = useMemo(() => {
-    if (!exportData || expandedPreviewItems.length === 0) return null
-    const headConfig = expandedPreviewItems[0].config
-    if (headConfig.kind !== 'summary' && headConfig.kind !== 'details') return null
-    return resolveTelemetryContext(
-      exportData,
-      headConfig.scope,
-      headConfig.selectedModeId,
-    )
-  }, [expandedPreviewItems, exportData])
+  const availableDetailsMetricIds = useMemo(() => {
+    if (!exportData) return null
+    return computeAvailableDetailsMetricIds(exportData, config, expandedPreviewItems)
+  }, [config, expandedPreviewItems, exportData])
 
   const canAddToCart = useMemo(() => {
     if (!exportData || expandedPreviewItems.length === 0) return false
     if (config.kind === 'highlights') {
       return config.selectedCards.length > 0
     }
-    if (config.kind === 'details' && config.section !== 'all' && configuratorPreviewContext) {
-      const selectedSet = new Set(config.selectedMetrics)
-      return DETAILS_SECTION_METRICS[config.section].some(
-        (descriptor) =>
-          selectedSet.has(descriptor.id) &&
-          isDetailsMetricAvailable(descriptor, configuratorPreviewContext, config.scope.kind),
-      )
+    if (config.kind === 'details' && config.section !== 'all' && availableDetailsMetricIds) {
+      return config.selectedMetrics.some((id) => availableDetailsMetricIds.has(id))
     }
     return true
-  }, [config, configuratorPreviewContext, expandedPreviewItems.length, exportData])
+  }, [availableDetailsMetricIds, config, expandedPreviewItems.length, exportData])
 
   const outputPlan = useMemo(() => {
     const pngCount = outputs.includePng ? cartItems.length : 0
@@ -363,7 +350,7 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
             <BlockConfigurator
               exportData={exportData}
               config={config}
-              resolvedPreviewContext={configuratorPreviewContext}
+              availableDetailsMetricIds={availableDetailsMetricIds}
               addCount={expandedPreviewItems.length}
               canAddToCart={canAddToCart}
               disabled={exporting}

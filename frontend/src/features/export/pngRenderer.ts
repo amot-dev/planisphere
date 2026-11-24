@@ -10,6 +10,7 @@ import {
 
 const PNG_SCALE_FACTOR = 2
 const IMAGES_SUBFOLDER = 'images'
+const PNG_DATA_URI_PREFIX = 'data:image/png;base64,'
 
 /**
  * Wraps serialized XHTML card markup and EXPORT_CARD_CSS inside an SVG
@@ -25,7 +26,7 @@ export function buildSvgForeignObjectDocument(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
     `<foreignObject width="100%" height="100%">` +
     `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;background:#050506;color:#f4ece4;">` +
-    `<style>${EXPORT_CARD_CSS}</style>` +
+    `<style><![CDATA[${EXPORT_CARD_CSS}]]></style>` +
     serializedXhtml +
     `</div></foreignObject></svg>`
   )
@@ -152,7 +153,12 @@ async function rasterizeSvgToPngBase64(
   renderingContext.drawImage(image, 0, 0, width, height)
 
   const pngDataUri = canvas.toDataURL('image/png')
-  const commaIndex = pngDataUri.indexOf(',')
-  return commaIndex >= 0 ? pngDataUri.slice(commaIndex + 1) : pngDataUri
+  const base64Payload = pngDataUri.startsWith(PNG_DATA_URI_PREFIX)
+    ? pngDataUri.slice(PNG_DATA_URI_PREFIX.length)
+    : ''
+  if (base64Payload.length === 0) {
+    throw new Error('Canvas PNG export failed or exceeded maximum dimensions')
+  }
+  return base64Payload
 }
 

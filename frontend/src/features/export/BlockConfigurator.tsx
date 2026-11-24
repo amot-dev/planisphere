@@ -3,8 +3,6 @@ import {
   getDistinctModesForScope,
   getVisitedLegs,
   getVisitedRegions,
-  isDetailsMetricAvailable,
-  ResolvedTelemetryContext,
   scopeSupportsModeSplit,
 } from './exportMetrics'
 import {
@@ -32,7 +30,7 @@ import {
 export interface BlockConfiguratorProps {
   exportData: ExpeditionExportData
   config: ConfiguratorBlockConfig
-  resolvedPreviewContext: ResolvedTelemetryContext | null
+  availableDetailsMetricIds: ReadonlySet<DetailsMetricId> | null
   addCount: number
   canAddToCart: boolean
   disabled?: boolean
@@ -62,7 +60,7 @@ const CAREER_DIFF_OPTIONS: ReadonlyArray<{ id: CareerDiffDisplay; label: string 
 export function BlockConfigurator({
   exportData,
   config,
-  resolvedPreviewContext,
+  availableDetailsMetricIds,
   addCount,
   canAddToCart,
   disabled = false,
@@ -123,7 +121,7 @@ export function BlockConfigurator({
         <DetailsControls
           exportData={exportData}
           config={config}
-          resolvedContext={resolvedPreviewContext}
+          availableDetailsMetricIds={availableDetailsMetricIds}
           hasVisitedLegs={hasVisitedLegs}
           disabled={disabled}
           onChange={onChangeConfig}
@@ -356,14 +354,14 @@ function SummaryControls({
 function DetailsControls({
   exportData,
   config,
-  resolvedContext,
+  availableDetailsMetricIds,
   hasVisitedLegs,
   disabled,
   onChange,
 }: {
   exportData: ExpeditionExportData
   config: DetailsConfiguratorConfig
-  resolvedContext: ResolvedTelemetryContext | null
+  availableDetailsMetricIds: ReadonlySet<DetailsMetricId> | null
   hasVisitedLegs: boolean
   disabled: boolean
   onChange: (next: DetailsConfiguratorConfig) => void
@@ -375,29 +373,27 @@ function DetailsControls({
   const isCarrierSection = config.section === 'carrier'
 
   function handleSectionChange(nextSection: DetailsSectionSelection) {
+    const nextScope = nextSection === 'carrier' ? { kind: 'full' as const } : config.scope
+    const nextModeGrouping = scopeSupportsModeSplit(exportData, nextScope, nextSection)
+      ? config.modeGrouping
+      : 'combined'
     if (nextSection === 'all') {
       onChange({
         kind: 'details',
         section: 'all',
-        scope: config.scope,
-        modeGrouping: !scopeSupportsModeSplit(exportData, config.scope, 'all')
-          ? 'combined'
-          : config.modeGrouping,
+        scope: nextScope,
+        modeGrouping: nextModeGrouping,
       })
       return
     }
     const nextMetrics = DETAILS_SECTION_METRICS[nextSection]
       .filter((metric) => metric.defaultChecked)
       .map((metric) => metric.id)
-    const nextScope = nextSection === 'carrier' ? { kind: 'full' as const } : config.scope
     onChange({
       ...config,
       section: nextSection,
       scope: nextScope,
-      modeGrouping:
-        nextSection === 'carrier' || !scopeSupportsModeSplit(exportData, nextScope, nextSection)
-          ? 'combined'
-          : config.modeGrouping,
+      modeGrouping: nextModeGrouping,
       selectedMetrics: nextMetrics,
     })
   }
@@ -490,8 +486,8 @@ function DetailsControls({
           </div>
           <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
             {descriptors.map((descriptor) => {
-              const available = resolvedContext
-                ? isDetailsMetricAvailable(descriptor, resolvedContext, config.scope.kind)
+              const available = availableDetailsMetricIds
+                ? availableDetailsMetricIds.has(descriptor.id)
                 : true
               const checked = selectedSet.has(descriptor.id)
               const isMetricDisabled = disabled || !available

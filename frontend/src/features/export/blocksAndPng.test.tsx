@@ -1,11 +1,16 @@
+// @vitest-environment happy-dom
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ExportBlockRenderer } from './blocks/ExportBlockRenderer'
-import { EXPORT_CARD_WIDTH } from './exportCardStyles'
+import { EXPORT_CARD_CSS, EXPORT_CARD_WIDTH } from './exportCardStyles'
 import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
 import { defaultMetricsForSection, ExportBlockConfig } from './exportTypes'
-import { buildPngBundleFileName, buildSvgForeignObjectDocument } from './pngRenderer'
+import {
+  buildPngBundleFileName,
+  buildSvgForeignObjectDocument,
+  renderCartBlockToPngBase64,
+} from './pngRenderer'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('export visual blocks and PNG SVG serializer', () => {
@@ -98,12 +103,13 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(highlightsTop3Markup).toContain('[IN SYSTEM]')
   })
 
-  it('builds valid XHTML-namespaced SVG foreignObject documents and places PNGs under images/ with dynamic zero-padding', () => {
+  it('builds valid XHTML-namespaced SVG foreignObject documents, wraps CSS in CDATA, and rejects truncated canvas PNG payloads', async () => {
     const svgDoc = buildSvgForeignObjectDocument('<div class="ed-exp-root">OK</div>', EXPORT_CARD_WIDTH, 320)
     expect(svgDoc).toContain('xmlns="http://www.w3.org/2000/svg"')
     expect(svgDoc).toContain('xmlns="http://www.w3.org/1999/xhtml"')
     expect(svgDoc).toContain('width="960" height="320"')
     expect(svgDoc).toContain('color:#f4ece4')
+    expect(svgDoc).toContain(`<style><![CDATA[${EXPORT_CARD_CSS}]]></style>`)
 
     const data = buildSampleExportData()
     const quickItems = createQuickShareCart(data)
@@ -121,6 +127,45 @@ describe('export visual blocks and PNG SVG serializer', () => {
     )
     expect(buildPngBundleFileName(legItems[0], 1, 223)).toBe('images/001-wp2-summary.png')
     expect(buildPngBundleFileName(legItems[0], 115, 223)).toBe('images/115-wp2-summary.png')
+
+    const originalImage = globalThis.Image
+    class ImmediateLoadImage {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(_value: string) {
+        this.onload?.()
+      }
+    }
+    const stubContext = {
+      scale: vi.fn(),
+      fillStyle: '',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D
+    const getContextSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(stubContext as never)
+    const toDataURLSpy = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+    globalThis.Image = ImmediateLoadImage as unknown as typeof Image
+
+    try {
+      toDataURLSpy.mockReturnValueOnce('data:,')
+      await expect(renderCartBlockToPngBase64(data, quickItems[0])).rejects.toThrow(
+        'Canvas PNG export failed or exceeded maximum dimensions',
+      )
+
+      toDataURLSpy.mockReturnValueOnce('data:image/png;base64,')
+      await expect(renderCartBlockToPngBase64(data, quickItems[0])).rejects.toThrow(
+        'Canvas PNG export failed or exceeded maximum dimensions',
+      )
+
+      toDataURLSpy.mockReturnValueOnce('data:image/png;base64,iVBORw0KGgo=')
+      await expect(renderCartBlockToPngBase64(data, quickItems[0])).resolves.toBe('iVBORw0KGgo=')
+    } finally {
+      globalThis.Image = originalImage
+      getContextSpy.mockRestore()
+      toDataURLSpy.mockRestore()
+    }
   })
 
   it('prefixes estimated carrier costs with tilde and sanitizes malformed mode colors in React blocks', () => {
