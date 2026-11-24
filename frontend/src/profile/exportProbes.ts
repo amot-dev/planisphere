@@ -232,7 +232,7 @@ export function executeExportStudioPass(hydrated: HydratedFrontendFixture): {
     children.push(
       makeRenderSpan(
         'Export Cart Expansion (Quick Share, Details, Highlights, Waypoints)',
-        'frontend/src/features/export/exportMetrics.ts:419',
+        'frontend/src/features/export/exportCartExpansion.ts',
         1,
         cartItems.length,
         'blocks',

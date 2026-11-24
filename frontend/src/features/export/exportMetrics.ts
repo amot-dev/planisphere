@@ -1,122 +1,19 @@
-import { expedition, realization, stats } from '../../api/models'
+import { realization, stats } from '../../api/models'
+import { computeShipDistanceLy, formatElapsedDuration } from '../../domain/galacticTime'
+import { DEFAULT_MODE_COLOR } from '../../domain/theme'
+import { ActiveModeTag, collectUniqueShips, getExportDataIndex, getVisitedLegs, getVisitedRegions, VisitedLegRecord } from './exportDataIndex'
 import {
-  computeShipDistanceLy,
-  formatCredits,
-  formatElapsedDuration,
-} from '../../domain/galacticTime'
+  addMetrics, addRealization, computeElapsedDays, createEmptyMetrics, createEmptyRealization,
+  formatNetProfitValue, FormattedNetProfit, MILLISECONDS_PER_DAY, safeDivide, safePercent, safePerThousand,
+} from './exportFormatting'
 import {
-  AllDetailsSectionsConfig,
-  CartBlockItem,
-  ConfiguratorBlockConfig,
-  defaultMetricsForSection,
-  DETAILS_SECTION_METRICS,
-  DETAILS_SECTIONS,
-  DetailsBlockConfig,
-  DetailsMetricDescriptor,
-  DetailsMetricId,
-  DetailsSection,
-  DetailsSectionSelection,
-  ExpeditionExportData,
-  ExportBlockConfig,
-  ExportCarrierCost,
-  ExportScopeSpec,
-  HIGHLIGHT_CARDS,
-  WAYPOINTS_COLUMNS,
+  CartBlockItem, ConfiguratorBlockConfig, DETAILS_SECTION_METRICS,
+  DetailsMetricDescriptor, DetailsMetricId, ExpeditionExportData, ExportCarrierCost, ExportScopeSpec,
 } from './exportTypes'
 
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
-const EXPORT_HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
-
-/** Validates a CSS hex color (#RGB or #RRGGBB), returning fallback for malformed inputs. */
-export function sanitizeExportHexColor(
-  rawColor: string | null | undefined,
-  fallback: string = '#FF7100',
-): string {
-  const trimmedColor = rawColor?.trim() ?? ''
-  return EXPORT_HEX_COLOR_PATTERN.test(trimmedColor) ? trimmedColor : fallback
-}
-
-/** Formats carrier credit values with a tilde prefix when estimated and greater than zero. */
-export function formatEstimatedCarrierCredits(
-  amount: number,
-  isEstimated: boolean = amount > 0,
-): string {
-  return isEstimated && amount > 0 ? `~${formatCredits(amount)}` : formatCredits(amount)
-}
-
-/** Formatted net profit value paired with whether its rounded amount is negative. */
-export interface FormattedNetProfit {
-  text: string
-  isNegative: boolean
-}
-
-/**
- * Formats credit amounts with any minus sign placed before the tilde prefix
- * and normalizes negative values rounding to zero.
- */
-export function formatSignedEstimatedCredits(amount: number, isEstimated: boolean): string {
-  const rounded = Math.round(amount) || 0
-  if (rounded < 0) {
-    const absoluteText = formatCredits(Math.abs(rounded))
-    return isEstimated ? `-~${absoluteText}` : `-${absoluteText}`
-  }
-  const formattedText = formatCredits(rounded)
-  return isEstimated ? `~${formattedText}` : formattedText
-}
-
-/**
- * Formats a net profit credit amount using carrier cost estimation metadata
- * and reports whether the rounded amount is negative.
- */
-export function formatNetProfitValue(
-  amount: number,
-  carrierCost: ExportCarrierCost | null,
-): FormattedNetProfit {
-  const rounded = Math.round(amount) || 0
-  const isEstimated = Boolean(
-    carrierCost && carrierCost.totalCost > 0 && carrierCost.totalEstimated,
-  )
-  return {
-    text: formatSignedEstimatedCredits(rounded, isEstimated),
-    isNegative: rounded < 0,
-  }
-}
-
-/**
- * Resolves the formatted NET PROFIT readout for Full Expedition Combined
- * Summary cards, returning null for all other scopes.
- */
-export function resolveFormattedNetProfit(
-  context: ResolvedTelemetryContext,
-): FormattedNetProfit | null {
-  if (!context.isFullExpeditionCombined) {
-    return null
-  }
-  const netProfit =
-    context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
-  return formatNetProfitValue(netProfit, context.carrierCost)
-}
-
-/** Visited non-origin leg enriched with its drawer details and attributed Galactic Region. */
-export interface VisitedLegRecord {
-  rowView: expedition.RowView
-  details: expedition.WaypointDetails
-  regionName: string
-}
-
-/** Distinct visited Galactic Region grouping its attributed visited legs and active flight modes. */
-export interface VisitedRegionSummary {
-  regionName: string
-  legs: VisitedLegRecord[]
-  distinctModes: ActiveModeTag[]
-}
-
-/** Lightweight flight mode identifier paired with display name and cockpit color. */
-export interface ActiveModeTag {
-  modeId: number
-  modeName: string
-  modeColor: string
-}
+export * from './exportCartExpansion'
+export * from './exportDataIndex'
+export * from './exportFormatting'
 
 /** Derived averages, ratios, and profit metrics computed with zero-division and sub-24h guards. */
 export interface DerivedMetrics {
@@ -146,16 +43,12 @@ export interface DerivedMetrics {
   avgRealizedCreditsPer1000Ly: number | null
 }
 
+/** Identifier for an inline Career Diff comparison metric. */
+export type CareerDiffFieldId = 'distanceLy' | 'jumps' | 'estimatedValue' | 'realizedValue' | 'bodiesScanned' | 'bodiesMapped' | 'organicSamples'
+
 /** One inline Career Diff entry comparing pre-expedition baseline and expedition growth. */
 export interface CareerDiffItem {
-  id:
-    | 'distanceLy'
-    | 'jumps'
-    | 'estimatedValue'
-    | 'realizedValue'
-    | 'bodiesScanned'
-    | 'bodiesMapped'
-    | 'organicSamples'
+  id: CareerDiffFieldId
   baseline: number
   growthPercent: number | null
   isNewBaseline: boolean
@@ -185,194 +78,11 @@ export interface ResolvedTelemetryContext {
   isFullExpeditionCombined: boolean
 }
 
-/** Returns an empty zeroed Metrics object structurally matching Wails stats.Metrics. */
-export function createEmptyMetrics(): stats.Metrics {
-  return {
-    distanceLy: 0,
-    shipDistanceLy: 0,
-    carrierPassengerLy: 0,
-    jumps: 0,
-    carrierJumps: 0,
-    carrierDistanceLy: 0,
-    tritiumUsed: undefined,
-    jetConeBoosts: 0,
-    premiumBoosts: 0,
-    standardBoosts: 0,
-    basicBoosts: 0,
-    bodiesScanned: 0,
-    bodiesMapped: 0,
-    efficientMappings: 0,
-    scanValueTotal: 0,
-    scanValueBase: 0,
-    scanValueBonus: 0,
-    scanValueEfficiencyBonus: 0,
-    firstDiscoveries: 0,
-    firstMapped: 0,
-    organicSamples: 0,
-    organicValueTotal: 0,
-    organicValueBase: 0,
-    organicValueBonus: 0,
-    firstLogged: 0,
-  }
-}
-
-/** Returns an empty zeroed RealizationBreakdown object. */
-export function createEmptyRealization(): realization.Breakdown {
-  return {
-    totalRealized: 0,
-    cartoLostDeath: 0,
-    organicLostDeath: 0,
-    cartoStolen: 0,
-    organicStolen: 0,
-    carrierTariffLoss: 0,
-    npcCrewLoss: 0,
-    pendingValue: 0,
-  }
-}
-
-/** Sums two Metrics objects field-by-field. */
-export function addMetrics(left: stats.Metrics, right: stats.Metrics): stats.Metrics {
-  const hasTritium = left.tritiumUsed != null || right.tritiumUsed != null
-  return {
-    distanceLy: left.distanceLy + right.distanceLy,
-    shipDistanceLy: left.shipDistanceLy + right.shipDistanceLy,
-    carrierPassengerLy: left.carrierPassengerLy + right.carrierPassengerLy,
-    jumps: left.jumps + right.jumps,
-    carrierJumps: left.carrierJumps + right.carrierJumps,
-    carrierDistanceLy: left.carrierDistanceLy + right.carrierDistanceLy,
-    tritiumUsed: hasTritium ? (left.tritiumUsed ?? 0) + (right.tritiumUsed ?? 0) : undefined,
-    jetConeBoosts: left.jetConeBoosts + right.jetConeBoosts,
-    premiumBoosts: left.premiumBoosts + right.premiumBoosts,
-    standardBoosts: left.standardBoosts + right.standardBoosts,
-    basicBoosts: left.basicBoosts + right.basicBoosts,
-    bodiesScanned: left.bodiesScanned + right.bodiesScanned,
-    bodiesMapped: left.bodiesMapped + right.bodiesMapped,
-    efficientMappings: left.efficientMappings + right.efficientMappings,
-    scanValueTotal: left.scanValueTotal + right.scanValueTotal,
-    scanValueBase: left.scanValueBase + right.scanValueBase,
-    scanValueBonus: left.scanValueBonus + right.scanValueBonus,
-    scanValueEfficiencyBonus: left.scanValueEfficiencyBonus + right.scanValueEfficiencyBonus,
-    firstDiscoveries: left.firstDiscoveries + right.firstDiscoveries,
-    firstMapped: left.firstMapped + right.firstMapped,
-    organicSamples: left.organicSamples + right.organicSamples,
-    organicValueTotal: left.organicValueTotal + right.organicValueTotal,
-    organicValueBase: left.organicValueBase + right.organicValueBase,
-    organicValueBonus: left.organicValueBonus + right.organicValueBonus,
-    firstLogged: left.firstLogged + right.firstLogged,
-  }
-}
-
-/** Sums two RealizationBreakdown objects field-by-field. */
-export function addRealization(
-  left: realization.Breakdown,
-  right: realization.Breakdown,
-): realization.Breakdown {
-  return {
-    totalRealized: left.totalRealized + right.totalRealized,
-    cartoLostDeath: left.cartoLostDeath + right.cartoLostDeath,
-    organicLostDeath: left.organicLostDeath + right.organicLostDeath,
-    cartoStolen: left.cartoStolen + right.cartoStolen,
-    organicStolen: left.organicStolen + right.organicStolen,
-    carrierTariffLoss: left.carrierTariffLoss + right.carrierTariffLoss,
-    npcCrewLoss: left.npcCrewLoss + right.npcCrewLoss,
-    pendingValue: left.pendingValue + right.pendingValue,
-  }
-}
-
-/** Returns ordered visited non-origin legs (WP #2+) paired with their drawer telemetry and attributed Galactic Region. */
-export function getVisitedLegs(exportData: ExpeditionExportData): VisitedLegRecord[] {
-  const detailsByRowId = new Map<number, expedition.WaypointDetails>()
-  for (const detailEntry of exportData.rowDetails ?? []) {
-    detailsByRowId.set(detailEntry.rowId, detailEntry)
-  }
-
-  let activeManualRegion = ''
-  const visitedLegs: VisitedLegRecord[] = []
-  for (const rowView of exportData.plan.rows ?? []) {
-    if (rowView.row.rowType === 'region') {
-      activeManualRegion = rowView.regionName || activeManualRegion
-      continue
-    }
-    if (rowView.number <= 1 || !rowView.row.visitedAt) {
-      continue
-    }
-    const details = detailsByRowId.get(rowView.row.id)
-    if (!details) {
-      continue
-    }
-    const attributedRegion = rowView.detectedRegion || activeManualRegion || 'Unknown Region'
-    visitedLegs.push({ rowView, details, regionName: attributedRegion })
-  }
-  return visitedLegs
-}
-
-/** Groups visited legs by distinct Galactic Region in order of first arrival. */
-export function getVisitedRegions(exportData: ExpeditionExportData): VisitedRegionSummary[] {
-  const legs = getVisitedLegs(exportData)
-  const regionMap = new Map<string, VisitedLegRecord[]>()
-  for (const leg of legs) {
-    const existing = regionMap.get(leg.regionName)
-    if (existing) {
-      existing.push(leg)
-    } else {
-      regionMap.set(leg.regionName, [leg])
-    }
-  }
-  const regionSummaries: VisitedRegionSummary[] = []
-  for (const [regionName, regionLegs] of regionMap.entries()) {
-    regionSummaries.push({
-      regionName,
-      legs: regionLegs,
-      distinctModes: extractDistinctModesFromLegs(regionLegs),
-    })
-  }
-  return regionSummaries
-}
-
-/** Returns the distinct active flight modes spanning the requested scope. */
-export function getDistinctModesForScope(
-  exportData: ExpeditionExportData,
-  scope: ExportScopeSpec,
-): ActiveModeTag[] {
-  switch (scope.kind) {
-    case 'baseline':
-    case 'leg':
-    case 'allLegs':
-      return []
-    case 'full':
-      return (exportData.modeBuckets ?? []).map((bucket) => ({
-        modeId: bucket.modeId,
-        modeName: bucket.modeName,
-        modeColor: bucket.modeColor,
-      }))
-    case 'region': {
-      const regionSummary = getVisitedRegions(exportData).find(
-        (region) => region.regionName === scope.regionName,
-      )
-      return regionSummary ? regionSummary.distinctModes : []
-    }
-    case 'allRegions': {
-      const allRegionModes = new Map<number, ActiveModeTag>()
-      for (const region of getVisitedRegions(exportData)) {
-        for (const modeTag of region.distinctModes) {
-          allRegionModes.set(modeTag.modeId, modeTag)
-        }
-      }
-      return Array.from(allRegionModes.values())
-    }
-  }
-}
-
-/** Reports whether the Combined / Separate mode control should appear for a scope and optional section. */
-export function scopeSupportsModeSplit(
-  exportData: ExpeditionExportData,
-  scope: ExportScopeSpec,
-  detailsSection?: DetailsSectionSelection,
-): boolean {
-  if (detailsSection === 'carrier') {
-    return false
-  }
-  return getDistinctModesForScope(exportData, scope).length >= 2
+/** Resolves the formatted NET PROFIT readout for Full Expedition Combined Summary cards. */
+export function resolveFormattedNetProfit(context: ResolvedTelemetryContext): FormattedNetProfit | null {
+  if (!context.isFullExpeditionCombined) return null
+  const netProfit = context.derived.netProfitAfterCarrierCost ?? context.realization.totalRealized
+  return formatNetProfitValue(netProfit, context.carrierCost)
 }
 
 /** Reports whether a Details metric checkbox is valid for the current scope, mode, and elapsed span. */
@@ -381,56 +91,53 @@ export function isDetailsMetricAvailable(
   context: ResolvedTelemetryContext,
   scopeKind: ExportScopeSpec['kind'],
 ): boolean {
-  if (descriptor.fullExpeditionCombinedOnly && !context.isFullExpeditionCombined) {
-    return false
-  }
-  if (descriptor.requiresVisitedRoute && scopeKind === 'baseline') {
-    return false
-  }
-  if (descriptor.requiresElapsed24h && (context.elapsedDays == null || context.elapsedDays < 1)) {
-    return false
-  }
+  if (descriptor.fullExpeditionCombinedOnly && !context.isFullExpeditionCombined) return false
+  if (descriptor.requiresVisitedRoute && scopeKind === 'baseline') return false
+  if (descriptor.requiresElapsed24h && (context.elapsedDays == null || context.elapsedDays < 1)) return false
   return true
 }
 
-/**
- * Computes the union of Details metric IDs available across at least one
- * expanded preview slice, returning null for non-concrete Details configs.
- */
+/** Computes the union of Details metric IDs available across expanded preview slices with early exit. */
 export function computeAvailableDetailsMetricIds(
   exportData: ExpeditionExportData,
   config: ConfiguratorBlockConfig,
   expandedItems: ReadonlyArray<CartBlockItem>,
   nowMs: number = Date.now(),
 ): ReadonlySet<DetailsMetricId> | null {
-  if (config.kind !== 'details' || config.section === 'all' || expandedItems.length === 0) {
-    return null
-  }
+  if (config.kind !== 'details' || config.section === 'all' || expandedItems.length === 0) return null
   const descriptors = DETAILS_SECTION_METRICS[config.section]
+  const achievableCount = countAchievableDescriptors(descriptors, expandedItems)
   const availableMetricIds = new Set<DetailsMetricId>()
+  if (achievableCount === 0) return availableMetricIds
+
   for (const item of expandedItems) {
-    if (item.config.kind !== 'details') {
-      continue
-    }
-    const sliceContext = resolveTelemetryContext(
-      exportData,
-      item.config.scope,
-      item.config.selectedModeId,
-      nowMs,
-    )
+    if (item.config.kind !== 'details') continue
+    const sliceContext = resolveTelemetryContext(exportData, item.config.scope, item.config.selectedModeId, nowMs)
     for (const descriptor of descriptors) {
-      if (
-        !availableMetricIds.has(descriptor.id) &&
-        isDetailsMetricAvailable(descriptor, sliceContext, item.config.scope.kind)
-      ) {
+      if (!availableMetricIds.has(descriptor.id) && isDetailsMetricAvailable(descriptor, sliceContext, item.config.scope.kind)) {
         availableMetricIds.add(descriptor.id)
       }
     }
-    if (availableMetricIds.size === descriptors.length) {
-      break
-    }
+    if (availableMetricIds.size >= achievableCount) break
   }
   return availableMetricIds
+}
+
+function countAchievableDescriptors(
+  descriptors: ReadonlyArray<DetailsMetricDescriptor>,
+  expandedItems: ReadonlyArray<CartBlockItem>,
+): number {
+  const hasFullCombined = expandedItems.some(
+    (item) => item.config.kind === 'details' && item.config.scope.kind === 'full' && item.config.selectedModeId == null,
+  )
+  const hasVisitedRoute = expandedItems.some(
+    (item) => item.config.kind === 'details' && item.config.scope.kind !== 'baseline',
+  )
+  return descriptors.filter(
+    (descriptor) =>
+      (!descriptor.fullExpeditionCombinedOnly || hasFullCombined) &&
+      (!descriptor.requiresVisitedRoute || hasVisitedRoute),
+  ).length
 }
 
 /** Computes all derived averages, percentages, and net profits with safe division and sub-24h guards. */
@@ -442,18 +149,9 @@ export function computeDerivedMetrics(
 ): DerivedMetrics {
   const shipDistanceLy = computeShipDistanceLy(metrics)
   const totalBoosts =
-    metrics.jetConeBoosts +
-    metrics.premiumBoosts +
-    metrics.standardBoosts +
-    metrics.basicBoosts
+    metrics.jetConeBoosts + metrics.premiumBoosts + metrics.standardBoosts + metrics.basicBoosts
   const combinedEstimatedCredits = metrics.scanValueTotal + metrics.organicValueTotal
-  const totalLossesCredits =
-    realizationBreakdown.cartoLostDeath +
-    realizationBreakdown.organicLostDeath +
-    realizationBreakdown.cartoStolen +
-    realizationBreakdown.organicStolen +
-    realizationBreakdown.carrierTariffLoss +
-    realizationBreakdown.npcCrewLoss
+  const totalLossesCredits = computeTotalLosses(realizationBreakdown)
   const settledEstimate = combinedEstimatedCredits - realizationBreakdown.pendingValue
   const validDays = elapsedDays != null && elapsedDays >= 1 ? elapsedDays : null
 
@@ -464,8 +162,7 @@ export function computeDerivedMetrics(
     boostRatePercent: safePercent(totalBoosts, metrics.jumps),
     avgDistancePerDayLy: validDays != null ? metrics.distanceLy / validDays : null,
     avgCarrierJumpRangeLy: safeDivide(metrics.carrierDistanceLy, metrics.carrierJumps),
-    avgTritiumPerJump:
-      metrics.tritiumUsed != null ? safeDivide(metrics.tritiumUsed, metrics.carrierJumps) : null,
+    avgTritiumPerJump: metrics.tritiumUsed != null ? safeDivide(metrics.tritiumUsed, metrics.carrierJumps) : null,
     combinedEstimatedCredits,
     dssEfficiencyPercent: safePercent(metrics.efficientMappings, metrics.bodiesMapped),
     firstDiscoveryRatePercent: safePercent(metrics.firstDiscoveries, metrics.bodiesScanned),
@@ -484,11 +181,19 @@ export function computeDerivedMetrics(
     netProfitAfterCarrierCost:
       carrierCost != null ? realizationBreakdown.totalRealized - carrierCost.totalCost : null,
     avgRealizedCreditsPerJump: safeDivide(realizationBreakdown.totalRealized, metrics.jumps),
-    avgRealizedCreditsPer1000Ly: safePerThousand(
-      realizationBreakdown.totalRealized,
-      metrics.distanceLy,
-    ),
+    avgRealizedCreditsPer1000Ly: safePerThousand(realizationBreakdown.totalRealized, metrics.distanceLy),
   }
+}
+
+function computeTotalLosses(realizationBreakdown: realization.Breakdown): number {
+  return (
+    realizationBreakdown.cartoLostDeath +
+    realizationBreakdown.organicLostDeath +
+    realizationBreakdown.cartoStolen +
+    realizationBreakdown.organicStolen +
+    realizationBreakdown.carrierTariffLoss +
+    realizationBreakdown.npcCrewLoss
+  )
 }
 
 /** Resolves all telemetry, labels, derived metrics, and optional Career Diffs for a concrete block scope. */
@@ -505,417 +210,32 @@ export function resolveTelemetryContext(
       return resolveLegContext(exportData, scope.rowId, nowMs)
     case 'region':
       return resolveRegionContext(exportData, scope.regionName, selectedModeId, nowMs)
-    case 'allLegs': {
-      const firstLeg = getVisitedLegs(exportData)[0]
-      return resolveLegContext(exportData, firstLeg?.rowView.row.id, nowMs)
-    }
-    case 'allRegions': {
-      const firstRegion = getVisitedRegions(exportData)[0]
-      return resolveRegionContext(exportData, firstRegion?.regionName, selectedModeId, nowMs)
-    }
+    case 'allLegs':
+      return resolveLegContext(exportData, getVisitedLegs(exportData)[0]?.rowView.row.id, nowMs)
+    case 'allRegions':
+      return resolveRegionContext(exportData, getVisitedRegions(exportData)[0]?.regionName, selectedModeId, nowMs)
     case 'full':
     default:
       return resolveFullExpeditionContext(exportData, selectedModeId, nowMs)
   }
 }
 
-/** Expands a configurator block (including All Sections, All Legs, All Regions, and Separate modes) into concrete cart items. */
-export function expandConfigToCartItems(
-  exportData: ExpeditionExportData,
-  config: ConfiguratorBlockConfig,
-  idPrefix: string,
-): CartBlockItem[] {
-  if (config.kind === 'waypoints') {
-    const scopeText = config.waypointsScope === 'fullPlan' ? 'Full Plan' : 'Visited Only'
-    return [
-      {
-        id: `${idPrefix}-waypoints`,
-        title: `Waypoints (${scopeText})`,
-        subtitle: `${config.selectedColumns.length} columns`,
-        filenameSlug: `waypoints-${slugify(scopeText)}`,
-        config: { ...config, selectedColumns: [...config.selectedColumns] },
-      },
-    ]
-  }
-  if (config.kind === 'highlights') {
-    return [
-      {
-        id: `${idPrefix}-highlights`,
-        title: `Highlights (Top ${config.depth})`,
-        subtitle: `${config.selectedCards.length} cards`,
-        filenameSlug: `highlights-top-${config.depth}`,
-        config: { ...config, selectedCards: [...config.selectedCards] },
-      },
-    ]
-  }
-  if (config.kind === 'details' && config.section === 'all') {
-    return expandAllDetailsSections(exportData, config, idPrefix)
-  }
-  return expandTelemetryBlockConfig(exportData, config, idPrefix)
-}
-
-/** Builds the Quick Share 3-card preset cart (Summary + Highlights Top 1 + Waypoints). */
-export function createQuickShareCart(exportData: ExpeditionExportData): CartBlockItem[] {
-  const items: CartBlockItem[] = []
-  items.push(
-    ...expandConfigToCartItems(
-      exportData,
-      {
-        kind: 'summary',
-        scope: { kind: 'full' },
-        modeGrouping: 'combined',
-        careerDiff: 'percentage',
-      },
-      'quick-1',
-    ),
-  )
-  if ((exportData.plan.visitedWaypointCount ?? 0) >= 2) {
-    items.push(
-      ...expandConfigToCartItems(
-        exportData,
-        {
-          kind: 'highlights',
-          depth: 1,
-          selectedCards: HIGHLIGHT_CARDS.filter((card) => card.defaultChecked).map(
-            (card) => card.id,
-          ),
-          lucrativeMetric: 'estimated',
-          distanceMetric: 'total',
-        },
-        'quick-2',
-      ),
-    )
-  }
-  items.push(
-    ...expandConfigToCartItems(
-      exportData,
-      {
-        kind: 'waypoints',
-        waypointsScope: 'visited',
-        selectedColumns: WAYPOINTS_COLUMNS.filter((column) => column.defaultChecked).map(
-          (column) => column.id,
-        ),
-      },
-      'quick-3',
-    ),
-  )
-  return items
-}
-
-/** Converts a display title into a clean lowercase filename slug. */
-export function slugify(rawText: string): string {
-  const cleaned = rawText
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  return cleaned || 'block'
-}
-
-function slugifyCamelCase(rawText: string): string {
-  return slugify(rawText.replace(/([a-z0-9])([A-Z])/g, '$1-$2'))
-}
-
-function expandAllDetailsSections(
-  exportData: ExpeditionExportData,
-  config: AllDetailsSectionsConfig,
-  idPrefix: string,
-): CartBlockItem[] {
-  const allowCarrier = includeCarrierSection(exportData, config)
-  const applicableSections = DETAILS_SECTIONS.filter(
-    (sectionMeta) => sectionMeta.id !== 'carrier' || allowCarrier,
-  )
-  if (config.scope.kind === 'allLegs') {
-    return expandAllLegsDetailsSections(exportData, applicableSections, idPrefix)
-  }
-  const perSectionItems = applicableSections.map((sectionMeta) =>
-    expandTelemetryBlockConfig(
-      exportData,
-      {
-        ...config,
-        section: sectionMeta.id,
-        selectedMetrics: defaultMetricsForSection(sectionMeta.id),
-      },
-      `${idPrefix}-${sectionMeta.id}`,
-    ),
-  )
-  // Transpose into entity-outer and section-inner order so all applicable sections
-  // for each region or flight mode stay grouped together before the next slice.
-  const sliceCount = perSectionItems[0]?.length ?? 0
-  const orderedItems: CartBlockItem[] = []
-  for (let sliceIndex = 0; sliceIndex < sliceCount; sliceIndex++) {
-    for (const sectionItems of perSectionItems) {
-      if (sectionItems[sliceIndex]) {
-        orderedItems.push(sectionItems[sliceIndex])
-      }
-    }
-  }
-  return orderedItems
-}
-
-function expandAllLegsDetailsSections(
-  exportData: ExpeditionExportData,
-  applicableSections: typeof DETAILS_SECTIONS,
-  idPrefix: string,
-): CartBlockItem[] {
-  const sectionTemplates = applicableSections.map((sectionMeta) => ({
-    sectionId: sectionMeta.id,
-    ...formatDetailsSectionMeta(sectionMeta.id),
-    selectedMetrics: defaultMetricsForSection(sectionMeta.id),
-  }))
-  const items: CartBlockItem[] = []
-  // Iterate entity-outer (visited leg) and section-inner so each leg's sections stay grouped.
-  for (const [legIndex, leg] of getVisitedLegs(exportData).entries()) {
-    for (const template of sectionTemplates) {
-      const legSectionConfig: DetailsBlockConfig = {
-        kind: 'details',
-        section: template.sectionId,
-        scope: { kind: 'leg', rowId: leg.rowView.row.id },
-        modeGrouping: 'combined',
-        selectedMetrics: template.selectedMetrics,
-      }
-      items.push(
-        buildLegCartItem(
-          leg,
-          legIndex,
-          legSectionConfig,
-          `${idPrefix}-${template.sectionId}`,
-          template.blockLabel,
-          template.blockSlug,
-        ),
-      )
-    }
-  }
-  return items
-}
-
-function includeCarrierSection(
-  exportData: ExpeditionExportData,
-  config: AllDetailsSectionsConfig,
-): boolean {
-  if (config.scope.kind !== 'full') {
-    return false
-  }
-  if (
-    config.modeGrouping === 'separate' &&
-    getDistinctModesForScope(exportData, config.scope).length >= 2
-  ) {
-    return false
-  }
-  return (
-    (exportData.expedition.metrics.carrierJumps ?? 0) > 0 ||
-    (exportData.carrierCost?.totalCost ?? 0) > 0
-  )
-}
-
-function formatDetailsSectionMeta(sectionId: DetailsSection): {
-  blockLabel: string
-  blockSlug: string
-} {
-  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === sectionId)
+function buildContextBase(
+  scopeLabel: string,
+  routeTitle: string,
+  metrics: stats.Metrics,
+  realizationBreakdown: realization.Breakdown,
+  carrierCost: ExportCarrierCost | null,
+  elapsedDays: number | null,
+  overrides: Partial<ResolvedTelemetryContext> = {},
+): ResolvedTelemetryContext {
   return {
-    blockLabel: `Details: ${sectionMeta?.label ?? sectionId}`,
-    blockSlug: slugifyCamelCase(sectionId),
-  }
-}
-
-function buildLegCartItem(
-  leg: VisitedLegRecord,
-  legIndex: number,
-  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
-  idPrefix: string,
-  blockLabel: string,
-  blockSlug: string,
-): CartBlockItem {
-  const legTitle = `Leg #${leg.details.number - 1} to #${leg.details.number}`
-  return {
-    id: `${idPrefix}-leg-${leg.rowView.row.id}-${legIndex}`,
-    title: `${blockLabel} — ${legTitle}`,
-    subtitle: `${leg.details.prevSystem || 'Origin'} to ${leg.rowView.row.systemName}`,
-    filenameSlug: `wp${leg.details.number}-${blockSlug}`,
-    config: cloneConcreteTelemetryConfig(
-      config,
-      { kind: 'leg', rowId: leg.rowView.row.id },
-      undefined,
-      'hide',
-    ),
-  }
-}
-
-function expandTelemetryBlockConfig(
-  exportData: ExpeditionExportData,
-  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
-  idPrefix: string,
-): CartBlockItem[] {
-  const { blockLabel, blockSlug } =
-    config.kind === 'summary'
-      ? { blockLabel: 'Summary', blockSlug: 'summary' }
-      : formatDetailsSectionMeta(config.section)
-
-  if (config.scope.kind === 'allLegs') {
-    return expandAllLegsItems(exportData, config, idPrefix, blockLabel, blockSlug)
-  }
-  if (config.scope.kind === 'allRegions') {
-    return expandAllRegionsItems(exportData, config, idPrefix, blockLabel, blockSlug)
-  }
-  return expandSingleScopeItems(
-    exportData,
-    config,
-    idPrefix,
-    blockLabel,
-    blockSlug,
-  )
-}
-
-function expandAllLegsItems(
-  exportData: ExpeditionExportData,
-  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
-  idPrefix: string,
-  blockLabel: string,
-  blockSlug: string,
-): CartBlockItem[] {
-  return getVisitedLegs(exportData).map((leg, index) =>
-    buildLegCartItem(leg, index, config, idPrefix, blockLabel, blockSlug),
-  )
-}
-
-function expandAllRegionsItems(
-  exportData: ExpeditionExportData,
-  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
-  idPrefix: string,
-  blockLabel: string,
-  blockSlug: string,
-): CartBlockItem[] {
-  const items: CartBlockItem[] = []
-  for (const region of getVisitedRegions(exportData)) {
-    const splitModes =
-      config.modeGrouping === 'separate' &&
-      (config.kind !== 'details' || config.section !== 'carrier') &&
-      region.distinctModes.length >= 2
-    if (splitModes) {
-      for (const modeTag of region.distinctModes) {
-        items.push({
-          id: `${idPrefix}-region-${slugify(region.regionName)}-mode-${modeTag.modeId}`,
-          title: `${blockLabel} — ${region.regionName} (${modeTag.modeName})`,
-          subtitle: `${region.legs.filter((leg) => leg.rowView.legModeId === modeTag.modeId).length} legs`,
-          filenameSlug: `${slugify(region.regionName)}-${slugify(modeTag.modeName)}-${blockSlug}`,
-          config: cloneConcreteTelemetryConfig(
-            config,
-            { kind: 'region', regionName: region.regionName },
-            modeTag.modeId,
-            'hide',
-          ),
-        })
-      }
-      continue
-    }
-    items.push({
-      id: `${idPrefix}-region-${slugify(region.regionName)}`,
-      title: `${blockLabel} — ${region.regionName}`,
-      subtitle: `${region.legs.length} legs`,
-      filenameSlug: `${slugify(region.regionName)}-${blockSlug}`,
-      config: cloneConcreteTelemetryConfig(
-        config,
-        { kind: 'region', regionName: region.regionName },
-        undefined,
-        'hide',
-      ),
-    })
-  }
-  return items
-}
-
-function expandSingleScopeItems(
-  exportData: ExpeditionExportData,
-  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
-  idPrefix: string,
-  blockLabel: string,
-  blockSlug: string,
-): CartBlockItem[] {
-  const availableModes = getDistinctModesForScope(exportData, config.scope)
-  const shouldSplitByMode =
-    config.modeGrouping === 'separate' &&
-    (config.kind !== 'details' || config.section !== 'carrier') &&
-    availableModes.length >= 2
-  const { label: scopeText, slug: scopeSlug } = describeScope(exportData, config.scope)
-
-  if (shouldSplitByMode) {
-    return availableModes.map((modeTag) => ({
-      id: `${idPrefix}-mode-${modeTag.modeId}`,
-      title: `${blockLabel} — ${scopeText} (${modeTag.modeName})`,
-      subtitle: modeTag.modeName,
-      filenameSlug: `${scopeSlug}-${slugify(modeTag.modeName)}-${blockSlug}`,
-      config: cloneConcreteTelemetryConfig(config, { ...config.scope }, modeTag.modeId, 'hide'),
-    }))
-  }
-
-  const baseCareerDiff = config.kind === 'summary' ? config.careerDiff : undefined
-  return [
-    {
-      id: `${idPrefix}-single`,
-      title: `${blockLabel} — ${scopeText}`,
-      subtitle: config.scope.kind === 'full' ? 'Combined' : scopeText,
-      filenameSlug: `${scopeSlug}-${blockSlug}`,
-      config: cloneConcreteTelemetryConfig(
-        config,
-        { ...config.scope },
-        undefined,
-        config.scope.kind === 'full' ? baseCareerDiff : 'hide',
-      ),
-    },
-  ]
-}
-
-function cloneConcreteTelemetryConfig(
-  config: Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>,
-  concreteScope: ExportScopeSpec,
-  selectedModeId: number | undefined,
-  careerDiffOverride: 'hide' | 'absolute' | 'percentage' | 'both' | undefined,
-): Extract<ExportBlockConfig, { kind: 'summary' | 'details' }> {
-  if (config.kind === 'summary') {
-    return {
-      kind: 'summary',
-      scope: concreteScope,
-      modeGrouping: selectedModeId ? 'separate' : 'combined',
-      selectedModeId,
-      careerDiff: careerDiffOverride ?? config.careerDiff,
-    }
-  }
-  return {
-    kind: 'details',
-    section: config.section,
-    scope: concreteScope,
-    modeGrouping: selectedModeId ? 'separate' : 'combined',
-    selectedModeId,
-    selectedMetrics: [...config.selectedMetrics],
-  }
-}
-
-function describeScope(
-  exportData: ExpeditionExportData,
-  scope: ExportScopeSpec,
-): { label: string; slug: string } {
-  switch (scope.kind) {
-    case 'full':
-      return { label: 'Full Expedition', slug: 'full-expedition' }
-    case 'baseline':
-      return { label: 'Pre-Expedition Baseline', slug: 'pre-expedition-baseline' }
-    case 'leg': {
-      const leg = getVisitedLegs(exportData).find((item) => item.rowView.row.id === scope.rowId)
-      return leg
-        ? {
-            label: `Leg #${leg.details.number - 1} to #${leg.details.number}`,
-            slug: `wp${leg.details.number}`,
-          }
-        : { label: 'Selected Leg', slug: 'selected-leg' }
-    }
-    case 'region': {
-      const label = scope.regionName || 'Selected Region'
-      return { label, slug: slugify(label) }
-    }
-    case 'allLegs':
-      return { label: 'All Legs', slug: 'all-legs' }
-    case 'allRegions':
-      return { label: 'All Galactic Regions', slug: 'all-galactic-regions' }
+    scopeLabel, routeTitle, modeBadge: null, fromGalactic: '', toGalactic: '', inSystem: false,
+    durationLabel: '', elapsedDays, metrics, realization: realizationBreakdown, carrierCost,
+    shipsFlown: [], distinctRegionCount: null, visitedWaypoints: null, plannedWaypoints: null,
+    coveredLy: null, plannedLy: null, careerDiff: null, isFullExpeditionCombined: false,
+    derived: computeDerivedMetrics(metrics, realizationBreakdown, carrierCost, elapsedDays),
+    ...overrides,
   }
 }
 
@@ -925,147 +245,67 @@ function resolveFullExpeditionContext(
   nowMs: number,
 ): ResolvedTelemetryContext {
   const modeBucket =
-    selectedModeId != null
-      ? exportData.modeBuckets.find((bucket) => bucket.modeId === selectedModeId)
-      : undefined
+    selectedModeId != null ? exportData.modeBuckets.find((bucket) => bucket.modeId === selectedModeId) : undefined
   const isCombined = modeBucket == null
   const metrics = modeBucket ? modeBucket.metrics : exportData.expedition.metrics
-  const realizationBreakdown = modeBucket
-    ? modeBucket.realization
-    : exportData.expedition.realization
+  const realizationBreakdown = modeBucket ? modeBucket.realization : exportData.expedition.realization
   const carrierCost = isCombined ? exportData.carrierCost : null
-  const visitedLegs = getVisitedLegs(exportData)
+  const dataIndex = getExportDataIndex(exportData)
   const matchingLegs = modeBucket
-    ? visitedLegs.filter((leg) => leg.rowView.legModeId === modeBucket.modeId)
-    : visitedLegs
-  const elapsedDays = computeElapsedDays(
-    exportData.effectiveStart,
-    exportData.effectiveEnd,
-    nowMs,
-  )
-  const derived = computeDerivedMetrics(metrics, realizationBreakdown, carrierCost, elapsedDays)
-  const careerDiff = isCombined ? buildCareerDiff(exportData) : null
+    ? dataIndex.visitedLegs.filter((leg) => leg.rowView.legModeId === modeBucket.modeId)
+    : dataIndex.visitedLegs
+  const elapsedDays = computeElapsedDays(exportData.effectiveStart, exportData.effectiveEnd, nowMs)
+  const scopeLabel = modeBucket ? `Full Expedition — ${modeBucket.modeName}` : 'Full Expedition'
 
-  return {
-    scopeLabel: modeBucket ? `Full Expedition — ${modeBucket.modeName}` : 'Full Expedition',
-    routeTitle: exportData.plan.expedition.name,
-    modeBadge: modeBucket
-      ? { modeId: modeBucket.modeId, modeName: modeBucket.modeName, modeColor: modeBucket.modeColor }
-      : null,
+  return buildContextBase(scopeLabel, exportData.plan.expedition.name, metrics, realizationBreakdown, carrierCost, elapsedDays, {
+    modeBadge: modeBucket ? { modeId: modeBucket.modeId, modeName: modeBucket.modeName, modeColor: modeBucket.modeColor } : null,
     fromGalactic: exportData.effectiveStartGalactic || 'Unknown',
     toGalactic: exportData.endIsNow ? 'ACTIVE' : exportData.effectiveEndGalactic || 'Unknown',
-    inSystem: false,
     durationLabel: exportData.duration || formatElapsedDuration(exportData.effectiveStart, exportData.effectiveEnd, nowMs),
-    elapsedDays,
-    metrics,
-    realization: realizationBreakdown,
-    carrierCost,
     shipsFlown: collectUniqueShips(matchingLegs),
-    distinctRegionCount: isCombined ? getVisitedRegions(exportData).length : null,
+    distinctRegionCount: isCombined ? dataIndex.visitedRegions.length : null,
     visitedWaypoints: exportData.plan.visitedWaypointCount,
     plannedWaypoints: exportData.plan.waypointCount,
     coveredLy: exportData.plan.coveredLy,
     plannedLy: exportData.plan.plannedLy,
-    derived,
-    careerDiff,
+    careerDiff: isCombined ? buildCareerDiff(exportData) : null,
     isFullExpeditionCombined: isCombined,
-  }
+  })
 }
 
-function resolveBaselineContext(
-  exportData: ExpeditionExportData,
-  nowMs: number,
-): ResolvedTelemetryContext {
+function resolveBaselineContext(exportData: ExpeditionExportData, nowMs: number): ResolvedTelemetryContext {
   const baseline = exportData.originBaseline
   const metrics = baseline?.metrics ?? createEmptyMetrics()
   const realizationBreakdown = baseline?.realization ?? createEmptyRealization()
   const elapsedDays = computeElapsedDays(baseline?.from, baseline?.to, nowMs)
-  return {
-    scopeLabel: 'Pre-Expedition Baseline',
-    routeTitle: exportData.plan.expedition.name,
-    modeBadge: null,
+  return buildContextBase('Pre-Expedition Baseline', exportData.plan.expedition.name, metrics, realizationBreakdown, null, elapsedDays, {
     fromGalactic: baseline?.fromGalactic || 'Earliest Archive',
     toGalactic: baseline?.toGalactic || exportData.effectiveStartGalactic || 'Unknown',
     inSystem: Boolean(baseline?.inSystem),
     durationLabel: baseline?.elapsed || formatElapsedDuration(baseline?.from, baseline?.to, nowMs),
-    elapsedDays,
-    metrics,
-    realization: realizationBreakdown,
-    carrierCost: null,
-    shipsFlown: [],
-    distinctRegionCount: null,
-    visitedWaypoints: null,
-    plannedWaypoints: null,
-    coveredLy: null,
-    plannedLy: null,
-    derived: computeDerivedMetrics(metrics, realizationBreakdown, null, elapsedDays),
-    careerDiff: null,
-    isFullExpeditionCombined: false,
-  }
+  })
 }
 
-function resolveLegContext(
-  exportData: ExpeditionExportData,
-  rowId: number | undefined,
-  nowMs: number,
-): ResolvedTelemetryContext {
-  const visitedLegs = getVisitedLegs(exportData)
-  const leg = visitedLegs.find((item) => item.rowView.row.id === rowId) ?? visitedLegs[0]
+function resolveLegContext(exportData: ExpeditionExportData, rowId: number | undefined, nowMs: number): ResolvedTelemetryContext {
+  const dataIndex = getExportDataIndex(exportData)
+  const leg = (rowId != null ? dataIndex.visitedLegByRowId.get(rowId) : undefined) ?? dataIndex.visitedLegs[0]
   if (!leg) {
-    const emptyMetrics = createEmptyMetrics()
-    const emptyRealization = createEmptyRealization()
-    return {
-      scopeLabel: 'Selected Leg',
-      routeTitle: exportData.plan.expedition.name,
-      modeBadge: null,
-      fromGalactic: '',
-      toGalactic: '',
-      inSystem: false,
-      durationLabel: '',
-      elapsedDays: null,
-      metrics: emptyMetrics,
-      realization: emptyRealization,
-      carrierCost: null,
-      shipsFlown: [],
-      distinctRegionCount: null,
-      visitedWaypoints: null,
-      plannedWaypoints: null,
-      coveredLy: null,
-      plannedLy: null,
-      derived: computeDerivedMetrics(emptyMetrics, emptyRealization, null, null),
-      careerDiff: null,
-      isFullExpeditionCombined: false,
-    }
+    return buildContextBase('Selected Leg', exportData.plan.expedition.name, createEmptyMetrics(), createEmptyRealization(), null, null)
   }
   const elapsedDays = computeElapsedDays(leg.details.from, leg.details.to, nowMs)
-  return {
-    scopeLabel: `Leg #${leg.details.number - 1} to #${leg.details.number}`,
-    routeTitle: `${leg.details.prevSystem || 'Origin'} -> ${leg.rowView.row.systemName}`,
+  const scopeLabel = `Leg #${leg.details.number - 1} to #${leg.details.number}`
+  const routeTitle = `${leg.details.prevSystem || 'Origin'} -> ${leg.rowView.row.systemName}`
+  return buildContextBase(scopeLabel, routeTitle, leg.details.metrics, leg.details.realization, null, elapsedDays, {
     modeBadge: leg.rowView.legModeName
-      ? {
-          modeId: leg.rowView.legModeId,
-          modeName: leg.rowView.legModeName,
-          modeColor: leg.rowView.legModeColor || '#FF7100',
-        }
+      ? { modeId: leg.rowView.legModeId, modeName: leg.rowView.legModeName, modeColor: leg.rowView.legModeColor || DEFAULT_MODE_COLOR }
       : null,
     fromGalactic: leg.details.fromGalactic || '',
     toGalactic: leg.details.toGalactic || (leg.details.inSystem ? 'IN SYSTEM' : 'IN PROGRESS'),
     inSystem: Boolean(leg.details.inSystem),
     durationLabel: leg.details.elapsed || formatElapsedDuration(leg.details.from, leg.details.to, nowMs),
-    elapsedDays,
-    metrics: leg.details.metrics,
-    realization: leg.details.realization,
-    carrierCost: null,
     shipsFlown: collectUniqueShips([leg]),
-    distinctRegionCount: null,
-    visitedWaypoints: null,
-    plannedWaypoints: null,
     coveredLy: leg.rowView.distFromPrevLy ?? null,
-    plannedLy: null,
-    derived: computeDerivedMetrics(leg.details.metrics, leg.details.realization, null, elapsedDays),
-    careerDiff: null,
-    isFullExpeditionCombined: false,
-  }
+  })
 }
 
 function resolveRegionContext(
@@ -1074,14 +314,31 @@ function resolveRegionContext(
   selectedModeId: number | undefined,
   nowMs: number,
 ): ResolvedTelemetryContext {
-  const regions = getVisitedRegions(exportData)
-  const region = regions.find((item) => item.regionName === regionName) ?? regions[0]
+  const dataIndex = getExportDataIndex(exportData)
+  const region =
+    (regionName != null ? dataIndex.visitedRegionByName.get(regionName) : undefined) ?? dataIndex.visitedRegions[0]
   const matchingLegs = region
-    ? selectedModeId != null
-      ? region.legs.filter((leg) => leg.rowView.legModeId === selectedModeId)
-      : region.legs
+    ? selectedModeId != null ? region.legs.filter((leg) => leg.rowView.legModeId === selectedModeId) : region.legs
     : []
+  const aggregated = aggregateRegionLegs(matchingLegs, nowMs)
+  const modeTag =
+    selectedModeId != null ? region?.distinctModes.find((mode) => mode.modeId === selectedModeId) ?? null : null
+  const resolvedName = region?.regionName ?? 'Selected Region'
+  const scopeLabel = modeTag ? `Region: ${resolvedName} (${modeTag.modeName})` : `Region: ${resolvedName}`
 
+  return buildContextBase(scopeLabel, exportData.plan.expedition.name, aggregated.metrics, aggregated.realizationBreakdown, null, aggregated.elapsedDays, {
+    modeBadge: modeTag,
+    fromGalactic: aggregated.firstFromGalactic,
+    toGalactic: aggregated.lastToGalactic,
+    inSystem: aggregated.anyInSystem,
+    durationLabel: aggregated.durationLabel,
+    shipsFlown: collectUniqueShips(matchingLegs),
+    visitedWaypoints: matchingLegs.length,
+    coveredLy: matchingLegs.reduce((sum, leg) => sum + (leg.rowView.distFromPrevLy ?? 0), 0),
+  })
+}
+
+function aggregateRegionLegs(matchingLegs: VisitedLegRecord[], nowMs: number) {
   let metrics = createEmptyMetrics()
   let realizationBreakdown = createEmptyRealization()
   let totalElapsedMs = 0
@@ -1092,146 +349,42 @@ function resolveRegionContext(
   for (const leg of matchingLegs) {
     metrics = addMetrics(metrics, leg.details.metrics)
     realizationBreakdown = addRealization(realizationBreakdown, leg.details.realization)
-    if (!firstFromGalactic && leg.details.fromGalactic) {
-      firstFromGalactic = leg.details.fromGalactic
-    }
-    if (leg.details.toGalactic) {
-      lastToGalactic = leg.details.toGalactic
-    }
+    if (!firstFromGalactic && leg.details.fromGalactic) firstFromGalactic = leg.details.fromGalactic
+    if (leg.details.toGalactic) lastToGalactic = leg.details.toGalactic
     if (leg.details.inSystem) {
       anyInSystem = true
       lastToGalactic = 'IN SYSTEM'
     }
     const legDays = computeElapsedDays(leg.details.from, leg.details.to, nowMs)
-    if (legDays != null) {
-      totalElapsedMs += legDays * MILLISECONDS_PER_DAY
-    }
+    if (legDays != null) totalElapsedMs += legDays * MILLISECONDS_PER_DAY
   }
-
-  const elapsedDays = totalElapsedMs > 0 ? totalElapsedMs / MILLISECONDS_PER_DAY : null
-  const modeTag =
-    selectedModeId != null
-      ? region?.distinctModes.find((mode) => mode.modeId === selectedModeId) ?? null
-      : null
-  const resolvedRegionName = region?.regionName ?? 'Selected Region'
-
   return {
-    scopeLabel: modeTag ? `Region: ${resolvedRegionName} (${modeTag.modeName})` : `Region: ${resolvedRegionName}`,
-    routeTitle: exportData.plan.expedition.name,
-    modeBadge: modeTag,
-    fromGalactic: firstFromGalactic,
-    toGalactic: lastToGalactic,
-    inSystem: anyInSystem,
-    durationLabel:
-      totalElapsedMs > 0
-        ? formatElapsedDuration(new Date(0).toISOString(), new Date(totalElapsedMs).toISOString())
-        : '',
-    elapsedDays,
-    metrics,
-    realization: realizationBreakdown,
-    carrierCost: null,
-    shipsFlown: collectUniqueShips(matchingLegs),
-    distinctRegionCount: null,
-    visitedWaypoints: matchingLegs.length,
-    plannedWaypoints: null,
-    coveredLy: matchingLegs.reduce((sum, leg) => sum + (leg.rowView.distFromPrevLy ?? 0), 0),
-    plannedLy: null,
-    derived: computeDerivedMetrics(metrics, realizationBreakdown, null, elapsedDays),
-    careerDiff: null,
-    isFullExpeditionCombined: false,
+    metrics, realizationBreakdown, firstFromGalactic, lastToGalactic, anyInSystem,
+    elapsedDays: totalElapsedMs > 0 ? totalElapsedMs / MILLISECONDS_PER_DAY : null,
+    durationLabel: totalElapsedMs > 0 ? formatElapsedDuration(new Date(0).toISOString(), new Date(totalElapsedMs).toISOString()) : '',
   }
 }
 
 function buildCareerDiff(exportData: ExpeditionExportData): CareerDiffItem[] | null {
   const baseline = exportData.originBaseline
-  if (!baseline) {
-    return null
-  }
-  const baseMetrics = baseline.metrics
-  const expMetrics = exportData.live
-  const baseRealized = baseline.realization.totalRealized
-  const expRealized = exportData.expedition.realization.totalRealized
-
-  return [
-    makeCareerDiffItem('distanceLy', baseMetrics.distanceLy, expMetrics.distanceLy),
-    makeCareerDiffItem('jumps', baseMetrics.jumps, expMetrics.jumps),
-    makeCareerDiffItem(
-      'estimatedValue',
-      baseMetrics.scanValueTotal + baseMetrics.organicValueTotal,
-      expMetrics.scanValueTotal + expMetrics.organicValueTotal,
-    ),
-    makeCareerDiffItem('realizedValue', baseRealized, expRealized),
-    makeCareerDiffItem('bodiesScanned', baseMetrics.bodiesScanned, expMetrics.bodiesScanned),
-    makeCareerDiffItem('bodiesMapped', baseMetrics.bodiesMapped, expMetrics.bodiesMapped),
-    makeCareerDiffItem('organicSamples', baseMetrics.organicSamples, expMetrics.organicSamples),
-  ]
-}
-
-function makeCareerDiffItem(
-  id: CareerDiffItem['id'],
-  baseline: number,
-  delta: number,
-): CareerDiffItem {
-  const isNewBaseline = baseline <= 0 && delta > 0
-  return {
+  if (!baseline) return null
+  const baselineMetrics = baseline.metrics
+  const expeditionMetrics = exportData.live
+  const baselineRealization = baseline.realization.totalRealized
+  const expeditionRealization = exportData.expedition.realization.totalRealized
+  const makeItem = (id: CareerDiffFieldId, baselineValue: number, delta: number): CareerDiffItem => ({
     id,
-    baseline,
-    growthPercent: baseline > 0 ? (delta / baseline) * 100 : null,
-    isNewBaseline,
-  }
-}
-
-function extractDistinctModesFromLegs(legs: VisitedLegRecord[]): ActiveModeTag[] {
-  const modesById = new Map<number, ActiveModeTag>()
-  for (const leg of legs) {
-    if (leg.rowView.legModeId > 0 && !modesById.has(leg.rowView.legModeId)) {
-      modesById.set(leg.rowView.legModeId, {
-        modeId: leg.rowView.legModeId,
-        modeName: leg.rowView.legModeName || 'Travel',
-        modeColor: leg.rowView.legModeColor || '#FF7100',
-      })
-    }
-  }
-  return Array.from(modesById.values())
-}
-
-function collectUniqueShips(legs: VisitedLegRecord[]): string[] {
-  const uniqueShips = new Set<string>()
-  for (const leg of legs) {
-    for (const shipName of leg.details.shipsUsed ?? []) {
-      const trimmed = shipName.trim()
-      if (trimmed) {
-        uniqueShips.add(trimmed)
-      }
-    }
-  }
-  return Array.from(uniqueShips)
-}
-
-function computeElapsedDays(
-  fromIso: string | undefined,
-  toIso: string | undefined,
-  nowMs: number,
-): number | null {
-  if (!fromIso) return null
-  const startMs = Date.parse(fromIso)
-  if (Number.isNaN(startMs)) return null
-  const endMs = toIso ? Date.parse(toIso) : nowMs
-  if (Number.isNaN(endMs) || endMs <= startMs) return null
-  return (endMs - startMs) / MILLISECONDS_PER_DAY
-}
-
-function safeDivide(numerator: number, denominator: number): number | null {
-  if (!Number.isFinite(denominator) || denominator <= 0) return null
-  return numerator / denominator
-}
-
-function safePercent(part: number, whole: number): number | null {
-  if (!Number.isFinite(whole) || whole <= 0) return null
-  return (part / whole) * 100
-}
-
-function safePerThousand(value: number, distanceLy: number): number | null {
-  if (!Number.isFinite(distanceLy) || distanceLy <= 0) return null
-  return value / (distanceLy / 1000)
+    baseline: baselineValue,
+    growthPercent: baselineValue > 0 ? (delta / baselineValue) * 100 : null,
+    isNewBaseline: baselineValue <= 0 && delta > 0,
+  })
+  return [
+    makeItem('distanceLy', baselineMetrics.distanceLy, expeditionMetrics.distanceLy),
+    makeItem('jumps', baselineMetrics.jumps, expeditionMetrics.jumps),
+    makeItem('estimatedValue', baselineMetrics.scanValueTotal + baselineMetrics.organicValueTotal, expeditionMetrics.scanValueTotal + expeditionMetrics.organicValueTotal),
+    makeItem('realizedValue', baselineRealization, expeditionRealization),
+    makeItem('bodiesScanned', baselineMetrics.bodiesScanned, expeditionMetrics.bodiesScanned),
+    makeItem('bodiesMapped', baselineMetrics.bodiesMapped, expeditionMetrics.bodiesMapped),
+    makeItem('organicSamples', baselineMetrics.organicSamples, expeditionMetrics.organicSamples),
+  ]
 }

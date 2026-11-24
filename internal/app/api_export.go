@@ -37,9 +37,25 @@ func (app *App) PickExportSavePath(defaultFilename, fileExt string) (string, err
 	})
 }
 
-// WriteExportOutput writes one file directly or packages multiple files into a zip archive at targetPath.
+// WriteExportOutput writes one file directly or packages multiple files into a zip archive at targetPath,
+// populating any CanonicalJSONExpeditionID entries directly in Go without round-tripping snapshot JSON over IPC.
 func (app *App) WriteExportOutput(targetPath string, files []exporter.BundleFile) (string, error) {
-	return exporter.WriteExport(targetPath, files)
+	resolvedFiles := make([]exporter.BundleFile, len(files))
+	copy(resolvedFiles, files)
+	for index, bundleFile := range resolvedFiles {
+		if bundleFile.CanonicalJSONExpeditionID > 0 && bundleFile.ContentText == "" && bundleFile.ContentBase64 == "" {
+			snapshot, exportError := app.GetExpeditionExportData(bundleFile.CanonicalJSONExpeditionID)
+			if exportError != nil {
+				return "", fmt.Errorf("build canonical json for expedition %d: %w", bundleFile.CanonicalJSONExpeditionID, exportError)
+			}
+			encodedJSON, marshalError := exporter.MarshalCanonicalJSON(snapshot)
+			if marshalError != nil {
+				return "", fmt.Errorf("marshal canonical json for expedition %d: %w", bundleFile.CanonicalJSONExpeditionID, marshalError)
+			}
+			resolvedFiles[index].ContentText = string(encodedJSON)
+		}
+	}
+	return exporter.WriteExport(targetPath, resolvedFiles)
 }
 
 func exportDialogFilters(extension string) []runtime.FileFilter {

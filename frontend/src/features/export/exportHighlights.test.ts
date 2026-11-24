@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { exporter } from '../../api/models'
 import {
   buildCanonicalJsonSnapshot,
   computeAllHighlightLeaderboards,
@@ -56,5 +57,78 @@ describe('exportHighlights', () => {
     )
     expect(longest.entries).toHaveLength(3)
   })
-})
 
+  it('filters by cardIds and slices to maxDepth before formatting, and reuses Go highlightsFullOrder when toggles use defaults', () => {
+    const baseData = buildSampleExportData()
+    const fixedNowMs = Date.parse('2026-04-05T12:00:00Z')
+
+    const toLocaleSpy = vi.spyOn(Number.prototype, 'toLocaleString')
+    let scopedCalls = 0
+    let fullCalls = 0
+    try {
+      const scopedBoards = computeAllHighlightLeaderboards(baseData, {
+        nowMs: fixedNowMs,
+        cardIds: ['mostLucrative'],
+        maxDepth: 1,
+      })
+      scopedCalls = toLocaleSpy.mock.calls.length
+      expect(scopedBoards).toHaveLength(1)
+      expect(scopedBoards[0].cardId).toBe('mostLucrative')
+      expect(scopedBoards[0].entries).toHaveLength(1)
+      // Only winner row (1 primary + 2 secondary credit values = 3 format calls) should be formatted.
+      expect(scopedCalls).toBe(3)
+
+      toLocaleSpy.mockClear()
+      computeAllHighlightLeaderboards(baseData, { nowMs: fixedNowMs })
+      fullCalls = toLocaleSpy.mock.calls.length
+      expect(fullCalls).toBeGreaterThan(scopedCalls * 5)
+    } finally {
+      toLocaleSpy.mockRestore()
+    }
+
+    // Hydrate through Wails exporter.ExpeditionExport with Go-populated highlightsFullOrder.
+    const fullPrecomputed = computeAllHighlightLeaderboards(baseData, { nowMs: fixedNowMs })
+    const hydratedPayload = exporter.ExpeditionExport.createFrom({
+      ...baseData,
+      highlightsFullOrder: fullPrecomputed.map((board) =>
+        board.cardId === 'mostLucrative'
+          ? {
+              ...board,
+              entries: board.entries.map((entry, entryIndex) =>
+                entryIndex === 0 ? { ...entry, formattedPrimary: '105,000,000 Cr [GO]' } : entry,
+              ),
+            }
+          : board,
+      ),
+    })
+
+    // Default 'estimated' toggle reuses Go highlightsFullOrder directly and slices to maxDepth=1.
+    const reusedDefault = computeAllHighlightLeaderboards(hydratedPayload, {
+      lucrativeMetric: 'estimated',
+      distanceMetric: 'total',
+      cardIds: ['mostLucrative', 'mostJumps'],
+      maxDepth: 1,
+    })
+    expect(reusedDefault).toHaveLength(2)
+    expect(reusedDefault[0].entries).toHaveLength(1)
+    expect(reusedDefault[0].entries[0].formattedPrimary).toBe('105,000,000 Cr [GO]')
+
+    // Switching lucrativeMetric to 'realized' recomputes mostLucrative in TS (95,000,000 Cr) while reusing mostJumps.
+    const recomputedRealized = computeAllHighlightLeaderboards(hydratedPayload, {
+      lucrativeMetric: 'realized',
+      distanceMetric: 'total',
+      cardIds: ['mostLucrative', 'mostJumps'],
+      maxDepth: 1,
+    })
+    expect(recomputedRealized[0].entries[0].formattedPrimary).toBe('95,000,000 Cr')
+    expect(recomputedRealized[1].entries[0].formattedPrimary).toBe('50 jumps')
+
+    // Switching distanceMetric to 'ship' recomputes longestDistance using ship distance (Leg #2 has 1,000 Ly ship vs 1,200 Ly total).
+    const shipDistanceBoards = computeAllHighlightLeaderboards(hydratedPayload, {
+      distanceMetric: 'ship',
+      cardIds: ['longestDistance'],
+      maxDepth: 2,
+    })
+    expect(shipDistanceBoards[0].entries[1].primaryValue).toBe(1000)
+  })
+})

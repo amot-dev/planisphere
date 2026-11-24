@@ -11,7 +11,6 @@ import { BlockConfigurator } from './BlockConfigurator'
 import { ExportBlockRenderer } from './blocks/ExportBlockRenderer'
 import { EXPORT_CARD_CSS, EXPORT_CARD_WIDTH } from './exportCardStyles'
 import { ExportCartQueue } from './ExportCartQueue'
-import { buildCanonicalJsonSnapshot } from './exportHighlights'
 import {
   computeAvailableDetailsMetricIds,
   createQuickShareCart,
@@ -73,9 +72,8 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
     GetExpeditionExportData(expeditionId)
       .then((payload) => {
         if (cancelled) return
-        const typedPayload = payload as unknown as ExpeditionExportData
-        setExportData(typedPayload)
-        setCartItems(createQuickShareCart(typedPayload))
+        setExportData(payload)
+        setCartItems(createQuickShareCart(payload))
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -232,7 +230,7 @@ export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditio
         setExportStatus('Serializing canonical JSON snapshot...')
         bundleFiles.push({
           name: `${expeditionSlug}-snapshot.json`,
-          contentText: buildCanonicalJsonSnapshot(exportData),
+          canonicalJsonExpeditionId: expeditionId,
         })
       }
 

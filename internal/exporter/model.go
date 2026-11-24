@@ -4,6 +4,7 @@ package exporter
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	replaystats "planisphere/internal/replay/stats"
@@ -27,6 +28,29 @@ type ModeBucket struct {
 	ModeColor   string                           `json:"modeColor"`
 	Metrics     replaystats.Metrics              `json:"metrics"`
 	Realization replaystats.RealizationBreakdown `json:"realization"`
+}
+
+// HighlightRankingEntry holds one ranked leg or waypoint row inside a Highlight leaderboard.
+type HighlightRankingEntry struct {
+	Rank             int     `json:"rank"`
+	Label            string  `json:"label"`
+	RouteLabel       string  `json:"routeLabel"`
+	PrimaryValue     float64 `json:"primaryValue"`
+	FormattedPrimary string  `json:"formattedPrimary"`
+	SecondaryLabel   string  `json:"secondaryLabel"`
+	ModeName         string  `json:"modeName,omitempty"`
+	ModeColor        string  `json:"modeColor,omitempty"`
+	InSystem         bool    `json:"inSystem,omitempty"`
+	RowID            int64   `json:"rowId"`
+	WaypointNumber   int     `json:"waypointNumber"`
+}
+
+// HighlightLeaderboard holds the complete ordered ranking for one Highlight category.
+type HighlightLeaderboard struct {
+	CardID  string                  `json:"cardId"`
+	Title   string                  `json:"title"`
+	Accent  string                  `json:"accent"`
+	Entries []HighlightRankingEntry `json:"entries"`
 }
 
 // ExpeditionExport is the canonical, unfiltered export payload for an expedition.
@@ -54,13 +78,20 @@ type ExpeditionExport struct {
 	OriginBaseline         *expedition.WaypointDetails  `json:"originBaseline,omitempty"`
 	ModeBuckets            []ModeBucket                 `json:"modeBuckets"`
 	RowDetails             []expedition.WaypointDetails `json:"rowDetails"`
+	HighlightsFullOrder    []HighlightLeaderboard       `json:"highlightsFullOrder"`
 }
 
 // BundleFile represents one rendered output file ready to write directly or package into a zip archive.
 type BundleFile struct {
-	Name          string `json:"name"`
-	ContentBase64 string `json:"contentBase64,omitempty"`
-	ContentText   string `json:"contentText,omitempty"`
+	Name                      string `json:"name"`
+	ContentBase64             string `json:"contentBase64,omitempty"`
+	ContentText               string `json:"contentText,omitempty"`
+	CanonicalJSONExpeditionID int64  `json:"canonicalJsonExpeditionId,omitempty"`
+}
+
+// MarshalCanonicalJSON serializes an ExpeditionExport snapshot as indented canonical JSON.
+func MarshalCanonicalJSON(snapshot ExpeditionExport) ([]byte, error) {
+	return json.MarshalIndent(snapshot, "", "  ")
 }
 
 // BuilderDeps injects the read-only projections and helpers required to assemble an export snapshot.

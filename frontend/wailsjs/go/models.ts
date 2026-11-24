@@ -822,6 +822,7 @@ export namespace exporter {
 	    name: string;
 	    contentBase64?: string;
 	    contentText?: string;
+	    canonicalJsonExpeditionId?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new BundleFile(source);
@@ -832,7 +833,76 @@ export namespace exporter {
 	        this.name = source["name"];
 	        this.contentBase64 = source["contentBase64"];
 	        this.contentText = source["contentText"];
+	        this.canonicalJsonExpeditionId = source["canonicalJsonExpeditionId"];
 	    }
+	}
+	export class HighlightRankingEntry {
+	    rank: number;
+	    label: string;
+	    routeLabel: string;
+	    primaryValue: number;
+	    formattedPrimary: string;
+	    secondaryLabel: string;
+	    modeName?: string;
+	    modeColor?: string;
+	    inSystem?: boolean;
+	    rowId: number;
+	    waypointNumber: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new HighlightRankingEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rank = source["rank"];
+	        this.label = source["label"];
+	        this.routeLabel = source["routeLabel"];
+	        this.primaryValue = source["primaryValue"];
+	        this.formattedPrimary = source["formattedPrimary"];
+	        this.secondaryLabel = source["secondaryLabel"];
+	        this.modeName = source["modeName"];
+	        this.modeColor = source["modeColor"];
+	        this.inSystem = source["inSystem"];
+	        this.rowId = source["rowId"];
+	        this.waypointNumber = source["waypointNumber"];
+	    }
+	}
+	export class HighlightLeaderboard {
+	    cardId: string;
+	    title: string;
+	    accent: string;
+	    entries: HighlightRankingEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new HighlightLeaderboard(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cardId = source["cardId"];
+	        this.title = source["title"];
+	        this.accent = source["accent"];
+	        this.entries = this.convertValues(source["entries"], HighlightRankingEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ModeBucket {
 	    modeId: number;
@@ -928,6 +998,7 @@ export namespace exporter {
 	    originBaseline?: expedition.WaypointDetails;
 	    modeBuckets: ModeBucket[];
 	    rowDetails: expedition.WaypointDetails[];
+	    highlightsFullOrder: HighlightLeaderboard[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ExpeditionExport(source);
@@ -958,6 +1029,7 @@ export namespace exporter {
 	        this.originBaseline = this.convertValues(source["originBaseline"], expedition.WaypointDetails);
 	        this.modeBuckets = this.convertValues(source["modeBuckets"], ModeBucket);
 	        this.rowDetails = this.convertValues(source["rowDetails"], expedition.WaypointDetails);
+	        this.highlightsFullOrder = this.convertValues(source["highlightsFullOrder"], HighlightLeaderboard);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

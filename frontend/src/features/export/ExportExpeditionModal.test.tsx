@@ -2,6 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { exporter } from '../../api/models'
 import { ExportExpeditionModal } from './ExportExpeditionModal'
 import { buildSampleExportData } from './exportTestFixtures'
 
@@ -346,6 +347,68 @@ describe('ExportExpeditionModal', () => {
       })
       expect(findButtonByText(container, 'Avg Credits per Day').disabled).toBe(true)
       expect(findButtonByText(container, '+ ADD TO CART').disabled).toBe(true)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('accepts hydrated Wails ExpeditionExport instances directly and delegates canonical JSON assembly to Go via canonicalJsonExpeditionId', async () => {
+    if (typeof globalThis.ResizeObserver === 'undefined') {
+      globalThis.ResizeObserver = class implements ResizeObserver {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    }
+
+    const hydratedExport = exporter.ExpeditionExport.createFrom(buildSampleExportData())
+    const mockWriteExportOutput = vi.fn(
+      async (targetPath: string, _files: exporter.BundleFile[]) => targetPath,
+    )
+
+    ;(window as unknown as MockGoWindow).go = {
+      app: {
+        App: {
+          GetExpeditionExportData: vi.fn(async () => hydratedExport) as never,
+          PickExportSavePath: vi.fn(async () => '/tmp/orion-horizon-test-snapshot.json') as never,
+          WriteExportOutput: mockWriteExportOutput as never,
+        },
+      },
+    }
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(createElement(ExportExpeditionModal, { expeditionId: 7, onClose: () => {} }))
+        await flushMicrotasks()
+      })
+
+      await act(async () => {
+        findButtonByText(container, 'PNG Images').click()
+        findButtonByText(container, 'JSON Data').click()
+        await flushMicrotasks()
+      })
+
+      await act(async () => {
+        findButtonByExactText(container, 'EXPORT').click()
+        await flushMicrotasks()
+      })
+
+      expect(mockWriteExportOutput).toHaveBeenCalledTimes(1)
+      const [savedPath, wireFiles] = mockWriteExportOutput.mock.calls[0]
+      expect(savedPath).toBe('/tmp/orion-horizon-test-snapshot.json')
+      expect(wireFiles).toHaveLength(1)
+      expect(wireFiles[0]).toMatchObject({
+        name: 'orion-horizon-test-snapshot.json',
+        canonicalJsonExpeditionId: 7,
+      })
+      expect(wireFiles[0].contentText).toBeUndefined()
     } finally {
       await act(async () => {
         root.unmount()

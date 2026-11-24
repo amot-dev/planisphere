@@ -1,5 +1,10 @@
 import { expedition } from '../../../api/models'
 import { formatLy } from '../../../domain/galacticTime'
+import {
+  DEFAULT_LEG_BORDER_COLOR,
+  DEFAULT_MODE_COLOR,
+  ORIGIN_LEG_BORDER_COLOR,
+} from '../../../domain/theme'
 import { sanitizeExportHexColor } from '../exportMetrics'
 import { ExpeditionExportData, WaypointsBlockConfig } from '../exportTypes'
 
@@ -86,7 +91,9 @@ export function WaypointsBlock({ exportData, config }: WaypointsBlockProps) {
             }
             const detail = detailsByRowId.get(rowView.row.id)
             const borderColor =
-              rowView.number === 1 ? '#3d2816' : sanitizeExportHexColor(rowView.legModeColor)
+              rowView.number === 1
+                ? ORIGIN_LEG_BORDER_COLOR
+                : sanitizeExportHexColor(rowView.legModeColor, DEFAULT_LEG_BORDER_COLOR)
             return (
               <tr key={rowView.row.id} style={{ borderLeft: `3px solid ${borderColor}` }}>
                 <td className="ed-exp-mono">{rowView.number}</td>
@@ -121,7 +128,11 @@ export function WaypointsBlock({ exportData, config }: WaypointsBlockProps) {
                 {columns.has('flightMode') && (
                   <td className="ed-exp-mono" style={{ fontSize: '11px' }}>
                     {rowView.number > 1 && rowView.legModeName ? (
-                      <span style={{ color: sanitizeExportHexColor(rowView.legModeColor) }}>
+                      <span
+                        style={{
+                          color: sanitizeExportHexColor(rowView.legModeColor, DEFAULT_MODE_COLOR),
+                        }}
+                      >
                         {rowView.legModeName}
                       </span>
                     ) : (

@@ -50,6 +50,7 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 	if bucketsError := populateModeBuckets(planView, queryAfter, departed, dependencies.Projections, &exportSnapshot); bucketsError != nil {
 		return ExpeditionExport{}, bucketsError
 	}
+	exportSnapshot.HighlightsFullOrder = ComputeHighlightLeaderboards(planView, exportSnapshot.RowDetails, currentTime)
 	return exportSnapshot, nil
 }
 
@@ -105,6 +106,7 @@ func initializeExportHeader(
 		Adjustments:            expeditionRecord.Adjustments.ToMetrics(),
 		ModeBuckets:            []ModeBucket{},
 		RowDetails:             []expedition.WaypointDetails{},
+		HighlightsFullOrder:    []HighlightLeaderboard{},
 	}
 }
 

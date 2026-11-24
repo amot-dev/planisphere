@@ -531,6 +531,8 @@ function renderHighlightsSection(
   const allBoards = computeAllHighlightLeaderboards(exportData, {
     lucrativeMetric: config.lucrativeMetric,
     distanceMetric: config.distanceMetric,
+    cardIds: config.selectedCards,
+    maxDepth: config.depth,
   })
   const visibleBoards = selectHighlightCards(allBoards, config.selectedCards, config.depth)
   const cardsHtml = visibleBoards

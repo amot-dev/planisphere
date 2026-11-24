@@ -19,6 +19,8 @@ export function HighlightsBlock({ exportData, config }: HighlightsBlockProps) {
   const allLeaderboards = computeAllHighlightLeaderboards(exportData, {
     lucrativeMetric: config.lucrativeMetric,
     distanceMetric: config.distanceMetric,
+    cardIds: config.selectedCards,
+    maxDepth: config.depth,
   })
   const visibleBoards = selectHighlightCards(allLeaderboards, config.selectedCards, config.depth)
   const colsClass =

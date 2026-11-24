@@ -1,75 +1,45 @@
-import { expedition, realization, stats } from '../../api/models'
+import { expedition, exporter } from '../../api/models'
 
 /**
- * ExportTelemetrySnapshot mirrors Go exporter.TelemetrySnapshot for canonical JSON payloads.
+ * Strips Wails class-hydration helper methods from generated DTO classes so both
+ * hydrated Wails instances and plain object literals satisfy export contracts.
  */
-export interface ExportTelemetrySnapshot {
-  metrics: stats.Metrics
-  realization: realization.Breakdown
-}
+export type PlainWailsDto<T> = Omit<T, 'convertValues'>
 
 /**
- * ExportCarrierCost mirrors Go expedition.CarrierCost for expedition carrier cost readouts.
+ * ExportTelemetrySnapshot derives directly from Wails exporter.TelemetrySnapshot.
  */
-export interface ExportCarrierCost {
-  carrierType: string
-  weeklyUpkeep: number
-  tritiumPrice: number
-  tritiumCost: number
-  jumpCost: number
-  upkeepCost: number
-  totalCost: number
-  totalEstimated: boolean
-}
+export type ExportTelemetrySnapshot = PlainWailsDto<exporter.TelemetrySnapshot>
 
 /**
- * ExportModeBucket holds expedition telemetry aggregated for a single flight mode.
+ * ExportCarrierCost derives directly from Wails expedition.CarrierCost.
  */
-export interface ExportModeBucket {
-  modeId: number
-  modeName: string
-  modeColor: string
-  metrics: stats.Metrics
-  realization: realization.Breakdown
-}
+export type ExportCarrierCost = PlainWailsDto<expedition.CarrierCost>
 
 /**
- * ExpeditionExportData mirrors the canonical Go exporter.ExpeditionExport payload.
+ * ExportModeBucket derives directly from Wails exporter.ModeBucket.
  */
-export interface ExpeditionExportData {
-  schemaVersion: number
-  exportedAt: string
-  exportedAtGalactic: string
-  appVersion: string
-  commanders: string[]
-  departed: boolean
-  effectiveStart: string
-  effectiveStartGalactic: string
-  effectiveEnd: string
-  effectiveEndGalactic: string
-  endIsNow: boolean
-  duration: string
-  careerStart: string
-  careerStartGalactic: string
-  careerDuration: string
-  plan: expedition.PlanView
+export type ExportModeBucket = PlainWailsDto<exporter.ModeBucket>
+
+/**
+ * ExpeditionExportData derives directly from Wails exporter.ExpeditionExport,
+ * mapping nested DTO fields so both Wails instances and plain fixtures type-check.
+ */
+export type ExpeditionExportData = Omit<
+  PlainWailsDto<exporter.ExpeditionExport>,
+  'expedition' | 'carrierCost' | 'originBaseline' | 'modeBuckets' | 'highlightsFullOrder'
+> & {
   expedition: ExportTelemetrySnapshot
-  live: stats.Metrics
-  adjustments: stats.Metrics
   carrierCost: ExportCarrierCost
   originBaseline?: expedition.WaypointDetails | null
   modeBuckets: ExportModeBucket[]
-  rowDetails: expedition.WaypointDetails[]
+  highlightsFullOrder?: Array<PlainWailsDto<exporter.HighlightLeaderboard>>
 }
 
 /**
- * ExportBundleFile matches Go exporter.BundleFile for single-file and zip exports.
+ * ExportBundleFile derives directly from Wails exporter.BundleFile.
  */
-export interface ExportBundleFile {
-  name: string
-  contentBase64?: string
-  contentText?: string
-}
+export type ExportBundleFile = PlainWailsDto<exporter.BundleFile>
 
 /** Top-level export block categories available in Export Studio. */
 export type ExportBlockKind = 'summary' | 'details' | 'waypoints' | 'highlights'

@@ -1,17 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import {
+  computeAvailableDetailsMetricIds,
   computeDerivedMetrics,
   createEmptyMetrics,
   createEmptyRealization,
   createQuickShareCart,
+  describeScope,
   expandConfigToCartItems,
   formatSignedEstimatedCredits,
+  getDistinctModesForScope,
+  getExportDataIndex,
+  getVisitedLegByRowId,
+  getVisitedLegs,
+  getVisitedRegionByName,
   getVisitedRegions,
   resolveFormattedNetProfit,
   resolveTelemetryContext,
   scopeSupportsModeSplit,
 } from './exportMetrics'
-import { defaultMetricsForSection } from './exportTypes'
+import { CartBlockItem, defaultMetricsForSection } from './exportTypes'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('exportMetrics', () => {
@@ -313,5 +320,77 @@ describe('exportMetrics', () => {
     for (const scopeContext of nonCombinedScopes) {
       expect(resolveFormattedNetProfit(scopeContext)).toBeNull()
     }
+  })
+
+  it('caches ExportDataIndex in a WeakMap per exportData reference and early-exits achievable Details metrics', () => {
+    const data = buildSampleExportData()
+    expect(getExportDataIndex(data)).toBe(getExportDataIndex(data))
+    expect(getVisitedLegs(data)).toBe(getVisitedLegs(data))
+    expect(getVisitedRegions(data)).toBe(getVisitedRegions(data))
+    expect(getDistinctModesForScope(data, { kind: 'full' })).toBe(
+      getDistinctModesForScope(data, { kind: 'full' }),
+    )
+    expect(getVisitedLegByRowId(data, 3)?.rowView.row.systemName).toBe('Beta Crossing')
+    expect(getVisitedRegionByName(data, "Odin's Hold")?.legs).toHaveLength(1)
+    expect(describeScope(data, { kind: 'leg', rowId: 3 })).toEqual({
+      label: 'Leg #2 to #3',
+      slug: 'wp3',
+    })
+
+    // Flight section has 8 descriptors, 1 of which (distinctRegions) is fullExpeditionCombinedOnly.
+    // On allLegs, Slice 0 (>= 24h) unlocks all 7 achievable metrics so Slice 1 rowId is never resolved.
+    let slice1RowIdReads = 0
+    const slice1Scope = {
+      kind: 'leg' as const,
+      get rowId() {
+        slice1RowIdReads++
+        return 3
+      },
+    }
+    const syntheticItems: CartBlockItem[] = [
+      {
+        id: 'leg-0',
+        title: 'Leg 1',
+        subtitle: '',
+        filenameSlug: 'wp2-flight',
+        config: {
+          kind: 'details',
+          section: 'flight',
+          scope: { kind: 'leg', rowId: 2 },
+          modeGrouping: 'combined',
+          selectedMetrics: defaultMetricsForSection('flight'),
+        },
+      },
+      {
+        id: 'leg-1',
+        title: 'Leg 2',
+        subtitle: '',
+        filenameSlug: 'wp3-flight',
+        config: {
+          kind: 'details',
+          section: 'flight',
+          scope: slice1Scope,
+          modeGrouping: 'combined',
+          selectedMetrics: defaultMetricsForSection('flight'),
+        },
+      },
+    ]
+
+    const available = computeAvailableDetailsMetricIds(
+      data,
+      {
+        kind: 'details',
+        section: 'flight',
+        scope: { kind: 'allLegs' },
+        modeGrouping: 'combined',
+        selectedMetrics: defaultMetricsForSection('flight'),
+      },
+      syntheticItems,
+      Date.parse('2026-04-05T12:00:00Z'),
+    )
+    expect(available?.size).toBe(7)
+    expect(available?.has('distinctRegions')).toBe(false)
+    expect(available?.has('avgDistancePerDay')).toBe(true)
+    expect(slice1RowIdReads).toBe(0)
   })
 })
