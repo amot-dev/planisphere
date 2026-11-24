@@ -1,8 +1,21 @@
 // @vitest-environment happy-dom
 import { act, createElement, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../api/models'
+
+const mockUpdateRow = vi.fn()
+
+vi.mock('../../api/backend', () => ({
+  AddRow: vi.fn(),
+  DeleteRow: vi.fn(),
+  MoveRow: vi.fn(),
+  OverrideCarrierStopArrival: vi.fn(),
+  SetExpeditionFlightMode: vi.fn(),
+  SetLegMode: vi.fn(),
+  UpdateRow: (...args: unknown[]) => mockUpdateRow(...args),
+}))
+
 import {
   executePlanMutation,
   usePlanMutations,
@@ -47,7 +60,7 @@ describe('executePlanMutation', () => {
     const refreshPlan = vi.fn(async () => {})
     const onSuccess = vi.fn()
 
-    await executePlanMutation(
+    const mutationSucceeded = await executePlanMutation(
       'REORDERING ROUTE',
       'Failed to reorder route row',
       async () => {
@@ -64,11 +77,26 @@ describe('executePlanMutation', () => {
       },
     )
 
+    expect(mutationSucceeded).toBe(false)
     expect(optimisticUpdateCalls).toEqual([samplePlan])
     expect(onSuccess).not.toHaveBeenCalled()
     expect(refreshPlan).toHaveBeenCalledTimes(1)
     expect(busyStates).toEqual(['REORDERING ROUTE', null])
     expect(errorSpy).toHaveBeenCalledTimes(1)
+
+    const retrySucceeded = await executePlanMutation(
+      'REORDERING ROUTE',
+      'Failed to reorder route row',
+      async () => {},
+      {
+        onBusyChange: (busyMessage) => busyStates.push(busyMessage),
+        onPlanOptimisticUpdate: (nextPlan) => optimisticUpdateCalls.push(nextPlan),
+        onRefreshPlan: refreshPlan,
+      },
+      { onSuccess },
+    )
+    expect(retrySucceeded).toBe(true)
+    expect(onSuccess).toHaveBeenCalledTimes(1)
     errorSpy.mockRestore()
   })
 })
@@ -82,6 +110,10 @@ function createDeferredPromise() {
 }
 
 describe('usePlanMutations overlapping busy coordination', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('preserves remaining mutation busy message regardless of settlement order', async () => {
     const samplePlan = buildSamplePlan()
     const busyStates: Array<string | null> = []
@@ -168,6 +200,20 @@ describe('usePlanMutations overlapping busy coordination', () => {
       fourthAction.resolve()
       await fourthPromise
       expect(busyStates).toEqual(['REORDERING ROUTE', 'UPDATING REGION', 'UPDATING REGION', null])
+
+      // Verify setFcArrived and commitField propagate boolean resolution outcomes.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      mockUpdateRow.mockRejectedValueOnce(new Error('locked')).mockResolvedValueOnce(undefined)
+      await expect(latestMutations.setFcArrived(11, true)).resolves.toBe(false)
+      await expect(latestMutations.setFcArrived(11, true)).resolves.toBe(true)
+      await expect(
+        latestMutations.commitField(samplePlan.rows[0].row, 'systemName', 'Sol'),
+      ).resolves.toBe(true)
+      mockUpdateRow.mockRejectedValueOnce(new Error('invalid'))
+      await expect(
+        latestMutations.commitField(samplePlan.rows[0].row, 'poiName', 'Earth'),
+      ).resolves.toBe(false)
+      errorSpy.mockRestore()
     } finally {
       act(() => {
         root.unmount()

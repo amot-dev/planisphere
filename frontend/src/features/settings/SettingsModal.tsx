@@ -37,11 +37,15 @@ export function SettingsModal({
   onOpenSetupWizard,
 }: SettingsModalProps) {
   const [error, setError] = useState('')
+  const [flightModesBusy, setFlightModesBusy] = useState(false)
+  const isBusy =
+    flightModesBusy || Boolean(eddProgress?.active) || Boolean(ingestStatus?.scanning)
 
   return (
     <ModalShell
       title="Terminal Configuration"
       onClose={onClose}
+      closeDisabled={isBusy}
       maxWidth="max-w-2xl"
     >
       {error && (
@@ -62,6 +66,7 @@ export function SettingsModal({
       <FlightModesSection
         modesState={modesState}
         onSetError={setError}
+        onBusyChange={setFlightModesBusy}
       />
 
       <FleetCarrierSection
@@ -97,6 +102,7 @@ export function SettingsModal({
           </span>
           <button
             type="button"
+            disabled={isBusy}
             onClick={onOpenSetupWizard}
             className="ed-btn"
           >

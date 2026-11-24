@@ -17,12 +17,15 @@ import { WaypointImportSection } from './WaypointImportSection'
 
 /**
  * ExpeditionManageModalProps defines the saved expedition list, active selection,
- * and callbacks for creating, cloning, renaming, switching, and deleting flight plans.
+ * and callbacks for creating, cloning, renaming, switching, and deleting flight
+ * plans. Passing `{ persist: false }` to `onSelect` updates local selection
+ * without issuing a redundant `SetActiveExpedition` RPC when the backend already
+ * persisted the active expedition ID.
  */
 export interface ExpeditionManageModalProps {
   expeditions: expedition.Expedition[]
   activeId: number
-  onSelect: (id: number) => void
+  onSelect: (id: number, options?: { persist?: boolean }) => void
   onClose: () => void
 }
 
@@ -43,27 +46,34 @@ export function ExpeditionManageModal({
   const [loadedFileNote, setLoadedFileNote] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [mutating, setMutating] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
+  const busy = creating || loadingFile || mutating
   const parsedImport = useMemo(() => parseWaypointImportText(rawImportText), [rawImportText])
   const hasRawImportText = rawImportText.trim().length > 0
   const hasInvalidImport = hasRawImportText && parsedImport.systems.length === 0
   const stagedWaypointCount = parsedImport.systems.length
 
   async function runExpeditionAction(action: () => Promise<void>) {
+    if (busy) return
     setErrorMessage('')
+    setMutating(true)
     try {
       await action()
     } catch (actionError) {
       setErrorMessage(String(actionError))
+    } finally {
+      setMutating(false)
     }
   }
 
   async function handleLoadImportFile() {
+    if (busy) return
     setErrorMessage('')
     setLoadingFile(true)
     try {
@@ -108,7 +118,7 @@ export function ExpeditionManageModal({
   }
 
   function handleCreate() {
-    if (!name.trim() || creating || loadingFile || hasInvalidImport) return
+    if (!name.trim() || busy || hasInvalidImport) return
     return runExpeditionAction(async () => {
       setCreating(true)
       try {
@@ -125,7 +135,7 @@ export function ExpeditionManageModal({
         setRawImportText('')
         setLoadedFileNote('')
         setImportExpanded(false)
-        onSelect(created.id)
+        onSelect(created.id, { persist: false })
         onClose()
       } finally {
         setCreating(false)
@@ -143,7 +153,7 @@ export function ExpeditionManageModal({
   function handleClone(id: number) {
     return runExpeditionAction(async () => {
       const cloned = await CloneExpedition(id)
-      onSelect(cloned.id)
+      onSelect(cloned.id, { persist: false })
       onClose()
     })
   }
@@ -160,6 +170,7 @@ export function ExpeditionManageModal({
       title="Expeditions"
       subtitle="Create a new expedition or switch between saved expeditions"
       onClose={onClose}
+      closeDisabled={busy}
     >
       {errorMessage && (
         <div className="p-2.5 border border-ed-danger bg-ed-danger-tint text-ed-danger-text">
@@ -192,7 +203,7 @@ export function ExpeditionManageModal({
             parsedImport={parsedImport}
             loadedFileNote={loadedFileNote}
             loadingFile={loadingFile}
-            disabled={creating}
+            disabled={creating || mutating}
             onChangeText={handleChangeImportText}
             onLoadFile={() => void handleLoadImportFile()}
             onClear={handleClearImportText}
@@ -201,7 +212,7 @@ export function ExpeditionManageModal({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
-            disabled={creating}
+            disabled={busy}
             onClick={() => setImportExpanded((previous) => !previous)}
             className="ed-btn"
           >
@@ -213,10 +224,10 @@ export function ExpeditionManageModal({
           </button>
           <button
             type="button"
-            disabled={!name.trim() || creating || loadingFile || hasInvalidImport}
+            disabled={!name.trim() || busy || hasInvalidImport}
             onClick={handleCreate}
             className={`ed-btn-primary ${
-              !name.trim() || creating || loadingFile || hasInvalidImport
+              !name.trim() || busy || hasInvalidImport
                 ? 'opacity-40 cursor-not-allowed hover:bg-transparent'
                 : ''
             }`}
@@ -237,18 +248,21 @@ export function ExpeditionManageModal({
               <div className="flex-1 flex items-center gap-2">
                 <input
                   type="text"
+                  disabled={busy}
                   value={editName}
                   onChange={(event) => setEditName(event.target.value)}
                   className="bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
                 />
                 <input
                   type="text"
+                  disabled={busy}
                   value={editDescription}
                   onChange={(event) => setEditDescription(event.target.value)}
                   className="flex-1 bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
                 />
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => handleSaveEdit(expeditionItem.id)}
                   className="ed-btn-cyan"
                 >
@@ -259,11 +273,12 @@ export function ExpeditionManageModal({
               <>
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => {
                     onSelect(expeditionItem.id)
                     onClose()
                   }}
-                  className="flex-1 text-left cursor-pointer"
+                  className="flex-1 text-left cursor-pointer disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-2">
                     <span
@@ -289,6 +304,7 @@ export function ExpeditionManageModal({
                       </span>
                       <button
                         type="button"
+                        disabled={busy}
                         onClick={() => setConfirmDeleteId(null)}
                         className="ed-btn"
                       >
@@ -296,6 +312,7 @@ export function ExpeditionManageModal({
                       </button>
                       <button
                         type="button"
+                        disabled={busy}
                         onClick={() => handleDelete(expeditionItem.id)}
                         className="ed-btn-danger"
                       >
@@ -306,6 +323,7 @@ export function ExpeditionManageModal({
                     <>
                       <button
                         type="button"
+                        disabled={busy}
                         onClick={() => handleClone(expeditionItem.id)}
                         title="Clone this expedition into a new expedition in the Planning phase"
                         className="ed-btn-cyan"
@@ -314,6 +332,7 @@ export function ExpeditionManageModal({
                       </button>
                       <button
                         type="button"
+                        disabled={busy}
                         onClick={() => {
                           setConfirmDeleteId(null)
                           setEditingId(expeditionItem.id)
@@ -327,6 +346,7 @@ export function ExpeditionManageModal({
                       {expeditions.length > 1 && (
                         <button
                           type="button"
+                          disabled={busy}
                           onClick={() => {
                             setEditingId(null)
                             setConfirmDeleteId(expeditionItem.id)

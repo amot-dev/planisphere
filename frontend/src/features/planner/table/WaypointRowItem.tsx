@@ -22,7 +22,7 @@ export interface WaypointRowHandlers {
     row: expedition.Row,
     field: 'systemName' | 'poiName' | 'notes',
     fieldValue: string,
-  ) => void
+  ) => void | boolean | Promise<void | boolean>
   onCopySystem: (id: number, name: string) => void
   onToggleFcStop: (row: expedition.Row) => void
   onOverrideFcArrived?: (rowView: expedition.RowView) => void
@@ -114,7 +114,22 @@ export const WaypointRowItem = memo(function WaypointRowItem({
     hasOverrideFcArrived: Boolean(handlers.onOverrideFcArrived),
   })
 
-  const isEditingRef = useRef(false)
+  const latestRowRef = useRef(row)
+  latestRowRef.current = row
+  const onOriginFilledRef = useRef(handlers.onOriginSystemFilledChange)
+  onOriginFilledRef.current = handlers.onOriginSystemFilledChange
+  const isOriginWaypointRef = useRef(rowView.number === 1)
+  isOriginWaypointRef.current = rowView.number === 1
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const editingFieldRef = useRef<'systemName' | 'poiName' | 'notes' | null>(null)
+  const previousRowIdRef = useRef(row.id)
   const [draft, setDraft] = useState(() => ({
     systemName: row.systemName ?? '',
     poiName: row.poiName ?? '',
@@ -122,17 +137,79 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   }))
 
   useEffect(() => {
-    if (isEditingRef.current) return
-    setDraft({
-      systemName: row.systemName ?? '',
-      poiName: row.poiName ?? '',
-      notes: row.notes ?? '',
+    if (!permissions.isSystemLocked || editingFieldRef.current !== 'systemName') return
+    editingFieldRef.current = null
+    const currentRow = latestRowRef.current
+    setDraft((previous) => ({ ...previous, systemName: currentRow.systemName ?? '' }))
+    if (isOriginWaypointRef.current) {
+      onOriginFilledRef.current?.(Boolean((currentRow.systemName ?? '').trim()))
+    }
+  }, [permissions.isSystemLocked])
+
+  useEffect(() => {
+    if (previousRowIdRef.current !== row.id) {
+      previousRowIdRef.current = row.id
+      editingFieldRef.current = null
+    }
+    const activeField = editingFieldRef.current
+    setDraft((previous) => {
+      const nextSystemName =
+        activeField === 'systemName' ? previous.systemName : (row.systemName ?? '')
+      const nextPoiName = activeField === 'poiName' ? previous.poiName : (row.poiName ?? '')
+      const nextNotes = activeField === 'notes' ? previous.notes : (row.notes ?? '')
+      if (
+        previous.systemName === nextSystemName &&
+        previous.poiName === nextPoiName &&
+        previous.notes === nextNotes
+      ) {
+        return previous
+      }
+      return {
+        systemName: nextSystemName,
+        poiName: nextPoiName,
+        notes: nextNotes,
+      }
     })
   }, [row.id, row.systemName, row.poiName, row.notes])
 
+  function restorePersistedDraft(blurredRowId: number, fieldName: 'systemName' | 'poiName' | 'notes') {
+    if (
+      !mountedRef.current ||
+      editingFieldRef.current === fieldName ||
+      latestRowRef.current.id !== blurredRowId
+    ) {
+      return
+    }
+    const persistedRow = latestRowRef.current
+    setDraft((previous) => ({
+      ...previous,
+      [fieldName]: persistedRow[fieldName] ?? '',
+    }))
+    if (isOriginWaypointRef.current && fieldName === 'systemName') {
+      onOriginFilledRef.current?.(Boolean((persistedRow.systemName ?? '').trim()))
+    }
+  }
+
   function handleBlur(fieldName: 'systemName' | 'poiName' | 'notes', fieldValue: string) {
-    isEditingRef.current = false
-    handlers.onFieldBlur(row, fieldName, fieldValue)
+    if (editingFieldRef.current === fieldName) {
+      editingFieldRef.current = null
+    }
+    const blurredRowId = row.id
+    const blurResult = handlers.onFieldBlur(row, fieldName, fieldValue)
+    if (blurResult === false) {
+      restorePersistedDraft(blurredRowId, fieldName)
+      return
+    }
+    if (blurResult && typeof blurResult === 'object' && 'then' in blurResult) {
+      void Promise.resolve(blurResult).then(
+        (blurSucceeded) => {
+          if (blurSucceeded === false) {
+            restorePersistedDraft(blurredRowId, fieldName)
+          }
+        },
+        () => restorePersistedDraft(blurredRowId, fieldName),
+      )
+    }
   }
 
   return (
@@ -216,7 +293,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
                 value={draft.systemName}
                 placeholder="Star System"
                 onFocus={() => {
-                  isEditingRef.current = true
+                  editingFieldRef.current = 'systemName'
                 }}
                 onChange={(event) => {
                   const nextValue = event.target.value
@@ -273,7 +350,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           placeholder="POI Name"
           maxLines={3}
           onFocus={() => {
-            isEditingRef.current = true
+            editingFieldRef.current = 'poiName'
           }}
           onChange={(value) => setDraft((previous) => ({ ...previous, poiName: value }))}
           onBlur={(value) => handleBlur('poiName', value)}
@@ -289,7 +366,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
             placeholder="Flight notes, reminders..."
             maxLines={3}
             onFocus={() => {
-              isEditingRef.current = true
+              editingFieldRef.current = 'notes'
             }}
             onChange={(value) => setDraft((previous) => ({ ...previous, notes: value }))}
             onBlur={(value) => handleBlur('notes', value)}

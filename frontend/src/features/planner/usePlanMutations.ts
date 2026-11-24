@@ -46,8 +46,8 @@ export interface PlanMutationBehaviorOptions {
 
 /**
  * executePlanMutation applies an optional optimistic PlanView update, runs a
- * backend planner RPC under a busy status banner, and rolls back via
- * onRefreshPlan if the RPC rejects.
+ * backend planner RPC under a busy status banner, rolls back via onRefreshPlan
+ * if the RPC rejects, and resolves to true on success or false on rejection.
  */
 export async function executePlanMutation(
   busyMessage: string,
@@ -55,7 +55,7 @@ export async function executePlanMutation(
   mutationAction: () => Promise<unknown>,
   contextCallbacks: PlanMutationContextCallbacks,
   options?: PlanMutationBehaviorOptions,
-): Promise<void> {
+): Promise<boolean> {
   if (options?.optimisticPlan) {
     contextCallbacks.onPlanOptimisticUpdate(options.optimisticPlan)
   }
@@ -68,11 +68,13 @@ export async function executePlanMutation(
   try {
     await mutationAction()
     options?.onSuccess?.()
+    return true
   } catch (mutationError) {
     console.error(`${errorContext}:`, mutationError)
     if (options?.optimisticPlan || options?.rollbackOnError) {
       await contextCallbacks.onRefreshPlan()
     }
+    return false
   } finally {
     if (endBusyTask) {
       endBusyTask()
@@ -101,6 +103,7 @@ export interface UsePlanMutationsOptions {
   plan: expedition.PlanView | null
   isPlanning: boolean
   onBusyChange: (busyMessage: string | null) => void
+  busyTracker?: BusyTaskTracker
   applyOptimisticPlan: (nextPlan: expedition.PlanView) => void
   onRefreshPlan: () => void
   carrierContextRef: MutableRefObject<CarrierMutationLockContext>
@@ -114,6 +117,7 @@ export function usePlanMutations({
   plan,
   isPlanning,
   onBusyChange,
+  busyTracker: externalBusyTracker,
   applyOptimisticPlan,
   onRefreshPlan,
   carrierContextRef,
@@ -123,10 +127,11 @@ export function usePlanMutations({
 
   const onBusyChangeRef = useRef(onBusyChange)
   onBusyChangeRef.current = onBusyChange
-  const busyTracker = useMemo(
+  const fallbackBusyTracker = useMemo(
     () => createBusyTaskTracker((busyMessage) => onBusyChangeRef.current(busyMessage)),
     [],
   )
+  const busyTracker = externalBusyTracker ?? fallbackBusyTracker
 
   const runPlanMutation = useCallback(
     (
@@ -151,9 +156,9 @@ export function usePlanMutations({
   )
 
   const setFcArrived = useCallback(
-    async (rowId: number, arrived: boolean) => {
-      if (!plan) return
-      await runPlanMutation(
+    async (rowId: number, arrived: boolean): Promise<boolean> => {
+      if (!plan) return false
+      return runPlanMutation(
         'UPDATING CARRIER ARRIVAL',
         'Failed to update carrier arrival',
         () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, fcArrived: arrived })),
@@ -164,9 +169,13 @@ export function usePlanMutations({
   )
 
   const commitField = useCallback(
-    async (row: expedition.Row, field: 'systemName' | 'poiName' | 'notes', value: string) => {
-      if ((row[field] ?? '') === value) return
-      await runPlanMutation(
+    async (
+      row: expedition.Row,
+      field: 'systemName' | 'poiName' | 'notes',
+      value: string,
+    ): Promise<boolean> => {
+      if ((row[field] ?? '') === value) return true
+      return runPlanMutation(
         'UPDATING WAYPOINT',
         `Failed to update waypoint ${field}`,
         () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, [field]: value })),

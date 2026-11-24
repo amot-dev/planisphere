@@ -49,7 +49,13 @@ export function SetupWizardModal({
       badge={`v${APP_VERSION}`}
       subtitle={STEP_TITLES[wizard.step]}
       maxWidth="max-w-lg"
-      onClose={onClose}
+      onClose={
+        onClose
+          ? () => {
+              if (!wizard.isBusy) onClose()
+            }
+          : undefined
+      }
       closeDisabled={wizard.isBusy}
       closeTitle="Close setup wizard"
       headerLeading={<div className="w-2 h-4 bg-ed-amber" />}

@@ -91,7 +91,7 @@ export interface PlannerTableRowActions {
     row: expedition.Row,
     fieldName: 'systemName' | 'poiName' | 'notes',
     fieldValue: string,
-  ) => void
+  ) => void | boolean | Promise<void | boolean>
   onCopySystem: (rowId: number, systemName: string) => void
   onToggleFcStop: (row: expedition.Row) => void
   onOverrideFcArrived?: (rowView: expedition.RowView) => void

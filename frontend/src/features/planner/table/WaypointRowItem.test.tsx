@@ -1,8 +1,12 @@
-import { createElement } from 'react'
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../../api/models'
 import { WaypointRowItem, type WaypointRowHandlers } from './WaypointRowItem'
+
+;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const defaultRowHandlers: WaypointRowHandlers = {
   onToggleExpand: () => {},
@@ -480,5 +484,216 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(visitedDestinationHtml).toContain('LOGGED VISIT')
     expect(visitedDestinationHtml).toContain('3312-01-18 13:00 UTC')
     expect(visitedDestinationHtml).not.toContain('title="Arrived ')
+  })
+})
+
+function setFormControlValue(
+  element: HTMLInputElement | HTMLTextAreaElement,
+  nextValue: string,
+): void {
+  const prototype =
+    element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value')
+  descriptor?.set?.call(element, nextValue)
+  element.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+describe('WaypointRowItem lock transition and rollback draft recovery', () => {
+  it('clears editing state when a focused system input becomes locked so subsequent background poiName updates sync into draft', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    const renderMountedRow = (rowView: expedition.RowView, lastVisitedIndex: number) => {
+      act(() => {
+        root.render(
+          createElement(
+            'table',
+            null,
+            createElement(
+              'tbody',
+              null,
+              createElement(WaypointRowItem, {
+                rowView,
+                index: 1,
+                isPlanning: false,
+                isLocked: false,
+                isBeingDragged: false,
+                isExpanded: false,
+                isNextFcStop: false,
+                hasActiveCarrierRoute: false,
+                isSystemCopied: false,
+                insertMenuOpen: false,
+                lastVisitedIndex,
+                rowStyle: {},
+                dropProps: {},
+                handlers: defaultRowHandlers,
+              }),
+            ),
+          ),
+        )
+      })
+    }
+
+    try {
+      renderMountedRow(
+        expedition.RowView.createFrom({
+          row: { id: 70, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia', poiName: '' },
+          number: 2,
+          visitState: 'future',
+        }),
+        0,
+      )
+
+      const systemInput = container.querySelector(
+        'input[placeholder="Star System"]',
+      ) as HTMLInputElement
+      expect(systemInput).toBeTruthy()
+
+      act(() => {
+        systemInput.focus()
+        setFormControlValue(systemInput, 'Colonia Draft')
+      })
+      expect(systemInput.value).toBe('Colonia Draft')
+
+      // Live arrival locks the system cell while the input was focused.
+      renderMountedRow(
+        expedition.RowView.createFrom({
+          row: {
+            id: 70,
+            expeditionId: 1,
+            rowType: 'waypoint',
+            systemName: 'Colonia',
+            poiName: '',
+            visitedAt: '3312-02-01T10:00:00Z',
+          },
+          number: 2,
+          visitState: 'visited',
+          visitedAtGalactic: '3312-02-01 10:00 UTC',
+        }),
+        1,
+      )
+      expect(container.querySelector('input[placeholder="Star System"]')).toBeNull()
+
+      // Subsequent background GEC resolution updates poiName on the locked row.
+      renderMountedRow(
+        expedition.RowView.createFrom({
+          row: {
+            id: 70,
+            expeditionId: 1,
+            rowType: 'waypoint',
+            systemName: 'Colonia',
+            poiName: 'Jaques Station',
+            visitedAt: '3312-02-01T10:00:00Z',
+          },
+          number: 2,
+          visitState: 'visited',
+          visitedAtGalactic: '3312-02-01 10:00 UTC',
+        }),
+        1,
+      )
+
+      const poiTextarea = container.querySelector(
+        'textarea[placeholder="POI Name"]',
+      ) as HTMLTextAreaElement
+      expect(poiTextarea.value).toBe('Jaques Station')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('restores rejected systemName draft without overwriting a newly focused poiName edit', async () => {
+    let resolveSystemBlur!: (succeeded: boolean) => void
+    const onFieldBlur = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSystemBlur = resolve
+        }),
+    )
+    const handlers: WaypointRowHandlers = {
+      ...defaultRowHandlers,
+      onFieldBlur,
+    }
+
+    const rowView = expedition.RowView.createFrom({
+      row: {
+        id: 71,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Sagittarius A*',
+        poiName: 'Supermassive Black Hole',
+      },
+      number: 3,
+      visitState: 'future',
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      act(() => {
+        root.render(
+          createElement(
+            'table',
+            null,
+            createElement(
+              'tbody',
+              null,
+              createElement(WaypointRowItem, {
+                rowView,
+                index: 2,
+                isPlanning: true,
+                isLocked: false,
+                isBeingDragged: false,
+                isExpanded: false,
+                isNextFcStop: false,
+                hasActiveCarrierRoute: false,
+                isSystemCopied: false,
+                insertMenuOpen: false,
+                lastVisitedIndex: -1,
+                rowStyle: {},
+                dropProps: {},
+                handlers,
+              }),
+            ),
+          ),
+        )
+      })
+
+      const systemInput = container.querySelector(
+        'input[placeholder="Star System"]',
+      ) as HTMLInputElement
+      const poiTextarea = container.querySelector(
+        'textarea[placeholder="POI Name"]',
+      ) as HTMLTextAreaElement
+      act(() => {
+        systemInput.focus()
+        setFormControlValue(systemInput, 'Rejected System Name')
+      })
+      expect(systemInput.value).toBe('Rejected System Name')
+
+      // Simulate Tab-blurring from Star System directly into POI Name before onFieldBlur settles.
+      act(() => {
+        systemInput.blur()
+        poiTextarea.focus()
+        setFormControlValue(poiTextarea, 'Explorer Anchorage')
+      })
+      expect(onFieldBlur).toHaveBeenCalledWith(rowView.row, 'systemName', 'Rejected System Name')
+
+      await act(async () => {
+        resolveSystemBlur(false)
+        await Promise.resolve()
+      })
+
+      expect(systemInput.value).toBe('Sagittarius A*')
+      expect(poiTextarea.value).toBe('Explorer Anchorage')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
   })
 })

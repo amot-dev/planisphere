@@ -5,12 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { app, expedition } from '../../../api/models'
 
 const mockBrowseWaypointImportFile = vi.fn<() => Promise<app.WaypointImportFile>>()
+const mockCloneExpedition = vi.fn()
 const mockCreateExpedition = vi.fn()
 const mockCreateExpeditionWithWaypoints = vi.fn()
 
 vi.mock('../../../api/backend', () => ({
   BrowseWaypointImportFile: () => mockBrowseWaypointImportFile(),
-  CloneExpedition: vi.fn(),
+  CloneExpedition: (...args: unknown[]) => mockCloneExpedition(...args),
   CreateExpedition: (...args: unknown[]) => mockCreateExpedition(...args),
   CreateExpeditionWithWaypoints: (...args: unknown[]) => mockCreateExpeditionWithWaypoints(...args),
   DeleteExpedition: vi.fn(),
@@ -214,7 +215,65 @@ describe('ExpeditionManageModal', () => {
         'Sol',
         'Colonia',
       ])
-      expect(onSelect).toHaveBeenCalledWith(42)
+      expect(onSelect).toHaveBeenCalledWith(42, { persist: false })
+      expect(onClose).toHaveBeenCalledTimes(1)
+    } finally {
+      modalView.unmount()
+    }
+  })
+
+  it('locks action and close controls while cloning and selects the clone with persist: false', async () => {
+    let resolveClone!: (cloned: expedition.Expedition) => void
+    mockCloneExpedition.mockImplementation(
+      () =>
+        new Promise<expedition.Expedition>((resolve) => {
+          resolveClone = resolve
+        }),
+    )
+
+    const onSelect = vi.fn()
+    const onClose = vi.fn()
+    const savedExpeditions = [
+      expedition.Expedition.createFrom({ id: 1, name: 'Alpha', description: '', status: 'active' }),
+      expedition.Expedition.createFrom({ id: 2, name: 'Beta', description: '', status: 'planning' }),
+    ]
+
+    const modalView = mountElement(
+      createElement(ExpeditionManageModal, {
+        expeditions: savedExpeditions,
+        activeId: 1,
+        onSelect,
+        onClose,
+      }),
+    )
+
+    try {
+      const cloneButton = findButtonByText(modalView.container, 'CLONE')
+      act(() => {
+        cloneButton.click()
+      })
+
+      expect(mockCloneExpedition).toHaveBeenCalledWith(1)
+      expect(findButtonByText(modalView.container, 'CLONE').disabled).toBe(true)
+      expect(findButtonByText(modalView.container, 'RENAME').disabled).toBe(true)
+      expect(findButtonByText(modalView.container, 'DELETE').disabled).toBe(true)
+      expect(findButtonByText(modalView.container, 'Alpha').disabled).toBe(true)
+      const closeHeaderButton = modalView.container.querySelector('button') as HTMLButtonElement
+      expect(closeHeaderButton.disabled).toBe(true)
+
+      await act(async () => {
+        resolveClone(
+          expedition.Expedition.createFrom({
+            id: 99,
+            name: 'Alpha (Copy)',
+            description: '',
+            status: 'planning',
+          }),
+        )
+        await Promise.resolve()
+      })
+
+      expect(onSelect).toHaveBeenCalledWith(99, { persist: false })
       expect(onClose).toHaveBeenCalledTimes(1)
     } finally {
       modalView.unmount()

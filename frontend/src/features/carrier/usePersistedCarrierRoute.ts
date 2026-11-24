@@ -11,6 +11,7 @@ import { expedition } from '../../api/models'
  * backend active carrier route record.
  */
 export interface PersistedCarrierRouteUpdates {
+  expeditionId?: number
   route?: expedition.CarrierRouteResult | null
   targetRowId?: number
   jumpIdx?: number
@@ -50,16 +51,18 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
 
   function persistRouteState(updates: PersistedCarrierRouteUpdates) {
     cancelPendingInputPersist()
-    if (!expeditionId || expeditionId <= 0) return
+    const targetExpeditionId =
+      updates.expeditionId !== undefined ? updates.expeditionId : expeditionId
+    if (!targetExpeditionId || targetExpeditionId <= 0) return
     const route = updates.route !== undefined ? updates.route : activeCarrierRoute
     const targetRowId =
       updates.targetRowId !== undefined ? updates.targetRowId : activeCarrierTargetRowId
     if (!route) {
-      ClearActiveCarrierRoute(expeditionId).catch(console.error)
+      ClearActiveCarrierRoute(targetExpeditionId).catch(console.error)
       return
     }
     const state = expedition.ActiveCarrierRouteState.createFrom({
-      expeditionId,
+      expeditionId: targetExpeditionId,
       targetRowId,
       route,
       jumpIdx: updates.jumpIdx !== undefined ? updates.jumpIdx : carrierJumpIndex,
@@ -83,14 +86,13 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
   }
 
   const persistRouteStateRef = useRef(persistRouteState)
-  useEffect(() => {
-    persistRouteStateRef.current = persistRouteState
-  })
+  persistRouteStateRef.current = persistRouteState
 
-  function flushPendingManualInputs() {
+  function flushPendingManualInputs(targetExpeditionId?: number) {
     if (!persistManualInputsTimerRef.current) return
     cancelPendingInputPersist()
     persistRouteStateRef.current({
+      expeditionId: targetExpeditionId,
       manualDistInput: manualDistanceInputRef.current,
       manualTritInput: manualTritiumInputRef.current,
     })
@@ -140,7 +142,7 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
 
     return () => {
       cancelled = true
-      flushPendingManualInputs()
+      flushPendingManualInputs(expeditionId)
     }
   }, [expeditionId])
 
@@ -184,9 +186,11 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
 
   function schedulePersistManualInputs() {
     cancelPendingInputPersist()
+    const scheduledExpeditionId = expeditionId
     persistManualInputsTimerRef.current = setTimeout(() => {
       persistManualInputsTimerRef.current = null
       persistRouteStateRef.current({
+        expeditionId: scheduledExpeditionId,
         manualDistInput: manualDistanceInputRef.current,
         manualTritInput: manualTritiumInputRef.current,
       })

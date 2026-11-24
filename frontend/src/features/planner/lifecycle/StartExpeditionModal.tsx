@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GetStartCandidates, StartExpedition } from '../../../api/backend'
 import { app, modes } from '../../../api/models'
 import { ModalShell } from '../../../components/ui/ModalShell'
@@ -41,14 +41,24 @@ export function StartExpeditionModal({
   )
   const [busy, setBusy] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     setSelectedModeId(resolveDefaultModeId(modesList, initialModeId))
   }, [initialModeId, modesList])
 
   useEffect(() => {
+    let cancelled = false
     GetStartCandidates(expeditionId)
       .then((candidatesResult) => {
+        if (cancelled) return
         setCandidates(candidatesResult)
         if (candidatesResult.visits && candidatesResult.visits.length > 0) {
           setSelectedTimestamp(candidatesResult.visits[0].timestamp)
@@ -56,12 +66,18 @@ export function StartExpeditionModal({
           setSelectedTimestamp('')
         }
       })
-      .catch((loadError) => setError(String(loadError)))
+      .catch((loadError) => {
+        if (!cancelled) setError(String(loadError))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [expeditionId])
 
   const selectedMode = modesList.find((modeItem) => modeItem.id === selectedModeId) ?? modesList[0]
 
   async function handleConfirm() {
+    if (busy) return
     setError('')
     if (!selectedTimestamp) {
       setError('Select a recorded visit timestamp first.')
@@ -72,14 +88,14 @@ export function StartExpeditionModal({
       await StartExpedition(expeditionId, selectedTimestamp, selectedModeId)
       onClose()
     } catch (startError) {
-      setError(String(startError))
+      if (mountedRef.current) setError(String(startError))
     } finally {
-      setBusy(false)
+      if (mountedRef.current) setBusy(false)
     }
   }
 
   return (
-    <ModalShell title="Engage Expedition" onClose={onClose}>
+    <ModalShell title="Engage Expedition" onClose={onClose} closeDisabled={busy}>
       {error && (
         <div className="p-2.5 border border-ed-danger bg-ed-danger-tint text-ed-danger-text">{error}</div>
       )}
@@ -93,6 +109,7 @@ export function StartExpeditionModal({
           {candidates && candidates.visits.length > 0 ? (
             <select
               aria-label="Recorded visit to Waypoint #1"
+              disabled={busy}
               value={selectedTimestamp}
               onChange={(event) => setSelectedTimestamp(event.target.value)}
               className="w-full bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
@@ -125,6 +142,7 @@ export function StartExpeditionModal({
               />
               <select
                 aria-label="Starting flight mode"
+                disabled={busy}
                 value={selectedModeId}
                 onChange={(event) => setSelectedModeId(Number(event.target.value))}
                 className="flex-1 bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs font-bold uppercase tracking-wider text-ed-text-main"

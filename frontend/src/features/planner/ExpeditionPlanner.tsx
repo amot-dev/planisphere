@@ -5,6 +5,7 @@ import {
   computePlanFrontierIndices,
   computePlannerTableDimensions,
 } from '../../domain/planTableItems'
+import { createBusyTaskTracker } from '../../hooks/useBusyTasks'
 import { useCopyFeedback } from '../../hooks/useCopyFeedback'
 import { useLocalStorageBoolean } from '../../hooks/useLocalStorageBoolean'
 import { CarrierRouteBottomPanel } from '../carrier/CarrierRouteBottomPanel'
@@ -109,10 +110,18 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     onCancelCarrierRoute: () => {},
   })
 
+  const onBusyChangeRef = useRef(onBusyChange)
+  onBusyChangeRef.current = onBusyChange
+  const sharedBusyTracker = useMemo(
+    () => createBusyTaskTracker((busyMessage) => onBusyChangeRef.current(busyMessage)),
+    [],
+  )
+
   const mutations = usePlanMutations({
     plan,
     isPlanning: Boolean(isPlanning),
     onBusyChange,
+    busyTracker: sharedBusyTracker,
     applyOptimisticPlan,
     onRefreshPlan,
     carrierContextRef,
@@ -123,6 +132,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     lastVisitedIndex: frontier.lastVisitedIndex,
     manualPlotterRequestCount,
     onBusyChange,
+    busyTracker: sharedBusyTracker,
     onSetFcArrived: mutations.setFcArrived,
     onCarrierRouteOpenChange,
   })
@@ -386,7 +396,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
             carrierRoute.setRoutePrompt((previous) => (previous ? updater(previous) : null))
           }
           onStart={carrierRoute.handleStartCarrierRoute}
-          onClose={() => carrierRoute.setRoutePrompt(null)}
+          onClose={carrierRoute.handleCloseRoutePrompt}
         />
       )}
 

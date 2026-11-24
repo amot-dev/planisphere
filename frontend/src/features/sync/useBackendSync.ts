@@ -244,10 +244,11 @@ export function useBackendSync() {
   useEffect(() => subscribeBackendEvents(eventHandlers), [eventHandlers])
 
   const handleSelectExpedition = useCallback(
-    async (selectedExpeditionId: number) => {
+    async (selectedExpeditionId: number, options?: { persist?: boolean }) => {
       if (!selectedExpeditionId) return
       setActiveExpeditionId(selectedExpeditionId)
       activeExpeditionIdRef.current = selectedExpeditionId
+      if (options?.persist === false) return
       try {
         await SetActiveExpedition(selectedExpeditionId)
       } catch (setActiveError) {

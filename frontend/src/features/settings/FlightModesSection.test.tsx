@@ -4,12 +4,13 @@ import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { app, modes } from '../../api/models'
 
+const mockUpdateMode = vi.fn()
 const mockGetModeUsage = vi.fn()
 const mockDeleteMode = vi.fn()
 
 vi.mock('../../api/backend', () => ({
   CreateMode: vi.fn(),
-  UpdateMode: vi.fn(),
+  UpdateMode: (...args: unknown[]) => mockUpdateMode(...args),
   GetModeUsage: (...args: unknown[]) => mockGetModeUsage(...args),
   DeleteMode: (...args: unknown[]) => mockDeleteMode(...args),
 }))
@@ -94,5 +95,54 @@ describe('FlightModesSection delete confirmation', () => {
       act(() => root.unmount())
       container.remove()
     }
+  })
+
+  it('flushes pending debounced color updates on unmount without invoking onSetError after unmount', async () => {
+    let rejectColorUpdate!: (reason: Error) => void
+    mockUpdateMode.mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectColorUpdate = reject
+        }),
+    )
+
+    const onSetError = vi.fn()
+    const modesState = app.ModesState.createFrom({
+      modes: [
+        { id: 1, name: 'Travel', description: 'Fast transit', color: '#FF7100', isDefault: true, sortOrder: 0 },
+      ],
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    act(() => {
+      root.render(createElement(FlightModesSection, { modesState, onSetError }))
+    })
+
+    const colorInput = container.querySelector('input[type="color"]') as HTMLInputElement
+    act(() => {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+      descriptor?.set?.call(colorInput, '#00e5a3')
+      colorInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    expect(mockUpdateMode).not.toHaveBeenCalled()
+
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+
+    expect(mockUpdateMode).toHaveBeenCalledWith(1, 'Travel', 'Fast transit', '#00e5a3')
+    expect(onSetError).not.toHaveBeenCalled()
+
+    await act(async () => {
+      rejectColorUpdate(new Error('database closed'))
+      await Promise.resolve()
+    })
+
+    expect(onSetError).not.toHaveBeenCalled()
   })
 })

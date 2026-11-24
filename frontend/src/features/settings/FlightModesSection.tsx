@@ -12,6 +12,7 @@ import { ED_AMBER_HEX } from '../../domain/theme'
 export interface FlightModesSectionProps {
   modesState: app.ModesState | null
   onSetError: (errorMessage: string) => void
+  onBusyChange?: (busy: boolean) => void
 }
 
 interface PendingModeDeletion {
@@ -27,6 +28,7 @@ interface PendingModeDeletion {
 export function FlightModesSection({
   modesState,
   onSetError,
+  onBusyChange,
 }: FlightModesSectionProps) {
   const [newModeName, setNewModeName] = useState('')
   const [newModeDescription, setNewModeDescription] = useState('')
@@ -35,12 +37,20 @@ export function FlightModesSection({
   const [pendingDelete, setPendingDelete] = useState<PendingModeDeletion | null>(null)
   const [loadingDeleteUsageId, setLoadingDeleteUsageId] = useState<number | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const mountedRef = useRef(true)
   const pendingColorUpdatesRef = useRef<
     Record<number, { timer: ReturnType<typeof setTimeout>; commit: () => void }>
   >({})
 
+  const isSectionBusy = loadingDeleteUsageId !== null || deleting
   useEffect(() => {
+    onBusyChange?.(isSectionBusy)
+  }, [isSectionBusy, onBusyChange])
+
+  useEffect(() => {
+    mountedRef.current = true
     return () => {
+      mountedRef.current = false
       for (const pendingUpdate of Object.values(pendingColorUpdatesRef.current)) {
         clearTimeout(pendingUpdate.timer)
         pendingUpdate.commit()
@@ -57,9 +67,11 @@ export function FlightModesSection({
     }
     const commit = () => {
       delete pendingColorUpdatesRef.current[modeItem.id]
-      onSetError('')
+      if (mountedRef.current) onSetError('')
       UpdateMode(modeItem.id, modeItem.name, modeItem.description, nextColor).catch(
-        (updateError) => onSetError(String(updateError)),
+        (updateError) => {
+          if (mountedRef.current) onSetError(String(updateError))
+        },
       )
     }
     pendingColorUpdatesRef.current[modeItem.id] = {
@@ -192,6 +204,7 @@ export function FlightModesSection({
       {pendingDelete && (
         <ModalShell
           title="Delete Flight Mode"
+          closeDisabled={deleting}
           onClose={() => {
             if (!deleting) setPendingDelete(null)
           }}

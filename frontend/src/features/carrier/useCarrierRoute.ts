@@ -11,6 +11,7 @@ import {
   normalizeDepotTritium,
   recalculateCarrierRouteDepotFuel,
 } from '../../domain/carrierRouting'
+import { createBusyTaskTracker, type BusyTaskTracker } from '../../hooks/useBusyTasks'
 import { useCopyFeedback } from '../../hooks/useCopyFeedback'
 import { resolveCarrierDefaults, resolveCarrierStartSystem } from './carrierRouteDefaults'
 import type { CarrierRoutePromptState } from './CarrierRouteModal'
@@ -25,7 +26,8 @@ export interface UseCarrierRouteOptions {
   lastVisitedIndex: number
   manualPlotterRequestCount?: number
   onBusyChange: (busyMessage: string | null) => void
-  onSetFcArrived: (rowId: number, arrived: boolean) => Promise<void>
+  busyTracker?: BusyTaskTracker
+  onSetFcArrived: (rowId: number, arrived: boolean) => Promise<boolean | void>
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
 }
 
@@ -38,6 +40,7 @@ export function useCarrierRoute({
   lastVisitedIndex,
   manualPlotterRequestCount = 0,
   onBusyChange,
+  busyTracker: externalBusyTracker,
   onSetFcArrived,
   onCarrierRouteOpenChange,
 }: UseCarrierRouteOptions) {
@@ -75,9 +78,50 @@ export function useCarrierRoute({
     handleChangeManualTritium,
   } = persistedRoute
 
+  const currentExpeditionId = plan?.expedition?.id
+  const expeditionIdRef = useRef<number | undefined>(currentExpeditionId)
+  expeditionIdRef.current = currentExpeditionId
+  const mountedRef = useRef(true)
+  const routeRequestSeqRef = useRef(0)
+
+  const onBusyChangeRef = useRef(onBusyChange)
+  onBusyChangeRef.current = onBusyChange
+  const fallbackBusyTracker = useMemo(
+    () => createBusyTaskTracker((busyMessage) => onBusyChangeRef.current(busyMessage)),
+    [],
+  )
+  const busyTracker = externalBusyTracker ?? fallbackBusyTracker
+  const activePlotBusyEndRef = useRef<(() => void) | null>(null)
+
+  const invalidateRouteRequests = useCallback(() => {
+    routeRequestSeqRef.current += 1
+    const endPlotBusy = activePlotBusyEndRef.current
+    activePlotBusyEndRef.current = null
+    endPlotBusy?.()
+    return routeRequestSeqRef.current
+  }, [])
+
+  const isStaleRouteRequest = useCallback(
+    (requestExpeditionId: number | undefined, requestSeq: number) =>
+      !mountedRef.current ||
+      expeditionIdRef.current !== requestExpeditionId ||
+      routeRequestSeqRef.current !== requestSeq,
+    [],
+  )
+
   useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      invalidateRouteRequests()
+    }
+  }, [invalidateRouteRequests])
+
+  useEffect(() => {
+    invalidateRouteRequests()
     setRoutePrompt(null)
-  }, [plan?.expedition?.id])
+    setLoggingJump(false)
+  }, [currentExpeditionId, invalidateRouteRequests])
 
   const nextFcStopEntry = useMemo(() => findNextCarrierStopEntry(plan), [plan])
   const nextFcStopSystem = nextFcStopEntry ? (nextFcStopEntry.row.systemName ?? '').trim() : ''
@@ -103,7 +147,13 @@ export function useCarrierRoute({
     copyWithFeedback('next', systemName)
   }
 
+  const handleCloseRoutePrompt = useCallback(() => {
+    invalidateRouteRequests()
+    setRoutePrompt(null)
+  }, [invalidateRouteRequests])
+
   function handleCancelCarrierRoute() {
+    invalidateRouteRequests()
     clearPersistedCarrierRoute()
     setCarrierJumpIndex(0)
     setManualModeOverride(false)
@@ -140,6 +190,8 @@ export function useCarrierRoute({
   async function openManualCarrierPlotter() {
     if (!plan || plan.expedition?.status === 'completed' || activeCarrierRoute) return
 
+    const requestExpeditionId = plan.expedition?.id
+    const requestSeq = invalidateRouteRequests()
     const upToIndex = nextFcStopEntry
       ? nextFcStopEntry.index
       : lastVisitedIndex >= 0
@@ -150,6 +202,7 @@ export function useCarrierRoute({
       resolveCarrierStartSystem(plan, upToIndex),
       resolveCarrierDefaults(),
     ])
+    if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
 
     const defaultCarrierType: 'player' | 'squadron' =
       plan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
@@ -190,10 +243,13 @@ export function useCarrierRoute({
     async (rowIndex: number, targetRow: expedition.Row) => {
       const currentPlan = latestPlanRef.current
       if (!currentPlan) return
+      const requestExpeditionId = currentPlan.expedition?.id
+      const requestSeq = invalidateRouteRequests()
       const [startSystem, defaults] = await Promise.all([
         resolveCarrierStartSystem(currentPlan, rowIndex),
         resolveCarrierDefaults(),
       ])
+      if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
       const defaultCarrierType: 'player' | 'squadron' =
         currentPlan.expedition?.carrierType === 'squadron' ? 'squadron' : 'player'
       setRoutePrompt({
@@ -206,11 +262,13 @@ export function useCarrierRoute({
         loading: false,
       })
     },
-    [],
+    [invalidateRouteRequests, isStaleRouteRequest],
   )
 
   async function handleStartCarrierRoute() {
-    if (!routePrompt) return
+    if (!routePrompt || routePrompt.loading) return
+    const requestExpeditionId = expeditionIdRef.current
+    const requestSeq = invalidateRouteRequests()
     const targetWaypointRowId = routePrompt.targetRowId
     const maxCarrierCapacityTonnes =
       routePrompt.carrierType === 'squadron'
@@ -229,7 +287,8 @@ export function useCarrierRoute({
     )
 
     setRoutePrompt((previous) => (previous ? { ...previous, loading: true } : null))
-    onBusyChange('PLOTTING SPANSH CARRIER ROUTE')
+    const endBusyTask = busyTracker.beginTask('PLOTTING SPANSH CARRIER ROUTE')
+    activePlotBusyEndRef.current = endBusyTask
     try {
       const routeResult = await PlotCarrierRoute(
         routePrompt.origin.trim(),
@@ -238,9 +297,11 @@ export function useCarrierRoute({
         routePrompt.carrierType,
         carrierDepot,
       )
+      if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
       setRoutePrompt(null)
       activateCarrierRoute(routeResult, targetWaypointRowId, Boolean(routeResult.manualMode))
     } catch (routeError: unknown) {
+      if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
       const errorRoute = expedition.CarrierRouteResult.createFrom({
         origin: routePrompt.origin.trim(),
         destination: routePrompt.destination.trim(),
@@ -257,7 +318,8 @@ export function useCarrierRoute({
       setRoutePrompt(null)
       activateCarrierRoute(errorRoute, targetWaypointRowId, true)
     } finally {
-      onBusyChange(null)
+      if (activePlotBusyEndRef.current === endBusyTask) activePlotBusyEndRef.current = null
+      endBusyTask()
     }
   }
 
@@ -277,13 +339,23 @@ export function useCarrierRoute({
   }
 
   async function handleCarrierArriveAtWaypoint() {
+    const requestExpeditionId = currentExpeditionId
+    const requestSeq = routeRequestSeqRef.current
+    if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
     const targetRowId = isManualCarrierRoute
       ? (nextFcStopEntry?.row.id ?? 0)
       : activeCarrierTargetRowId || (nextFcStopEntry?.row.id ?? 0)
-    clearPersistedCarrierRoute()
     if (targetRowId > 0) {
-      await onSetFcArrived(targetRowId, true)
+      try {
+        const arrivedSucceeded = await onSetFcArrived(targetRowId, true)
+        if (arrivedSucceeded === false || isStaleRouteRequest(requestExpeditionId, requestSeq)) {
+          return
+        }
+      } catch {
+        return
+      }
     }
+    clearPersistedCarrierRoute()
   }
 
   async function handleCompleteSpanshJump() {
@@ -296,10 +368,13 @@ export function useCarrierRoute({
       return
     }
 
+    const requestExpeditionId = currentExpeditionId
+    const requestSeq = routeRequestSeqRef.current
     setLoggingJump(true)
-    onBusyChange('LOGGING CARRIER JUMP')
+    const endBusyTask = busyTracker.beginTask('LOGGING CARRIER JUMP')
     try {
       await RecordCarrierJump(plan.expedition.id, carrierHop.distanceLy, carrierHop.tritiumUsed)
+      if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
       const nextJumpIndex = carrierJumpIndex + 1
       if (nextJumpIndex >= (activeCarrierRoute.jumps?.length ?? 0)) {
         await handleCarrierArriveAtWaypoint()
@@ -317,8 +392,10 @@ export function useCarrierRoute({
     } catch (jumpError) {
       console.error(jumpError)
     } finally {
-      setLoggingJump(false)
-      onBusyChange(null)
+      if (mountedRef.current && expeditionIdRef.current === requestExpeditionId) {
+        setLoggingJump(false)
+      }
+      endBusyTask()
     }
   }
 
@@ -327,11 +404,14 @@ export function useCarrierRoute({
     const jumpDistance = parseFloat(manualDistanceInputRef.current) || 0
     const tritiumAmount = Math.max(0, parseInt(manualTritiumInputRef.current, 10) || 0)
     if (jumpDistance <= 0 && tritiumAmount <= 0) return
+    const requestExpeditionId = currentExpeditionId
+    const requestSeq = routeRequestSeqRef.current
     cancelPendingInputPersist()
     setLoggingJump(true)
-    onBusyChange('LOGGING CARRIER JUMP')
+    const endBusyTask = busyTracker.beginTask('LOGGING CARRIER JUMP')
     try {
       await RecordCarrierJump(plan.expedition.id, jumpDistance, tritiumAmount)
+      if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
       const nextJumps = manualLegJumps + 1
       const nextTotalDistance = manualLegDistance + Math.max(0, jumpDistance)
       const nextTotalTritium = manualLegTritium + tritiumAmount
@@ -352,14 +432,17 @@ export function useCarrierRoute({
     } catch (jumpError) {
       console.error(jumpError)
     } finally {
-      setLoggingJump(false)
-      onBusyChange(null)
+      if (mountedRef.current && expeditionIdRef.current === requestExpeditionId) {
+        setLoggingJump(false)
+      }
+      endBusyTask()
     }
   }
 
   return {
     routePrompt,
     setRoutePrompt,
+    handleCloseRoutePrompt,
     activeCarrierRoute,
     activeCarrierTargetRowId,
     carrierJumpIndex,

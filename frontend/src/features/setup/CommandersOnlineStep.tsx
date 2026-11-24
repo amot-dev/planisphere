@@ -51,11 +51,14 @@ export function CommandersOnlineStep({
             {localSettings.commanders.map((commander) => (
               <label
                 key={commander.name}
-                className="flex items-center justify-between p-2.5 border border-ed-border bg-ed-card cursor-pointer hover:border-ed-border-strong"
+                className={`flex items-center justify-between p-2.5 border border-ed-border bg-ed-card ${
+                  isBusy ? 'cursor-not-allowed' : 'cursor-pointer hover:border-ed-border-strong'
+                }`}
               >
                 <div className="flex items-center gap-2.5">
                   <SquareCheckbox
                     checked={commander.enabled}
+                    disabled={isBusy}
                     onChange={(checked) => onToggleCommander(commander.name, checked)}
                   />
                   <div>
@@ -87,9 +90,12 @@ export function CommandersOnlineStep({
 
       {/* EDSM / GEC Online Sync */}
       <div className="p-3 border border-ed-border bg-ed-card space-y-3">
-        <label className="flex items-start gap-2.5 cursor-pointer">
+        <label
+          className={`flex items-start gap-2.5 ${isBusy ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+        >
           <SquareCheckbox
             checked={onlineLookups}
+            disabled={isBusy}
             onChange={(checked) => onToggleOnline(checked)}
             className="mt-0.5"
           />

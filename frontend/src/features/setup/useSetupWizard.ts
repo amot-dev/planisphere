@@ -54,7 +54,18 @@ export function useSetupWizard(
   const [gecSyncedCount, setGecSyncedCount] = useState<number | null>(null)
 
   const [busyMessage, setBusyMessage] = useState<string | null>(null)
+  const [actionBusy, setActionBusy] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const isBusy = Boolean(busyMessage) || actionBusy || eddBusy || gecBusy
 
   useEffect(() => {
     if (!initialSettings) return
@@ -86,8 +97,10 @@ export function useSetupWizard(
       GetSettings(),
       GetIngestStatus(),
     ])
-    setLocalSettings(currentSettings)
-    setLocalIngest(currentIngestStatus)
+    if (mountedRef.current) {
+      setLocalSettings(currentSettings)
+      setLocalIngest(currentIngestStatus)
+    }
     return { settings: currentSettings, ingestStatus: currentIngestStatus }
   }
 
@@ -96,6 +109,7 @@ export function useSetupWizard(
     options?: { busyText?: string; setBusyFlag?: (busy: boolean) => void },
   ) {
     setError('')
+    setActionBusy(true)
     if (options?.busyText) {
       setBusyMessage(options.busyText)
     }
@@ -103,12 +117,17 @@ export function useSetupWizard(
     try {
       await action()
     } catch (actionError) {
-      setError(String(actionError))
-    } finally {
-      if (options?.busyText) {
-        setBusyMessage(null)
+      if (mountedRef.current) {
+        setError(String(actionError))
       }
-      options?.setBusyFlag?.(false)
+    } finally {
+      if (mountedRef.current) {
+        setActionBusy(false)
+        if (options?.busyText) {
+          setBusyMessage(null)
+        }
+        options?.setBusyFlag?.(false)
+      }
     }
   }
 
@@ -119,7 +138,7 @@ export function useSetupWizard(
   ) {
     return runWizardAction(async () => {
       const picked = await browse()
-      if (picked) {
+      if (mountedRef.current && picked) {
         modifiedRef.current = true
         setPath(picked)
       }
@@ -165,6 +184,7 @@ export function useSetupWizard(
     return runWizardAction(
       async () => {
         const count = await ImportEDDiscoveryHistory(eddPath)
+        if (!mountedRef.current) return
         setEddImportedCount(count)
         await refreshWizardState()
       },
@@ -175,16 +195,29 @@ export function useSetupWizard(
   function handleToggleCommander(name: string, enabled: boolean) {
     return runWizardAction(async () => {
       const next = await SetCommanderEnabled(name, enabled)
-      setLocalSettings(next)
+      if (mountedRef.current) {
+        setLocalSettings(next)
+      }
     })
   }
 
   function handleToggleOnline(enabled: boolean) {
+    const previousOnlineLookups = onlineLookups
     userModifiedOnlineLookupsRef.current = true
     setOnlineLookups(enabled)
     return runWizardAction(async () => {
-      const next = await SetOnlineLookups(enabled)
-      setLocalSettings(next)
+      try {
+        const next = await SetOnlineLookups(enabled)
+        if (mountedRef.current) {
+          setLocalSettings(next)
+          setOnlineLookups(next.onlineLookups)
+        }
+      } catch (toggleError) {
+        if (mountedRef.current) {
+          setOnlineLookups(localSettings?.onlineLookups ?? previousOnlineLookups)
+        }
+        throw toggleError
+      }
     })
   }
 
@@ -192,6 +225,7 @@ export function useSetupWizard(
     return runWizardAction(
       async () => {
         const count = await RefreshGEC()
+        if (!mountedRef.current) return
         setGecSyncedCount(count)
         await refreshWizardState()
       },
@@ -200,11 +234,13 @@ export function useSetupWizard(
   }
 
   function handleNext() {
+    if (isBusy) return
     if (step === 0) {
       return runWizardAction(
         async () => {
           const nextSettings = await SetDatabasePath(dbPath)
           const nextIngestStatus = await GetIngestStatus()
+          if (!mountedRef.current) return
           setLocalSettings(nextSettings)
           setLocalIngest(nextIngestStatus)
           setDbPath(nextSettings.dbPath)
@@ -229,8 +265,10 @@ export function useSetupWizard(
       return runWizardAction(
         async () => {
           const currentIngestStatus = await SetupConfigureJournals(journalDir)
+          if (!mountedRef.current) return
           setLocalIngest(currentIngestStatus)
           const currentSettings = await GetSettings()
+          if (!mountedRef.current) return
           setLocalSettings(currentSettings)
           setStep(2)
         },
@@ -248,6 +286,7 @@ export function useSetupWizard(
       return runWizardAction(
         async () => {
           await CompleteSetup()
+          if (!mountedRef.current) return
           onComplete()
         },
         { busyText: 'FINALIZING SETUP...' },
@@ -256,13 +295,14 @@ export function useSetupWizard(
   }
 
   function handleBack() {
-    if (step > 0 && !busyMessage && !eddBusy) {
+    if (step > 0 && !isBusy) {
       setError('')
       setStep(step - 1)
     }
   }
 
   function handleSelectCompletedStep(targetStep: number) {
+    if (isBusy || targetStep < 0 || targetStep >= step) return
     setError('')
     setStep(targetStep)
   }
@@ -282,7 +322,7 @@ export function useSetupWizard(
     gecSyncedCount,
     busyMessage,
     error,
-    isBusy: Boolean(busyMessage) || eddBusy || gecBusy,
+    isBusy,
     handleChangeDbPath,
     handleBrowseDb: () => browseWizardPath(BrowseDBPath, userModifiedDbPathRef, setDbPath),
     handleResetDefaultDb,
