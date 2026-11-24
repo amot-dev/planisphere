@@ -13,51 +13,67 @@ export interface WaypointDetailsState {
   toggleExpand: (rowId: number) => void
 }
 
-function computeLegStartTimestamp(plan: expedition.PlanView, targetVisitedAt: string): string {
-  let latestVisitedAt = ''
-  let latestDepartedAt = ''
-  for (const rowView of plan.rows ?? []) {
-    const candidateVisitedAt = rowView.row.visitedAt ?? ''
-    if (
-      rowView.row.rowType === 'waypoint' &&
-      candidateVisitedAt !== '' &&
-      (targetVisitedAt === '' || candidateVisitedAt < targetVisitedAt) &&
-      candidateVisitedAt > latestVisitedAt
-    ) {
-      latestVisitedAt = candidateVisitedAt
-      latestDepartedAt = rowView.row.departedAt ?? ''
-    }
-  }
-  return latestDepartedAt || latestVisitedAt || (plan.expedition?.startTimestamp ?? '')
+function isDrawerEligibleRow(
+  rowView: expedition.RowView | undefined,
+): rowView is expedition.RowView {
+  return Boolean(rowView && rowView.row.rowType === 'waypoint' && rowView.visitState !== 'future')
 }
 
-function computeExpectedDrawerTo(plan: expedition.PlanView, rowView: expedition.RowView): string {
-  const departedAt = rowView.row.departedAt ?? ''
-  if (departedAt !== '') {
-    return departedAt
+function pruneDrawerRecord<T>(
+  record: Record<number, T>,
+  rowViewById: Map<number, expedition.RowView>,
+  onPruneRowId?: (rowId: number) => void,
+): Record<number, T> {
+  let nextRecord: Record<number, T> | null = null
+  for (const idString of Object.keys(record)) {
+    const rowId = Number(idString)
+    if (!isDrawerEligibleRow(rowViewById.get(rowId))) {
+      nextRecord ??= { ...record }
+      delete nextRecord[rowId]
+      onPruneRowId?.(rowId)
+    }
   }
-  const visitedAt = rowView.row.visitedAt ?? ''
-  if (
-    rowView.number > 1 &&
-    visitedAt !== '' &&
-    plan.expedition?.status === 'completed' &&
-    plan.expedition?.endTimestamp
-  ) {
-    return plan.expedition.endTimestamp
+  return nextRecord ?? record
+}
+
+function isLoadedDrawerFresh(
+  rowView: expedition.RowView,
+  loadedDetails: expedition.WaypointDetails | undefined,
+  loadedArchiveRevision: string | undefined,
+  loadedClosedRevision: number | undefined,
+  archiveRevision: string,
+  closedWindowRevision: number,
+): boolean {
+  if (!loadedDetails || !loadedDetails.kind || loadedDetails.number !== rowView.number) {
+    return false
   }
-  return ''
+  const expectedArrivedAt = rowView.row.visitedAt ?? ''
+  const expectedTo = rowView.drawerTo ?? (rowView.row.departedAt ?? '')
+  const expectedFrom = rowView.number === 1 ? loadedDetails.from : (rowView.drawerFrom ?? '')
+  const isRevisionFresh =
+    expectedTo !== ''
+      ? loadedClosedRevision === closedWindowRevision
+      : loadedArchiveRevision === archiveRevision &&
+        loadedClosedRevision === closedWindowRevision
+  return (
+    isRevisionFresh &&
+    loadedDetails.to === expectedTo &&
+    loadedDetails.from === expectedFrom &&
+    (loadedDetails.arrivedAt ?? '') === expectedArrivedAt
+  )
 }
 
 /**
  * useWaypointDetails manages expandable waypoint telemetry drawers, resets state
- * across expedition switches, and refreshes open drawers when leg bounds or
- * journal events change.
+ * across expedition switches, prunes demoted future rows, and selectively refreshes
+ * open drawers when leg bounds or relevant journal watermarks change.
  */
 export function useWaypointDetails(
   plan: expedition.PlanView | null,
   isPlanning: boolean,
   archiveRevision = '',
   isOptimisticPlan = false,
+  closedWindowRevision = 0,
 ): WaypointDetailsState {
   const [expandedRowIds, setExpandedRowIds] = useState<Record<number, boolean>>({})
   const expandedRowIdsRef = useRef<Record<number, boolean>>(expandedRowIds)
@@ -76,15 +92,30 @@ export function useWaypointDetails(
   const archiveRevisionRef = useRef<string>(archiveRevision)
   archiveRevisionRef.current = archiveRevision
 
+  const closedWindowRevisionRef = useRef<number>(closedWindowRevision)
+  closedWindowRevisionRef.current = closedWindowRevision
+
   const loadedArchiveRevisionByIdRef = useRef<Record<number, string>>({})
+  const loadedClosedRevisionByIdRef = useRef<Record<number, number>>({})
   const requestSeqByRowIdRef = useRef<Record<number, number>>({})
+
+  const rowViewById = useMemo(() => {
+    const map = new Map<number, expedition.RowView>()
+    for (const rowView of plan?.rows ?? []) {
+      if (rowView?.row) {
+        map.set(rowView.row.id, rowView)
+      }
+    }
+    return map
+  }, [plan?.rows])
 
   const loadDetails = useCallback((rowId: number) => {
     const requestExpeditionId = activeExpeditionIdRef.current
     const requestArchiveRevision = archiveRevisionRef.current
+    const requestClosedRevision = closedWindowRevisionRef.current
     const requestSequence = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
     requestSeqByRowIdRef.current[rowId] = requestSequence
-    const hasLoadedDetails = Boolean(detailsByIdRef.current[rowId])
+    const hasLoadedDetails = Boolean(detailsByIdRef.current[rowId]?.kind)
     if (!hasLoadedDetails) {
       setLoadingDetails((previous) => ({ ...previous, [rowId]: true }))
     }
@@ -96,7 +127,13 @@ export function useWaypointDetails(
         ) {
           return
         }
+        if (!details || !details.kind) {
+          delete loadedArchiveRevisionByIdRef.current[rowId]
+          delete loadedClosedRevisionByIdRef.current[rowId]
+          return
+        }
         loadedArchiveRevisionByIdRef.current[rowId] = requestArchiveRevision
+        loadedClosedRevisionByIdRef.current[rowId] = requestClosedRevision
         setDetailsById((previous) => {
           const nextDetails = { ...previous, [rowId]: details }
           detailsByIdRef.current = nextDetails
@@ -109,6 +146,7 @@ export function useWaypointDetails(
           requestSeqByRowIdRef.current[rowId] === requestSequence
         ) {
           delete loadedArchiveRevisionByIdRef.current[rowId]
+          delete loadedClosedRevisionByIdRef.current[rowId]
           console.error('Failed to load waypoint details:', detailsError)
         }
       })
@@ -126,6 +164,7 @@ export function useWaypointDetails(
   // Reset open drawers and cached payloads when switching expeditions or entering planning mode.
   useEffect(() => {
     loadedArchiveRevisionByIdRef.current = {}
+    loadedClosedRevisionByIdRef.current = {}
     requestSeqByRowIdRef.current = {}
     if (
       Object.keys(expandedRowIdsRef.current).length > 0 ||
@@ -139,45 +178,66 @@ export function useWaypointDetails(
     }
   }, [activeExpeditionId, isPlanning])
 
-  // Refresh open drawers when their leg bounds or journal archive revision change.
+  // Prune ineligible or future drawers and selectively refresh open drawers on bound or revision changes.
   useEffect(() => {
     if (!plan || isPlanning || isOptimisticPlan) return
+
+    const invalidatePrunedRow = (rowId: number) => {
+      delete loadedArchiveRevisionByIdRef.current[rowId]
+      delete loadedClosedRevisionByIdRef.current[rowId]
+      requestSeqByRowIdRef.current[rowId] = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
+    }
+    const nextExpanded = pruneDrawerRecord(
+      expandedRowIdsRef.current,
+      rowViewById,
+      invalidatePrunedRow,
+    )
+    if (nextExpanded !== expandedRowIdsRef.current) {
+      expandedRowIdsRef.current = nextExpanded
+      setExpandedRowIds(nextExpanded)
+    }
+    const nextDetails = pruneDrawerRecord(detailsByIdRef.current, rowViewById, invalidatePrunedRow)
+    if (nextDetails !== detailsByIdRef.current) {
+      detailsByIdRef.current = nextDetails
+      setDetailsById(nextDetails)
+    }
+    setLoadingDetails((previous) => pruneDrawerRecord(previous, rowViewById))
+
     for (const [idString, isOpen] of Object.entries(expandedRowIdsRef.current)) {
       if (!isOpen) continue
       const rowId = Number(idString)
-      const rowView = plan.rows?.find((candidate) => candidate.row.id === rowId)
-      if (!rowView || rowView.row.rowType !== 'waypoint' || rowView.visitState === 'future') {
+      const rowView = rowViewById.get(rowId)
+      if (!isDrawerEligibleRow(rowView)) {
         continue
       }
-
-      const loadedDetails = detailsByIdRef.current[rowId]
       if (
-        loadedDetails &&
-        loadedDetails.number === rowView.number &&
-        loadedArchiveRevisionByIdRef.current[rowId] === archiveRevision
+        isLoadedDrawerFresh(
+          rowView,
+          detailsByIdRef.current[rowId],
+          loadedArchiveRevisionByIdRef.current[rowId],
+          loadedClosedRevisionByIdRef.current[rowId],
+          archiveRevision,
+          closedWindowRevision,
+        )
       ) {
-        const expectedArrivedAt = rowView.row.visitedAt ?? ''
-        const expectedTo = computeExpectedDrawerTo(plan, rowView)
-        const expectedFrom =
-          rowView.number === 1
-            ? loadedDetails.from
-            : computeLegStartTimestamp(plan, expectedArrivedAt)
-        if (
-          loadedDetails.to === expectedTo &&
-          loadedDetails.from === expectedFrom &&
-          (loadedDetails.arrivedAt ?? '') === expectedArrivedAt
-        ) {
-          continue
-        }
+        continue
       }
       loadDetails(rowId)
     }
-  }, [archiveRevision, isOptimisticPlan, isPlanning, loadDetails, plan])
+  }, [
+    archiveRevision,
+    closedWindowRevision,
+    isOptimisticPlan,
+    isPlanning,
+    loadDetails,
+    plan,
+    rowViewById,
+  ])
 
   const toggleExpand = useCallback(
     (rowId: number) => {
-      const rowView = plan?.rows?.find((candidate) => candidate.row.id === rowId)
-      if (isPlanning || !rowView || rowView.visitState === 'future') return
+      const rowView = rowViewById.get(rowId)
+      if (isPlanning || !isDrawerEligibleRow(rowView)) return
 
       const nextOpen = !expandedRowIdsRef.current[rowId]
       setExpandedRowIds((previous) => {
@@ -189,7 +249,7 @@ export function useWaypointDetails(
         loadDetails(rowId)
       }
     },
-    [isPlanning, loadDetails, plan],
+    [isPlanning, loadDetails, rowViewById],
   )
 
   return useMemo(

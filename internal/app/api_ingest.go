@@ -16,19 +16,20 @@ import (
 
 // IngestStatus reports journal archive and watcher state.
 type IngestStatus struct {
-	Scanning           bool   `json:"scanning"`
-	WatcherActive      bool   `json:"watcherActive"`
-	WatcherError       string `json:"watcherError"`
-	LastError          string `json:"lastError"`
-	LastScanAt         string `json:"lastScanAt"`
-	FilesTracked       int    `json:"filesTracked"`
-	EventsStored       int    `json:"eventsStored"`
-	FirstEventAt       string `json:"firstEventAt"`
-	FirstEventGalactic string `json:"firstEventGalactic"`
-	LastEventAt        string `json:"lastEventAt"`
-	LastEventGalactic  string `json:"lastEventGalactic"`
-	CurrentSystem      string `json:"currentSystem"`
-	CurrentShip        string `json:"currentShip"`
+	Scanning             bool   `json:"scanning"`
+	WatcherActive        bool   `json:"watcherActive"`
+	WatcherError         string `json:"watcherError"`
+	LastError            string `json:"lastError"`
+	LastScanAt           string `json:"lastScanAt"`
+	FilesTracked         int    `json:"filesTracked"`
+	EventsStored         int    `json:"eventsStored"`
+	FirstEventAt         string `json:"firstEventAt"`
+	FirstEventGalactic   string `json:"firstEventGalactic"`
+	LastEventAt          string `json:"lastEventAt"`
+	LastEventGalactic    string `json:"lastEventGalactic"`
+	CurrentSystem        string `json:"currentSystem"`
+	CurrentShip          string `json:"currentShip"`
+	ClosedWindowRevision uint64 `json:"closedWindowRevision"`
 }
 
 // GetIngestStatus returns the journal ingestion status.
@@ -42,6 +43,9 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	}
 	if app.watcher != nil {
 		status.WatcherActive, status.WatcherError = app.watcher.Active()
+	}
+	if app.timeRangeStats != nil {
+		status.ClosedWindowRevision = app.timeRangeStats.ClosedWindowRevision()
 	}
 	status.LastScanAt = settings.LastScanAt(app.db)
 	archiveStatus, archiveError := replay.ArchiveStatus(app.db)

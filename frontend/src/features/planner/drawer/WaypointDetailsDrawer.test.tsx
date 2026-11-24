@@ -334,6 +334,25 @@ describe('WaypointDetailsDrawer', () => {
     expect(stagedOriginHtml).not.toContain('[IN SYSTEM]:')
   })
 
+  it('renders computing placeholder when details has an empty kind so zero-valued payloads never render LEG #-1', () => {
+    const legRowView = expedition.RowView.createFrom({
+      row: { id: 30, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia' },
+      number: 2,
+      visitState: 'current',
+    })
+
+    const html = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: expedition.WaypointDetails.createFrom({ rowId: 0, kind: '', number: 0 }),
+        loading: false,
+        rowView: legRowView,
+      }),
+    )
+
+    expect(html).toContain('[ COMPUTING WAYPOINT TELEMETRY... ]')
+    expect(html).not.toContain('LEG #-1')
+  })
+
   it('updates live [IN SYSTEM]: duration every minute while in system and pauses when clockSuspended is true', async () => {
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     vi.useFakeTimers()

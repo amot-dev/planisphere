@@ -59,7 +59,7 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
       forceOrigin: isOrigin,
     }) ?? DEFAULT_LEG_BORDER_COLOR
 
-  if (loading || !details) {
+  if (loading || !details || !details.kind) {
     return (
       <div
         style={{ borderLeftColor: drawerBorderColor }}

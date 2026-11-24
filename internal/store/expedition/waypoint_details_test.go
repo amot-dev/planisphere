@@ -29,12 +29,24 @@ func assertBatchMatchesIndividualDetails(
 			testingContext.Fatalf("Details(%d): %v", rowView.Row.ID, detailsError)
 		}
 		if singleDetails.RowID == 0 {
+			if rowView.DrawerFrom != "" || rowView.DrawerTo != "" {
+				testingContext.Fatalf("ineligible row %d expected empty drawer bounds, got from=%q to=%q",
+					rowView.Row.ID, rowView.DrawerFrom, rowView.DrawerTo)
+			}
 			continue
 		}
 		if singleDetails.Kind == "origin" {
+			if rowView.DrawerFrom != "" || rowView.DrawerTo != singleDetails.To {
+				testingContext.Fatalf("origin row %d drawer bounds mismatch: got (%q,%q) want (%q,%q)",
+					rowView.Row.ID, rowView.DrawerFrom, rowView.DrawerTo, "", singleDetails.To)
+			}
 			originCopy := singleDetails
 			expectedOrigin = &originCopy
 			continue
+		}
+		if rowView.DrawerFrom != singleDetails.From || rowView.DrawerTo != singleDetails.To {
+			testingContext.Fatalf("leg row %d drawer bounds mismatch: got (%q,%q) want (%q,%q)",
+				rowView.Row.ID, rowView.DrawerFrom, rowView.DrawerTo, singleDetails.From, singleDetails.To)
 		}
 		expectedLegs = append(expectedLegs, singleDetails)
 	}

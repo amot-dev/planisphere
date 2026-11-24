@@ -415,3 +415,77 @@ func TestTimeRangeStatsMemoizesModeLoaderOnColdFilteredCompute(testingContext *t
 		testingContext.Fatalf("expected post-invalidation Compute to reload mode lookup once (total 2), got %d", loaderCalls.Load())
 	}
 }
+
+func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"SeedSys","SystemAddress":1001,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, lines)
+
+	eventBus := projection.NewBus()
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, nil)
+
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
+		testingContext.Fatalf("expected initial ClosedWindowRevision 1, got %d", gotRevision)
+	}
+
+	// Chronological forward non-retroactive gameplay batches advance the high-water mark without incrementing ClosedWindowRevision.
+	forwardBatches := []struct {
+		events    journal.EventSet
+		timestamp string
+	}{
+		{events: journal.NewEventSet(journal.EventFSDJump), timestamp: "2026-01-18T20:00:00Z"},
+		{events: journal.NewEventSet(journal.EventScan, journal.EventSAAScanComplete), timestamp: "2026-01-18T20:10:00Z"},
+		{events: journal.NewEventSet(journal.EventScanOrganic), timestamp: "2026-01-18T20:20:00Z"},
+	}
+	for _, batch := range forwardBatches {
+		eventBus.PublishJournalSince(batch.events, batch.timestamp)
+		if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
+			testingContext.Fatalf("expected forward batch at %s to keep ClosedWindowRevision 1, got %d", batch.timestamp, gotRevision)
+		}
+	}
+
+	expectedRevision := uint64(1)
+	assertIncrement := func(label string, trigger func()) {
+		testingContext.Helper()
+		trigger()
+		expectedRevision++
+		if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != expectedRevision {
+			testingContext.Fatalf("%s: expected ClosedWindowRevision %d, got %d", label, expectedRevision, gotRevision)
+		}
+	}
+
+	assertIncrement("SellOrganicData", func() {
+		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventSellOrganicData), "2026-01-18T20:30:00Z")
+	})
+	assertIncrement("MultiSellExplorationData", func() {
+		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventMultiSellExplorationData), "2026-01-18T20:40:00Z")
+	})
+	assertIncrement("Resurrect", func() {
+		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventResurrect), "2026-01-18T20:50:00Z")
+	})
+	assertIncrement("NpcCrewPaidWage", func() {
+		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventNpcCrewPaidWage), "2026-01-18T21:00:00Z")
+	})
+	assertIncrement("AppCommanderFilterChanged", func() {
+		eventBus.PublishApp(events.AppCommanderFilterChanged)
+	})
+	assertIncrement("empty EarliestTimestamp", func() {
+		eventBus.PublishJournal(journal.NewEventSet(journal.EventScan))
+	})
+	assertIncrement("historical backfill equal to highWaterTimestamp", func() {
+		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventFSDJump), "2026-01-18T21:00:00Z")
+	})
+	assertIncrement("historical backfill strictly before highWaterTimestamp", func() {
+		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventScan), "2026-01-18T18:00:00Z")
+	})
+
+	// Subsequent forward live gameplay above the preserved 21:00:00Z high-water mark stays non-invalidating.
+	eventBus.PublishJournalSince(journal.NewEventSet(journal.EventFSDJump), "2026-01-18T22:00:00Z")
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != expectedRevision {
+		testingContext.Fatalf("expected forward batch after backfill to preserve ClosedWindowRevision %d, got %d", expectedRevision, gotRevision)
+	}
+}

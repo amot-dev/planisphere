@@ -474,8 +474,15 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 
 	initialTimeRangeGen := testApp.timeRangeStats.Generation()
+	initialClosedRev := testApp.timeRangeStats.ClosedWindowRevision()
 	initialCarrierGen := testApp.carrierState.Generation()
 	initialCareerGen := testApp.careerStats.Generation()
+
+	initialIngestStatus, ingestErr := testApp.GetIngestStatus()
+	if ingestErr != nil || initialIngestStatus.ClosedWindowRevision != initialClosedRev {
+		testingContext.Fatalf("expected GetIngestStatus ClosedWindowRevision %d, got %d (err=%v)",
+			initialClosedRev, initialIngestStatus.ClosedWindowRevision, ingestErr)
+	}
 
 	if testApp.timeRangeStats.CachedCount() == 0 {
 		testingContext.Fatal("expected timeRangeStats to cache an entry after GetSidebarStats")
@@ -533,6 +540,10 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+2 || testApp.timeRangeStats.CachedCount() != 0 {
 		testingContext.Errorf("expected timeRangeStats generation %d and empty cache after AppDatabaseSwitched, got gen=%d count=%d",
 			initialTimeRangeGen+2, testApp.timeRangeStats.Generation(), testApp.timeRangeStats.CachedCount())
+	}
+	if switchedStatus, switchedErr := testApp.GetIngestStatus(); switchedErr != nil || switchedStatus.ClosedWindowRevision != initialClosedRev+1 {
+		testingContext.Errorf("expected ClosedWindowRevision %d after AppDatabaseSwitched, got %d (err=%v)",
+			initialClosedRev+1, switchedStatus.ClosedWindowRevision, switchedErr)
 	}
 }
 

@@ -38,6 +38,8 @@ type RowView struct {
 	VisitState         string       `json:"visitState"`
 	VisitedAtGalactic  string       `json:"visitedAtGalactic"`
 	DepartedAtGalactic string       `json:"departedAtGalactic,omitempty"`
+	DrawerFrom         string       `json:"drawerFrom,omitempty"`
+	DrawerTo           string       `json:"drawerTo,omitempty"`
 	DistFromPrevLy     *float64     `json:"distFromPrevLy,omitempty"`
 	DistFromCurrentLy *float64 `json:"distFromCurrentLy,omitempty"`
 	IsNextWaypoint    bool     `json:"isNextWaypoint,omitempty"`
@@ -75,11 +77,12 @@ type planBuildContext struct {
 	nextWaypointRowID  int64
 	modeList           []modes.Mode
 	modeByID           map[int64]modes.Mode
-	defaultModeID      int64
-	activeModeID       int64
-	previousVisitByID  map[int64]string
-	visitCountBySystem map[string]int
-	gecLookup          GECLookup
+	defaultModeID        int64
+	activeModeID         int64
+	previousVisitByID    map[int64]string
+	precedingVisitedByID map[int64]*Row
+	visitCountBySystem   map[string]int
+	gecLookup            GECLookup
 }
 
 func (buildContext *planBuildContext) resolveMode(modeID int64) (int64, string, string) {
@@ -222,7 +225,34 @@ func accumulateRemainingDistanceLy(expeditionStatus string, rowItem Row, rowView
 	return 0
 }
 
+func populateWaypointDrawerBounds(buildContext *planBuildContext, rowItem Row, waypointNumber int, rowViewItem *RowView) {
+	if rowViewItem.VisitState != VisitVisited && rowViewItem.VisitState != VisitCurrent {
+		return
+	}
+	if waypointNumber == 1 {
+		rowViewItem.DrawerTo = rowItem.DepartedAt
+		return
+	}
+	precedingRow := buildContext.currentWaypoint
+	if rowItem.VisitedAt != "" {
+		precedingRow = buildContext.precedingVisitedByID[rowItem.ID]
+	}
+	if precedingRow == nil {
+		rowViewItem.DrawerFrom = buildContext.expeditionRecord.StartTimestamp
+	} else if precedingRow.DepartedAt != "" {
+		rowViewItem.DrawerFrom = precedingRow.DepartedAt
+	} else {
+		rowViewItem.DrawerFrom = precedingRow.VisitedAt
+	}
+	if rowItem.DepartedAt != "" {
+		rowViewItem.DrawerTo = rowItem.DepartedAt
+	} else if rowItem.VisitedAt != "" && buildContext.expeditionRecord.Status == StatusCompleted && buildContext.expeditionRecord.EndTimestamp != "" {
+		rowViewItem.DrawerTo = buildContext.expeditionRecord.EndTimestamp
+	}
+}
+
 func populateWaypointLegTelemetry(buildContext *planBuildContext, rowItem Row, waypointNumber int, rowViewItem *RowView) {
+	populateWaypointDrawerBounds(buildContext, rowItem, waypointNumber, rowViewItem)
 	switch rowViewItem.VisitState {
 	case VisitVisited:
 		rowViewItem.VisitedAtGalactic = reference.ToGalactic(rowItem.VisitedAt)
@@ -323,6 +353,7 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expe
 	if contextError != nil {
 		return planView, contextError
 	}
+	buildContext.precedingVisitedByID = indexPrecedingVisitedWaypoints(rows)
 
 	waypointNumber := 0
 	var previousWaypoint *Row

@@ -12,17 +12,21 @@ import (
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 )
 
 // TimeRangeStats caches bounded expedition and telemetry window metrics across
 // specialized section projections.
 type TimeRangeStats struct {
-	modeLoader    replaystats.ModeLookupLoader
-	travel        *TimeRangeTravel
-	cartographics *TimeRangeCartographics
-	exobiology    *TimeRangeExobiology
-	realization   *TimeRangeRealization
+	modeLoader           replaystats.ModeLookupLoader
+	travel               *TimeRangeTravel
+	cartographics        *TimeRangeCartographics
+	exobiology           *TimeRangeExobiology
+	realization          *TimeRangeRealization
+	watermarkMu          sync.Mutex
+	closedWindowRevision uint64
+	highWaterTimestamp   string
 }
 
 // NewTimeRangeStats creates and registers all time-windowed section projections on bus.
@@ -33,13 +37,23 @@ func NewTimeRangeStats(
 	recoveredJumps *projections.RecoveredJumps,
 	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeStats {
-	return &TimeRangeStats{
-		modeLoader:    modeLoader,
-		travel:        NewTimeRangeTravel(dbConn, bus, recoveredJumps, modeLoader),
-		cartographics: NewTimeRangeCartographics(dbConn, bus, modeLoader),
-		exobiology:    NewTimeRangeExobiology(dbConn, bus, salesLedger, modeLoader),
-		realization:   NewTimeRangeRealization(dbConn, bus, salesLedger, modeLoader),
+	initialHighWater := ""
+	if dbConn != nil {
+		initialHighWater = replay.LatestEventTimestamp(dbConn)
 	}
+	timeRangeStats := &TimeRangeStats{
+		modeLoader:           modeLoader,
+		travel:               NewTimeRangeTravel(dbConn, bus, recoveredJumps, modeLoader),
+		cartographics:        NewTimeRangeCartographics(dbConn, bus, modeLoader),
+		exobiology:           NewTimeRangeExobiology(dbConn, bus, salesLedger, modeLoader),
+		realization:          NewTimeRangeRealization(dbConn, bus, salesLedger, modeLoader),
+		closedWindowRevision: 1,
+		highWaterTimestamp:   initialHighWater,
+	}
+	if bus != nil {
+		bus.OnTrigger(timeRangeStats.Triggers(), timeRangeStats.observeTrigger)
+	}
+	return timeRangeStats
 }
 
 // Travel returns the time-windowed Flight Operations projection.
@@ -92,6 +106,29 @@ func (timeRangeStats *TimeRangeStats) Generation() uint64 {
 		timeRangeStats.exobiology.Generation(),
 		timeRangeStats.realization.Generation(),
 	)
+}
+
+// ClosedWindowRevision returns a monotonic watermark that advances only when
+// closed historical telemetry windows may change due to retroactive settlements,
+// commander or database switches, or out-of-order backfills.
+func (timeRangeStats *TimeRangeStats) ClosedWindowRevision() uint64 {
+	timeRangeStats.watermarkMu.Lock()
+	defer timeRangeStats.watermarkMu.Unlock()
+	return timeRangeStats.closedWindowRevision
+}
+
+func (timeRangeStats *TimeRangeStats) observeTrigger(observed projection.Triggers) {
+	timeRangeStats.watermarkMu.Lock()
+	defer timeRangeStats.watermarkMu.Unlock()
+	if !observed.App.IsEmpty() ||
+		observed.Journal.Intersects(realizationRetroactiveJournalEvents) ||
+		observed.EarliestTimestamp == "" ||
+		observed.EarliestTimestamp <= timeRangeStats.highWaterTimestamp {
+		timeRangeStats.closedWindowRevision++
+	}
+	if observed.EarliestTimestamp > timeRangeStats.highWaterTimestamp {
+		timeRangeStats.highWaterTimestamp = observed.EarliestTimestamp
+	}
 }
 
 // Compute returns the merged metrics and realization breakdown for timeRange

@@ -73,6 +73,18 @@ func FirstEventTimestamp(queryer db.Queryer) string {
 	return firstTimestamp.String
 }
 
+// LatestEventTimestamp returns the latest ISO-8601 event timestamp stored in journal_events.
+func LatestEventTimestamp(queryer db.Queryer) string {
+	if queryer == nil {
+		return ""
+	}
+	var latestTimestamp string
+	if queryError := queryer.QueryRow(`SELECT COALESCE(MAX(timestamp), '') FROM journal_events`).Scan(&latestTimestamp); queryError != nil {
+		return ""
+	}
+	return latestTimestamp
+}
+
 // CareerStart returns the earliest active commander timestamp in ISO-8601 UTC
 // and Galactic Standard Time formats.
 func CareerStart(queryer db.Queryer) (string, string) {

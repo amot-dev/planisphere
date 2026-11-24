@@ -127,6 +127,7 @@ export default function App() {
           <ExpeditionPlanner
             plan={plan}
             archiveRevision={archiveRevision}
+            closedWindowRevision={ingest?.closedWindowRevision ?? 0}
             clockSuspended={isClockSuspended}
             externalLinkInara={settings?.externalLinkInara}
             externalLinkEdsm={settings?.externalLinkEdsm}

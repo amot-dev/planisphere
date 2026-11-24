@@ -27,6 +27,7 @@ import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMuta
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
   archiveRevision?: string
+  closedWindowRevision?: number
   clockSuspended?: boolean
   externalLinkInara?: string
   externalLinkEdsm?: string
@@ -48,6 +49,7 @@ export interface ExpeditionPlannerProps {
 export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   plan,
   archiveRevision = '',
+  closedWindowRevision = 0,
   clockSuspended = false,
   externalLinkInara,
   externalLinkEdsm,
@@ -70,6 +72,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     Boolean(isPlanning),
     archiveRevision,
     isOptimisticPlan,
+    closedWindowRevision,
   )
 
   const { copiedKey: copiedSystemRowId, copyWithFeedback } = useCopyFeedback<number>()

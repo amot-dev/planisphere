@@ -14,6 +14,7 @@ export namespace app {
 	    lastEventGalactic: string;
 	    currentSystem: string;
 	    currentShip: string;
+	    closedWindowRevision: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new IngestStatus(source);
@@ -34,6 +35,7 @@ export namespace app {
 	        this.lastEventGalactic = source["lastEventGalactic"];
 	        this.currentSystem = source["currentSystem"];
 	        this.currentShip = source["currentShip"];
+	        this.closedWindowRevision = source["closedWindowRevision"];
 	    }
 	}
 	export class ModesState {
@@ -615,6 +617,8 @@ export namespace expedition {
 	    visitState: string;
 	    visitedAtGalactic: string;
 	    departedAtGalactic?: string;
+	    drawerFrom?: string;
+	    drawerTo?: string;
 	    distFromPrevLy?: number;
 	    distFromCurrentLy?: number;
 	    isNextWaypoint?: boolean;
@@ -638,6 +642,8 @@ export namespace expedition {
 	        this.visitState = source["visitState"];
 	        this.visitedAtGalactic = source["visitedAtGalactic"];
 	        this.departedAtGalactic = source["departedAtGalactic"];
+	        this.drawerFrom = source["drawerFrom"];
+	        this.drawerTo = source["drawerTo"];
 	        this.distFromPrevLy = source["distFromPrevLy"];
 	        this.distFromCurrentLy = source["distFromCurrentLy"];
 	        this.isNextWaypoint = source["isNextWaypoint"];
