@@ -19,11 +19,13 @@ var (
 	)
 )
 
-// RecoveredJump represents a hyperspace jump completed server-side during a
-// client disconnect, reconstructed from the subsequent LoadGame and Location sequence.
+// RecoveredJump represents a hyperspace or Fleet Carrier passenger jump completed
+// server-side during a client disconnect or offline session, reconstructed from
+// the subsequent Location sequence.
 type RecoveredJump = replay.RecoveredJump
 
-// RecoveredJumps caches crash-recovered hyperspace jumps over the active archive.
+// RecoveredJumps caches crash-recovered hyperspace jumps and offline or
+// disconnected Fleet Carrier passenger jumps over the active archive.
 type RecoveredJumps struct {
 	database *sql.DB
 	cache    *projection.Cache[[]RecoveredJump]

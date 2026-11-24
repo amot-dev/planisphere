@@ -10,6 +10,7 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/modes"
@@ -421,4 +422,80 @@ func TestTravelMulticrewDoesNotPolluteCarrierJumpBaseline(testingContext *testin
 			subTest.Fatalf("expected CarrierPassengerLy=100.0 and DistanceLy=100.0 after multicrew Location, got %+v", afterLocationMetrics)
 		}
 	})
+}
+
+func TestComputeRecoversOfflineAndCrashedCarrierPassengerJumps(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-11-23T22:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Odyssey":true}`,
+		`{"timestamp":"2026-11-23T22:00:58Z","event":"FSDJump","StarSystem":"StartSys","SystemAddress":9001,"StarPos":[0,0,0],"JumpDist":40.0}`,
+		`{"timestamp":"2026-11-23T22:04:45Z","event":"Docked","StarSystem":"StartSys","SystemAddress":9001,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		`{"timestamp":"2026-11-23T22:25:10Z","event":"CarrierJump","StarSystem":"CarrierHop1","SystemAddress":9002,"StarPos":[400,0,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		`{"timestamp":"2026-11-23T22:46:07Z","event":"CarrierJump","StarSystem":"CarrierHop2","SystemAddress":9003,"StarPos":[800,0,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		// Crash mid-jump into StartSys (revisit) and reconnect via Location (+800 Ly return)
+		`{"timestamp":"2026-11-24T00:40:49Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Odyssey":true}`,
+		`{"timestamp":"2026-11-24T00:41:06Z","event":"Location","StarSystem":"StartSys","SystemAddress":9001,"StarPos":[0,0,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		// Subsequent online CarrierJump from StartSys to FinalHop (+250 Ly) must measure from StartSys with no gap or double-count
+		`{"timestamp":"2026-11-24T01:05:00Z","event":"CarrierJump","StarSystem":"FinalHop","SystemAddress":9004,"StarPos":[0,250,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, lines)
+
+	modeList, listError := modes.List(databaseConnection)
+	if listError != nil || len(modeList) == 0 {
+		testingContext.Fatalf("expected default modes, got %v (%v)", modeList, listError)
+	}
+	explorationModeID := modeList[0].ID
+	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
+
+	engineInstance := newEngineWithModeLookup(databaseConnection, func(timestamp string) int64 {
+		if timestamp >= "2026-11-24T00:00:00Z" && timestamp < "2026-11-24T01:00:00Z" {
+			return explorationModeID
+		}
+		return fallbackModeID
+	})
+
+	carrierWindow := stats.Range{After: "2026-11-23T22:01:00Z", Until: "2026-11-24T02:00:00Z"}
+	unfiltered, computeError := engineInstance.ComputeTravel(carrierWindow, nil)
+	if computeError != nil {
+		testingContext.Fatalf("ComputeTravel unfiltered: %v", computeError)
+	}
+	// 400 (online) + 400 (online) + 800 (crash-recovered Location) + 250 (online) = 1850 Ly; zero piloted ship jumps.
+	if unfiltered.Jumps != 0 || unfiltered.ShipDistanceLy != 0 || unfiltered.CarrierPassengerLy != 1850.0 || unfiltered.DistanceLy != 1850.0 {
+		testingContext.Fatalf("unexpected unfiltered carrier metrics: %+v (want Jumps=0 ShipDistanceLy=0 CarrierPassengerLy=1850.0)", unfiltered)
+	}
+
+	// Excluding explorationModeID Travel must exclude only the 800 Ly recovered hop at 00:41:06Z, leaving 1050 Ly.
+	filtered, filterError := engineInstance.ComputeTravel(carrierWindow, &stats.Filter{
+		Enabled: true,
+		Modes: []stats.ModeSelection{
+			{ModeID: explorationModeID, Travel: false, Discovery: true},
+			{ModeID: fallbackModeID, Travel: true, Discovery: true},
+		},
+	})
+	if filterError != nil {
+		testingContext.Fatalf("ComputeTravel filtered: %v", filterError)
+	}
+	if filtered.CarrierPassengerLy != 1050.0 || filtered.DistanceLy != 1050.0 {
+		testingContext.Fatalf("expected filtered CarrierPassengerLy=1050.0, got %+v", filtered)
+	}
+
+	// Recovered carrier jumps must count toward system visit counts (StartSys visited via FSDJump + offline carrier return = 2)
+	// while remaining excluded from piloted ship jump timestamps used for vessels flown.
+	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	if recoverError != nil {
+		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+	}
+	visitCounts, visitError := replay.QuerySystemVisitCounts(databaseConnection, []string{"startsys"}, recovered)
+	if visitError != nil {
+		testingContext.Fatalf("QuerySystemVisitCounts: %v", visitError)
+	}
+	if visitCounts["startsys"] != 2 {
+		testingContext.Fatalf("expected StartSys visit count 2 (FSDJump + offline carrier return), got %d", visitCounts["startsys"])
+	}
+	pilotedTimestamps, jumpQueryError := replay.QueryJumpTimestamps(databaseConnection, "2026-11-23T22:01:00Z", "2026-11-24T02:00:00Z", recovered)
+	if jumpQueryError != nil {
+		testingContext.Fatalf("QueryJumpTimestamps: %v", jumpQueryError)
+	}
+	if len(pilotedTimestamps) != 0 {
+		testingContext.Fatalf("expected recovered carrier jump excluded from piloted jump timestamps, got %v", pilotedTimestamps)
+	}
 }

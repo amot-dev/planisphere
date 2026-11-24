@@ -15,9 +15,11 @@ import (
 type arrivalSnapshot struct {
 	id            int64
 	timestamp     string
+	eventType     journal.EventType
 	systemName    string
 	systemAddress int64
 	starPosition  reference.Vec3
+	rawJSON       string
 	valid         bool
 }
 
@@ -29,33 +31,40 @@ type nullableArrivalColumns struct {
 	starX         sql.NullFloat64
 	starY         sql.NullFloat64
 	starZ         sql.NullFloat64
+	rawJSON       sql.NullString
 }
 
-func (columns nullableArrivalColumns) toSnapshot() arrivalSnapshot {
+func (columns nullableArrivalColumns) toSnapshot(eventType journal.EventType) arrivalSnapshot {
 	if !columns.id.Valid || !columns.timestamp.Valid || !columns.starX.Valid || !columns.starY.Valid || !columns.starZ.Valid {
 		return arrivalSnapshot{}
 	}
 	return arrivalSnapshot{
 		id:            columns.id.Int64,
 		timestamp:     columns.timestamp.String,
+		eventType:     eventType,
 		systemName:    columns.systemName.String,
 		systemAddress: columns.systemAddress.Int64,
 		starPosition:  reference.Vec3{X: columns.starX.Float64, Y: columns.starY.Float64, Z: columns.starZ.Float64},
+		rawJSON:       columns.rawJSON.String,
 		valid:         true,
 	}
 }
 
 type primedDisconnectCandidate struct {
-	loadGameID        int64
-	loadGameTimestamp string
-	commander         string
-	locationID        int64
-	locationUID       string
-	locationTimestamp string
-	locationSystem    string
-	locationAddress   int64
-	locationPosition  reference.Vec3
-	previousArrival   arrivalSnapshot
+	loadGameID         int64
+	loadGameTimestamp  string
+	commander          string
+	locationID         int64
+	locationUID        string
+	locationTimestamp  string
+	locationSystem     string
+	locationAddress    int64
+	locationPosition   reference.Vec3
+	previousArrival    arrivalSnapshot
+	isCarrier          bool
+	carrierDocked      bool
+	carrierMarketID    int64
+	carrierStationName string
 }
 
 type preDisconnectEvent struct {
@@ -108,12 +117,20 @@ func sameCommanderAsSQL(alias, referenceCommanderExpr string) string {
 	return ` AND (COALESCE(` + alias + `.commander, '') = '' OR COALESCE(` + referenceCommanderExpr + `, '') = '' OR ` + alias + `.commander = ` + referenceCommanderExpr + ` COLLATE NOCASE)`
 }
 
+func isCarrierConcourseLocation(locationEvent journal.LocationEvent) bool {
+	return locationEvent.OnFoot && !locationEvent.Docked &&
+		!locationEvent.Multicrew && !locationEvent.Taxi && !locationEvent.InSRV &&
+		!strings.EqualFold(locationEvent.BodyType, "Station") &&
+		locationEvent.DistFromStarLS == nil
+}
+
 // buildPrimedCandidatesSQL builds the candidate query pairing each LoadGame with
-// its next Location and latest prior StartJump when no FSDJump completed between
-// them. prev_loc_id stops strictly before LoadGame so a same-system relog cuts
-// off pre-relog boosts, whereas prev_fsd_id and prev_cj_id scan up to Location
-// so normal jumps logged between LoadGame and Location advance previousArrival
-// past LoadGame and cause evaluatePrimedRow to reject the candidate.
+// its next Location and preceding arrival for either an uncompleted hyperspace
+// StartJump or a potential aboard-carrier Location transition. prev_loc_id stops
+// strictly before LoadGame so a same-system relog cuts off pre-relog boosts,
+// whereas prev_fsd_id and prev_cj_id scan up to Location so normal jumps logged
+// between LoadGame and Location advance previousArrival past LoadGame and cause
+// evaluatePrimedRow to reject the candidate.
 func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 	loadGameFilter := commanderFilterForAlias("lg", applyCommanderFilter)
 	nextLocFilter := commanderFilterForAlias("loc", applyCommanderFilter)
@@ -151,12 +168,19 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 			 ORDER BY c.timestamp DESC, c.id DESC LIMIT 1) AS prev_cj_id
 		FROM lg_uncompleted_sj u
 		JOIN journal_events loc ON loc.id = u.next_loc_id
-		JOIN journal_events sj ON sj.id = u.last_sj_id
-		WHERE NOT EXISTS (
-			SELECT 1 FROM journal_events f2
-			WHERE f2.event = 'FSDJump'
-			  AND (f2.timestamp, f2.id) > (sj.timestamp, sj.id)
-			  AND (f2.timestamp, f2.id) < (loc.timestamp, loc.id)` + completedFSDFilter + sameCommanderAsSQL("f2", "u.lg_cmdr") + `
+		LEFT JOIN journal_events sj ON sj.id = u.last_sj_id
+		WHERE (
+			instr(loc.raw_json, '"FleetCarrier"') > 0
+			OR instr(loc.raw_json, '"OnFoot"') > 0
+			OR (
+				u.last_sj_id IS NOT NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM journal_events f2
+					WHERE f2.event = 'FSDJump'
+					  AND (f2.timestamp, f2.id) > (sj.timestamp, sj.id)
+					  AND (f2.timestamp, f2.id) < (loc.timestamp, loc.id)` + completedFSDFilter + sameCommanderAsSQL("f2", "u.lg_cmdr") + `
+				)
+			)
 		)
 	)
 	SELECT
@@ -164,8 +188,8 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 		loc.id, loc.event_uid, loc.timestamp, COALESCE(loc.system_name, ''), COALESCE(loc.system_address, 0),
 		loc.star_x, loc.star_y, loc.star_z, loc.raw_json,
 		prev_f.id, prev_f.timestamp, prev_f.system_name, prev_f.system_address, prev_f.star_x, prev_f.star_y, prev_f.star_z,
-		prev_l.id, prev_l.timestamp, prev_l.system_name, prev_l.system_address, prev_l.star_x, prev_l.star_y, prev_l.star_z,
-		prev_c.id, prev_c.timestamp, prev_c.system_name, prev_c.system_address, prev_c.star_x, prev_c.star_y, prev_c.star_z
+		prev_l.id, prev_l.timestamp, prev_l.system_name, prev_l.system_address, prev_l.star_x, prev_l.star_y, prev_l.star_z, prev_l.raw_json,
+		prev_c.id, prev_c.timestamp, prev_c.system_name, prev_c.system_address, prev_c.star_x, prev_c.star_y, prev_c.star_z, prev_c.raw_json
 	FROM uncompleted u
 	JOIN journal_events lg ON lg.id = u.lg_id
 	JOIN journal_events loc ON loc.id = u.next_loc_id
@@ -175,24 +199,42 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 	ORDER BY u.lg_ts ASC, u.lg_id ASC`
 }
 
+func classifyLocationCandidate(locationJSON, loadGameJSON string, candidate *primedDisconnectCandidate) bool {
+	var locationEvent journal.LocationEvent
+	if json.Unmarshal([]byte(locationJSON), &locationEvent) != nil {
+		return false
+	}
+	if locationEvent.InSRV || locationEvent.Taxi || locationEvent.Multicrew {
+		return false
+	}
+	if locationEvent.Docked {
+		if !strings.EqualFold(locationEvent.StationType, reference.FleetCarrierStationType) {
+			return false
+		}
+		candidate.isCarrier = true
+		candidate.carrierDocked = true
+		candidate.carrierMarketID = locationEvent.MarketID
+		candidate.carrierStationName = locationEvent.StationName
+		return true
+	}
+	if locationEvent.OnFoot {
+		if !isCarrierConcourseLocation(locationEvent) {
+			return false
+		}
+		candidate.isCarrier = true
+		return true
+	}
+	var loadGameEvent journal.LoadGameEvent
+	return json.Unmarshal([]byte(loadGameJSON), &loadGameEvent) == nil && reference.IsPlayerShip(loadGameEvent.Ship)
+}
+
 func evaluatePrimedRow(
-	loadGameID int64,
-	loadGameTimestamp string,
-	loadGameCommander string,
-	loadGameJSON string,
-	locationID int64,
-	locationUID string,
-	locationTimestamp string,
-	locationSystem string,
-	locationAddress int64,
+	loadGameID, locationID, locationAddress int64,
+	loadGameTimestamp, loadGameCommander, loadGameJSON, locationUID, locationTimestamp string,
+	locationSystem, locationJSON string,
 	locX, locY, locZ sql.NullFloat64,
-	locationJSON string,
 	previousArrival arrivalSnapshot,
 ) (primedDisconnectCandidate, bool) {
-	var loadGameEvent journal.LoadGameEvent
-	if json.Unmarshal([]byte(loadGameJSON), &loadGameEvent) != nil || !reference.IsPlayerShip(loadGameEvent.Ship) {
-		return primedDisconnectCandidate{}, false
-	}
 	if !previousArrival.valid || !locX.Valid || !locY.Valid || !locZ.Valid {
 		return primedDisconnectCandidate{}, false
 	}
@@ -202,14 +244,7 @@ func evaluatePrimedRow(
 	if disconnectSystemsMatch(previousArrival.systemAddress, previousArrival.systemName, locationAddress, locationSystem) {
 		return primedDisconnectCandidate{}, false
 	}
-	var locationEvent journal.LocationEvent
-	if json.Unmarshal([]byte(locationJSON), &locationEvent) != nil {
-		return primedDisconnectCandidate{}, false
-	}
-	if locationEvent.Docked || locationEvent.OnFoot || locationEvent.InSRV || locationEvent.Taxi || locationEvent.Multicrew {
-		return primedDisconnectCandidate{}, false
-	}
-	return primedDisconnectCandidate{
+	candidate := primedDisconnectCandidate{
 		loadGameID:        loadGameID,
 		loadGameTimestamp: loadGameTimestamp,
 		commander:         loadGameCommander,
@@ -220,7 +255,11 @@ func evaluatePrimedRow(
 		locationAddress:   locationAddress,
 		locationPosition:  reference.Vec3{X: locX.Float64, Y: locY.Float64, Z: locZ.Float64},
 		previousArrival:   previousArrival,
-	}, true
+	}
+	if !classifyLocationCandidate(locationJSON, loadGameJSON, &candidate) {
+		return primedDisconnectCandidate{}, false
+	}
+	return candidate, true
 }
 
 func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]primedDisconnectCandidate, error) {
@@ -244,17 +283,22 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 			&locationID, &locationUID, &locationTimestamp, &locationSystem, &locationAddress,
 			&locX, &locY, &locZ, &locationJSON,
 			&prevFSD.id, &prevFSD.timestamp, &prevFSD.systemName, &prevFSD.systemAddress, &prevFSD.starX, &prevFSD.starY, &prevFSD.starZ,
-			&prevLoc.id, &prevLoc.timestamp, &prevLoc.systemName, &prevLoc.systemAddress, &prevLoc.starX, &prevLoc.starY, &prevLoc.starZ,
-			&prevCarrier.id, &prevCarrier.timestamp, &prevCarrier.systemName, &prevCarrier.systemAddress, &prevCarrier.starX, &prevCarrier.starY, &prevCarrier.starZ,
+			&prevLoc.id, &prevLoc.timestamp, &prevLoc.systemName, &prevLoc.systemAddress, &prevLoc.starX, &prevLoc.starY, &prevLoc.starZ, &prevLoc.rawJSON,
+			&prevCarrier.id, &prevCarrier.timestamp, &prevCarrier.systemName, &prevCarrier.systemAddress, &prevCarrier.starX, &prevCarrier.starY, &prevCarrier.starZ, &prevCarrier.rawJSON,
 		)
 		if scanError != nil {
 			return nil, fmt.Errorf("scan primed disconnect candidate: %w", scanError)
 		}
-		latestPrevious := selectLatestArrival(prevFSD.toSnapshot(), prevLoc.toSnapshot(), prevCarrier.toSnapshot())
+		latestPrevious := selectLatestArrival(
+			prevFSD.toSnapshot(journal.EventFSDJump),
+			prevLoc.toSnapshot(journal.EventLocation),
+			prevCarrier.toSnapshot(journal.EventCarrierJump),
+		)
 		candidate, isCandidate := evaluatePrimedRow(
-			loadGameID, loadGameTimestamp, loadGameCommander, loadGameJSON,
-			locationID, locationUID, locationTimestamp, locationSystem, locationAddress,
-			locX, locY, locZ, locationJSON, latestPrevious,
+			loadGameID, locationID, locationAddress,
+			loadGameTimestamp, loadGameCommander, loadGameJSON, locationUID, locationTimestamp,
+			locationSystem, locationJSON,
+			locX, locY, locZ, latestPrevious,
 		)
 		// Multiple consecutive LoadGame rows resolving to the same Location keep only the final login state.
 		if len(candidates) > 0 && candidates[len(candidates)-1].locationID == locationID {
@@ -287,7 +331,7 @@ func loadPreDisconnectChunk(
 	// Omit SQL ORDER BY across MULTI-INDEX OR ranges to avoid a temporary B-tree sort; sort the tiny slice in Go.
 	query := `SELECT je.id, je.timestamp, COALESCE(je.commander, ''), je.event, COALESCE(je.system_name, ''), COALESCE(je.system_address, 0), je.raw_json
 		FROM journal_events je
-		WHERE +je.event IN ('Resurrect', 'ShipyardSwap', 'StartJump', 'JetConeBoost', 'Synthesis')` +
+		WHERE +je.event IN ('Resurrect', 'ShipyardSwap', 'StartJump', 'JetConeBoost', 'Synthesis', 'Docked', 'Undocked')` +
 		commanderFilterForAlias("je", applyCommanderFilter) +
 		` AND (` + strings.Join(rangePredicates, " OR ") + `)`
 
@@ -325,4 +369,77 @@ func loadPreDisconnectChunk(
 		return 0
 	})
 	return loadedEvents, nil
+}
+
+// queryPriorCarrierBoardingState walks backward along idx_journal_events_ts past
+// transparent on-foot concourse Location relogs to determine whether the commander
+// was already aboard a Fleet Carrier at arrival.
+func queryPriorCarrierBoardingState(
+	queryer db.Queryer,
+	arrival arrivalSnapshot,
+	commander string,
+	applyCommanderFilter bool,
+) (carrierStayState, error) {
+	query := `SELECT je.event, je.raw_json
+		FROM journal_events je
+		WHERE +je.event IN ('Docked', 'Undocked', 'FSDJump', 'CarrierJump', 'Resurrect', 'Location')
+		  AND (je.timestamp, je.id) < (?, ?)` +
+		commanderFilterForAlias("je", applyCommanderFilter) +
+		` AND (COALESCE(je.commander, '') = '' OR ? = '' OR je.commander = ? COLLATE NOCASE)
+		ORDER BY je.timestamp DESC, je.id DESC`
+	databaseRows, queryError := queryer.Query(query, arrival.timestamp, arrival.id, commander, commander)
+	if queryError != nil {
+		return carrierStayState{}, fmt.Errorf("query prior carrier boarding state: %w", queryError)
+	}
+	defer databaseRows.Close()
+
+	for databaseRows.Next() {
+		var eventName, rawJSON string
+		if scanError := databaseRows.Scan(&eventName, &rawJSON); scanError != nil {
+			return carrierStayState{}, fmt.Errorf("scan prior carrier boarding state: %w", scanError)
+		}
+		if stay, decided := evaluatePriorBoardingRow(eventName, rawJSON); decided {
+			return stay, nil
+		}
+	}
+	return carrierStayState{}, databaseRows.Err()
+}
+
+func evaluatePriorBoardingRow(eventName, rawJSON string) (carrierStayState, bool) {
+	switch eventName {
+	case "Docked":
+		var dockedEvent journal.DockedEvent
+		if json.Unmarshal([]byte(rawJSON), &dockedEvent) != nil || dockedEvent.Multicrew {
+			return carrierStayState{}, false
+		}
+		if strings.EqualFold(dockedEvent.StationType, reference.FleetCarrierStationType) {
+			return carrierStayState{aboard: true, marketID: dockedEvent.MarketID, stationName: dockedEvent.StationName}, true
+		}
+		return carrierStayState{}, true
+	case "CarrierJump":
+		stay := carrierStayState{aboard: true}
+		var carrierJumpEvent journal.CarrierJumpEvent
+		if json.Unmarshal([]byte(rawJSON), &carrierJumpEvent) == nil {
+			stay.marketID = carrierJumpEvent.MarketID
+			stay.stationName = carrierJumpEvent.StationName
+		}
+		return stay, true
+	case "Location":
+		var locationEvent journal.LocationEvent
+		if json.Unmarshal([]byte(rawJSON), &locationEvent) != nil || locationEvent.Multicrew {
+			return carrierStayState{}, false
+		}
+		if locationEvent.Docked && strings.EqualFold(locationEvent.StationType, reference.FleetCarrierStationType) {
+			return carrierStayState{aboard: true, marketID: locationEvent.MarketID, stationName: locationEvent.StationName}, true
+		}
+		return carrierStayState{}, !isCarrierConcourseLocation(locationEvent)
+	default:
+		var multicrewFlag struct {
+			Multicrew bool `json:"Multicrew"`
+		}
+		if json.Unmarshal([]byte(rawJSON), &multicrewFlag) == nil && multicrewFlag.Multicrew {
+			return carrierStayState{}, false
+		}
+		return carrierStayState{}, true
+	}
 }

@@ -269,3 +269,116 @@ func TestRecoveredJumpsMultiCommanderIsolation(testingContext *testing.T) {
 		testingContext.Fatalf("unexpected recovered jump %+v (want DeepDest, 100.0 Ly from StartSystem, BoostUsed 0)", recoveredJump)
 	}
 }
+
+func TestRecoveredCarrierJumpsContinuousStayAndOnFootConcourse(testingContext *testing.T) {
+	databaseConnection := openProjectionTestDB(testingContext)
+	temporaryDirectory := testingContext.TempDir()
+	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-11-23T173623.01.log")
+
+	lines := []string{
+		`{"timestamp":"2026-11-23T22:00:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"Explorer_NX"}`,
+		`{"timestamp":"2026-11-23T22:00:58Z","event":"FSDJump","StarSystem":"OriginSys","SystemAddress":5001,"StarPos":[0,0,0],"JumpDist":50.0}`,
+		`{"timestamp":"2026-11-23T22:04:45Z","event":"Docked","StarSystem":"OriginSys","SystemAddress":5001,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		// Hop 1: crashed/offline carrier jump while docked on same carrier (100 Ly)
+		`{"timestamp":"2026-11-23T22:30:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"Explorer_NX"}`,
+		`{"timestamp":"2026-11-23T22:30:10Z","event":"Location","StarSystem":"CarrierHop1","SystemAddress":5002,"StarPos":[100,0,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		// Same-system relog on carrier concourse must not break stay or double-count
+		`{"timestamp":"2026-11-23T22:35:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"ExplorationSuit_Class5"}`,
+		`{"timestamp":"2026-11-23T22:35:10Z","event":"Location","StarSystem":"CarrierHop1","SystemAddress":5002,"StarPos":[100,0,0],"Docked":false,"OnFoot":true,"BodyType":"Star"}`,
+		// Hop 2: chained offline jump logging in on foot in carrier concourse (150 Ly)
+		`{"timestamp":"2026-11-23T23:00:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"ExplorationSuit_Class5"}`,
+		`{"timestamp":"2026-11-23T23:00:10Z","event":"Location","StarSystem":"CarrierHop2","SystemAddress":5003,"StarPos":[250,0,0],"Docked":false,"OnFoot":true,"BodyType":"Star"}`,
+		// Hop 3: second consecutive on-foot concourse offline jump (200 Ly)
+		`{"timestamp":"2026-11-23T23:30:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"ExplorationSuit_Class5"}`,
+		`{"timestamp":"2026-11-23T23:30:10Z","event":"Location","StarSystem":"CarrierHop3","SystemAddress":5004,"StarPos":[450,0,0],"Docked":false,"OnFoot":true,"BodyType":"Planet"}`,
+		// Hop 4: re-embarked into ship before offline jump on same carrier (50 Ly)
+		`{"timestamp":"2026-11-24T00:00:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"Explorer_NX"}`,
+		`{"timestamp":"2026-11-24T00:00:10Z","event":"Location","StarSystem":"CarrierHop4","SystemAddress":5005,"StarPos":[500,0,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		// Online on-foot CarrierJump (omits MarketID) followed by Hop 5 offline jump docked on same carrier (75 Ly)
+		`{"timestamp":"2026-11-24T00:20:00Z","event":"CarrierJump","StarSystem":"CarrierOnline5","SystemAddress":5006,"StarPos":[500,100,0],"Docked":false,"OnFoot":true,"BodyType":"Star"}`,
+		`{"timestamp":"2026-11-24T00:45:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"Explorer_NX"}`,
+		`{"timestamp":"2026-11-24T00:45:10Z","event":"Location","StarSystem":"CarrierHop5","SystemAddress":5007,"StarPos":[500,175,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+	}
+	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		testingContext.Fatal(writeError)
+	}
+	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
+		testingContext.Fatal(scanError)
+	}
+
+	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	if recoverError != nil {
+		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+	}
+	expectedHops := []struct {
+		systemName string
+		distance   float64
+	}{
+		{"CarrierHop1", 100.0},
+		{"CarrierHop2", 150.0},
+		{"CarrierHop3", 200.0},
+		{"CarrierHop4", 50.0},
+		{"CarrierHop5", 75.0},
+	}
+	if len(recovered) != len(expectedHops) {
+		testingContext.Fatalf("expected %d recovered carrier jumps, got %d: %+v", len(expectedHops), len(recovered), recovered)
+	}
+	for index, expected := range expectedHops {
+		got := recovered[index]
+		if !got.IsCarrier || got.SystemName != expected.systemName || math.Abs(got.JumpDist-expected.distance) > 1e-6 || got.BoostUsed != 0 {
+			testingContext.Errorf("carrier hop %d: got %+v, want IsCarrier=true system=%s dist=%.1f boost=0",
+				index, got, expected.systemName, expected.distance)
+		}
+	}
+}
+
+func TestRecoveredCarrierJumpsRejections(testingContext *testing.T) {
+	databaseConnection := openProjectionTestDB(testingContext)
+	temporaryDirectory := testingContext.TempDir()
+	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-11-23T180000.01.log")
+
+	lines := []string{
+		`{"timestamp":"2026-11-23T18:00:00Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-23T18:00:05Z","event":"Location","StarSystem":"SysStart","SystemAddress":6001,"StarPos":[0,0,0],"Docked":true,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+		// Undocked before logging in on same carrier in another system -> rejected
+		`{"timestamp":"2026-11-23T18:05:00Z","event":"Undocked","StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+		`{"timestamp":"2026-11-23T18:09:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-23T18:10:00Z","event":"Location","StarSystem":"SysAfterUndock","SystemAddress":6002,"StarPos":[100,0,0],"Docked":true,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+		// Resurrect respawn onto carrier in another system -> rejected
+		`{"timestamp":"2026-11-23T18:15:00Z","event":"Resurrect","Option":"rebuy","Cost":1000}`,
+		`{"timestamp":"2026-11-23T18:15:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-23T18:16:00Z","event":"Location","StarSystem":"SysAfterResurrect","SystemAddress":6003,"StarPos":[200,0,0],"Docked":true,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+		// Mismatched carrier MarketID -> rejected
+		`{"timestamp":"2026-11-23T18:19:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-23T18:20:00Z","event":"Location","StarSystem":"SysWrongCarrier","SystemAddress":6004,"StarPos":[300,0,0],"Docked":true,"StationName":"BBB-222","StationType":"FleetCarrier","MarketID":222}`,
+		// Docked at a non-carrier station clears carrier stay -> rejected
+		`{"timestamp":"2026-11-23T18:22:00Z","event":"Docked","StarSystem":"SysWrongCarrier","SystemAddress":6004,"StationName":"Jameson Memorial","StationType":"Orbis","MarketID":333}`,
+		`{"timestamp":"2026-11-23T18:24:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-23T18:25:00Z","event":"Location","StarSystem":"SysAfterStarport","SystemAddress":6005,"StarPos":[400,0,0],"Docked":true,"StationName":"BBB-222","StationType":"FleetCarrier","MarketID":222}`,
+		// On-foot Station concourse (e.g. escape pod destination) -> rejected
+		`{"timestamp":"2026-11-23T18:29:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"ExplorationSuit_Class1"}`,
+		`{"timestamp":"2026-11-23T18:30:00Z","event":"Location","StarSystem":"SysStationConcourse","SystemAddress":6006,"StarPos":[500,0,0],"Docked":false,"OnFoot":true,"BodyType":"Station"}`,
+		// Re-board carrier then appear on foot on a planet surface (DistFromStarLS present) -> rejected
+		`{"timestamp":"2026-11-23T18:35:00Z","event":"Docked","StarSystem":"SysStationConcourse","SystemAddress":6006,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+		`{"timestamp":"2026-11-23T18:39:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"ExplorationSuit_Class1"}`,
+		`{"timestamp":"2026-11-23T18:40:00Z","event":"Location","StarSystem":"SysPlanetSurface","SystemAddress":6007,"StarPos":[600,0,0],"Docked":false,"OnFoot":true,"BodyType":"Planet","DistFromStarLS":512.5}`,
+		// Missing intermediate jump before Docked (Docked system differs from previousArrival) -> rejected
+		`{"timestamp":"2026-11-23T18:45:00Z","event":"Docked","StarSystem":"SysMissingArrival","SystemAddress":6008,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+		`{"timestamp":"2026-11-23T18:49:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-11-23T18:50:00Z","event":"Location","StarSystem":"SysAfterGap","SystemAddress":6009,"StarPos":[700,0,0],"Docked":true,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
+	}
+	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		testingContext.Fatal(writeError)
+	}
+	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
+		testingContext.Fatal(scanError)
+	}
+
+	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	if recoverError != nil {
+		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+	}
+	if len(recovered) != 0 {
+		testingContext.Fatalf("expected all invalid carrier Location transitions to be rejected, got %+v", recovered)
+	}
+}

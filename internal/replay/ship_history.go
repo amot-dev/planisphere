@@ -103,10 +103,17 @@ func QueryJumpTimestamps(
 		return nil, iterationError
 	}
 	if len(recovered) > 0 {
+		addedRecovered := false
 		for _, recoveredJump := range recovered {
+			if recoveredJump.IsCarrier {
+				continue
+			}
 			timestamps = append(timestamps, recoveredJump.Timestamp)
+			addedRecovered = true
 		}
-		sort.Strings(timestamps)
+		if addedRecovered {
+			sort.Strings(timestamps)
+		}
 	}
 	return timestamps, nil
 }

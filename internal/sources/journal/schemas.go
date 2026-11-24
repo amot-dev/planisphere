@@ -26,19 +26,21 @@ type FSDJumpEvent struct {
 
 // LocationEvent is written at login / respawn (and mirrors CarrierJump).
 type LocationEvent struct {
-	Timestamp     string    `json:"timestamp"`
-	StarSystem    string    `json:"StarSystem"`
-	SystemAddress int64     `json:"SystemAddress"`
-	StarPos       []float64 `json:"StarPos"`
-	Population    int64     `json:"Population"`
-	Docked        bool      `json:"Docked"`
-	OnFoot        bool      `json:"OnFoot"`
-	InSRV         bool      `json:"InSRV"`
-	Taxi          bool      `json:"Taxi"`
-	Multicrew     bool      `json:"Multicrew"`
-	BodyType      string    `json:"BodyType"`
-	StationType   string    `json:"StationType"`
-	MarketID      int64     `json:"MarketID"`
+	Timestamp      string    `json:"timestamp"`
+	StarSystem     string    `json:"StarSystem"`
+	SystemAddress  int64     `json:"SystemAddress"`
+	StarPos        []float64 `json:"StarPos"`
+	Population     int64     `json:"Population"`
+	Docked         bool      `json:"Docked"`
+	OnFoot         bool      `json:"OnFoot"`
+	InSRV          bool      `json:"InSRV"`
+	Taxi           bool      `json:"Taxi"`
+	Multicrew      bool      `json:"Multicrew"`
+	BodyType       string    `json:"BodyType"`
+	StationName    string    `json:"StationName"`
+	StationType    string    `json:"StationType"`
+	MarketID       int64     `json:"MarketID"`
+	DistFromStarLS *float64  `json:"DistFromStarLS"`
 }
 
 // StartJumpEvent is written at the start of a Hyperspace or Supercruise jump countdown.
@@ -71,6 +73,7 @@ type DockedEvent struct {
 	StarSystem    string `json:"StarSystem"`
 	SystemAddress int64  `json:"SystemAddress"`
 	MarketID      int64  `json:"MarketID"`
+	Multicrew     bool   `json:"Multicrew"`
 }
 
 // CarrierJumpEvent is written when the player is aboard a jumping fleet carrier.

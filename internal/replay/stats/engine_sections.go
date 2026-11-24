@@ -90,6 +90,10 @@ func (engine *Engine) ComputeTravel(timeRange Range, filter *Filter) (TravelMetr
 		return TravelMetrics{}, fmt.Errorf("recover disconnected jumps: %w", recoverError)
 	}
 	for _, recoveredJump := range recoveredJumps {
+		if recoveredJump.IsCarrier {
+			creditCarrierPassengerDistance(recoveredJump.Timestamp, recoveredJump.JumpDist, filterSet, &metrics)
+			continue
+		}
 		creditJump(recoveredJump.Timestamp, recoveredJump.JumpDist, recoveredJump.BoostUsed, filterSet, &metrics)
 	}
 	return ExtractTravelMetrics(metrics), nil

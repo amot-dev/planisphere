@@ -164,6 +164,14 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metric
 	creditJump(rowItem.Timestamp, jumpEvent.JumpDist, jumpEvent.BoostUsed, accumulator.filterSet, metrics)
 }
 
+func creditCarrierPassengerDistance(timestamp string, distanceLy float64, filterSet *filterSets, metrics *Metrics) {
+	if distanceLy <= 0 || !filterSet.allow(timestamp, false) {
+		return
+	}
+	metrics.CarrierPassengerLy += distanceLy
+	metrics.DistanceLy += distanceLy
+}
+
 func (accumulator *computeAccumulator) processCarrierJump(rowItem replay.Row, metrics *Metrics) error {
 	if seedError := accumulator.ensurePreviousPosition(); seedError != nil {
 		return seedError
@@ -173,10 +181,7 @@ func (accumulator *computeAccumulator) processCarrierJump(rowItem replay.Row, me
 		legDistanceLy = reference.Distance(*accumulator.previousPosition, *rowItem.StarPos)
 	}
 	accumulator.recordStarPosition(rowItem.StarPos)
-	if legDistanceLy > 0 && accumulator.filterSet.allow(rowItem.Timestamp, false) {
-		metrics.CarrierPassengerLy += legDistanceLy
-		metrics.DistanceLy += legDistanceLy
-	}
+	creditCarrierPassengerDistance(rowItem.Timestamp, legDistanceLy, accumulator.filterSet, metrics)
 	return nil
 }
 
