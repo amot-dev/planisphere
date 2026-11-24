@@ -7,8 +7,57 @@ import {
   GetSidebarStats,
   ListExpeditions,
 } from '../../api/backend'
-import { app, expedition, stats } from '../../api/models'
-import type { SyncBootLifecycleState } from './syncEventRouter'
+import { app, expedition, modes, stats } from '../../api/models'
+import type { RefreshAllOptions, SyncBootLifecycleState } from './syncEventRouter'
+
+/**
+ * reconcileModeFilter aligns the sidebar telemetry filter with the current
+ * flight modes catalog, defaulting newly created custom modes to full
+ * inclusion, dropping deleted modes, and preserving reference identity when no
+ * effective selection changed.
+ */
+export function reconcileModeFilter(
+  currentFilter: stats.Filter,
+  availableModes: modes.Mode[] | undefined | null,
+): stats.Filter {
+  if (!availableModes) {
+    return currentFilter
+  }
+  const existingByModeId = new Map(
+    currentFilter.enabled ? (currentFilter.modes ?? []).map((item) => [item.modeId, item]) : [],
+  )
+  const reconciledModes = availableModes.map((mode) => {
+    const existingSelection = existingByModeId.get(mode.id)
+    return existingSelection
+      ? {
+          modeId: mode.id,
+          travel: existingSelection.travel,
+          discovery: existingSelection.discovery,
+        }
+      : { modeId: mode.id, travel: true, discovery: true }
+  })
+  const nextEnabled = reconciledModes.some((selection) => !selection.travel || !selection.discovery)
+  const currentModes = currentFilter.modes ?? []
+  if (
+    nextEnabled === currentFilter.enabled &&
+    currentModes.length === reconciledModes.length &&
+    reconciledModes.every(
+      (selection, index) =>
+        currentModes[index]?.modeId === selection.modeId &&
+        currentModes[index]?.travel === selection.travel &&
+        currentModes[index]?.discovery === selection.discovery,
+    )
+  ) {
+    return currentFilter
+  }
+  return stats.Filter.createFrom({
+    ...(currentFilter.expeditionId !== undefined
+      ? { expeditionId: currentFilter.expeditionId }
+      : {}),
+    enabled: nextEnabled,
+    modes: reconciledModes,
+  })
+}
 
 /**
  * UseDomainLoadersOptions provides shared filter and boot lifecycle refs used
@@ -18,6 +67,11 @@ export interface UseDomainLoadersOptions {
   filterRef: MutableRefObject<stats.Filter>
   bootStateRef: MutableRefObject<SyncBootLifecycleState>
   lastEffectPlanExpeditionIdRef: MutableRefObject<number>
+  onRefreshAllFilterReconciled?: (
+    nextFilter: stats.Filter,
+    chosenId: number,
+    willTransitionEffectReload: boolean,
+  ) => void
 }
 
 /**
@@ -28,6 +82,7 @@ export function useDomainLoaders({
   filterRef,
   bootStateRef,
   lastEffectPlanExpeditionIdRef,
+  onRefreshAllFilterReconciled,
 }: UseDomainLoadersOptions) {
   const [statsLoading, setStatsLoading] = useState<boolean>(false)
   const [settings, setSettings] = useState<app.Settings | null>(null)
@@ -116,6 +171,7 @@ export function useDomainLoaders({
 
   const loadCoreState = useCallback(async (): Promise<{
     settingsData: app.Settings | null
+    modesStateData: app.ModesState | null
     chosenId: number
   }> => {
     const coreRequestSequence = ++coreStateRequestSequenceRef.current
@@ -130,7 +186,7 @@ export function useDomainLoaders({
         ListExpeditions(),
       ])
       if (coreRequestSequence !== coreStateRequestSequenceRef.current) {
-        return { settingsData: null, chosenId: 0 }
+        return { settingsData: null, modesStateData: null, chosenId: 0 }
       }
       if (settingsRequestSequence === settingsRequestSequenceRef.current) {
         setupCompletedRef.current = Boolean(settingsData.setupCompleted)
@@ -174,10 +230,10 @@ export function useDomainLoaders({
         setSidebarStats(null)
         setStatsLoading(false)
       }
-      return { settingsData, chosenId }
+      return { settingsData, modesStateData, chosenId }
     } catch (coreStateError) {
       console.error('Failed to load core state:', coreStateError)
-      return { settingsData: null, chosenId: 0 }
+      return { settingsData: null, modesStateData: null, chosenId: 0 }
     }
   }, [])
 
@@ -222,30 +278,49 @@ export function useDomainLoaders({
     }
   }, [])
 
-  const refreshAll = useCallback(() => {
-    const prefetchedExpeditionId = setupCompletedRef.current ? activeExpeditionIdRef.current : 0
+  const refreshAll = useCallback((options?: RefreshAllOptions) => {
+    if (options?.skipPrefetch) {
+      activeExpeditionIdRef.current = 0
+    }
+    const prefetchedExpeditionId =
+      !options?.skipPrefetch && setupCompletedRef.current ? activeExpeditionIdRef.current : 0
     if (prefetchedExpeditionId > 0) {
       void loadPlanOnly(prefetchedExpeditionId)
       void loadStatsOnly(prefetchedExpeditionId, filterRef.current)
     }
-    void loadCoreState().then(({ settingsData, chosenId }) => {
+    void loadCoreState().then(({ settingsData, modesStateData, chosenId }) => {
+      const previousFilter = filterRef.current
+      const nextFilter = reconcileModeFilter(previousFilter, modesStateData?.modes)
+      filterRef.current = nextFilter
       if (
         !settingsData ||
         !settingsData.setupCompleted ||
         chosenId <= 0 ||
         chosenId === prefetchedExpeditionId
       ) {
+        if (nextFilter !== previousFilter) {
+          onRefreshAllFilterReconciled?.(nextFilter, chosenId, true)
+        }
         return
       }
       const willTransitionEffectReload =
         bootStateRef.current.initialBootComplete &&
         lastEffectPlanExpeditionIdRef.current !== chosenId
+      onRefreshAllFilterReconciled?.(nextFilter, chosenId, willTransitionEffectReload)
       if (!willTransitionEffectReload) {
         void loadPlanOnly(chosenId)
-        void loadStatsOnly(chosenId, filterRef.current)
+        void loadStatsOnly(chosenId, nextFilter)
       }
     })
-  }, [bootStateRef, filterRef, lastEffectPlanExpeditionIdRef, loadCoreState, loadPlanOnly, loadStatsOnly])
+  }, [
+    bootStateRef,
+    filterRef,
+    lastEffectPlanExpeditionIdRef,
+    loadCoreState,
+    loadPlanOnly,
+    loadStatsOnly,
+    onRefreshAllFilterReconciled,
+  ])
 
   return {
     statsLoading,

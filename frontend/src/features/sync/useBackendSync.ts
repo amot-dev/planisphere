@@ -1,10 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SetActiveExpedition } from '../../api/backend'
 import { subscribeBackendEvents } from '../../api/events'
-import { stats, type EddImportProgress } from '../../api/models'
-import type { DataChangedDispatchContext, SyncBootLifecycleState } from './syncEventRouter'
-import { useDomainLoaders } from './useDomainLoaders'
+import { app, expedition, stats, type EddImportProgress } from '../../api/models'
+import { useBusyTasks } from '../../hooks/useBusyTasks'
+import {
+  flushDeferredBootEvents,
+  type DataChangedDispatchContext,
+  type SyncBootLifecycleState,
+} from './syncEventRouter'
+import { reconcileModeFilter, useDomainLoaders } from './useDomainLoaders'
 import { useSyncPause } from './useSyncPause'
+
+export { reconcileModeFilter } from './useDomainLoaders'
+
+/**
+ * isExpeditionExportEnabled checks whether export is available for the active
+ * expedition, ignoring stale plan or sidebar telemetry from a previously
+ * selected expedition while replacement RPCs are in flight.
+ */
+export function isExpeditionExportEnabled(
+  activeExpeditionId: number,
+  plan: expedition.PlanView | null | undefined,
+  sidebarStats: app.SidebarStats | null | undefined,
+): boolean {
+  const isPlanForActive = Boolean(
+    activeExpeditionId > 0 && plan?.expedition?.id === activeExpeditionId,
+  )
+  const isStatsForActive = Boolean(
+    activeExpeditionId > 0 && sidebarStats?.expeditionId === activeExpeditionId,
+  )
+  return (
+    (isStatsForActive && Boolean(sidebarStats?.departed)) ||
+    (isPlanForActive && plan?.expedition?.status === 'completed')
+  )
+}
 
 /**
  * useBackendSync manages terminal bootstrap state, Wails IPC queries for
@@ -12,7 +41,7 @@ import { useSyncPause } from './useSyncPause'
  */
 export function useBackendSync() {
   const [booting, setBooting] = useState<boolean>(true)
-  const [busyAction, setBusyAction] = useState<string | null>('INITIALIZING TERMINAL')
+  const { busyAction, beginBusyTask, setBusyAction } = useBusyTasks('INITIALIZING TERMINAL')
   const [filter, setFilter] = useState<stats.Filter>(() =>
     stats.Filter.createFrom({ enabled: false, modes: [] }),
   )
@@ -21,7 +50,7 @@ export function useBackendSync() {
   const bootStateRef = useRef<SyncBootLifecycleState>({
     initialBootComplete: false,
     bootCoreLoaded: false,
-    pendingBootRefresh: false,
+    deferredPayloads: [],
   })
   const lastEffectPlanExpeditionIdRef = useRef(0)
   const lastEffectStatsSelectionRef = useRef<{
@@ -30,9 +59,18 @@ export function useBackendSync() {
   } | null>(null)
   const filterRef = useRef(filter)
 
-  useEffect(() => {
-    filterRef.current = filter
-  }, [filter])
+  const handleRefreshAllFilterReconciled = useCallback(
+    (nextFilter: stats.Filter, chosenId: number, willTransitionEffectReload: boolean) => {
+      setFilter((currentFilter) => (currentFilter === nextFilter ? currentFilter : nextFilter))
+      if (!willTransitionEffectReload && chosenId > 0) {
+        lastEffectStatsSelectionRef.current = {
+          expeditionId: chosenId,
+          filter: nextFilter,
+        }
+      }
+    },
+    [],
+  )
 
   const {
     statsLoading,
@@ -59,7 +97,20 @@ export function useBackendSync() {
     filterRef,
     bootStateRef,
     lastEffectPlanExpeditionIdRef,
+    onRefreshAllFilterReconciled: handleRefreshAllFilterReconciled,
   })
+
+  const reconciledFilter = useMemo(
+    () => reconcileModeFilter(filter, modesState?.modes),
+    [filter, modesState?.modes],
+  )
+  filterRef.current = reconciledFilter
+
+  useEffect(() => {
+    if (reconciledFilter !== filter) {
+      setFilter(reconciledFilter)
+    }
+  }, [filter, reconciledFilter])
 
   useEffect(() => {
     activeExpeditionIdRef.current = activeExpeditionId
@@ -71,12 +122,18 @@ export function useBackendSync() {
   useEffect(() => {
     let mounted = true
     bootStateRef.current.bootCoreLoaded = false
-    setBusyAction('INITIALIZING TERMINAL')
+    bootStateRef.current.deferredPayloads.length = 0
+    const endBootTask = beginBusyTask('INITIALIZING TERMINAL')
     ;(async () => {
       try {
-        const { settingsData, chosenId } = await loadCoreState()
+        const { settingsData, modesStateData, chosenId } = await loadCoreState()
         if (!mounted) {
           return
+        }
+        const bootFilter = reconcileModeFilter(filterRef.current, modesStateData?.modes)
+        if (bootFilter !== filterRef.current) {
+          filterRef.current = bootFilter
+          setFilter(bootFilter)
         }
         bootStateRef.current.bootCoreLoaded = true
         lastEffectPlanExpeditionIdRef.current = chosenId
@@ -90,21 +147,19 @@ export function useBackendSync() {
           ])
         }
       } finally {
+        endBootTask()
         if (mounted) {
           bootStateRef.current.initialBootComplete = true
           setBooting(false)
-          setBusyAction(null)
-          if (bootStateRef.current.pendingBootRefresh) {
-            bootStateRef.current.pendingBootRefresh = false
-            refreshAll()
-          }
+          flushDeferredBootEvents(getLiveDispatchContextRef.current())
         }
       }
     })()
     return () => {
       mounted = false
+      endBootTask()
     }
-  }, [loadCoreState, loadPlanOnly, loadStatsOnly, refreshAll])
+  }, [beginBusyTask, loadCoreState, loadPlanOnly, loadStatsOnly])
 
   // Load plan immediately when expedition changes after initial boot.
   useEffect(() => {
@@ -129,13 +184,16 @@ export function useBackendSync() {
     }
     if (
       lastEffectStatsSelectionRef.current?.expeditionId === activeExpeditionId &&
-      lastEffectStatsSelectionRef.current?.filter === filter
+      lastEffectStatsSelectionRef.current?.filter === reconciledFilter
     ) {
       return
     }
-    lastEffectStatsSelectionRef.current = { expeditionId: activeExpeditionId, filter }
-    void loadStatsOnly(activeExpeditionId, filter)
-  }, [activeExpeditionId, filter, loadStatsOnly])
+    lastEffectStatsSelectionRef.current = {
+      expeditionId: activeExpeditionId,
+      filter: reconciledFilter,
+    }
+    void loadStatsOnly(activeExpeditionId, reconciledFilter)
+  }, [activeExpeditionId, loadStatsOnly, reconciledFilter])
 
   const activeStatusMessage =
     busyAction ||
@@ -167,6 +225,8 @@ export function useBackendSync() {
       refreshExpeditionListOnly,
     ],
   )
+  const getLiveDispatchContextRef = useRef(getLiveDispatchContext)
+  getLiveDispatchContextRef.current = getLiveDispatchContext
 
   const {
     syncPauseState,
@@ -216,7 +276,7 @@ export function useBackendSync() {
     plan,
     setPlan,
     sidebarStats,
-    filter,
+    filter: reconciledFilter,
     setFilter,
     eddProgress,
     activeStatusMessage,

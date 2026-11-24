@@ -23,7 +23,7 @@ function createLiveDispatchHarness(expeditionId = 4) {
     bootState: {
       initialBootComplete: true,
       bootCoreLoaded: true,
-      pendingBootRefresh: false,
+      deferredPayloads: [],
     },
     currentActiveExpeditionId: expeditionId,
     currentFilter: filter,

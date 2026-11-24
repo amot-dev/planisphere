@@ -9,7 +9,7 @@ import { StartExpeditionModal } from './features/planner/lifecycle/StartExpediti
 import { SettingsModal } from './features/settings/SettingsModal'
 import { SetupWizardModal } from './features/setup/SetupWizard'
 import { StatsSidebar } from './features/sidebar/StatsSidebar'
-import { useBackendSync } from './features/sync/useBackendSync'
+import { isExpeditionExportEnabled, useBackendSync } from './features/sync/useBackendSync'
 import { useLocalStorageBoolean } from './hooks/useLocalStorageBoolean'
 
 /**
@@ -70,6 +70,7 @@ export default function App() {
   const archiveRevision = ingest
     ? `${ingest.eventsStored}:${ingest.firstEventAt}:${ingest.lastEventAt}`
     : ''
+  const exportEnabled = isExpeditionExportEnabled(activeExpeditionId, plan, sidebarStats)
 
   if (booting) {
     return <TerminalBootScreen />
@@ -133,7 +134,7 @@ export default function App() {
             externalLinkEdsm={settings?.externalLinkEdsm}
             externalLinkGec={settings?.externalLinkGec}
             manualPlotterRequestCount={manualPlotterRequestCount}
-            exportEnabled={Boolean(sidebarStats?.departed || plan?.expedition?.status === 'completed')}
+            exportEnabled={exportEnabled}
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
             onOpenExportModal={handleOpenExportModal}

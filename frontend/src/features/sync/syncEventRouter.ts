@@ -1,13 +1,21 @@
 import type { DataChangedPayload, stats } from '../../api/models'
 
 /**
+ * RefreshAllOptions controls whether refreshAll skips speculative plan and
+ * stats prefetching before core state resolves (used on database switches).
+ */
+export interface RefreshAllOptions {
+  skipPrefetch?: boolean
+}
+
+/**
  * SyncBootLifecycleState tracks the two-stage terminal boot lifecycle so early
  * Wails events do not cancel in-flight bootstrap RPCs before main paint.
  */
 export interface SyncBootLifecycleState {
   initialBootComplete: boolean
   bootCoreLoaded: boolean
-  pendingBootRefresh: boolean
+  deferredPayloads: DataChangedPayload[]
 }
 
 /**
@@ -24,7 +32,20 @@ export interface DataChangedDispatchContext {
   loadModesOnly: () => Promise<unknown>
   loadPlanOnly: (expeditionId: number) => Promise<void>
   loadStatsOnly: (expeditionId: number, currentFilter: stats.Filter) => Promise<void>
-  refreshAll: () => void
+  refreshAll: (options?: RefreshAllOptions) => void
+}
+
+function createOnceCallback<Args extends unknown[]>(
+  callback: (...args: Args) => unknown,
+): (...args: Args) => Promise<void> {
+  let invoked = false
+  return async (...args: Args) => {
+    if (invoked) {
+      return
+    }
+    invoked = true
+    await callback(...args)
+  }
 }
 
 /**
@@ -36,8 +57,12 @@ export function routeDataChangedEvent(
   dispatchContext: DataChangedDispatchContext,
 ): void {
   if (!dispatchContext.bootState.initialBootComplete) {
-    if (dispatchContext.bootState.bootCoreLoaded) {
-      dispatchContext.bootState.pendingBootRefresh = true
+    if (
+      dispatchContext.bootState.bootCoreLoaded &&
+      payload?.domains &&
+      payload.domains.length > 0
+    ) {
+      dispatchContext.bootState.deferredPayloads.push(payload)
     }
     return
   }
@@ -52,7 +77,7 @@ export function routeDataChangedEvent(
   const domainSet = new Set(domains)
 
   if (domainSet.has('settings') && domainSet.has('expeditions') && domainSet.has('modes')) {
-    dispatchContext.refreshAll()
+    dispatchContext.refreshAll({ skipPrefetch: true })
     return
   }
 
@@ -79,6 +104,45 @@ export function routeDataChangedEvent(
   }
   if (domainSet.has('stats') && currentActive > 0 && (isTargetActive || domainSet.has('modes'))) {
     void dispatchContext.loadStatsOnly(currentActive, dispatchContext.currentFilter)
+  }
+}
+
+/**
+ * flushDeferredBootEvents replays data:changed notifications captured during the
+ * mid-boot window once bootstrap completes, deduplicating redundant per-domain
+ * loads while preserving database-switch full refreshes.
+ */
+export function flushDeferredBootEvents(dispatchContext: DataChangedDispatchContext): void {
+  const queuedPayloads = dispatchContext.bootState.deferredPayloads.splice(0)
+  if (queuedPayloads.length === 0) {
+    return
+  }
+
+  const databaseSwitchPayload = queuedPayloads.find((payload) => {
+    const domainSet = new Set(payload.domains ?? [])
+    return domainSet.has('settings') && domainSet.has('expeditions') && domainSet.has('modes')
+  })
+  if (databaseSwitchPayload) {
+    routeDataChangedEvent(databaseSwitchPayload, {
+      ...dispatchContext,
+      bootState: { ...dispatchContext.bootState, initialBootComplete: true },
+    })
+    return
+  }
+
+  const deduplicatedContext: DataChangedDispatchContext = {
+    ...dispatchContext,
+    bootState: { ...dispatchContext.bootState, initialBootComplete: true },
+    refreshExpeditionListOnly: createOnceCallback(dispatchContext.refreshExpeditionListOnly),
+    loadIngestStatusOnly: createOnceCallback(dispatchContext.loadIngestStatusOnly),
+    loadSettingsOnly: createOnceCallback(dispatchContext.loadSettingsOnly),
+    loadModesOnly: createOnceCallback(dispatchContext.loadModesOnly),
+    loadPlanOnly: createOnceCallback(dispatchContext.loadPlanOnly),
+    loadStatsOnly: createOnceCallback(dispatchContext.loadStatsOnly),
+  }
+
+  for (const payload of queuedPayloads) {
+    routeDataChangedEvent(payload, deduplicatedContext)
   }
 }
 

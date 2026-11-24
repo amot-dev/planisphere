@@ -1,4 +1,4 @@
-import { useCallback, useState, type MutableRefObject } from 'react'
+import { useCallback, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   AddRow,
   DeleteRow,
@@ -17,16 +17,19 @@ import {
   buildOptimisticLegModePlan,
   buildOptimisticMovedRowPlan,
 } from '../../domain/planOptimisticReducers'
+import { createBusyTaskTracker, type BusyTaskTracker } from '../../hooks/useBusyTasks'
 import type { PlannerConfirmState } from './PlannerConfirmModal'
 
 const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
 
 /**
- * PlanMutationContextCallbacks supplies the busy banner, optimistic PlanView
- * setter, and rollback refresh handler shared across planner mutations.
+ * PlanMutationContextCallbacks supplies the busy banner, optional token-scoped
+ * busy tracker, optimistic PlanView setter, and rollback refresh handler shared
+ * across planner mutations.
  */
 export interface PlanMutationContextCallbacks {
   onBusyChange: (busyMessage: string | null) => void
+  busyTracker?: BusyTaskTracker
   onPlanOptimisticUpdate: (nextPlan: expedition.PlanView) => void
   onRefreshPlan: () => void | Promise<void>
 }
@@ -56,7 +59,12 @@ export async function executePlanMutation(
   if (options?.optimisticPlan) {
     contextCallbacks.onPlanOptimisticUpdate(options.optimisticPlan)
   }
-  contextCallbacks.onBusyChange(busyMessage)
+  const endBusyTask = contextCallbacks.busyTracker
+    ? contextCallbacks.busyTracker.beginTask(busyMessage)
+    : null
+  if (!endBusyTask) {
+    contextCallbacks.onBusyChange(busyMessage)
+  }
   try {
     await mutationAction()
     options?.onSuccess?.()
@@ -66,7 +74,11 @@ export async function executePlanMutation(
       await contextCallbacks.onRefreshPlan()
     }
   } finally {
-    contextCallbacks.onBusyChange(null)
+    if (endBusyTask) {
+      endBusyTask()
+    } else {
+      contextCallbacks.onBusyChange(null)
+    }
   }
 }
 
@@ -109,6 +121,13 @@ export function usePlanMutations({
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
   const [confirmState, setConfirmState] = useState<PlannerConfirmState | null>(null)
 
+  const onBusyChangeRef = useRef(onBusyChange)
+  onBusyChangeRef.current = onBusyChange
+  const busyTracker = useMemo(
+    () => createBusyTaskTracker((busyMessage) => onBusyChangeRef.current(busyMessage)),
+    [],
+  )
+
   const runPlanMutation = useCallback(
     (
       busyMessage: string,
@@ -120,10 +139,15 @@ export function usePlanMutations({
         busyMessage,
         errorContext,
         mutationAction,
-        { onBusyChange, onPlanOptimisticUpdate: applyOptimisticPlan, onRefreshPlan },
+        {
+          onBusyChange,
+          busyTracker,
+          onPlanOptimisticUpdate: applyOptimisticPlan,
+          onRefreshPlan,
+        },
         options,
       ),
-    [applyOptimisticPlan, onBusyChange, onRefreshPlan],
+    [applyOptimisticPlan, busyTracker, onBusyChange, onRefreshPlan],
   )
 
   const setFcArrived = useCallback(
