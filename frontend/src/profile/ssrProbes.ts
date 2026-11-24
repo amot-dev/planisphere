@@ -181,7 +181,6 @@ function renderSidebarBothScopesHTML(hydrated: HydratedFrontendFixture): string 
   const expeditionHTML = renderToString(
     createElement(StatsSidebar, {
       sidebarStats: sidebar,
-      statsLoading: false,
       modesState,
       filter: emptyFilter,
       collapsed: false,

@@ -56,7 +56,6 @@ function mountWorkspaceTree(
         null,
         createElement(StatsSidebar, {
           sidebarStats: sidebar,
-          statsLoading: false,
           modesState,
           filter: emptyFilter,
           collapsed: false,

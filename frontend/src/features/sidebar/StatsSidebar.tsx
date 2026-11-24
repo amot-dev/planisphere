@@ -11,7 +11,6 @@ import { NavigationTelemetrySection } from './NavigationTelemetrySection'
  */
 export interface StatsSidebarProps {
   sidebarStats: app.SidebarStats | null
-  statsLoading: boolean
   modesState: app.ModesState | null
   filter: stats.Filter
   collapsed?: boolean
@@ -28,7 +27,6 @@ export interface StatsSidebarProps {
  */
 export const StatsSidebar = memo(function StatsSidebar({
   sidebarStats,
-  statsLoading,
   modesState,
   filter,
   collapsed = false,
@@ -116,12 +114,6 @@ export const StatsSidebar = memo(function StatsSidebar({
             All Time
           </button>
         </div>
-
-        {statsLoading && (
-          <span className="font-mono-tabular text-[10px] uppercase tracking-wider text-ed-amber animate-pulse">
-            SYNCING...
-          </span>
-        )}
       </div>
 
       {/* Tracked Metrics List */}

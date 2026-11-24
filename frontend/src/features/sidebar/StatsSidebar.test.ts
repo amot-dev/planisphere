@@ -12,7 +12,6 @@ describe('StatsSidebar', () => {
       renderToString(
         createElement(StatsSidebar, {
           sidebarStats: null,
-          statsLoading: false,
           modesState: null,
           filter: emptyFilter,
           onFilterChange: () => {},

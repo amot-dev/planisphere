@@ -20,7 +20,6 @@ export default function App() {
   const {
     booting,
     setBusyAction,
-    statsLoading,
     settings,
     ingest,
     modesState,
@@ -112,7 +111,6 @@ export default function App() {
         <ErrorBoundary fallbackTitle="Telemetry Sidebar Error">
           <StatsSidebar
             sidebarStats={sidebarStats}
-            statsLoading={statsLoading}
             modesState={modesState}
             filter={filter}
             collapsed={sidebarCollapsed}
