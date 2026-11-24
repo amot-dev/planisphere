@@ -46,6 +46,7 @@ export function useCarrierRoute({
 }: UseCarrierRouteOptions) {
   const [routePrompt, setRoutePrompt] = useState<CarrierRoutePromptState | null>(null)
   const [loggingJump, setLoggingJump] = useState(false)
+  const loggingJumpRef = useRef(false)
   const { copiedKey, copyWithFeedback } = useCopyFeedback<'next'>()
   const copiedNextJump = copiedKey === 'next'
 
@@ -119,6 +120,7 @@ export function useCarrierRoute({
 
   useEffect(() => {
     invalidateRouteRequests()
+    loggingJumpRef.current = false
     setRoutePrompt(null)
     setLoggingJump(false)
   }, [currentExpeditionId, invalidateRouteRequests])
@@ -338,62 +340,83 @@ export function useCarrierRoute({
     persistRouteState({ route: updatedRoute })
   }
 
-  async function handleCarrierArriveAtWaypoint() {
-    const requestExpeditionId = currentExpeditionId
-    const requestSeq = routeRequestSeqRef.current
-    if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
+  async function performCarrierArriveAtWaypoint(
+    requestExpeditionId: number | undefined,
+    requestSeq: number,
+  ): Promise<boolean> {
+    if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return false
     const targetRowId = isManualCarrierRoute
       ? (nextFcStopEntry?.row.id ?? 0)
       : activeCarrierTargetRowId || (nextFcStopEntry?.row.id ?? 0)
     if (targetRowId > 0) {
       try {
         const arrivedSucceeded = await onSetFcArrived(targetRowId, true)
-        if (arrivedSucceeded === false || isStaleRouteRequest(requestExpeditionId, requestSeq)) {
-          return
-        }
+        if (arrivedSucceeded === false || isStaleRouteRequest(requestExpeditionId, requestSeq)) return false
       } catch {
-        return
+        return false
       }
     }
     clearPersistedCarrierRoute()
+    return true
+  }
+
+  async function handleCarrierArriveAtWaypoint() {
+    const requestExpeditionId = currentExpeditionId
+    const requestSeq = routeRequestSeqRef.current
+    if (loggingJump || loggingJumpRef.current || isStaleRouteRequest(requestExpeditionId, requestSeq)) return
+    cancelPendingInputPersist()
+    loggingJumpRef.current = true
+    setLoggingJump(true)
+    const endBusyTask = busyTracker.beginTask('MARKING CARRIER ARRIVAL')
+    try {
+      await performCarrierArriveAtWaypoint(requestExpeditionId, requestSeq)
+    } finally {
+      if (expeditionIdRef.current === requestExpeditionId) {
+        loggingJumpRef.current = false
+        if (mountedRef.current) setLoggingJump(false)
+      }
+      endBusyTask()
+    }
   }
 
   async function handleCompleteSpanshJump() {
-    if (!plan || !activeCarrierRoute || loggingJump) return
-    const carrierHop = activeCarrierRoute.jumps?.[carrierJumpIndex]
-    if (!carrierHop) return
-
+    const totalJumps = activeCarrierRoute?.jumps?.length ?? 0
+    if (!plan || !activeCarrierRoute || totalJumps === 0 || loggingJump || loggingJumpRef.current) return
+    const allJumpsRecorded = carrierJumpIndex >= totalJumps
+    const carrierHop = allJumpsRecorded ? null : activeCarrierRoute.jumps[carrierJumpIndex]
     const currentDepot = normalizeDepotTritium(activeCarrierRoute.depotTritium)
-    if (currentDepot < carrierHop.tritiumUsed) {
-      return
-    }
+    if (carrierHop && currentDepot < carrierHop.tritiumUsed) return
 
     const requestExpeditionId = currentExpeditionId
     const requestSeq = routeRequestSeqRef.current
+    loggingJumpRef.current = true
     setLoggingJump(true)
-    const endBusyTask = busyTracker.beginTask('LOGGING CARRIER JUMP')
+    const endBusyTask = busyTracker.beginTask(
+      allJumpsRecorded ? 'MARKING CARRIER ARRIVAL' : 'LOGGING CARRIER JUMP',
+    )
     try {
+      if (!carrierHop) {
+        await performCarrierArriveAtWaypoint(requestExpeditionId, requestSeq)
+        return
+      }
       await RecordCarrierJump(plan.expedition.id, carrierHop.distanceLy, carrierHop.tritiumUsed)
       if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
       const nextJumpIndex = carrierJumpIndex + 1
-      if (nextJumpIndex >= (activeCarrierRoute.jumps?.length ?? 0)) {
-        await handleCarrierArriveAtWaypoint()
-        return
-      }
-      setCarrierJumpIndex(nextJumpIndex)
       const nextDepot = Math.max(0, currentDepot - carrierHop.tritiumUsed)
-      const updatedRoute = recalculateCarrierRouteDepotFuel(
-        activeCarrierRoute,
-        nextJumpIndex,
-        nextDepot,
-      )
+      const updatedRoute = recalculateCarrierRouteDepotFuel(activeCarrierRoute, nextJumpIndex, nextDepot)
+      setCarrierJumpIndex(nextJumpIndex)
       setActiveCarrierRoute(updatedRoute)
-      persistRouteState({ route: updatedRoute, jumpIdx: nextJumpIndex })
+      const shouldPersist =
+        nextJumpIndex < totalJumps ||
+        (!(await performCarrierArriveAtWaypoint(requestExpeditionId, requestSeq)) &&
+          !isStaleRouteRequest(requestExpeditionId, requestSeq))
+      if (shouldPersist) persistRouteState({ route: updatedRoute, jumpIdx: nextJumpIndex })
     } catch (jumpError) {
       console.error(jumpError)
     } finally {
-      if (mountedRef.current && expeditionIdRef.current === requestExpeditionId) {
-        setLoggingJump(false)
+      if (expeditionIdRef.current === requestExpeditionId) {
+        loggingJumpRef.current = false
+        if (mountedRef.current) setLoggingJump(false)
       }
       endBusyTask()
     }

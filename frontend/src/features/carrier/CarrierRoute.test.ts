@@ -194,6 +194,28 @@ describe('CarrierRoute UI Components', () => {
     )
     expect(spanshFinalJumpHtml).toContain('class="ed-btn-cyan">COMPLETE JUMP #2</button>')
     expect(spanshFinalJumpHtml).not.toContain('CARRIER ARRIVED')
+
+    const spanshAllRecordedHtml = renderCarrierPanel({
+      route: plottedSpanshRoute,
+      jumpIndex: 2,
+      depotTritium: 6,
+      manualMode: false,
+      hasNextFcStop: true,
+      nextFcStopSystem: 'Colonia',
+    })
+    expect(spanshAllRecordedHtml).toMatch(/0(?:<!-- -->|\s)+JUMPS/)
+    expect(spanshAllRecordedHtml).toContain('0.0 Ly')
+    expect(spanshAllRecordedHtml).toMatch(/~(?:<!-- -->)?0(?:<!-- -->)? t/)
+    expect(spanshAllRecordedHtml).toContain('class="ed-btn-cyan">MARK FC STOP ARRIVAL</button>')
+    expect(spanshAllRecordedHtml).not.toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
+
+    const manualArrivalBusyHtml = renderCarrierPanel({
+      route: expedition.CarrierRouteResult.createFrom({ origin: 'Sol', destination: 'Colonia', carrierType: 'player', manualMode: true, jumps: [] }),
+      hasNextFcStop: true,
+      nextFcStopSystem: 'Colonia',
+      loggingJump: true,
+    })
+    expect(manualArrivalBusyHtml).toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
   })
 })
 
@@ -372,7 +394,8 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
     }
   })
 
-  it('preserves activeCarrierRoute when onSetFcArrived returns false and clears only after arrival succeeds', async () => {
+  it('cancels pending manual-input timers, blocks concurrent arrival clicks, and preserves activeCarrierRoute until onSetFcArrived succeeds', async () => {
+    vi.useFakeTimers()
     const savedRoute = expedition.CarrierRouteResult.createFrom({
       origin: 'Sol',
       destination: 'Colonia',
@@ -388,11 +411,15 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
         manualMode: true,
       }),
     )
+    mockSaveActiveCarrierRoute.mockResolvedValue(undefined)
     mockClearActiveCarrierRoute.mockResolvedValue(undefined)
 
+    let resolveFirstArrival!: (succeeded: boolean) => void
     const onSetFcArrived = vi
       .fn<(rowId: number, arrived: boolean) => Promise<boolean>>()
-      .mockResolvedValueOnce(false)
+      .mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => { resolveFirstArrival = resolve }),
+      )
       .mockResolvedValueOnce(true)
 
     const planOne = buildCarrierPlan(1, 11, 'Colonia')
@@ -419,22 +446,112 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
       })
       expect(latestHook.activeCarrierRoute).not.toBeNull()
 
+      act(() => {
+        latestHook.handleChangeManualDistance('245.5')
+      })
+
+      let firstArrivalPromise!: Promise<void>
+      act(() => {
+        firstArrivalPromise = latestHook.handleCarrierArriveAtWaypoint()
+      })
+      expect(latestHook.loggingJump).toBe(true)
+
+      // Concurrent click while loggingJump is true and 250 ms timer window elapsing must both no-op.
       await act(async () => {
         await latestHook.handleCarrierArriveAtWaypoint()
+        vi.advanceTimersByTime(300)
       })
-      expect(onSetFcArrived).toHaveBeenCalledWith(11, true)
+      expect(onSetFcArrived).toHaveBeenCalledTimes(1)
+      expect(mockSaveActiveCarrierRoute).not.toHaveBeenCalled()
+
+      await act(async () => {
+        resolveFirstArrival(false)
+        await firstArrivalPromise
+      })
+      expect(latestHook.loggingJump).toBe(false)
       expect(mockClearActiveCarrierRoute).not.toHaveBeenCalled()
       expect(latestHook.activeCarrierRoute).not.toBeNull()
 
       await act(async () => {
         await latestHook.handleCarrierArriveAtWaypoint()
       })
+      expect(onSetFcArrived).toHaveBeenCalledTimes(2)
       expect(mockClearActiveCarrierRoute).toHaveBeenCalledWith(1)
       expect(latestHook.activeCarrierRoute).toBeNull()
     } finally {
+      vi.useRealTimers()
       act(() => root.unmount())
       container.remove()
     }
+  })
+
+  it('records final Spansh hop once and preserves activeCarrierTargetRowId across arrival retry and reload when an earlier unarrived FC stop exists', async () => {
+    const spanshRoute = expedition.CarrierRouteResult.createFrom({
+      origin: 'Sol',
+      destination: 'Colonia',
+      carrierType: 'player',
+      depotTritium: 50,
+      manualMode: false,
+      jumps: [{ systemName: 'Colonia', distanceLy: 400, tritiumUsed: 44, fuelInTank: 6 }],
+    })
+    mockGetActiveCarrierRoute.mockResolvedValueOnce(
+      expedition.ActiveCarrierRouteState.createFrom({
+        expeditionId: 1, targetRowId: 12, route: spanshRoute, jumpIdx: 0, manualMode: false,
+      }),
+    )
+    mockRecordCarrierJump.mockResolvedValue(undefined)
+    mockSaveActiveCarrierRoute.mockResolvedValue(undefined)
+    mockClearActiveCarrierRoute.mockResolvedValue(undefined)
+
+    const onSetFcArrived = vi
+      .fn<(rowId: number, arrived: boolean) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+
+    const multiStopPlan = expedition.PlanView.createFrom({
+      expedition: { id: 1, name: 'Expedition 1', status: 'active' },
+      nextFcStopRowId: 11,
+      rows: [
+        { row: { id: 10, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol', visitedAt: '3312-01-01T00:00:00Z' }, number: 1, visitState: 'visited' },
+        { row: { id: 11, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini', fcStop: true, fcArrived: false }, number: 2, visitState: 'future' },
+        { row: { id: 12, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia', fcStop: true, fcArrived: false }, number: 3, visitState: 'future' },
+      ],
+    })
+
+    let latestHook!: ReturnType<typeof useCarrierRoute>
+    const HookHarness = () => {
+      latestHook = useCarrierRoute({ plan: multiStopPlan, lastVisitedIndex: 0, onBusyChange: () => {}, onSetFcArrived })
+      return null
+    }
+
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => { root.render(createElement(HookHarness)); await Promise.resolve() })
+    expect(latestHook.nextFcStopEntry?.row.id).toBe(11)
+    expect(latestHook.activeCarrierTargetRowId).toBe(12)
+
+    await act(async () => { await latestHook.handleCompleteSpanshJump() })
+    expect(mockRecordCarrierJump).toHaveBeenCalledTimes(1)
+    expect(onSetFcArrived).toHaveBeenCalledWith(12, true)
+    expect(latestHook.carrierJumpIndex).toBe(1)
+    expect(latestHook.isManualCarrierRoute).toBe(false)
+    expect(mockSaveActiveCarrierRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ targetRowId: 12, jumpIdx: 1, manualMode: false }),
+    )
+
+    mockGetActiveCarrierRoute.mockResolvedValueOnce(mockSaveActiveCarrierRoute.mock.calls.at(-1)?.[0])
+    act(() => root.unmount())
+    const reloadedRoot = createRoot(container)
+    await act(async () => { reloadedRoot.render(createElement(HookHarness)); await Promise.resolve() })
+    expect(latestHook.carrierJumpIndex).toBe(1)
+    expect(latestHook.activeCarrierTargetRowId).toBe(12)
+
+    await act(async () => { await latestHook.handleCompleteSpanshJump() })
+    expect(mockRecordCarrierJump).toHaveBeenCalledTimes(1)
+    expect(onSetFcArrived).toHaveBeenNthCalledWith(2, 12, true)
+    expect(mockClearActiveCarrierRoute).toHaveBeenCalledWith(1)
+    expect(latestHook.activeCarrierRoute).toBeNull()
+    act(() => reloadedRoot.unmount())
   })
 })
 

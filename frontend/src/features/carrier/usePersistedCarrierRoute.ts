@@ -120,10 +120,7 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
           const savedTritiumInput = saved.manualTritInput || ''
           manualDistanceInputRef.current = savedDistanceInput
           manualTritiumInputRef.current = savedTritiumInput
-          const maxJumpIndex =
-            saved.route.jumps && saved.route.jumps.length > 0
-              ? saved.route.jumps.length - 1
-              : 0
+          const maxJumpIndex = saved.route.jumps ? saved.route.jumps.length : 0
           setActiveCarrierRoute(saved.route)
           setActiveCarrierTargetRowId(saved.targetRowId)
           setCarrierJumpIndex(Math.min(Math.max(0, saved.jumpIdx || 0), maxJumpIndex))

@@ -119,7 +119,7 @@ export function ManualCarrierLoggerView({
 
       <button
         type="button"
-        disabled={!canMarkArrival}
+        disabled={!canMarkArrival || loggingJump}
         onClick={onArrive}
         title={
           canMarkArrival

@@ -410,6 +410,7 @@ describe('ExportExpeditionModal', () => {
       expect(wireFiles[0]).toMatchObject({
         name: 'orion-horizon-test-snapshot.json',
         canonicalJsonExpeditionId: 7,
+        canonicalJsonExportedAt: hydratedExport.exportedAt,
       })
       expect(wireFiles[0].contentText).toBeUndefined()
     } finally {

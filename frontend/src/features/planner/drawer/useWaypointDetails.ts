@@ -65,8 +65,8 @@ function isLoadedDrawerFresh(
 
 /**
  * useWaypointDetails manages expandable waypoint telemetry drawers, resets state
- * across expedition switches, prunes demoted future rows, and selectively refreshes
- * open drawers when leg bounds or relevant journal watermarks change.
+ * across expedition or database switches, prunes demoted future rows, and selectively
+ * refreshes open drawers when leg bounds or relevant journal watermarks change.
  */
 export function useWaypointDetails(
   plan: expedition.PlanView | null,
@@ -74,6 +74,7 @@ export function useWaypointDetails(
   archiveRevision = '',
   isOptimisticPlan = false,
   closedWindowRevision = 0,
+  databaseKey = '',
 ): WaypointDetailsState {
   const [expandedRowIds, setExpandedRowIds] = useState<Record<number, boolean>>({})
   const expandedRowIdsRef = useRef<Record<number, boolean>>(expandedRowIds)
@@ -88,6 +89,9 @@ export function useWaypointDetails(
   const activeExpeditionId = plan?.expedition?.id
   const activeExpeditionIdRef = useRef<number | undefined>(activeExpeditionId)
   activeExpeditionIdRef.current = activeExpeditionId
+
+  const databaseKeyRef = useRef<string>(databaseKey)
+  databaseKeyRef.current = databaseKey
 
   const archiveRevisionRef = useRef<string>(archiveRevision)
   archiveRevisionRef.current = archiveRevision
@@ -111,6 +115,7 @@ export function useWaypointDetails(
 
   const loadDetails = useCallback((rowId: number) => {
     const requestExpeditionId = activeExpeditionIdRef.current
+    const requestDatabaseKey = databaseKeyRef.current
     const requestArchiveRevision = archiveRevisionRef.current
     const requestClosedRevision = closedWindowRevisionRef.current
     const requestSequence = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
@@ -123,6 +128,7 @@ export function useWaypointDetails(
       .then((details) => {
         if (
           activeExpeditionIdRef.current !== requestExpeditionId ||
+          databaseKeyRef.current !== requestDatabaseKey ||
           requestSeqByRowIdRef.current[rowId] !== requestSequence
         ) {
           return
@@ -143,6 +149,7 @@ export function useWaypointDetails(
       .catch((detailsError) => {
         if (
           activeExpeditionIdRef.current === requestExpeditionId &&
+          databaseKeyRef.current === requestDatabaseKey &&
           requestSeqByRowIdRef.current[rowId] === requestSequence
         ) {
           delete loadedArchiveRevisionByIdRef.current[rowId]
@@ -153,6 +160,7 @@ export function useWaypointDetails(
       .finally(() => {
         if (
           activeExpeditionIdRef.current !== requestExpeditionId ||
+          databaseKeyRef.current !== requestDatabaseKey ||
           requestSeqByRowIdRef.current[rowId] !== requestSequence
         ) {
           return
@@ -161,7 +169,7 @@ export function useWaypointDetails(
       })
   }, [])
 
-  // Reset open drawers and cached payloads when switching expeditions or entering planning mode.
+  // Reset open drawers and cached payloads when switching expeditions, switching databases, or entering planning mode.
   useEffect(() => {
     loadedArchiveRevisionByIdRef.current = {}
     loadedClosedRevisionByIdRef.current = {}
@@ -174,9 +182,9 @@ export function useWaypointDetails(
       detailsByIdRef.current = {}
       setExpandedRowIds({})
       setDetailsById({})
-      setLoadingDetails({})
     }
-  }, [activeExpeditionId, isPlanning])
+    setLoadingDetails((previous) => (Object.keys(previous).length > 0 ? {} : previous))
+  }, [activeExpeditionId, databaseKey, isPlanning])
 
   // Prune ineligible or future drawers and selectively refresh open drawers on bound or revision changes.
   useEffect(() => {

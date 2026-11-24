@@ -100,8 +100,8 @@ export function useExportStudio(expeditionId: number) {
     statusStore, setConfig, setCartItems, setInspectedCartItemId, setOutputs,
   )
   const handleRunExport = useCallback(
-    () => executeStudioExport(expeditionId, exportData, cartItems, outputPlan, statusStore, setExporting),
-    [cartItems, expeditionId, exportData, outputPlan, statusStore],
+    () => executeStudioExport(exportData, cartItems, outputPlan, statusStore, setExporting),
+    [cartItems, exportData, outputPlan, statusStore],
   )
 
   return {
@@ -220,7 +220,6 @@ function cloneCartBlockConfig(blockConfig: ExportBlockConfig): ExportBlockConfig
 }
 
 async function executeStudioExport(
-  expeditionId: number,
   exportData: ExpeditionExportData | null,
   cartItems: CartBlockItem[],
   outputPlan: ExportOutputPlan,
@@ -251,7 +250,11 @@ async function executeStudioExport(
     }
     if (outputPlan.jsonCount > 0) {
       statusStore.setStatus('Serializing canonical JSON snapshot...')
-      bundleFiles.push({ name: `${expeditionSlug}-snapshot.json`, canonicalJsonExpeditionId: expeditionId })
+      bundleFiles.push({
+        name: `${expeditionSlug}-snapshot.json`,
+        canonicalJsonExpeditionId: exportData.plan.expedition.id,
+        canonicalJsonExportedAt: exportData.exportedAt,
+      })
     }
     statusStore.setStatus('Writing export output...')
     const wireFiles = bundleFiles.map((file) => exporter.BundleFile.createFrom(file))

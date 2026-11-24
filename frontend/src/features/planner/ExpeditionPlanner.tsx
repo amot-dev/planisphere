@@ -21,12 +21,13 @@ import { useInitialExpeditionScroll } from './useInitialExpeditionScroll'
 import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMutations'
 
 /**
- * ExpeditionPlannerProps defines the active expedition plan state, journal
- * archive revision token, external-link visibility settings, optimistic update
- * handlers, lifecycle modal triggers, and carrier router trigger count.
+ * ExpeditionPlannerProps defines the active expedition plan state, database
+ * path key, journal archive revision token, external-link visibility settings,
+ * optimistic update handlers, lifecycle modal triggers, and carrier router trigger count.
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
+  dbPath?: string
   archiveRevision?: string
   closedWindowRevision?: number
   clockSuspended?: boolean
@@ -49,6 +50,7 @@ export interface ExpeditionPlannerProps {
  */
 export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   plan,
+  dbPath = '',
   archiveRevision = '',
   closedWindowRevision = 0,
   clockSuspended = false,
@@ -74,6 +76,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     archiveRevision,
     isOptimisticPlan,
     closedWindowRevision,
+    dbPath,
   )
 
   const { copiedKey: copiedSystemRowId, copyWithFeedback } = useCopyFeedback<number>()

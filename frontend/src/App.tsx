@@ -127,6 +127,7 @@ export default function App() {
         <ErrorBoundary fallbackTitle="Expedition Planner Error">
           <ExpeditionPlanner
             plan={plan}
+            dbPath={settings?.dbPath ?? ''}
             archiveRevision={archiveRevision}
             closedWindowRevision={ingest?.closedWindowRevision ?? 0}
             clockSuspended={isClockSuspended}

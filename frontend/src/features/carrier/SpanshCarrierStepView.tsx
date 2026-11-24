@@ -34,22 +34,26 @@ export function SpanshCarrierStepView({
   onRefillDepot,
   onCompleteSpanshJump,
 }: SpanshCarrierStepViewProps) {
+  const allJumpsRecorded = jumpIndex >= jumps.length
   const activeHopIndex = Math.min(Math.max(0, jumpIndex), jumps.length - 1)
-  const currentSystem =
-    activeHopIndex === 0
+  const currentSystem = allJumpsRecorded
+    ? jumps[jumps.length - 1]?.systemName || destinationDisplay
+    : activeHopIndex === 0
       ? route.origin || '???'
       : jumps[activeHopIndex - 1]?.systemName || destinationDisplay
   const nextHop = jumps[activeHopIndex]
-  const isFinalJump = activeHopIndex === jumps.length - 1
+  const isFinalJump = allJumpsRecorded || activeHopIndex === jumps.length - 1
   const hopTritiumRequired = nextHop.tritiumUsed ?? 0
-  const isDepotInsufficient = currentDepot < hopTritiumRequired
-  const remainingJumps = Math.max(0, jumps.length - activeHopIndex)
+  const isDepotInsufficient = !allJumpsRecorded && currentDepot < hopTritiumRequired
+  const remainingJumps = allJumpsRecorded ? 0 : Math.max(0, jumps.length - activeHopIndex)
   let remainingDistanceLy = 0
   let remainingTritiumTonnes = 0
-  for (let hopIndex = activeHopIndex; hopIndex < jumps.length; hopIndex++) {
-    const jump = jumps[hopIndex]
-    remainingDistanceLy += jump.distanceLy || 0
-    remainingTritiumTonnes += jump.tritiumUsed || 0
+  if (!allJumpsRecorded) {
+    for (let hopIndex = activeHopIndex; hopIndex < jumps.length; hopIndex++) {
+      const jump = jumps[hopIndex]
+      remainingDistanceLy += jump.distanceLy || 0
+      remainingTritiumTonnes += jump.tritiumUsed || 0
+    }
   }
 
   return (
@@ -150,13 +154,21 @@ export function SpanshCarrierStepView({
           title={
             isDepotInsufficient
               ? `Refill required: Fuel depot (${formatInt(currentDepot)} t) is insufficient for this jump (${formatInt(hopTritiumRequired)} t)`
-              : isFinalJump
-                ? `Complete final carrier jump to ${destinationDisplay} and mark waypoint arrival`
-                : undefined
+              : allJumpsRecorded
+                ? `Mark Fleet Carrier arrival at ${destinationDisplay} and close the carrier router`
+                : isFinalJump
+                  ? `Complete final carrier jump to ${destinationDisplay} and mark waypoint arrival`
+                  : undefined
           }
           className={isFinalJump ? 'ed-btn-cyan' : 'ed-btn-primary'}
         >
-          {loggingJump ? 'LOGGING JUMP...' : `COMPLETE JUMP #${activeHopIndex + 1}`}
+          {allJumpsRecorded
+            ? loggingJump
+              ? 'MARKING ARRIVAL...'
+              : 'MARK FC STOP ARRIVAL'
+            : loggingJump
+              ? 'LOGGING JUMP...'
+              : `COMPLETE JUMP #${activeHopIndex + 1}`}
         </button>
       </div>
     </div>

@@ -823,6 +823,7 @@ export namespace exporter {
 	    contentBase64?: string;
 	    contentText?: string;
 	    canonicalJsonExpeditionId?: number;
+	    canonicalJsonExportedAt?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new BundleFile(source);
@@ -834,6 +835,7 @@ export namespace exporter {
 	        this.contentBase64 = source["contentBase64"];
 	        this.contentText = source["contentText"];
 	        this.canonicalJsonExpeditionId = source["canonicalJsonExpeditionId"];
+	        this.canonicalJsonExportedAt = source["canonicalJsonExportedAt"];
 	    }
 	}
 	export class HighlightRankingEntry {

@@ -378,5 +378,62 @@ describe('useWaypointDetails', () => {
       root.unmount()
     })
   })
+
+  it('clears open drawers and discards stale in-flight responses across hot database switches with matching expedition IDs', async () => {
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    const buildPlan = (secondSystem: string) =>
+      expedition.PlanView.createFrom({
+        expedition: { id: 1, name: 'Expedition One', status: 'active' },
+        rows: [
+          { row: { id: 101, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol', visitedAt: '2026-01-01T10:00:00Z' }, number: 1, visitState: 'visited' },
+          { row: { id: 102, expeditionId: 1, rowType: 'waypoint', systemName: secondSystem, visitedAt: '2026-01-01T11:00:00Z' }, number: 2, visitState: 'visited' },
+        ],
+      })
+
+    const dbOneOriginLoad = createDeferred<expedition.WaypointDetails>()
+    const dbOneInFlightLegLoad = createDeferred<expedition.WaypointDetails>()
+    const dbTwoLegLoad = createDeferred<expedition.WaypointDetails>()
+    getWaypointDetailsMock
+      .mockReturnValueOnce(dbOneOriginLoad.promise)
+      .mockReturnValueOnce(dbOneInFlightLegLoad.promise)
+      .mockReturnValueOnce(dbTwoLegLoad.promise)
+
+    let latestState!: WaypointDetailsState
+    function Harness({ plan, databaseKey }: { plan: expedition.PlanView; databaseKey: string }) {
+      latestState = useWaypointDetails(plan, false, 'rev-1', false, 1, databaseKey)
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    await act(async () => { root.render(createElement(Harness, { plan: buildPlan('Colonia'), databaseKey: '/data/a.db' })) })
+    await act(async () => { latestState.toggleExpand(101); latestState.toggleExpand(102) })
+    await act(async () => {
+      dbOneOriginLoad.resolve(expedition.WaypointDetails.createFrom({ rowId: 101, kind: 'origin', number: 1, metrics: { jumps: 5 } }))
+      await dbOneOriginLoad.promise
+    })
+    expect(latestState.expandedRowIds[101]).toBe(true)
+    expect(latestState.loadingDetails[102]).toBe(true)
+
+    await act(async () => { root.render(createElement(Harness, { plan: buildPlan('Beagle Point'), databaseKey: '/data/b.db' })) })
+    expect(latestState.expandedRowIds).toEqual({})
+    expect(latestState.detailsById).toEqual({})
+    expect(latestState.loadingDetails).toEqual({})
+
+    await act(async () => { latestState.toggleExpand(102) })
+    await act(async () => {
+      dbOneInFlightLegLoad.resolve(expedition.WaypointDetails.createFrom({ rowId: 102, kind: 'leg', number: 2, metrics: { jumps: 99 } }))
+      await dbOneInFlightLegLoad.promise
+    })
+    expect(latestState.detailsById[102]).toBeUndefined()
+    expect(latestState.loadingDetails[102]).toBe(true)
+
+    await act(async () => {
+      dbTwoLegLoad.resolve(expedition.WaypointDetails.createFrom({ rowId: 102, kind: 'leg', number: 2, metrics: { jumps: 12 } }))
+      await dbTwoLegLoad.promise
+    })
+    expect(latestState.detailsById[102]?.metrics.jumps).toBe(12)
+    expect(latestState.loadingDetails[102]).toBe(false)
+    await act(async () => { root.unmount() })
+  })
 })
 
