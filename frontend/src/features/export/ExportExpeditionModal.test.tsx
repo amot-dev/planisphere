@@ -3,7 +3,10 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { exporter } from '../../api/models'
+import { BlockConfigurator } from './BlockConfigurator'
+import { ExportCartQueue } from './ExportCartQueue'
 import { ExportExpeditionModal } from './ExportExpeditionModal'
+import { ExportPreviewPane } from './ExportPreviewPane'
 import { buildSampleExportData } from './exportTestFixtures'
 
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -414,6 +417,121 @@ describe('ExportExpeditionModal', () => {
         root.unmount()
       })
       container.remove()
+    }
+  })
+
+  it('updates leaf ExportStatusBanner during PNG progress ticks without re-rendering BlockConfigurator or ExportCartQueue', async () => {
+    if (typeof globalThis.ResizeObserver === 'undefined') {
+      globalThis.ResizeObserver = class implements ResizeObserver {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    }
+
+    const originalImage = globalThis.Image
+    const pendingImageLoads: Array<() => void> = []
+    class ControlledImage {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(_value: string) {
+        pendingImageLoads.push(() => this.onload?.())
+      }
+    }
+    const stubContext = {
+      scale: vi.fn(),
+      fillStyle: '',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D
+
+    const getContextSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(stubContext as never)
+    const toDataURLSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,iVBORw0KGgo=')
+    const configuratorRenderSpy = vi.spyOn(
+      BlockConfigurator as unknown as { type: (...args: never[]) => unknown },
+      'type',
+    )
+    const cartQueueRenderSpy = vi.spyOn(
+      ExportCartQueue as unknown as { type: (...args: never[]) => unknown },
+      'type',
+    )
+    const previewPaneRenderSpy = vi.spyOn(
+      ExportPreviewPane as unknown as { type: (...args: never[]) => unknown },
+      'type',
+    )
+    globalThis.Image = ControlledImage as unknown as typeof Image
+
+    ;(window as unknown as MockGoWindow).go = {
+      app: {
+        App: {
+          GetExpeditionExportData: vi.fn(async () => buildSampleExportData()) as never,
+          PickExportSavePath: vi.fn(async () => '/tmp/orion-export.zip') as never,
+          WriteExportOutput: vi.fn(async (targetPath: string) => targetPath) as never,
+        },
+      },
+    }
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(createElement(ExportExpeditionModal, { expeditionId: 7, onClose: () => {} }))
+        await flushMicrotasks()
+      })
+
+      await act(async () => {
+        findButtonByExactText(container, 'EXPORT').click()
+        await flushMicrotasks()
+      })
+
+      expect(container.textContent).toContain('Rendering PNG 0 / 3...')
+      expect(pendingImageLoads).toHaveLength(1)
+
+      configuratorRenderSpy.mockClear()
+      cartQueueRenderSpy.mockClear()
+      previewPaneRenderSpy.mockClear()
+
+      await act(async () => {
+        pendingImageLoads.shift()?.()
+        await flushMicrotasks()
+      })
+      expect(container.textContent).toContain('Rendering PNG 1 / 3...')
+      expect(configuratorRenderSpy).toHaveBeenCalledTimes(0)
+      expect(cartQueueRenderSpy).toHaveBeenCalledTimes(0)
+      expect(previewPaneRenderSpy).toHaveBeenCalledTimes(0)
+
+      await act(async () => {
+        pendingImageLoads.shift()?.()
+        await flushMicrotasks()
+      })
+      expect(container.textContent).toContain('Rendering PNG 2 / 3...')
+      expect(configuratorRenderSpy).toHaveBeenCalledTimes(0)
+      expect(cartQueueRenderSpy).toHaveBeenCalledTimes(0)
+      expect(previewPaneRenderSpy).toHaveBeenCalledTimes(0)
+
+      await act(async () => {
+        pendingImageLoads.shift()?.()
+        await flushMicrotasks()
+      })
+      expect(container.textContent).toContain('Saved to /tmp/orion-export.zip')
+      expect(findButtonByExactText(container, 'EXPORT').disabled).toBe(false)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+      globalThis.Image = originalImage
+      getContextSpy.mockRestore()
+      toDataURLSpy.mockRestore()
+      configuratorRenderSpy.mockRestore()
+      cartQueueRenderSpy.mockRestore()
+      previewPaneRenderSpy.mockRestore()
     }
   })
 })

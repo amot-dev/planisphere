@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { CartBlockItem } from './exportTypes'
 
 /** Props for the compact ordered Export Cart queue panel. */
@@ -16,7 +17,7 @@ export interface ExportCartQueueProps {
  * ExportCartQueue renders the Quick Share preset trigger, Clear Cart button,
  * and compact reorderable list of queued export blocks.
  */
-export function ExportCartQueue({
+export const ExportCartQueue = memo(function ExportCartQueue({
   items,
   inspectedCartItemId,
   disabled = false,
@@ -139,4 +140,4 @@ export function ExportCartQueue({
       )}
     </div>
   )
-}
+})

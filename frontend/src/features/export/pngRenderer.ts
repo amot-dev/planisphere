@@ -48,51 +48,78 @@ export function buildPngBundleFileName(
 
 /**
  * Renders a single CartBlockItem to a crisp 2x DPI PNG base64 string (without
- * the data-URI prefix) using an offscreen DOM measurement pass and SVG
- * foreignObject canvas capture.
+ * the data-URI prefix) using a shared offscreen DOM and canvas session helper.
  */
 export async function renderCartBlockToPngBase64(
   exportData: ExpeditionExportData,
   item: CartBlockItem,
 ): Promise<string> {
-  const staticMarkup = renderToStaticMarkup(
-    createElement(ExportBlockRenderer, {
-      exportData,
-      config: item.config,
-    }),
-  )
-  const { serializedXhtml, width, height } = measureAndSerializeCard(staticMarkup)
-  const svgMarkup = buildSvgForeignObjectDocument(serializedXhtml, width, height)
-  return rasterizeSvgToPngBase64(svgMarkup, width, height, PNG_SCALE_FACTOR)
+  return runWithPngRenderSession(exportData, (renderCard) => renderCard(item))
 }
 
 /**
- * Renders all queued cart items sequentially to 2x DPI PNG ExportBundleFile entries,
- * reporting progress after each completed card.
+ * Renders all queued cart items sequentially to 2x DPI PNG ExportBundleFile entries
+ * using one shared offscreen host, stylesheet, XMLSerializer, and canvas across the batch.
  */
 export async function renderCartToPngFiles(
   exportData: ExpeditionExportData,
   cartItems: CartBlockItem[],
   onProgress?: (completedCount: number, totalCount: number) => void,
 ): Promise<ExportBundleFile[]> {
-  const outputFiles: ExportBundleFile[] = []
-  for (let index = 0; index < cartItems.length; index++) {
-    const item = cartItems[index]
-    const pngBase64 = await renderCartBlockToPngBase64(exportData, item)
-    outputFiles.push({
-      name: buildPngBundleFileName(item, index + 1, cartItems.length),
-      contentBase64: pngBase64,
-    })
-    onProgress?.(index + 1, cartItems.length)
-  }
-  return outputFiles
+  if (cartItems.length === 0) return []
+  return runWithPngRenderSession(exportData, async (renderCard) => {
+    const outputFiles: ExportBundleFile[] = []
+    for (let index = 0; index < cartItems.length; index++) {
+      const item = cartItems[index]
+      const pngBase64 = await renderCard(item)
+      outputFiles.push({
+        name: buildPngBundleFileName(item, index + 1, cartItems.length),
+        contentBase64: pngBase64,
+      })
+      onProgress?.(index + 1, cartItems.length)
+    }
+    return outputFiles
+  })
 }
 
-function measureAndSerializeCard(staticMarkup: string): {
-  serializedXhtml: string
-  width: number
-  height: number
-} {
+interface BatchDomResources {
+  host: HTMLDivElement
+  parserElement: HTMLDivElement
+  xmlSerializer: XMLSerializer
+  canvas: HTMLCanvasElement
+  mountedCardElement: HTMLElement | null
+}
+
+async function runWithPngRenderSession<T>(
+  exportData: ExpeditionExportData,
+  work: (renderCard: (item: CartBlockItem) => Promise<string>) => Promise<T>,
+): Promise<T> {
+  const resources = createBatchDomResources()
+  document.body.appendChild(resources.host)
+  try {
+    return await work(async (item) => {
+      const staticMarkup = renderToStaticMarkup(
+        createElement(ExportBlockRenderer, { exportData, config: item.config }),
+      )
+      const { serializedXhtml, width, height } = measureAndSerializeCardInHost(
+        resources,
+        staticMarkup,
+      )
+      const svgMarkup = buildSvgForeignObjectDocument(serializedXhtml, width, height)
+      return rasterizeSvgOntoSharedCanvas(
+        resources.canvas,
+        svgMarkup,
+        width,
+        height,
+        PNG_SCALE_FACTOR,
+      )
+    })
+  } finally {
+    document.body.removeChild(resources.host)
+  }
+}
+
+function createBatchDomResources(): BatchDomResources {
   const host = document.createElement('div')
   host.style.position = 'fixed'
   host.style.left = '-100000px'
@@ -105,28 +132,45 @@ function measureAndSerializeCard(staticMarkup: string): {
   styleElement.textContent = EXPORT_CARD_CSS
   host.appendChild(styleElement)
 
-  const wrapper = document.createElement('div')
-  wrapper.innerHTML = staticMarkup
-  const cardElement = wrapper.firstElementChild as HTMLElement | null
-  if (!cardElement) {
-    throw new Error('Export card rendered empty markup')
-  }
-  host.appendChild(cardElement)
-  document.body.appendChild(host)
-
-  try {
-    const bounds = cardElement.getBoundingClientRect()
-    const width = Math.max(EXPORT_CARD_WIDTH, Math.ceil(bounds.width || EXPORT_CARD_WIDTH))
-    const height = Math.max(120, Math.ceil(bounds.height || cardElement.scrollHeight || 200))
-    cardElement.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
-    const serializedXhtml = new XMLSerializer().serializeToString(cardElement)
-    return { serializedXhtml, width, height }
-  } finally {
-    document.body.removeChild(host)
+  return {
+    host,
+    parserElement: document.createElement('div'),
+    xmlSerializer: new XMLSerializer(),
+    canvas: document.createElement('canvas'),
+    mountedCardElement: null,
   }
 }
 
-async function rasterizeSvgToPngBase64(
+function measureAndSerializeCardInHost(
+  resources: BatchDomResources,
+  staticMarkup: string,
+): {
+  serializedXhtml: string
+  width: number
+  height: number
+} {
+  resources.parserElement.innerHTML = staticMarkup
+  const cardElement = resources.parserElement.firstElementChild as HTMLElement | null
+  if (!cardElement) {
+    throw new Error('Export card rendered empty markup')
+  }
+  if (resources.mountedCardElement) {
+    resources.host.replaceChild(cardElement, resources.mountedCardElement)
+  } else {
+    resources.host.appendChild(cardElement)
+  }
+  resources.mountedCardElement = cardElement
+
+  const bounds = cardElement.getBoundingClientRect()
+  const width = Math.max(EXPORT_CARD_WIDTH, Math.ceil(bounds.width || EXPORT_CARD_WIDTH))
+  const height = Math.max(120, Math.ceil(bounds.height || cardElement.scrollHeight || 200))
+  cardElement.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+  const serializedXhtml = resources.xmlSerializer.serializeToString(cardElement)
+  return { serializedXhtml, width, height }
+}
+
+async function rasterizeSvgOntoSharedCanvas(
+  canvas: HTMLCanvasElement,
   svgMarkup: string,
   width: number,
   height: number,
@@ -140,7 +184,7 @@ async function rasterizeSvgToPngBase64(
     image.src = svgDataUri
   })
 
-  const canvas = document.createElement('canvas')
+  // Resizing canvas dimensions automatically resets the 2D rendering context state and transform.
   canvas.width = width * scaleFactor
   canvas.height = height * scaleFactor
   const renderingContext = canvas.getContext('2d')

@@ -7,13 +7,16 @@ import {
   buildExobiologyBreakdownRows,
   buildRealizationLossRows,
 } from '../../domain/telemetryBreakdowns'
+import { BlockConfigurator } from './BlockConfigurator'
 import { DetailsBlock } from './blocks/DetailsBlock'
 import { ExportBlockRenderer } from './blocks/ExportBlockRenderer'
 import { HighlightsBlock } from './blocks/HighlightsBlock'
 import { SummaryBlock } from './blocks/SummaryBlock'
 import { WaypointsBlock } from './blocks/WaypointsBlock'
 import { EXPORT_CARD_CSS, EXPORT_CARD_WIDTH } from './exportCardStyles'
+import { ExportCartQueue } from './ExportCartQueue'
 import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
+import { ExportPreviewPane } from './ExportPreviewPane'
 import { buildSampleExportData } from './exportTestFixtures'
 import { defaultMetricsForSection, ExportBlockConfig } from './exportTypes'
 import { buildHighlightsViewModel } from './exportViewModels'
@@ -21,6 +24,7 @@ import {
   buildPngBundleFileName,
   buildSvgForeignObjectDocument,
   renderCartBlockToPngBase64,
+  renderCartToPngFiles,
 } from './pngRenderer'
 
 describe('export visual blocks and PNG SVG serializer', () => {
@@ -31,6 +35,9 @@ describe('export visual blocks and PNG SVG serializer', () => {
       DetailsBlock,
       WaypointsBlock,
       HighlightsBlock,
+      BlockConfigurator,
+      ExportCartQueue,
+      ExportPreviewPane,
     ]) {
       expect((blockComponent as unknown as { $$typeof?: symbol }).$$typeof).toBe(
         Symbol.for('react.memo'),
@@ -199,6 +206,99 @@ describe('export visual blocks and PNG SVG serializer', () => {
       await expect(renderCartBlockToPngBase64(data, quickItems[0])).resolves.toBe('iVBORw0KGgo=')
     } finally {
       globalThis.Image = originalImage
+      getContextSpy.mockRestore()
+      toDataURLSpy.mockRestore()
+    }
+  })
+
+  it('reuses a single offscreen host and canvas across a multi-card PNG batch and cleans up on failure', async () => {
+    const data = buildSampleExportData()
+    const quickItems = createQuickShareCart(data)
+    expect(quickItems).toHaveLength(3)
+
+    const originalImage = globalThis.Image
+    let failOnImageIndex = -1
+    let loadedImageCount = 0
+    class BatchStubImage {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(_value: string) {
+        const currentIndex = loadedImageCount++
+        if (currentIndex === failOnImageIndex) {
+          this.onerror?.()
+          return
+        }
+        this.onload?.()
+      }
+    }
+    const stubContext = {
+      scale: vi.fn(),
+      fillStyle: '',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D
+
+    const originalCreateElement = document.createElement.bind(document)
+    let createdCanvasCount = 0
+    const createElementSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+        if (tagName.toLowerCase() === 'canvas') createdCanvasCount++
+        return originalCreateElement(tagName, options)
+      }) as typeof document.createElement)
+    const appendChildSpy = vi.spyOn(document.body, 'appendChild')
+    const removeChildSpy = vi.spyOn(document.body, 'removeChild')
+    const getContextSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(stubContext as never)
+    const toDataURLSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,iVBORw0KGgo=')
+    globalThis.Image = BatchStubImage as unknown as typeof Image
+
+    try {
+      const progressTicks: Array<[number, number]> = []
+      const renderedFiles = await renderCartToPngFiles(
+        data,
+        quickItems,
+        (completedCount, totalCount) => progressTicks.push([completedCount, totalCount]),
+      )
+      expect(renderedFiles.map((file) => file.name)).toEqual([
+        'images/01-full-expedition-summary.png',
+        'images/02-highlights-top-1.png',
+        'images/03-waypoints-visited-only.png',
+      ])
+      expect(progressTicks).toEqual([
+        [1, 3],
+        [2, 3],
+        [3, 3],
+      ])
+      expect(appendChildSpy).toHaveBeenCalledTimes(1)
+      expect(removeChildSpy).toHaveBeenCalledTimes(1)
+      expect(createdCanvasCount).toBe(1)
+      const firstBatchHost = appendChildSpy.mock.calls[0][0] as HTMLElement
+      expect(document.body.contains(firstBatchHost)).toBe(false)
+
+      // Mid-batch rasterization failure on card 2 must still remove the single host in finally.
+      appendChildSpy.mockClear()
+      removeChildSpy.mockClear()
+      createdCanvasCount = 0
+      loadedImageCount = 0
+      failOnImageIndex = 1
+
+      await expect(renderCartToPngFiles(data, quickItems)).rejects.toThrow(
+        'Failed to load SVG foreignObject image for PNG capture',
+      )
+      expect(appendChildSpy).toHaveBeenCalledTimes(1)
+      expect(removeChildSpy).toHaveBeenCalledTimes(1)
+      expect(createdCanvasCount).toBe(1)
+      const failedBatchHost = appendChildSpy.mock.calls[0][0] as HTMLElement
+      expect(document.body.contains(failedBatchHost)).toBe(false)
+    } finally {
+      globalThis.Image = originalImage
+      createElementSpy.mockRestore()
+      appendChildSpy.mockRestore()
+      removeChildSpy.mockRestore()
       getContextSpy.mockRestore()
       toDataURLSpy.mockRestore()
     }

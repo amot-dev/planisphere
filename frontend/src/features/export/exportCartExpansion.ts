@@ -13,6 +13,7 @@ import {
   defaultMetricsForSection,
   DETAILS_SECTIONS,
   DetailsBlockConfig,
+  DetailsMetricId,
   DetailsSection,
   ExpeditionExportData,
   ExportBlockConfig,
@@ -22,6 +23,32 @@ import {
 } from './exportTypes'
 
 type ConcreteTelemetryConfig = Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>
+
+interface DetailsSectionExpansionMeta {
+  section: DetailsSection
+  blockLabel: string
+  blockSlug: string
+  defaultMetrics: ReadonlyArray<DetailsMetricId>
+}
+
+const SUMMARY_EXPANSION_META = {
+  blockLabel: 'Summary',
+  blockSlug: 'summary',
+} as const
+
+const DETAILS_SECTION_EXPANSION_META: ReadonlyArray<DetailsSectionExpansionMeta> =
+  DETAILS_SECTIONS.map((sectionMeta) => ({
+    section: sectionMeta.id,
+    blockLabel: `Details: ${sectionMeta.label}`,
+    blockSlug: slugifyCamelCase(sectionMeta.id),
+    defaultMetrics: defaultMetricsForSection(sectionMeta.id),
+  }))
+
+const DETAILS_SECTION_EXPANSION_BY_ID: Readonly<
+  Record<DetailsSection, DetailsSectionExpansionMeta>
+> = Object.fromEntries(
+  DETAILS_SECTION_EXPANSION_META.map((entry) => [entry.section, entry]),
+) as Record<DetailsSection, DetailsSectionExpansionMeta>
 
 /** Expands a configurator block (including All Sections, All Legs, All Regions, and Separate modes) into concrete cart items. */
 export function expandConfigToCartItems(
@@ -119,15 +146,17 @@ function expandAllDetailsSections(
   idPrefix: string,
 ): CartBlockItem[] {
   const allowCarrier = includeCarrierSection(exportData, config)
-  const applicableSections = DETAILS_SECTIONS.filter((meta) => meta.id !== 'carrier' || allowCarrier)
+  const applicableSections = DETAILS_SECTION_EXPANSION_META.filter(
+    (entry) => entry.section !== 'carrier' || allowCarrier,
+  )
   if (config.scope.kind === 'allLegs') {
     return expandAllLegsDetailsSections(exportData, applicableSections, idPrefix)
   }
-  const perSectionItems = applicableSections.map((meta) =>
+  const perSectionItems = applicableSections.map((entry) =>
     expandTelemetryBlockConfig(
       exportData,
-      { ...config, section: meta.id, selectedMetrics: defaultMetricsForSection(meta.id) },
-      `${idPrefix}-${meta.id}`,
+      { ...config, section: entry.section, selectedMetrics: [...entry.defaultMetrics] },
+      `${idPrefix}-${entry.section}`,
     ),
   )
   // Transpose into entity-outer and section-inner order so all applicable sections
@@ -146,27 +175,29 @@ function expandAllDetailsSections(
 
 function expandAllLegsDetailsSections(
   exportData: ExpeditionExportData,
-  applicableSections: typeof DETAILS_SECTIONS,
+  applicableSections: ReadonlyArray<DetailsSectionExpansionMeta>,
   idPrefix: string,
 ): CartBlockItem[] {
-  const templates = applicableSections.map((meta) => ({
-    sectionId: meta.id,
-    ...formatDetailsSectionMeta(meta.id),
-    selectedMetrics: defaultMetricsForSection(meta.id),
-  }))
   const items: CartBlockItem[] = []
   // Iterate entity-outer (visited leg) and section-inner so each leg's sections stay grouped.
   for (const [legIndex, leg] of getVisitedLegs(exportData).entries()) {
-    for (const template of templates) {
+    for (const sectionEntry of applicableSections) {
       const legConfig: DetailsBlockConfig = {
         kind: 'details',
-        section: template.sectionId,
+        section: sectionEntry.section,
         scope: { kind: 'leg', rowId: leg.rowView.row.id },
         modeGrouping: 'combined',
-        selectedMetrics: template.selectedMetrics,
+        selectedMetrics: [...sectionEntry.defaultMetrics],
       }
       items.push(
-        buildLegCartItem(leg, legIndex, legConfig, `${idPrefix}-${template.sectionId}`, template.blockLabel, template.blockSlug),
+        buildLegCartItem(
+          leg,
+          legIndex,
+          legConfig,
+          `${idPrefix}-${sectionEntry.section}`,
+          sectionEntry.blockLabel,
+          sectionEntry.blockSlug,
+        ),
       )
     }
   }
@@ -179,14 +210,6 @@ function includeCarrierSection(exportData: ExpeditionExportData, config: AllDeta
     return false
   }
   return (exportData.expedition.metrics.carrierJumps ?? 0) > 0 || (exportData.carrierCost?.totalCost ?? 0) > 0
-}
-
-function formatDetailsSectionMeta(sectionId: DetailsSection): { blockLabel: string; blockSlug: string } {
-  const sectionMeta = DETAILS_SECTIONS.find((section) => section.id === sectionId)
-  return {
-    blockLabel: `Details: ${sectionMeta?.label ?? sectionId}`,
-    blockSlug: slugifyCamelCase(sectionId),
-  }
 }
 
 function buildLegCartItem(
@@ -213,8 +236,8 @@ function expandTelemetryBlockConfig(
 ): CartBlockItem[] {
   const { blockLabel, blockSlug } =
     config.kind === 'summary'
-      ? { blockLabel: 'Summary', blockSlug: 'summary' }
-      : formatDetailsSectionMeta(config.section)
+      ? SUMMARY_EXPANSION_META
+      : DETAILS_SECTION_EXPANSION_BY_ID[config.section]
 
   if (config.scope.kind === 'allLegs') {
     return getVisitedLegs(exportData).map((leg, index) =>
