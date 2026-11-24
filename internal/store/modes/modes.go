@@ -90,7 +90,9 @@ func Create(queryer db.Queryer, name, description, color string) (Mode, error) {
 		return Mode{}, validateError
 	}
 	var maxOrder int
-	_ = queryer.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM modes`).Scan(&maxOrder)
+	if queryError := queryer.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM modes`).Scan(&maxOrder); queryError != nil {
+		return Mode{}, fmt.Errorf("query max mode sort order: %w", queryError)
+	}
 	insertResult, insertError := queryer.Exec(`INSERT INTO modes(name, description, color, is_default, sort_order, created_at) VALUES(?,?,?,0,?,?)`,
 		validName, strings.TrimSpace(description), validColor, maxOrder+1, reference.NowISO())
 	if insertError != nil {
@@ -99,7 +101,10 @@ func Create(queryer db.Queryer, name, description, color string) (Mode, error) {
 		}
 		return Mode{}, insertError
 	}
-	modeID, _ := insertResult.LastInsertId()
+	modeID, idError := insertResult.LastInsertId()
+	if idError != nil {
+		return Mode{}, fmt.Errorf("read created mode id: %w", idError)
+	}
 	return Mode{ID: modeID, Name: validName, Description: strings.TrimSpace(description), Color: validColor, SortOrder: maxOrder + 1}, nil
 }
 
@@ -116,7 +121,11 @@ func Update(queryer db.Queryer, modeID int64, name, description, color string) e
 		}
 		return updateError
 	}
-	if affectedRows, _ := updateResult.RowsAffected(); affectedRows == 0 {
+	affectedRows, rowsError := updateResult.RowsAffected()
+	if rowsError != nil {
+		return fmt.Errorf("read updated mode rows for %d: %w", modeID, rowsError)
+	}
+	if affectedRows == 0 {
 		return fmt.Errorf("mode %d not found", modeID)
 	}
 	return nil
@@ -163,7 +172,10 @@ func UsageByExpedition(queryer db.Queryer, modeID int64) ([]ExpeditionUsage, err
 func Delete(transaction *sql.Tx, modeID int64) error {
 	var isDefault bool
 	if queryError := transaction.QueryRow(`SELECT is_default FROM modes WHERE id = ?`, modeID).Scan(&isDefault); queryError != nil {
-		return fmt.Errorf("mode %d not found", modeID)
+		if errors.Is(queryError, sql.ErrNoRows) {
+			return fmt.Errorf("mode %d not found", modeID)
+		}
+		return fmt.Errorf("query mode %d: %w", modeID, queryError)
 	}
 	if isDefault {
 		return errors.New("default modes cannot be deleted (you can recolour them)")

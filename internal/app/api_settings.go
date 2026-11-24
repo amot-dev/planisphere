@@ -53,7 +53,10 @@ func (app *App) GetSettings() (Settings, error) {
 		return Settings{}, readyError
 	}
 	dir := settings.JournalDir(app.db, journal.DefaultJournalDir())
-	commanders, _ := replay.ListCommanders(app.db)
+	commanders, listError := replay.ListCommanders(app.db)
+	if listError != nil {
+		return Settings{}, fmt.Errorf("list commanders: %w", listError)
+	}
 	if commanders == nil {
 		commanders = []replay.Commander{}
 	}
@@ -276,15 +279,22 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 		return 0, importError
 	}
 
+	var markError error
 	app.dbMu.RLock()
 	if app.db == database {
-		_ = settings.MarkEDDRecovered(app.db, eddPath)
+		markError = settings.MarkEDDRecovered(app.db, eddPath)
 	}
 	app.dbMu.RUnlock()
 
+	uiTargets := events.NewUITargetSet(events.UITargetIngest)
+	if markError == nil {
+		uiTargets = uiTargets.Union(events.NewUITargetSet(events.UITargetSettings))
+	}
 	affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp)
-	affectedTargets = affectedTargets.Union(events.NewUITargetSet(events.UITargetIngest, events.UITargetSettings))
-	app.emitDataChanged(0, affectedTargets)
+	app.emitDataChanged(0, affectedTargets.Union(uiTargets))
+	if markError != nil {
+		return 0, fmt.Errorf("mark EDDiscovery history recovered: %w", markError)
+	}
 	return importResult.LinesRead, nil
 }
 

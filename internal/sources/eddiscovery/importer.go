@@ -317,7 +317,9 @@ func Import(ctx context.Context, ingester *journal.Ingester, databasePath string
 
 		reportProgress(0, totalEntries, 0, "Ingesting historical journal events into SQLite archive...")
 		txError := importEntriesTx(ctx, destConn, rows, totalEntries, reportProgress, &result)
-		reportProgress(totalEntries, totalEntries, result.FilesScanned, "Complete")
+		if txError == nil {
+			reportProgress(totalEntries, totalEntries, result.FilesScanned, "Complete")
+		}
 		return result, txError
 	})
 }

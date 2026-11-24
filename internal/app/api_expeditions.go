@@ -32,8 +32,7 @@ func (app *App) CreateExpedition(name, description string) (expedition.Expeditio
 		if createError != nil {
 			return createError
 		}
-		_ = settings.SetActiveExpeditionID(app.db, createdExpedition.ID)
-		return nil
+		return settings.SetActiveExpeditionID(app.db, createdExpedition.ID)
 	}); err != nil {
 		return createdExpedition, err
 	}
@@ -475,7 +474,11 @@ func (app *App) StartExpedition(expeditionID int64, timestamp string, initialMod
 	return nil
 }
 
-// CompleteExpedition ends the expedition at the final visited waypoint's arrival timestamp.
+// CompleteExpedition locks end_timestamp to the final visited waypoint's last
+// non-multicrew in-system exploration activity (Scan, SAAScanComplete, or
+// ScanOrganic Analyse) for the target system and stay commander before
+// departure, falling back to the waypoint's arrival timestamp only when no
+// in-system exploration occurred.
 func (app *App) CompleteExpedition(expeditionID int64) error {
 	return app.lifecycle(expeditionID, func() error { return expedition.CompleteTx(app.db, expeditionID) })
 }

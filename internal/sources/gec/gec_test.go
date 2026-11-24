@@ -1,7 +1,6 @@
 package gec_test
 
 import (
-	"strings"
 	"testing"
 
 	"planisphere/internal/core/db"
@@ -52,13 +51,13 @@ func TestGECandGMPCombinedImport(t *testing.T) {
 		t.Fatalf("reload failed: %v", reloadError)
 	}
 
-	// Verify description fields are excluded from cached raw_json
+	// Verify deprecated raw_json is stored as an empty string
 	var cachedRawJSON string
 	if queryError := dbConn.QueryRow(`SELECT raw_json FROM gec_pois_cache WHERE id = 729`).Scan(&cachedRawJSON); queryError != nil {
 		t.Fatalf("query cached raw_json: %v", queryError)
 	}
-	if strings.Contains(cachedRawJSON, "descriptionMardown") || strings.Contains(cachedRawJSON, "descriptionHtml") {
-		t.Errorf("expected descriptions to be omitted from raw_json, got: %s", cachedRawJSON)
+	if cachedRawJSON != "" {
+		t.Errorf("expected cachedRawJSON == \"\", got %q", cachedRawJSON)
 	}
 
 	// Lookup GEC

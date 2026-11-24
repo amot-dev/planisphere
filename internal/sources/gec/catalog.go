@@ -124,9 +124,6 @@ func (catalog *Catalog) Import(body []byte) (int, error) {
 				rowID = 1_000_000_000 + remote.ID
 			}
 
-			// Keep the cache lean: remotePOI only defines metadata fields,
-			// automatically ignoring long-form descriptions without allocating them.
-			slimJSON, _ := json.Marshal(remote)
 			var xCoord, yCoord, zCoord any
 			if len(remote.Coordinates) == 3 {
 				xCoord, yCoord, zCoord = remote.Coordinates[0], remote.Coordinates[1], remote.Coordinates[2]
@@ -140,8 +137,9 @@ func (catalog *Catalog) Import(body []byte) (int, error) {
 			poiType := html.UnescapeString(strings.TrimSpace(remote.Type))
 			region := html.UnescapeString(strings.TrimSpace(remote.Region))
 			summary := html.UnescapeString(strings.TrimSpace(remote.Summary))
+			// raw_json is deprecated and written as "" because all runtime queries read the structured columns.
 			if _, insertError := stmt.Exec(rowID, poiName, systemName, remote.ID64, poiType, region, summary,
-				targetURL, xCoord, yCoord, zCoord, string(slimJSON), sourceName, now); insertError != nil {
+				targetURL, xCoord, yCoord, zCoord, "", sourceName, now); insertError != nil {
 				return insertError
 			}
 			count++

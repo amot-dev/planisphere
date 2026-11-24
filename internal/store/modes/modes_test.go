@@ -2,6 +2,7 @@ package modes_test
 
 import (
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -91,5 +92,33 @@ func TestModeColorValidation(testingContext *testing.T) {
 				subContext.Fatalf("unexpected Update error for colour %q: %v", testCase.rawColor, updateError)
 			}
 		})
+	}
+}
+
+func TestDeleteModeDistinguishesNotFoundFromSQLError(testingContext *testing.T) {
+	dbConn := openModesTestDB(testingContext)
+
+	missingError := modes.DeleteTx(dbConn, 999999)
+	if missingError == nil || !strings.Contains(missingError.Error(), "mode 999999 not found") {
+		testingContext.Fatalf("expected not found error for missing mode, got %v", missingError)
+	}
+
+	rolledBackTx, beginError := dbConn.Begin()
+	if beginError != nil {
+		testingContext.Fatal(beginError)
+	}
+	if rollbackError := rolledBackTx.Rollback(); rollbackError != nil {
+		testingContext.Fatal(rollbackError)
+	}
+
+	txDeleteError := modes.Delete(rolledBackTx, 1)
+	if txDeleteError == nil {
+		testingContext.Fatal("expected Delete on rolled-back transaction to fail")
+	}
+	if strings.Contains(txDeleteError.Error(), "not found") {
+		testingContext.Fatalf("expected underlying SQL error rather than not found, got %v", txDeleteError)
+	}
+	if !errors.Is(txDeleteError, sql.ErrTxDone) {
+		testingContext.Fatalf("expected wrapped sql.ErrTxDone, got %v", txDeleteError)
 	}
 }

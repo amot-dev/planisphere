@@ -216,6 +216,7 @@ func syncPackageLockJSON(path string, appConfig Config) {
 
 	changed, writeErr := writeFileIfChanged(path, []byte(updated), 0644)
 	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeErr)
 		return
 	}
 	if changed {
@@ -246,9 +247,14 @@ func syncNodeModulesStamp(path string, appConfig Config) {
 		updated = text
 	}
 
-	_ = os.WriteFile(path, []byte(updated), 0644)
+	if writeError := os.WriteFile(path, []byte(updated), 0644); writeError != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeError)
+		return
+	}
 	now := time.Now()
-	_ = os.Chtimes(path, now, now)
+	if chtimesError := os.Chtimes(path, now, now); chtimesError != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update timestamps on %s: %v\n", path, chtimesError)
+	}
 }
 
 func syncIndexHTML(path string, appConfig Config) {
@@ -270,7 +276,10 @@ func syncIndexHTML(path string, appConfig Config) {
 }
 
 func generateGoVersion(path string, appConfig Config) {
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	if mkdirError := os.MkdirAll(filepath.Dir(path), 0755); mkdirError != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not create directory for %s: %v\n", path, mkdirError)
+		return
+	}
 	userAgent := fmt.Sprintf("%s/%s", appConfig.ProductName, appConfig.Version)
 	content := fmt.Sprintf(`// DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json
 package version
@@ -289,6 +298,7 @@ const (
 `, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName, appConfig.Repository, userAgent)
 	changed, writeErr := writeFileIfChanged(path, []byte(content), 0644)
 	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeErr)
 		return
 	}
 	if changed {
@@ -297,7 +307,10 @@ const (
 }
 
 func generateTSVersion(path string, appConfig Config) {
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	if mkdirError := os.MkdirAll(filepath.Dir(path), 0755); mkdirError != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not create directory for %s: %v\n", path, mkdirError)
+		return
+	}
 	content := fmt.Sprintf(`// DO NOT EDIT DIRECTLY: Managed by scripts/sync_metadata.go from app.config.json
 
 export const APP_NAME = %q
@@ -311,6 +324,7 @@ export const APP_REPOSITORY = %q
 `, appConfig.Name, appConfig.ProductName, appConfig.Tagline, appConfig.Version, appConfig.Author, appConfig.Description, appConfig.BinaryName, appConfig.Repository)
 	changed, writeErr := writeFileIfChanged(path, []byte(content), 0644)
 	if writeErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write %s: %v\n", path, writeErr)
 		return
 	}
 	if changed {

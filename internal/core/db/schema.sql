@@ -90,9 +90,9 @@ CREATE TABLE IF NOT EXISTS expeditions (
     start_timestamp  TEXT,
     end_timestamp    TEXT,
     armed_at         TEXT,   -- legacy (unused)
-    baseline_enabled INTEGER NOT NULL DEFAULT 0,
-    baseline_source  TEXT NOT NULL DEFAULT '',   -- '', 'statistics', 'manual'
-    baseline_json    TEXT NOT NULL DEFAULT '{}', -- stats.Metrics snapshot "before expedition"
+    baseline_enabled INTEGER NOT NULL DEFAULT 0, -- deprecated (unused)
+    baseline_source  TEXT NOT NULL DEFAULT '',   -- deprecated (unused)
+    baseline_json    TEXT NOT NULL DEFAULT '{}', -- deprecated (unused)
     adjustments_json TEXT NOT NULL DEFAULT '{}', -- stats.Metrics manual deltas (e.g. remote carrier jumps)
     carrier_type          TEXT NOT NULL DEFAULT 'player',
     carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0,
@@ -154,10 +154,25 @@ CREATE TABLE IF NOT EXISTS gec_pois_cache (
     x              REAL,
     y              REAL,
     z              REAL,
-    raw_json       TEXT NOT NULL,
+    raw_json       TEXT NOT NULL, -- deprecated (unused)
     source         TEXT NOT NULL DEFAULT 'GEC',
     fetched_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gec_system_name ON gec_pois_cache(system_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_gec_system_addr ON gec_pois_cache(system_address);
+
+-- Deprecated Schema Objects (retained for schema and migration compatibility):
+-- - mode_windows (and idx_mode_windows_start): superseded by expeditions.active_mode_id
+--   and expedition_rows.leg_mode_id; still read by migration leg_modes_v11
+--   (internal/core/db/migrations.go).
+-- - expeditions.armed_at: superseded by direct expedition.StartTx activation;
+--   still referenced by migration unarm_expeditions_v9 (internal/core/db/migrations.go)
+--   and cleared on lifecycle updates (internal/store/expedition/lifecycle.go).
+-- - expeditions.baseline_enabled, expeditions.baseline_source, expeditions.baseline_json:
+--   superseded by dynamic pre-expedition OriginBaseline replay; baseline_source and
+--   baseline_json are still referenced by migration commander_schema_v3
+--   (internal/core/db/migrations.go).
+-- - gec_pois_cache.raw_json: superseded by structured columns on gec_pois_cache;
+--   Catalog.Import writes "" to avoid per-POI JSON marshaling and multi-megabyte
+--   database bloat.
 

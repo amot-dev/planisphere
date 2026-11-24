@@ -93,7 +93,11 @@ func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error)
 	if expeditionRecord.CarrierType == "" {
 		expeditionRecord.CarrierType = "player"
 	}
-	_ = json.Unmarshal([]byte(adjustmentsJSON), &expeditionRecord.Adjustments)
+	if trimmedAdjustments := strings.TrimSpace(adjustmentsJSON); trimmedAdjustments != "" && trimmedAdjustments != "{}" {
+		if unmarshalError := json.Unmarshal([]byte(trimmedAdjustments), &expeditionRecord.Adjustments); unmarshalError != nil {
+			return expeditionRecord, fmt.Errorf("decode expedition %d adjustments: %w", expeditionRecord.ID, unmarshalError)
+		}
+	}
 	return expeditionRecord, nil
 }
 
@@ -320,7 +324,11 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 		if insertError != nil {
 			return insertError
 		}
-		newExpeditionID, _ = insertResult.LastInsertId()
+		var idError error
+		newExpeditionID, idError = insertResult.LastInsertId()
+		if idError != nil {
+			return fmt.Errorf("read cloned expedition id: %w", idError)
+		}
 		if len(sourceRows) == 0 {
 			_, seedError := transaction.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, created_at, updated_at) VALUES(?,1,?,?,?)`,
 				newExpeditionID, RowWaypoint, now, now)
@@ -366,7 +374,10 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 
 // SaveAdjustments stores manual Fleet Carrier jump adjustments for expeditionID.
 func SaveAdjustments(queryer db.Queryer, expeditionID int64, carrierStats CarrierStats) error {
-	adjustmentsJSON, _ := json.Marshal(carrierStats)
+	adjustmentsJSON, marshalError := json.Marshal(carrierStats)
+	if marshalError != nil {
+		return fmt.Errorf("marshal expedition %d adjustments: %w", expeditionID, marshalError)
+	}
 	_, execError := queryer.Exec(`UPDATE expeditions SET adjustments_json = ?, updated_at = ? WHERE id = ?`, string(adjustmentsJSON), reference.NowISO(), expeditionID)
 	return execError
 }

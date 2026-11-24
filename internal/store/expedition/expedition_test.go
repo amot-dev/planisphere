@@ -1866,3 +1866,25 @@ func TestCompleteOpenStayScopesToSystemCommanderAndNonMulticrew(testingContext *
 		testingContext.Fatalf("EndTimestamp after ScanOrganic = %q, want %q", completedAfterOrganic.EndTimestamp, "2026-10-01T12:20:00Z")
 	}
 }
+
+func TestScanExpeditionAdjustmentsDecodeError(testingContext *testing.T) {
+	databaseConnection := openExpeditionTestDB(testingContext)
+	createdExpedition, createError := expedition.Create(databaseConnection, "Adjustments Check", "")
+	if createError != nil {
+		testingContext.Fatalf("Create: %v", createError)
+	}
+
+	if _, blankError := databaseConnection.Exec(`UPDATE expeditions SET adjustments_json = '   ' WHERE id = ?`, createdExpedition.ID); blankError != nil {
+		testingContext.Fatalf("set blank adjustments_json: %v", blankError)
+	}
+	if _, getBlankError := expedition.Get(databaseConnection, createdExpedition.ID); getBlankError != nil {
+		testingContext.Fatalf("expected blank adjustments_json to succeed, got %v", getBlankError)
+	}
+
+	if _, corruptError := databaseConnection.Exec(`UPDATE expeditions SET adjustments_json = '{corrupt' WHERE id = ?`, createdExpedition.ID); corruptError != nil {
+		testingContext.Fatalf("set corrupt adjustments_json: %v", corruptError)
+	}
+	if _, getCorruptError := expedition.Get(databaseConnection, createdExpedition.ID); getCorruptError == nil || !strings.Contains(getCorruptError.Error(), "decode expedition") {
+		testingContext.Fatalf("expected decode error for corrupt adjustments_json, got %v", getCorruptError)
+	}
+}

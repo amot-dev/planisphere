@@ -7,7 +7,8 @@ const SINGLE_LINE_TEXT_THRESHOLD = 10
 interface ObservedTextareaEntry {
   maxLines: number
   lastObservedWidth: number | null
-  measuredWhileVisible: boolean
+  measuredBorderBoxWidth: number | null
+  measuredSingleLine: boolean
 }
 
 interface PendingTextareaMeasurement {
@@ -50,9 +51,11 @@ function measureAndApplyTextareaBatch(
   elementsToMeasure: PendingTextareaMeasurement[],
   observedEntries: Map<HTMLTextAreaElement, ObservedTextareaEntry>,
 ) {
-  // Reset all candidate heights together before reading any layout metrics.
+  // Reset candidate heights and overflowY together before reading any layout metrics
+  // so shrinking a scrollable cell does not measure against scrollbar-narrowed width.
   for (const pending of elementsToMeasure) {
     pending.element.style.height = 'auto'
+    pending.element.style.overflowY = 'hidden'
   }
 
   // Read all geometry in a single clean layout pass without interleaved writes.
@@ -61,10 +64,12 @@ function measureAndApplyTextareaBatch(
     const pending = elementsToMeasure[index]
     const borderHeight = Math.max(pending.element.offsetHeight - pending.element.clientHeight, 2)
     const scrollAndBorderHeight = pending.element.scrollHeight + borderHeight
+    const borderBoxWidth = pending.element.offsetWidth ?? pending.element.clientWidth
     const targetHeight = Math.min(Math.max(scrollAndBorderHeight, pending.minHeight), pending.maxHeight)
     const observedEntry = observedEntries.get(pending.element)
     if (observedEntry) {
-      observedEntry.measuredWhileVisible = pending.element.clientWidth > 0
+      observedEntry.measuredSingleLine = false
+      observedEntry.measuredBorderBoxWidth = borderBoxWidth > 0 ? borderBoxWidth : null
     }
     computedLayouts[index] = {
       element: pending.element,
@@ -109,7 +114,8 @@ export function createTextareaResizeCoordinator(): TextareaResizeCoordinator {
         applyTextareaDimensions(element, singleLineHeightStyle, 'hidden')
         const observedEntry = observedEntries.get(element)
         if (observedEntry) {
-          observedEntry.measuredWhileVisible = true
+          observedEntry.measuredSingleLine = true
+          observedEntry.measuredBorderBoxWidth = null
         }
         continue
       }
@@ -146,15 +152,24 @@ export function createTextareaResizeCoordinator(): TextareaResizeCoordinator {
       const observedEntry = observedEntries.get(element)
       if (!observedEntry) continue
 
-      const nextWidth = Math.round(entry.contentRect.width)
-      const previousWidth = observedEntry.lastObservedWidth
-      observedEntry.lastObservedWidth = nextWidth
+      const nextWidth = Math.round(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width)
       if (nextWidth <= 0) continue
 
-      // Skip the initial observer delivery when the pre-paint pass already
-      // measured this visible cell; still measure cells that mounted offscreen.
-      if (previousWidth === null && observedEntry.measuredWhileVisible) continue
-      if (previousWidth !== null && nextWidth === previousWidth) continue
+      const previousWidth = observedEntry.lastObservedWidth
+      observedEntry.lastObservedWidth = nextWidth
+
+      // Skip the initial observer delivery only when the pre-paint pass already
+      // handled a single-line cell or measured at this exact border-box width.
+      if (previousWidth === null) {
+        if (
+          observedEntry.measuredSingleLine ||
+          (observedEntry.measuredBorderBoxWidth !== null && observedEntry.measuredBorderBoxWidth === nextWidth)
+        ) {
+          continue
+        }
+      } else if (nextWidth === previousWidth) {
+        continue
+      }
 
       pendingElements.set(element, observedEntry.maxLines)
       hasQueuedResize = true
@@ -175,7 +190,8 @@ export function createTextareaResizeCoordinator(): TextareaResizeCoordinator {
     observedEntries.set(element, {
       maxLines,
       lastObservedWidth: null,
-      measuredWhileVisible: false,
+      measuredBorderBoxWidth: null,
+      measuredSingleLine: false,
     })
 
     if (typeof ResizeObserver !== 'undefined') {
