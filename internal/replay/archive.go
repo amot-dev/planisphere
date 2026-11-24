@@ -371,3 +371,26 @@ func ListCommanders(queryer db.Queryer) ([]Commander, error) {
 	}
 	return discoveredCommanders, nil
 }
+
+// ListEnabledCommanderNames returns the names of all enabled commanders ordered
+// by first_seen without scanning journal_events for per-commander event counts.
+func ListEnabledCommanderNames(queryer db.Queryer) ([]string, error) {
+	rows, queryError := queryer.Query(`SELECT name FROM commanders WHERE enabled != 0 AND TRIM(name) != '' ORDER BY first_seen ASC, name ASC`)
+	if queryError != nil {
+		return nil, fmt.Errorf("query enabled commander names: %w", queryError)
+	}
+	defer rows.Close()
+
+	enabledNames := []string{}
+	for rows.Next() {
+		var commanderName string
+		if scanError := rows.Scan(&commanderName); scanError != nil {
+			return nil, fmt.Errorf("scan enabled commander name: %w", scanError)
+		}
+		enabledNames = append(enabledNames, commanderName)
+	}
+	if iterationError := rows.Err(); iterationError != nil {
+		return nil, fmt.Errorf("iterate enabled commander names: %w", iterationError)
+	}
+	return enabledNames, nil
+}

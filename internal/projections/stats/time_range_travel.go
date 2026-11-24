@@ -59,6 +59,10 @@ func (timeRangeTravel *TimeRangeTravel) Generation() uint64 {
 
 // Compute returns Flight Operations metrics for timeRange and filter, caching per travel filter.
 func (timeRangeTravel *TimeRangeTravel) Compute(timeRange Range, filter *Filter) (TravelMetrics, error) {
+	return timeRangeTravel.computeWithModeLoader(timeRange, filter, timeRangeTravel.modeLoader)
+}
+
+func (timeRangeTravel *TimeRangeTravel) computeWithModeLoader(timeRange Range, filter *Filter, modeLoader replaystats.ModeLookupLoader) (TravelMetrics, error) {
 	if timeRangeTravel.database == nil {
 		return TravelMetrics{}, nil
 	}
@@ -68,7 +72,7 @@ func (timeRangeTravel *TimeRangeTravel) Compute(timeRange Range, filter *Filter)
 			timeRangeTravel.database,
 			nil,
 			timeRangeTravel.recoveredJumps,
-			timeRangeTravel.modeLoader,
+			modeLoader,
 		)
 		return engine.ComputeTravel(timeRange, filter)
 	})

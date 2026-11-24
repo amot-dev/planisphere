@@ -55,6 +55,10 @@ func (timeRangeCarto *TimeRangeCartographics) Generation() uint64 {
 
 // Compute returns Universal Cartographics metrics for timeRange and filter, caching per discovery filter.
 func (timeRangeCarto *TimeRangeCartographics) Compute(timeRange Range, filter *Filter) (CartographicsMetrics, error) {
+	return timeRangeCarto.computeWithModeLoader(timeRange, filter, timeRangeCarto.modeLoader)
+}
+
+func (timeRangeCarto *TimeRangeCartographics) computeWithModeLoader(timeRange Range, filter *Filter, modeLoader replaystats.ModeLookupLoader) (CartographicsMetrics, error) {
 	if timeRangeCarto.database == nil {
 		return CartographicsMetrics{}, nil
 	}
@@ -64,7 +68,7 @@ func (timeRangeCarto *TimeRangeCartographics) Compute(timeRange Range, filter *F
 			timeRangeCarto.database,
 			nil,
 			nil,
-			timeRangeCarto.modeLoader,
+			modeLoader,
 		)
 		return engine.ComputeCartographics(timeRange, filter)
 	})

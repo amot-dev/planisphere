@@ -70,6 +70,10 @@ func (timeRangeReal *TimeRangeRealization) Generation() uint64 {
 
 // Compute returns Realized Value breakdowns for timeRange and filter, caching per discovery filter.
 func (timeRangeReal *TimeRangeRealization) Compute(timeRange Range, filter *Filter) (RealizationBreakdown, error) {
+	return timeRangeReal.computeWithModeLoader(timeRange, filter, timeRangeReal.modeLoader)
+}
+
+func (timeRangeReal *TimeRangeRealization) computeWithModeLoader(timeRange Range, filter *Filter, modeLoader replaystats.ModeLookupLoader) (RealizationBreakdown, error) {
 	if timeRangeReal.database == nil {
 		return RealizationBreakdown{}, nil
 	}
@@ -79,7 +83,7 @@ func (timeRangeReal *TimeRangeRealization) Compute(timeRange Range, filter *Filt
 			timeRangeReal.database,
 			timeRangeReal.salesLedger,
 			nil,
-			timeRangeReal.modeLoader,
+			modeLoader,
 		)
 		return engine.ComputeRealization(timeRange, filter)
 	})

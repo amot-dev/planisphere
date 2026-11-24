@@ -317,3 +317,42 @@ func TestMulticrewIgnoredAcrossArrivalsLocationAndVisitCounts(testingContext *te
 		testingContext.Fatalf("expected multicrew systems to have 0 visits and taxi/sol 1 visit, got %+v", counts)
 	}
 }
+
+func TestListEnabledCommanderNames(testingContext *testing.T) {
+	databaseConnection := openReplayTestDB(testingContext)
+
+	emptyNames, emptyError := replay.ListEnabledCommanderNames(databaseConnection)
+	if emptyError != nil || emptyNames == nil || len(emptyNames) != 0 {
+		testingContext.Fatalf("expected non-nil empty slice when no commanders exist, got %v err=%v", emptyNames, emptyError)
+	}
+
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO commanders (name, fid, enabled, first_seen, last_seen) VALUES
+		('CmdrZulu', 'FZ', 1, '2026-04-02T00:00:00Z', '2026-04-02T00:00:00Z'),
+		('CmdrDisabled', 'FD', 0, '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z'),
+		('   ', 'FB', 1, '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z'),
+		('CmdrBravo', 'F2', 1, '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z'),
+		('CmdrAlpha', 'F1', 1, '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed commanders: %v", execError)
+	}
+	// Dropping journal_events verifies ListEnabledCommanderNames skips event count queries.
+	if _, dropEventsError := databaseConnection.Exec(`DROP TABLE journal_events`); dropEventsError != nil {
+		testingContext.Fatalf("drop journal_events: %v", dropEventsError)
+	}
+
+	enabledNames, listError := replay.ListEnabledCommanderNames(databaseConnection)
+	if listError != nil {
+		testingContext.Fatalf("ListEnabledCommanderNames: %v", listError)
+	}
+	if strings.Join(enabledNames, "|") != "CmdrAlpha|CmdrBravo|CmdrZulu" {
+		testingContext.Fatalf("unexpected enabled commander order: %v", enabledNames)
+	}
+
+	if _, dropCmdrsError := databaseConnection.Exec(`DROP TABLE commanders`); dropCmdrsError != nil {
+		testingContext.Fatalf("drop commanders: %v", dropCmdrsError)
+	}
+	if _, missingTableError := replay.ListEnabledCommanderNames(databaseConnection); missingTableError == nil {
+		testingContext.Fatal("expected error when commanders table is missing")
+	}
+}

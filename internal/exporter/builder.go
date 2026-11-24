@@ -26,31 +26,28 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 		return ExpeditionExport{}, validationError
 	}
 	currentTime := resolveNow(dependencies.Now)
-	expeditionRecord, loadExpeditionError := expedition.Get(databaseConnection, expeditionID)
-	if loadExpeditionError != nil {
-		return ExpeditionExport{}, fmt.Errorf("load expedition %d for export: %w", expeditionID, loadExpeditionError)
-	}
-	queryAfter, displayStart, departed, effectiveStartError := expedition.EffectiveStart(databaseConnection, expeditionRecord)
-	if effectiveStartError != nil {
-		return ExpeditionExport{}, fmt.Errorf("resolve effective start for expedition %d: %w", expeditionID, effectiveStartError)
-	}
-	if expeditionRecord.Status == expedition.StatusPlanning || (!departed && expeditionRecord.Status != expedition.StatusCompleted) {
-		return ExpeditionExport{}, ErrNotExportable
-	}
-
 	planView, planError := expedition.BuildPlan(databaseConnection, expeditionID, dependencies.GECLookup, dependencies.Projections)
 	if planError != nil {
 		return ExpeditionExport{}, fmt.Errorf("build plan for export %d: %w", expeditionID, planError)
 	}
-	exportSnapshot := initializeExportHeader(databaseConnection, expeditionRecord, planView, dependencies, currentTime, displayStart, departed)
+	expeditionRecord := planView.Expedition
+	queryAfter, displayStart, departed := expedition.EffectiveStartFromRows(expeditionRecord, planView.Rows)
+	if expeditionRecord.Status == expedition.StatusPlanning || (!departed && expeditionRecord.Status != expedition.StatusCompleted) {
+		return ExpeditionExport{}, ErrNotExportable
+	}
+	enabledCommanders, commandersError := replay.ListEnabledCommanderNames(databaseConnection)
+	if commandersError != nil {
+		return ExpeditionExport{}, fmt.Errorf("list enabled commanders for export %d: %w", expeditionID, commandersError)
+	}
+	exportSnapshot := initializeExportHeader(databaseConnection, expeditionRecord, planView, enabledCommanders, dependencies, currentTime, displayStart, departed)
 
 	if populateError := populateExpeditionTelemetry(databaseConnection, expeditionRecord, queryAfter, displayStart, departed, currentTime, dependencies, &exportSnapshot); populateError != nil {
 		return ExpeditionExport{}, populateError
 	}
-	if detailsError := populateRowDetailsAndBaseline(databaseConnection, planView.Rows, dependencies.Projections, &exportSnapshot); detailsError != nil {
+	if detailsError := populateRowDetailsAndBaseline(databaseConnection, planView, dependencies.Projections, &exportSnapshot); detailsError != nil {
 		return ExpeditionExport{}, detailsError
 	}
-	if bucketsError := populateModeBuckets(expeditionRecord, planView.Modes, queryAfter, departed, dependencies.Projections, &exportSnapshot); bucketsError != nil {
+	if bucketsError := populateModeBuckets(planView, queryAfter, departed, dependencies.Projections, &exportSnapshot); bucketsError != nil {
 		return ExpeditionExport{}, bucketsError
 	}
 	return exportSnapshot, nil
@@ -67,12 +64,12 @@ func initializeExportHeader(
 	databaseConnection *sql.DB,
 	expeditionRecord expedition.Expedition,
 	planView expedition.PlanView,
+	commanders []string,
 	dependencies BuilderDeps,
 	currentTime time.Time,
 	displayStart string,
 	departed bool,
 ) ExpeditionExport {
-	commanders := loadEnabledCommanderNames(databaseConnection)
 	effectiveEnd := expeditionRecord.EndTimestamp
 	endIsNow := effectiveEnd == ""
 	effectiveEndGalactic := reference.ToGalactic(effectiveEnd)
@@ -111,20 +108,6 @@ func initializeExportHeader(
 	}
 }
 
-func loadEnabledCommanderNames(databaseConnection *sql.DB) []string {
-	commanderRecords, listError := replay.ListCommanders(databaseConnection)
-	if listError != nil || len(commanderRecords) == 0 {
-		return []string{}
-	}
-	enabledNames := make([]string, 0, len(commanderRecords))
-	for _, commander := range commanderRecords {
-		if commander.Enabled && commander.Name != "" {
-			enabledNames = append(enabledNames, commander.Name)
-		}
-	}
-	return enabledNames
-}
-
 func populateExpeditionTelemetry(
 	databaseConnection *sql.DB,
 	expeditionRecord expedition.Expedition,
@@ -156,37 +139,21 @@ func populateExpeditionTelemetry(
 
 func populateRowDetailsAndBaseline(
 	databaseConnection *sql.DB,
-	rows []expedition.RowView,
+	planView expedition.PlanView,
 	expeditionProjections *expedition.Projections,
 	exportSnapshot *ExpeditionExport,
 ) error {
-	for _, rowView := range rows {
-		if !rowView.Row.IsWaypoint() {
-			continue
-		}
-		if rowView.Row.VisitedAt == "" && rowView.VisitState != expedition.VisitCurrent {
-			continue
-		}
-		details, detailsError := expedition.Details(databaseConnection, rowView.Row.ID, expeditionProjections)
-		if detailsError != nil {
-			return fmt.Errorf("compute waypoint %d details: %w", rowView.Number, detailsError)
-		}
-		if details.RowID == 0 {
-			continue
-		}
-		if details.Kind == "origin" {
-			originCopy := details
-			exportSnapshot.OriginBaseline = &originCopy
-			continue
-		}
-		exportSnapshot.RowDetails = append(exportSnapshot.RowDetails, details)
+	originBaseline, rowDetails, detailsError := expedition.DetailsBatch(databaseConnection, planView, expeditionProjections)
+	if detailsError != nil {
+		return fmt.Errorf("compute waypoint details batch: %w", detailsError)
 	}
+	exportSnapshot.OriginBaseline = originBaseline
+	exportSnapshot.RowDetails = rowDetails
 	return nil
 }
 
 func populateModeBuckets(
-	expeditionRecord expedition.Expedition,
-	modeList []modes.Mode,
+	planView expedition.PlanView,
 	queryAfter string,
 	departed bool,
 	expeditionProjections *expedition.Projections,
@@ -195,9 +162,37 @@ func populateModeBuckets(
 	if !departed {
 		return nil
 	}
+	candidateModes, singleCoveringMode := expedition.SelectActiveModes(planView)
+	if singleCoveringMode {
+		if hasTelemetryActivity(exportSnapshot.Live, exportSnapshot.Expedition.Realization) {
+			singleMode := candidateModes[0]
+			exportSnapshot.ModeBuckets = []ModeBucket{{
+				ModeID:      singleMode.ID,
+				ModeName:    singleMode.Name,
+				ModeColor:   singleMode.Color,
+				Metrics:     exportSnapshot.Live,
+				Realization: exportSnapshot.Expedition.Realization,
+			}}
+		}
+		return nil
+	}
+	buckets, computeError := computeFilteredModeBuckets(planView.Expedition, queryAfter, candidateModes, expeditionProjections)
+	if computeError != nil {
+		return computeError
+	}
+	exportSnapshot.ModeBuckets = buckets
+	return nil
+}
+
+func computeFilteredModeBuckets(
+	expeditionRecord expedition.Expedition,
+	queryAfter string,
+	candidateModes []modes.Mode,
+	expeditionProjections *expedition.Projections,
+) ([]ModeBucket, error) {
 	expeditionRange := replaystats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
-	buckets := make([]ModeBucket, 0, len(modeList))
-	for _, modeItem := range modeList {
+	buckets := make([]ModeBucket, 0, len(candidateModes))
+	for _, modeItem := range candidateModes {
 		modeFilter := replaystats.Filter{
 			Enabled:      true,
 			ExpeditionID: expeditionRecord.ID,
@@ -205,7 +200,7 @@ func populateModeBuckets(
 		}
 		summary, computeError := expeditionProjections.TimeRangeStats.Compute(expeditionRange, &modeFilter)
 		if computeError != nil {
-			return fmt.Errorf("compute mode bucket %q: %w", modeItem.Name, computeError)
+			return nil, fmt.Errorf("compute mode bucket %q: %w", modeItem.Name, computeError)
 		}
 		if !hasTelemetryActivity(summary.Metrics, summary.Realization) {
 			continue
@@ -218,8 +213,7 @@ func populateModeBuckets(
 			Realization: summary.Realization,
 		})
 	}
-	exportSnapshot.ModeBuckets = buckets
-	return nil
+	return buckets, nil
 }
 
 func hasTelemetryActivity(metrics replaystats.Metrics, realization replaystats.RealizationBreakdown) bool {

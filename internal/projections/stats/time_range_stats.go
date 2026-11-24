@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
+	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
@@ -16,6 +18,7 @@ import (
 // TimeRangeStats caches bounded expedition and telemetry window metrics across
 // specialized section projections.
 type TimeRangeStats struct {
+	modeLoader    replaystats.ModeLookupLoader
 	travel        *TimeRangeTravel
 	cartographics *TimeRangeCartographics
 	exobiology    *TimeRangeExobiology
@@ -31,6 +34,7 @@ func NewTimeRangeStats(
 	modeLoader replaystats.ModeLookupLoader,
 ) *TimeRangeStats {
 	return &TimeRangeStats{
+		modeLoader:    modeLoader,
 		travel:        NewTimeRangeTravel(dbConn, bus, recoveredJumps, modeLoader),
 		cartographics: NewTimeRangeCartographics(dbConn, bus, modeLoader),
 		exobiology:    NewTimeRangeExobiology(dbConn, bus, salesLedger, modeLoader),
@@ -93,19 +97,23 @@ func (timeRangeStats *TimeRangeStats) Generation() uint64 {
 // Compute returns the merged metrics and realization breakdown for timeRange
 // and optional Flight Mode filter, backed by the independently cached sections.
 func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (TelemetrySummary, error) {
-	travelMetrics, travelError := timeRangeStats.travel.Compute(timeRange, filter)
+	modeLoader := timeRangeStats.modeLoader
+	if filter != nil && filter.Enabled {
+		modeLoader = memoizeModeLookupLoader(modeLoader)
+	}
+	travelMetrics, travelError := timeRangeStats.travel.computeWithModeLoader(timeRange, filter, modeLoader)
 	if travelError != nil {
 		return TelemetrySummary{}, travelError
 	}
-	cartoMetrics, cartoError := timeRangeStats.cartographics.Compute(timeRange, filter)
+	cartoMetrics, cartoError := timeRangeStats.cartographics.computeWithModeLoader(timeRange, filter, modeLoader)
 	if cartoError != nil {
 		return TelemetrySummary{}, cartoError
 	}
-	exobiologyMetrics, exobiologyError := timeRangeStats.exobiology.Compute(timeRange, filter)
+	exobiologyMetrics, exobiologyError := timeRangeStats.exobiology.computeWithModeLoader(timeRange, filter, modeLoader)
 	if exobiologyError != nil {
 		return TelemetrySummary{}, exobiologyError
 	}
-	realizationBreakdown, realizationError := timeRangeStats.realization.Compute(timeRange, filter)
+	realizationBreakdown, realizationError := timeRangeStats.realization.computeWithModeLoader(timeRange, filter, modeLoader)
 	if realizationError != nil {
 		return TelemetrySummary{}, realizationError
 	}
@@ -118,6 +126,23 @@ func (timeRangeStats *TimeRangeStats) Compute(timeRange Range, filter *Filter) (
 		Metrics:     combinedMetrics,
 		Realization: realizationBreakdown,
 	}, nil
+}
+
+func memoizeModeLookupLoader(baseLoader replaystats.ModeLookupLoader) replaystats.ModeLookupLoader {
+	if baseLoader == nil {
+		return nil
+	}
+	var (
+		loadOnce     sync.Once
+		cachedLookup replaystats.ModeLookup
+		cachedError  error
+	)
+	return func(queryer db.Queryer, expeditionID int64) (replaystats.ModeLookup, error) {
+		loadOnce.Do(func() {
+			cachedLookup, cachedError = baseLoader(queryer, expeditionID)
+		})
+		return cachedLookup, cachedError
+	}
 }
 
 // newTimeRangeDomainCache registers standard triggers for a time-window cache,

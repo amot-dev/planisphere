@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"planisphere/internal/core/db"
@@ -357,5 +358,60 @@ func TestTimeRangeSelectiveInvalidationPreservesClosedWindowsExceptRetroactiveEv
 	}
 	if timeRangeStats.Realization().CachedCount() != 0 {
 		testingContext.Fatalf("expected SellExplorationData to evict Realization closedRange, got %d", timeRangeStats.Realization().CachedCount())
+	}
+}
+
+func TestTimeRangeStatsMemoizesModeLoaderOnColdFilteredCompute(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T19:10:00Z","event":"FSDJump","StarSystem":"ModeSys","SystemAddress":2002,"StarPos":[25,0,0],"JumpDist":25.0}`,
+		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"ModeSys","SystemAddress":2002,"BodyID":1,"BodyName":"ModeSys 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":2002,"Body":1}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, lines)
+
+	eventBus := projection.NewBus()
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
+
+	var loaderCalls atomic.Int32
+	countingModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
+		loaderCalls.Add(1)
+		return func(_ string) int64 { return fallbackModeID }, nil
+	}
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, countingModeLoader)
+
+	timeRange := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
+	modeFilter := &stats.Filter{
+		Enabled:      true,
+		ExpeditionID: 1,
+		Modes:        []stats.ModeSelection{{ModeID: fallbackModeID, Travel: true, Discovery: true}},
+	}
+
+	summary, computeError := timeRangeStats.Compute(timeRange, modeFilter)
+	if computeError != nil {
+		testingContext.Fatalf("cold filtered Compute: %v", computeError)
+	}
+	if loaderCalls.Load() != 1 {
+		testingContext.Fatalf("expected modeLoader to be called once on cold filtered Compute, got %d", loaderCalls.Load())
+	}
+	if summary.Metrics.Jumps != 1 || summary.Metrics.BodiesScanned != 1 || summary.Metrics.OrganicSamples != 1 || summary.Realization.PendingValue <= 0 {
+		testingContext.Fatalf("unexpected cold filtered summary: %+v", summary)
+	}
+
+	if _, warmError := timeRangeStats.Compute(timeRange, modeFilter); warmError != nil {
+		testingContext.Fatalf("warm filtered Compute: %v", warmError)
+	}
+	if loaderCalls.Load() != 1 {
+		testingContext.Fatalf("expected warm filtered Compute to reuse cached sections, got %d loader calls", loaderCalls.Load())
+	}
+
+	eventBus.PublishApp(events.AppExpeditionModesChanged)
+	if _, refreshError := timeRangeStats.Compute(timeRange, modeFilter); refreshError != nil {
+		testingContext.Fatalf("post-invalidation filtered Compute: %v", refreshError)
+	}
+	if loaderCalls.Load() != 2 {
+		testingContext.Fatalf("expected post-invalidation Compute to reload mode lookup once (total 2), got %d", loaderCalls.Load())
 	}
 }

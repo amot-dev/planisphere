@@ -193,3 +193,100 @@ func ReopenTx(dbConn *sql.DB, expeditionID int64) error {
 		return Reopen(transaction, expeditionID)
 	})
 }
+
+// EffectiveStartFromRows resolves an expedition's telemetry start from Origin
+// Waypoint #1's departure timestamp using already-loaded PlanView rows without
+// querying expedition_rows again.
+func EffectiveStartFromRows(expeditionRecord Expedition, rows []RowView) (queryAfter, displayStart string, departed bool) {
+	if expeditionRecord.StartTimestamp == "" {
+		return "", "", false
+	}
+	for index := range rows {
+		rowItem := rows[index].Row
+		if !rowItem.IsWaypoint() {
+			continue
+		}
+		if rowItem.DepartedAt == "" {
+			return "", "", false
+		}
+		return exclusiveBoundaryBefore(rowItem.DepartedAt, rowItem.VisitedAt), rowItem.DepartedAt, true
+	}
+	return "", "", false
+}
+
+func resolvePlanFallbackModeID(modeList []modes.Mode) int64 {
+	for _, modeItem := range modeList {
+		if strings.EqualFold(modeItem.Name, "Travel") {
+			return modeItem.ID
+		}
+	}
+	for _, modeItem := range modeList {
+		if modeItem.IsDefault {
+			return modeItem.ID
+		}
+	}
+	if len(modeList) > 0 {
+		return modeList[0].ID
+	}
+	return modes.UnassignedID
+}
+
+func resolveLegSpanModeID(rowView RowView, fallbackModeID int64) int64 {
+	if rowView.Row.LegModeID > 0 {
+		return rowView.Row.LegModeID
+	}
+	if rowView.LegModeID > 0 {
+		return rowView.LegModeID
+	}
+	return fallbackModeID
+}
+
+func collectActiveModeIDs(planView PlanView, fallbackModeID int64) map[int64]bool {
+	candidateModeIDs := make(map[int64]bool, len(planView.Modes))
+	seenOrigin := false
+	hasNonOriginSpan := false
+	lastSpanUntil := ""
+	for _, rowView := range planView.Rows {
+		if !rowView.Row.IsWaypoint() || rowView.Row.VisitedAt == "" {
+			continue
+		}
+		if !seenOrigin {
+			seenOrigin = true
+			continue
+		}
+		hasNonOriginSpan = true
+		candidateModeIDs[resolveLegSpanModeID(rowView, fallbackModeID)] = true
+		if rowView.Row.DepartedAt != "" {
+			lastSpanUntil = exclusiveBoundaryBefore(rowView.Row.DepartedAt, rowView.Row.VisitedAt)
+		} else {
+			lastSpanUntil = "9999-12-31T23:59:59Z"
+		}
+	}
+	effectiveUntil := planView.Expedition.EndTimestamp
+	if effectiveUntil == "" {
+		effectiveUntil = "9999-12-31T23:59:59Z"
+	}
+	if !hasNonOriginSpan || effectiveUntil > lastSpanUntil {
+		trailingModeID := planView.Expedition.ActiveModeID
+		if trailingModeID <= 0 {
+			trailingModeID = fallbackModeID
+		}
+		candidateModeIDs[trailingModeID] = true
+	}
+	return candidateModeIDs
+}
+
+// SelectActiveModes returns the subset of planView.Modes (preserving display
+// order) that LoadModeLookup can resolve within the departed expedition window,
+// along with whether a single mode covers 100% of that window.
+func SelectActiveModes(planView PlanView) ([]modes.Mode, bool) {
+	fallbackModeID := resolvePlanFallbackModeID(planView.Modes)
+	candidateModeIDs := collectActiveModeIDs(planView, fallbackModeID)
+	candidateModes := make([]modes.Mode, 0, len(candidateModeIDs))
+	for _, modeItem := range planView.Modes {
+		if candidateModeIDs[modeItem.ID] {
+			candidateModes = append(candidateModes, modeItem)
+		}
+	}
+	return candidateModes, len(candidateModeIDs) == 1 && len(candidateModes) == 1
+}

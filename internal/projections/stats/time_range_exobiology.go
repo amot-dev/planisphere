@@ -66,6 +66,10 @@ func (timeRangeExo *TimeRangeExobiology) Generation() uint64 {
 
 // Compute returns Vista Genomics metrics for timeRange and filter, caching per discovery filter.
 func (timeRangeExo *TimeRangeExobiology) Compute(timeRange Range, filter *Filter) (ExobiologyMetrics, error) {
+	return timeRangeExo.computeWithModeLoader(timeRange, filter, timeRangeExo.modeLoader)
+}
+
+func (timeRangeExo *TimeRangeExobiology) computeWithModeLoader(timeRange Range, filter *Filter, modeLoader replaystats.ModeLookupLoader) (ExobiologyMetrics, error) {
 	if timeRangeExo.database == nil {
 		return ExobiologyMetrics{}, nil
 	}
@@ -75,7 +79,7 @@ func (timeRangeExo *TimeRangeExobiology) Compute(timeRange Range, filter *Filter
 			timeRangeExo.database,
 			timeRangeExo.salesLedger,
 			nil,
-			timeRangeExo.modeLoader,
+			modeLoader,
 		)
 		return engine.ComputeExobiology(timeRange, filter)
 	})

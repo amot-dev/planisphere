@@ -6,10 +6,13 @@ import (
 	"errors"
 	"math"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
 	replaystats "planisphere/internal/replay/stats"
@@ -207,5 +210,137 @@ func TestBuildCompletedExpeditionBoundariesAndModeBuckets(testingContext *testin
 	}
 	if math.Abs(bucketSum.DistanceLy-snapshot.Live.DistanceLy) > 0.001 || bucketSum.Jumps != snapshot.Live.Jumps || bucketSum.BodiesScanned != snapshot.Live.BodiesScanned {
 		testingContext.Fatalf("mode buckets sum %+v != live %+v", bucketSum, snapshot.Live)
+	}
+}
+
+func TestBuildPropagatesCommanderQueryError(testingContext *testing.T) {
+	fixture := setupExportFixture(testingContext)
+	fixedTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	fixture.insertEvent(testingContext, "2026-04-01T10:00:00Z", "Location", "sol", `{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`)
+	fixture.insertEvent(testingContext, "2026-04-01T11:00:00Z", "FSDJump", "alpha", `{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[30,0,0],"JumpDist":30.0}`)
+
+	expeditionRecord, createError := expedition.CreateWithWaypoints(
+		fixture.databaseConnection,
+		"Commander Error Check",
+		"",
+		[]expedition.SeedWaypoint{{SystemName: "Sol"}, {SystemName: "Alpha"}},
+	)
+	if createError != nil {
+		testingContext.Fatalf("create expedition: %v", createError)
+	}
+	if startError := expedition.StartTx(fixture.databaseConnection, expeditionRecord.ID, "2026-04-01T10:00:00Z", 0); startError != nil {
+		testingContext.Fatalf("start expedition: %v", startError)
+	}
+	if _, alterError := fixture.databaseConnection.Exec(`ALTER TABLE commanders DROP COLUMN first_seen`); alterError != nil {
+		testingContext.Fatalf("drop commanders.first_seen: %v", alterError)
+	}
+
+	_, buildError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime))
+	if buildError == nil || !strings.Contains(buildError.Error(), "list enabled commanders") {
+		testingContext.Fatalf("expected commander query error propagation, got %v", buildError)
+	}
+}
+
+func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingContext *testing.T) {
+	fixture := setupExportFixture(testingContext)
+	fixedTime := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	explorationID := fixture.lookupModeID(testingContext, "Exploration")
+	tourismID := fixture.lookupModeID(testingContext, "Tourism")
+	if _, createModeError := modes.Create(fixture.databaseConnection, "Unused Custom", "Never selected", "#123456"); createModeError != nil {
+		testingContext.Fatalf("create custom mode: %v", createModeError)
+	}
+	if _, seedCmdrsError := fixture.databaseConnection.Exec(`
+		INSERT INTO commanders (name, fid, enabled, first_seen, last_seen) VALUES
+		('CMDR Second', 'F2', 1, '2026-04-02T00:00:00Z', '2026-04-02T00:00:00Z'),
+		('CMDR Disabled', 'FD', 0, '2026-03-01T00:00:00Z', '2026-03-01T00:00:00Z'),
+		('CMDR First', 'F1', 1, '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z')
+	`); seedCmdrsError != nil {
+		testingContext.Fatalf("seed commanders: %v", seedCmdrsError)
+	}
+
+	fixture.insertEvent(testingContext, "2026-04-01T09:00:00Z", "LoadGame", "lg", `{"timestamp":"2026-04-01T09:00:00Z","event":"LoadGame","Commander":"CMDR First","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`)
+	fixture.insertEvent(testingContext, "2026-04-01T10:00:00Z", "Location", "sol", `{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`)
+	fixture.insertEvent(testingContext, "2026-04-01T11:00:00Z", "FSDJump", "mid", `{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Midway","SystemAddress":2001,"StarPos":[40,0,0],"JumpDist":40.0}`)
+	fixture.insertEvent(testingContext, "2026-04-01T11:10:00Z", "ShipyardSwap", "swap", `{"timestamp":"2026-04-01T11:10:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}`)
+	fixture.insertEvent(testingContext, "2026-04-01T11:20:00Z", "FSDJump", "alpha", `{"timestamp":"2026-04-01T11:20:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[90,0,0],"JumpDist":50.0}`)
+	fixture.insertEvent(testingContext, "2026-04-01T11:30:00Z", "Scan", "scan", `{"timestamp":"2026-04-01T11:30:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":2002,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"Water world","MassEM":1.1,"WasDiscovered":false,"WasMapped":false}`)
+
+	expeditionRecord, createError := expedition.CreateWithWaypoints(
+		fixture.databaseConnection,
+		"Mode Optimization Trip",
+		"",
+		[]expedition.SeedWaypoint{{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"}},
+	)
+	if createError != nil {
+		testingContext.Fatalf("create expedition: %v", createError)
+	}
+	if startError := expedition.StartTx(fixture.databaseConnection, expeditionRecord.ID, "2026-04-01T10:00:00Z", explorationID); startError != nil {
+		testingContext.Fatalf("start expedition: %v", startError)
+	}
+	// While still docked in Alpha (DepartedAt == ""), changing ActiveModeID to Tourism must NOT prevent single-mode reuse for Exploration.
+	if setModeError := expedition.SetActiveModeTx(fixture.databaseConnection, expeditionRecord.ID, tourismID); setModeError != nil {
+		testingContext.Fatalf("set active mode tourism: %v", setModeError)
+	}
+
+	singleModeSnapshot, singleBuildError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime))
+	if singleBuildError != nil {
+		testingContext.Fatalf("single-mode exporter.Build: %v", singleBuildError)
+	}
+	if !reflect.DeepEqual(singleModeSnapshot.Commanders, []string{"CMDR First", "CMDR Second"}) {
+		testingContext.Fatalf("unexpected enabled commanders: %v", singleModeSnapshot.Commanders)
+	}
+	if len(singleModeSnapshot.ModeBuckets) != 1 || singleModeSnapshot.ModeBuckets[0].ModeID != explorationID ||
+		!reflect.DeepEqual(singleModeSnapshot.ModeBuckets[0].Metrics, singleModeSnapshot.Live) ||
+		!reflect.DeepEqual(singleModeSnapshot.ModeBuckets[0].Realization, singleModeSnapshot.Expedition.Realization) {
+		testingContext.Fatalf("expected single Exploration bucket reusing Live telemetry, got %+v", singleModeSnapshot.ModeBuckets)
+	}
+	cachedBeforeInvalidation := fixture.expeditionProjections.TimeRangeStats.CachedCount()
+	fixture.bus.PublishApp(events.AppExpeditionModesChanged)
+	if fixture.expeditionProjections.TimeRangeStats.CachedCount() != cachedBeforeInvalidation {
+		testingContext.Fatalf("expected zero mode-filtered TimeRangeStats entries for single-mode expedition")
+	}
+
+	// Depart Alpha under Tourism: now Exploration (visited leg) and Tourism (trailing active leg) are active while Travel and Unused Custom are skipped.
+	fixture.insertEvent(testingContext, "2026-04-01T12:00:00Z", "FSDJump", "outbound", `{"timestamp":"2026-04-01T12:00:00Z","event":"FSDJump","StarSystem":"Outbound","SystemAddress":2009,"StarPos":[120,0,0],"JumpDist":30.0}`)
+	if _, reevalError := expedition.ReevaluateTx(fixture.databaseConnection, expeditionRecord.ID); reevalError != nil {
+		testingContext.Fatalf("reevaluate after departure: %v", reevalError)
+	}
+
+	multiModeSnapshot, multiBuildError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime))
+	if multiBuildError != nil {
+		testingContext.Fatalf("multi-mode exporter.Build: %v", multiBuildError)
+	}
+	if len(multiModeSnapshot.ModeBuckets) != 2 ||
+		multiModeSnapshot.ModeBuckets[0].ModeID != explorationID ||
+		multiModeSnapshot.ModeBuckets[1].ModeID != tourismID {
+		testingContext.Fatalf("expected ordered [Exploration, Tourism] buckets, got %+v", multiModeSnapshot.ModeBuckets)
+	}
+	cachedWithTwoModes := fixture.expeditionProjections.TimeRangeStats.CachedCount()
+	fixture.bus.PublishApp(events.AppExpeditionModesChanged)
+	if cachedWithTwoModes-fixture.expeditionProjections.TimeRangeStats.CachedCount() != 2 {
+		testingContext.Fatalf("expected exactly 2 mode-filtered TimeRangeStats entries (skipping unused Travel and Custom), got %d",
+			cachedWithTwoModes-fixture.expeditionProjections.TimeRangeStats.CachedCount())
+	}
+
+	// Verify OriginBaseline and RowDetails match per-row expedition.Details (including multi-ship leg and VisitCurrent leg).
+	expectedOrigin, originError := expedition.Details(fixture.databaseConnection, multiModeSnapshot.Plan.Rows[0].Row.ID, fixture.expeditionProjections)
+	if originError != nil || multiModeSnapshot.OriginBaseline == nil || !reflect.DeepEqual(*multiModeSnapshot.OriginBaseline, expectedOrigin) {
+		testingContext.Fatalf("OriginBaseline parity mismatch: got %+v want %+v (err=%v)", multiModeSnapshot.OriginBaseline, expectedOrigin, originError)
+	}
+	if len(multiModeSnapshot.RowDetails) != 2 {
+		testingContext.Fatalf("expected 2 RowDetails (Alpha + VisitCurrent Beta), got %d", len(multiModeSnapshot.RowDetails))
+	}
+	for index, rowDetail := range multiModeSnapshot.RowDetails {
+		expectedDetail, detailError := expedition.Details(fixture.databaseConnection, rowDetail.RowID, fixture.expeditionProjections)
+		if detailError != nil {
+			testingContext.Fatalf("Details(%d): %v", rowDetail.RowID, detailError)
+		}
+		if rowDetail.To == "" && rowDetail.Elapsed != "" && expectedDetail.Elapsed != "" {
+			rowDetail.Elapsed = expectedDetail.Elapsed
+		}
+		if !reflect.DeepEqual(rowDetail, expectedDetail) {
+			testingContext.Fatalf("RowDetails[%d] parity mismatch:\ngot:  %+v\nwant: %+v", index, rowDetail, expectedDetail)
+		}
 	}
 }
