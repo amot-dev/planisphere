@@ -14,6 +14,7 @@ import (
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/sources/journal"
 )
 
 // TimeRangeStats caches bounded expedition and telemetry window metrics across
@@ -51,7 +52,10 @@ func NewTimeRangeStats(
 		highWaterTimestamp:   initialHighWater,
 	}
 	if bus != nil {
-		bus.OnTrigger(timeRangeStats.Triggers(), timeRangeStats.observeTrigger)
+		bus.OnTrigger(
+			timeRangeStats.Triggers().WithJournal(journal.EventLoadGame, journal.EventShipyardSwap),
+			timeRangeStats.observeTrigger,
+		)
 	}
 	return timeRangeStats
 }
@@ -117,6 +121,17 @@ func (timeRangeStats *TimeRangeStats) ClosedWindowRevision() uint64 {
 	return timeRangeStats.closedWindowRevision
 }
 
+// EnsureMinClosedWindowRevision raises closedWindowRevision to at least minRevision
+// so replacing TimeRangeStats across a hot database switch never resets or collides
+// with an earlier watermark.
+func (timeRangeStats *TimeRangeStats) EnsureMinClosedWindowRevision(minRevision uint64) {
+	timeRangeStats.watermarkMu.Lock()
+	defer timeRangeStats.watermarkMu.Unlock()
+	if timeRangeStats.closedWindowRevision < minRevision {
+		timeRangeStats.closedWindowRevision = minRevision
+	}
+}
+
 func (timeRangeStats *TimeRangeStats) observeTrigger(observed projection.Triggers) {
 	timeRangeStats.watermarkMu.Lock()
 	defer timeRangeStats.watermarkMu.Unlock()
@@ -126,8 +141,9 @@ func (timeRangeStats *TimeRangeStats) observeTrigger(observed projection.Trigger
 		observed.EarliestTimestamp <= timeRangeStats.highWaterTimestamp {
 		timeRangeStats.closedWindowRevision++
 	}
-	if observed.EarliestTimestamp > timeRangeStats.highWaterTimestamp {
-		timeRangeStats.highWaterTimestamp = observed.EarliestTimestamp
+	latestObserved := max(observed.LatestTimestamp, observed.EarliestTimestamp)
+	if latestObserved > timeRangeStats.highWaterTimestamp {
+		timeRangeStats.highWaterTimestamp = latestObserved
 	}
 }
 

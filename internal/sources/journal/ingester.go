@@ -55,16 +55,20 @@ type Result struct {
 	NewEvents         int      // count of events actually inserted (not previously known)
 	Events            EventSet // set of newly inserted event types
 	EarliestTimestamp string   // earliest timestamp among newly inserted or backfilled events
+	LatestTimestamp   string   // latest timestamp among newly inserted or backfilled events
 	Errors            []string
 }
 
-// ObserveTimestamp records timestamp when it precedes the earliest timestamp seen in result.
+// ObserveTimestamp records timestamp when it expands the earliest or latest bounds seen in result.
 func (result *Result) ObserveTimestamp(timestamp string) {
 	if timestamp == "" {
 		return
 	}
 	if result.EarliestTimestamp == "" || timestamp < result.EarliestTimestamp {
 		result.EarliestTimestamp = timestamp
+	}
+	if result.LatestTimestamp == "" || timestamp > result.LatestTimestamp {
+		result.LatestTimestamp = timestamp
 	}
 }
 
@@ -75,6 +79,7 @@ func (result *Result) merge(other Result) {
 	result.NewEvents += other.NewEvents
 	result.Events = result.Events.Union(other.Events)
 	result.ObserveTimestamp(other.EarliestTimestamp)
+	result.ObserveTimestamp(other.LatestTimestamp)
 	result.Errors = append(result.Errors, other.Errors...)
 }
 
@@ -297,6 +302,9 @@ func ingestAppendedLines(
 				}
 				if state.first.Valid {
 					result.ObserveTimestamp(state.first.String)
+				}
+				if state.last.Valid {
+					result.ObserveTimestamp(state.last.String)
 				}
 				hasUnattributedEvents = false
 			}

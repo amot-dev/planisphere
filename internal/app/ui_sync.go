@@ -15,6 +15,12 @@ import (
 )
 
 func (app *App) wireProjections(dbConn *sql.DB) {
+	var previousClosedRevision uint64
+	hasPreviousTimeRangeStats := app.timeRangeStats != nil
+	if hasPreviousTimeRangeStats {
+		previousClosedRevision = app.timeRangeStats.ClosedWindowRevision()
+	}
+
 	bus := projection.NewBus()
 	app.recoveredJumps = projections.NewRecoveredJumps(dbConn, bus)
 	app.systemArrivals = projections.NewSystemArrivals(dbConn, bus)
@@ -24,6 +30,9 @@ func (app *App) wireProjections(dbConn *sql.DB) {
 	app.salesLedger = realization.NewSalesLedger(dbConn, bus)
 	app.careerStats = stats.NewCareerStats(dbConn, bus, app.salesLedger, app.recoveredJumps)
 	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps, expedition.LoadModeLookup)
+	if hasPreviousTimeRangeStats {
+		app.timeRangeStats.EnsureMinClosedWindowRevision(previousClosedRevision + 1)
+	}
 
 	bus.OnTrigger(
 		projection.Triggers{
@@ -105,6 +114,18 @@ func (app *App) expeditionProjections() *expedition.Projections {
 	}
 }
 
+func (app *App) currentDB() *sql.DB {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	return app.db
+}
+
+func (app *App) isCurrentDB(targetDB *sql.DB) bool {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	return app.db == targetDB && targetDB != nil
+}
+
 func (app *App) currentBus() *projection.Bus {
 	app.dbMu.RLock()
 	bus := app.bus
@@ -113,15 +134,15 @@ func (app *App) currentBus() *projection.Bus {
 }
 
 func (app *App) publishJournalEvents(journalEvents journal.EventSet) events.UITargetSet {
-	return app.publishJournalBatch(journalEvents, "")
+	return app.publishJournalBatch(journalEvents, "", "")
 }
 
-func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTimestamp string) events.UITargetSet {
+func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTimestamp, latestTimestamp string) events.UITargetSet {
 	bus := app.currentBus()
 	if bus == nil {
 		return 0
 	}
-	return bus.PublishJournalSince(journalEvents, earliestTimestamp)
+	return bus.PublishJournalRange(journalEvents, earliestTimestamp, latestTimestamp)
 }
 
 func (app *App) emitDataChanged(expeditionID int64, targets events.UITargetSet) {
@@ -140,6 +161,22 @@ func (app *App) publishApp(expeditionID int64, appEvents ...events.AppEvent) {
 		return
 	}
 	app.emitDataChanged(expeditionID, bus.PublishApp(appEvents...))
+}
+
+func (app *App) publishAppForDB(targetDB *sql.DB, expeditionID int64, appEvents ...events.AppEvent) {
+	app.dbMu.RLock()
+	var bus *projection.Bus
+	if app.db == targetDB && targetDB != nil {
+		bus = app.bus
+	}
+	app.dbMu.RUnlock()
+	if bus == nil {
+		return
+	}
+	targets := bus.PublishApp(appEvents...)
+	if app.isCurrentDB(targetDB) {
+		app.emitDataChanged(expeditionID, targets)
+	}
 }
 
 func (app *App) isLiveSyncPaused() bool {

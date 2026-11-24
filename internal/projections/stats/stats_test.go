@@ -489,3 +489,44 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 		testingContext.Fatalf("expected forward batch after backfill to preserve ClosedWindowRevision %d, got %d", expectedRevision, gotRevision)
 	}
 }
+
+func TestTimeRangeStatsClosedWindowRevisionRangeAndShipHistoryBackfill(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"SeedSys","SystemAddress":1001,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	}
+	databaseConnection := seedStatsDBFromLines(testingContext, lines)
+
+	eventBus := projection.NewBus()
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, nil)
+
+	// Multi-event forward batch [T1, T3] advances highWaterTimestamp to T3 without incrementing ClosedWindowRevision.
+	eventBus.PublishJournalRange(
+		journal.NewEventSet(journal.EventFSDJump, journal.EventShipyardSwap),
+		"2026-01-18T20:00:00Z",
+		"2026-01-18T20:30:00Z",
+	)
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
+		testingContext.Fatalf("expected forward [T1, T3] range to preserve ClosedWindowRevision 1, got %d", gotRevision)
+	}
+
+	// Out-of-order T2 event (T1 < T2 < T3) falls below T3 high-water mark and increments ClosedWindowRevision.
+	eventBus.PublishJournalRange(journal.NewEventSet(journal.EventScan), "2026-01-18T20:15:00Z", "2026-01-18T20:15:00Z")
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 2 {
+		testingContext.Fatalf("expected out-of-order T2 within [T1, T3] to increment ClosedWindowRevision to 2, got %d", gotRevision)
+	}
+
+	// Backfilled ShipyardSwap event below T3 increments ClosedWindowRevision even without metric triggers.
+	eventBus.PublishJournalRange(journal.NewEventSet(journal.EventShipyardSwap), "2026-01-18T20:20:00Z", "2026-01-18T20:20:00Z")
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 3 {
+		testingContext.Fatalf("expected backfilled ShipyardSwap to increment ClosedWindowRevision to 3, got %d", gotRevision)
+	}
+
+	timeRangeStats.EnsureMinClosedWindowRevision(8)
+	timeRangeStats.EnsureMinClosedWindowRevision(4)
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 8 {
+		testingContext.Fatalf("expected EnsureMinClosedWindowRevision monotonic floor 8, got %d", gotRevision)
+	}
+}

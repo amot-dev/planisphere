@@ -15,6 +15,7 @@ type Triggers struct {
 	Journal           events.JournalEventSet
 	App               events.AppEventSet
 	EarliestTimestamp string
+	LatestTimestamp   string
 }
 
 // Matches reports whether triggers and observed share any journal or app event.

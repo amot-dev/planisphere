@@ -82,11 +82,14 @@ type ExpeditionExport struct {
 }
 
 // BundleFile represents one rendered output file ready to write directly or package into a zip archive.
+// When CanonicalJSONExpeditionID is positive and text/binary content is empty, WriteExportOutput
+// serializes the matching CanonicalJSONExportedAt snapshot (or rebuilds on miss) directly in Go.
 type BundleFile struct {
 	Name                      string `json:"name"`
 	ContentBase64             string `json:"contentBase64,omitempty"`
 	ContentText               string `json:"contentText,omitempty"`
 	CanonicalJSONExpeditionID int64  `json:"canonicalJsonExpeditionId,omitempty"`
+	CanonicalJSONExportedAt   string `json:"canonicalJsonExportedAt,omitempty"`
 }
 
 // MarshalCanonicalJSON serializes an ExpeditionExport snapshot as indented canonical JSON.
@@ -111,4 +114,3 @@ func validateBuilderDeps(databaseConnection *sql.DB, dependencies BuilderDeps) e
 	}
 	return nil
 }
-

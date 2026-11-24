@@ -65,7 +65,7 @@ func (app *App) executeJournalScan(emitProgress bool) (bool, bool, events.UITarg
 	hasNewEvents := scanResult.NewEvents > 0
 	var affectedTargets events.UITargetSet
 	if hasNewEvents {
-		affectedTargets = app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
+		affectedTargets = app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp, scanResult.LatestTimestamp)
 	}
 	return hasNewEvents, true, affectedTargets
 }
@@ -131,7 +131,7 @@ func (app *App) warmInitialStats() {
 
 // onJournalBatch runs after the live tailer stored new events.
 func (app *App) onJournalBatch(scanResult journal.Result) {
-	affectedTargets := app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
+	affectedTargets := app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp, scanResult.LatestTimestamp)
 	app.emitBackgroundDataChanged(0, affectedTargets)
 }
 
@@ -169,6 +169,20 @@ func (app *App) reevaluate(expeditionID int64) bool {
 		return false
 	}
 	changed, txError := expedition.ReevaluateTx(app.db, expeditionID)
+	if txError != nil {
+		log.Printf("reevaluate expedition %d: %v", expeditionID, txError)
+		return false
+	}
+	return changed
+}
+
+func (app *App) reevaluateForDB(targetDB *sql.DB, expeditionID int64) bool {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db != targetDB || targetDB == nil {
+		return false
+	}
+	changed, txError := expedition.ReevaluateTx(targetDB, expeditionID)
 	if txError != nil {
 		log.Printf("reevaluate expedition %d: %v", expeditionID, txError)
 		return false
@@ -249,7 +263,7 @@ func (app *App) maybeCatchUpEDD() {
 		if settingError := settings.MarkEDDDisconnectsRecovered(database); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}
-		affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp)
+		affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp, importResult.LatestTimestamp)
 		if affectedTargets.IsEmpty() {
 			affectedTargets = events.NewUITargetSet(events.UITargetIngest)
 		}

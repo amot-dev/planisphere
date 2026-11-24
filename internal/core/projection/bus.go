@@ -110,12 +110,19 @@ func (bus *Bus) PublishJournal(journalEvents events.JournalEventSet) events.UITa
 // along with the earliest timestamp among inserted events so windowed caches
 // can preserve closed historical ranges ending strictly before earliestTimestamp.
 func (bus *Bus) PublishJournalSince(journalEvents events.JournalEventSet, earliestTimestamp string) events.UITargetSet {
+	return bus.PublishJournalRange(journalEvents, earliestTimestamp, earliestTimestamp)
+}
+
+// PublishJournalRange dispatches newly ingested journal events across the bus
+// along with the earliest and latest timestamps observed in the batch.
+func (bus *Bus) PublishJournalRange(journalEvents events.JournalEventSet, earliestTimestamp, latestTimestamp string) events.UITargetSet {
 	if journalEvents.IsEmpty() {
 		return 0
 	}
 	return bus.Publish(Triggers{
 		Journal:           journalEvents,
 		EarliestTimestamp: earliestTimestamp,
+		LatestTimestamp:   latestTimestamp,
 	})
 }
 

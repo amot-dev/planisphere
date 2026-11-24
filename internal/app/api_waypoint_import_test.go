@@ -245,7 +245,7 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 	testApp.resolver.EDSMBase = mockServer.URL
 	testApp.resolver.HTTP = mockServer.Client()
 
-	testApp.runExpeditionResolutionWorker(createdExpedition.ID, false)
+	testApp.runExpeditionResolutionWorker(testApp.db, createdExpedition.ID, false)
 
 	if !offlineVerifiedBeforeFirstHTTP.Load() {
 		testingContext.Fatalf("expected offline batch resolution and single emit to finish before first online EDSM request")
@@ -273,7 +273,7 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 		testingContext.Fatalf("create offline expedition: %v", offlineCreateErr)
 	}
 	onlineRequests.Store(0)
-	testApp.runExpeditionResolutionWorker(offlineExpedition.ID, false)
+	testApp.runExpeditionResolutionWorker(testApp.db, offlineExpedition.ID, false)
 	offlineRows, _ := expedition.ListRows(testApp.db, offlineExpedition.ID)
 	emittedMutex.Lock()
 	offlinePlanEmits := planEmitCount
@@ -436,4 +436,63 @@ func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) 
 	}
 	close(stopReaders)
 	workers.Wait()
+}
+
+func TestOnlineResolutionAbortsAcrossDatabaseSwitch(testingContext *testing.T) {
+	tempDir := testingContext.TempDir()
+	testingContext.Setenv("XDG_CONFIG_HOME", tempDir)
+	testingContext.Setenv("APPDATA", tempDir)
+	testApp := setupTestApp(testingContext)
+	enteredHTTP, releaseHTTP, httpCalls := make(chan struct{}), make(chan struct{}), atomic.Int32{}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		if httpCalls.Add(1) == 1 {
+			close(enteredHTTP)
+			<-releaseHTTP
+		}
+		if _, writeErr := writer.Write([]byte(`{"name":"Deep One","id":1,"id64":9001,"coords":{"x":1,"y":2,"z":3}}`)); writeErr != nil {
+			testingContext.Errorf("write mock EDSM: %v", writeErr)
+		}
+	}))
+	testingContext.Cleanup(mockServer.Close)
+	testApp.resolver.EDSMBase, testApp.resolver.HTTP = mockServer.URL, mockServer.Client()
+	oldExp, oldErr := expedition.CreateWithWaypoints(testApp.db, "Old", "", []expedition.SeedWaypoint{{SystemName: "Deep One"}, {SystemName: "Deep Two"}})
+	if onlineErr := settings.SetOnlineLookups(testApp.db, true); onlineErr != nil || oldErr != nil {
+		testingContext.Fatalf("prepare old expedition: onlineErr=%v oldErr=%v", onlineErr, oldErr)
+	}
+	testApp.kickResolution(oldExp.ID, false)
+	<-enteredHTTP
+	_, switchErr := testApp.SetDatabasePath(filepath.Join(tempDir, "switched.sqlite"))
+	newExp, newErr := expedition.CreateWithWaypoints(testApp.db, "New", "", []expedition.SeedWaypoint{{SystemName: "Deep One"}})
+	close(releaseHTTP)
+	testApp.backgroundWg.Wait()
+	newRows, listErr := expedition.ListRows(testApp.db, newExp.ID)
+	if switchErr != nil || newErr != nil || listErr != nil || httpCalls.Load() != 1 || len(newRows) != 1 || newRows[0].CoordsSource != "" || newRows[0].HasCoords {
+		testingContext.Fatalf("expected switched DB untouched and 1 HTTP call, got switchErr=%v newErr=%v listErr=%v calls=%d rows=%+v", switchErr, newErr, listErr, httpCalls.Load(), newRows)
+	}
+}
+
+func TestAsyncResolutionVisitedAddressMatchEmitsStatsDomain(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	if _, execErr := testApp.db.Exec(`INSERT INTO journal_events (event_uid,timestamp,event,system_name,system_address,star_x,star_y,star_z,raw_json,ingested_at) VALUES ('addr-sol','2026-03-01T10:00:00Z','Location','Sol',10477373803,0,0,0,'{}','2026-03-01T10:00:00Z'),('addr-col','2026-03-01T11:00:00Z','FSDJump','Colonia',3238296097059,-9530.5,-910.28125,19808.125,'{}','2026-03-01T11:00:00Z'); INSERT INTO system_cache (name_key,system_name,system_address,edsm_id,x,y,z,source,fetched_at) VALUES ('eol prou rs-t d3-94','Eol Prou RS-T d3-94',3238296097059,43805,-9530.5,-910.28125,19808.125,'edsm','2026-03-01T10:00:00Z')`); execErr != nil {
+		testingContext.Fatalf("seed resolution fixtures: %v", execErr)
+	}
+	createdExp, createErr := testApp.CreateExpeditionWithWaypoints("Address Visit", "", []string{"Sol"})
+	addedRow, addErr := testApp.AddRow(createdExp.ID, 0, expedition.RowWaypoint, 0)
+	if createErr != nil || addErr != nil || testApp.StartExpedition(createdExp.ID, "2026-03-01T10:00:00Z", 0) != nil {
+		testingContext.Fatalf("prepare active expedition: createErr=%v addErr=%v", createErr, addErr)
+	}
+	aliasName, sawPlanAndStats := "Eol Prou RS-T d3-94", atomic.Bool{}
+	testApp.emit = func(eventName string, payload ...any) {
+		if eventName == EventDataChanged && len(payload) > 0 {
+			if changed, ok := payload[0].(DataChanged); ok && slices.Contains(changed.Domains, "plan") && slices.Contains(changed.Domains, "stats") {
+				sawPlanAndStats.Store(true)
+			}
+		}
+	}
+	updateErr := testApp.UpdateRow(expedition.RowPatch{ID: addedRow.ID, SystemName: &aliasName})
+	testApp.backgroundWg.Wait()
+	resolvedRow, rowErr := expedition.GetRow(testApp.db, addedRow.ID)
+	if updateErr != nil || rowErr != nil || resolvedRow.VisitedAt != "2026-03-01T11:00:00Z" || !sawPlanAndStats.Load() {
+		testingContext.Fatalf("expected visited match and plan+stats emit, got updateErr=%v rowErr=%v row=%+v sawBoth=%v", updateErr, rowErr, resolvedRow, sawPlanAndStats.Load())
+	}
 }

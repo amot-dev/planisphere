@@ -134,6 +134,7 @@ func (app *App) buildLocalWaypointUpdate(
 }
 
 func (app *App) resolvePendingRowsLocally(
+	targetDB *sql.DB,
 	expeditionID int64,
 	candidateRows []expedition.Row,
 	systemNames []string,
@@ -146,10 +147,10 @@ func (app *App) resolvePendingRowsLocally(
 
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
-	if app.db == nil || app.resolver == nil {
+	if app.db != targetDB || targetDB == nil || app.resolver == nil {
 		return result
 	}
-	result.onlineLookups = settings.OnlineLookups(app.db)
+	result.onlineLookups = settings.OnlineLookups(targetDB)
 	localByKey, resolveError := app.resolver.ResolveLocalBatch(systemNames)
 	if resolveError != nil {
 		log.Printf("batch resolve expedition %d waypoints locally: %v", expeditionID, resolveError)
@@ -163,7 +164,7 @@ func (app *App) resolvePendingRowsLocally(
 			localUpdates = append(localUpdates, update)
 		}
 	}
-	if applyError := expedition.ApplyResolvedWaypointsTx(app.db, localUpdates); applyError != nil {
+	if applyError := expedition.ApplyResolvedWaypointsTx(targetDB, localUpdates); applyError != nil {
 		log.Printf("store locally resolved waypoints for expedition %d: %v", expeditionID, applyError)
 		return result
 	}
@@ -177,18 +178,19 @@ func (app *App) resolvePendingRowsLocally(
 	return result
 }
 
-func (app *App) listExpeditionRowsForResolution(expeditionID int64) ([]expedition.Row, bool) {
+func (app *App) listExpeditionRowsForResolution(targetDB *sql.DB, expeditionID int64) ([]expedition.Row, bool) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
-	if app.db == nil {
+	if app.db != targetDB || targetDB == nil {
 		return nil, false
 	}
-	rows, listError := expedition.ListRows(app.db, expeditionID)
+	rows, listError := expedition.ListRows(targetDB, expeditionID)
 	return rows, listError == nil
 }
 
 func (app *App) resolvePendingRowsOnline(
 	workerContext context.Context,
+	targetDB *sql.DB,
 	candidateRows []expedition.Row,
 	resolvedRowIDs map[int64]bool,
 	allowRetry bool,
@@ -197,10 +199,10 @@ func (app *App) resolvePendingRowsOnline(
 		if resolvedRowIDs[rowItem.ID] || !isRowOnlineEligible(rowItem, allowRetry) {
 			continue
 		}
-		if workerContext.Err() != nil {
+		if workerContext.Err() != nil || !app.isCurrentDB(targetDB) {
 			break
 		}
-		resolvedCoords, updated := app.resolveRowSync(rowItem, true)
+		resolvedCoords, updated := app.resolveRowSyncForDB(targetDB, rowItem, true)
 		if updated {
 			anyUpdated = true
 			if resolvedCoords {
@@ -211,7 +213,7 @@ func (app *App) resolvePendingRowsOnline(
 	return anyCoords, anyUpdated
 }
 
-func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry bool) {
+func (app *App) runExpeditionResolutionWorker(targetDB *sql.DB, expeditionID int64, allowRetry bool) {
 	defer func() {
 		app.resolveMu.Lock()
 		delete(app.resolvingExpeditions, expeditionID)
@@ -222,7 +224,7 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 	if workerContext.Err() != nil {
 		return
 	}
-	rows, loaded := app.listExpeditionRowsForResolution(expeditionID)
+	rows, loaded := app.listExpeditionRowsForResolution(targetDB, expeditionID)
 	if !loaded {
 		return
 	}
@@ -231,23 +233,27 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 		return
 	}
 
-	localBatch := app.resolvePendingRowsLocally(expeditionID, candidateRows, systemNames, allowRetry)
+	localBatch := app.resolvePendingRowsLocally(targetDB, expeditionID, candidateRows, systemNames, allowRetry)
 	if localBatch.anyUpdated && !app.isShuttingDown() {
-		if localBatch.anyCoords {
-			app.reevaluate(expeditionID)
+		reevalChanged := localBatch.anyCoords && app.reevaluateForDB(targetDB, expeditionID)
+		if reevalChanged {
+			app.publishAppForDB(targetDB, expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+		} else {
+			app.publishAppForDB(targetDB, expeditionID, events.AppExpeditionPlanChanged)
 		}
-		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	}
 	if !localBatch.onlineLookups {
 		return
 	}
 
-	anyOnlineCoords, anyOnlineUpdated := app.resolvePendingRowsOnline(workerContext, candidateRows, localBatch.resolvedRowIDs, allowRetry)
+	anyOnlineCoords, anyOnlineUpdated := app.resolvePendingRowsOnline(workerContext, targetDB, candidateRows, localBatch.resolvedRowIDs, allowRetry)
 	if anyOnlineUpdated && !app.isShuttingDown() {
-		if anyOnlineCoords {
-			app.reevaluate(expeditionID)
+		reevalChanged := anyOnlineCoords && app.reevaluateForDB(targetDB, expeditionID)
+		if reevalChanged {
+			app.publishAppForDB(targetDB, expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+		} else {
+			app.publishAppForDB(targetDB, expeditionID, events.AppExpeditionPlanChanged)
 		}
-		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	}
 }
 
@@ -260,6 +266,10 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	if expeditionID == 0 {
 		return
 	}
+	targetDB := app.currentDB()
+	if targetDB == nil {
+		return
+	}
 	app.resolveMu.Lock()
 	if app.resolvingExpeditions[expeditionID] {
 		app.resolveMu.Unlock()
@@ -269,7 +279,7 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	app.resolveMu.Unlock()
 
 	if !app.spawnBackground(func() {
-		app.runExpeditionResolutionWorker(expeditionID, allowRetry)
+		app.runExpeditionResolutionWorker(targetDB, expeditionID, allowRetry)
 	}) {
 		app.resolveMu.Lock()
 		delete(app.resolvingExpeditions, expeditionID)
@@ -277,7 +287,7 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	}
 }
 
-func (app *App) lookupRowSystemInfo(systemName string, online bool) (*edsm.Info, error, bool) {
+func (app *App) lookupRowSystemInfo(targetDB *sql.DB, systemName string, online bool) (*edsm.Info, error, bool) {
 	if online {
 		lookupContext := app.context()
 		select {
@@ -289,8 +299,15 @@ func (app *App) lookupRowSystemInfo(systemName string, online bool) (*edsm.Info,
 			<-app.resolutionSemaphore
 		}()
 		app.dbMu.RLock()
-		coordinateResolver := app.resolver
+		var coordinateResolver *edsm.Resolver
+		dbMatches := app.db == targetDB && targetDB != nil
+		if dbMatches {
+			coordinateResolver = app.resolver
+		}
 		app.dbMu.RUnlock()
+		if !dbMatches {
+			return nil, nil, false
+		}
 		if coordinateResolver == nil {
 			return nil, nil, true
 		}
@@ -301,18 +318,22 @@ func (app *App) lookupRowSystemInfo(systemName string, online bool) (*edsm.Info,
 	var resolvedInfo *edsm.Info
 	var lookupError error
 	app.dbMu.RLock()
-	coordinateResolver := app.resolver
-	if coordinateResolver != nil {
-		resolvedInfo, lookupError = coordinateResolver.ResolveLocal(systemName)
+	dbMatches := app.db == targetDB && targetDB != nil
+	if dbMatches && app.resolver != nil {
+		resolvedInfo, lookupError = app.resolver.ResolveLocal(systemName)
 	}
 	app.dbMu.RUnlock()
-	if resolvedInfo == nil && lookupError == nil {
+	if !dbMatches || (resolvedInfo == nil && lookupError == nil) {
 		return nil, nil, false
 	}
 	return resolvedInfo, lookupError, true
 }
 
 func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoords bool, updated bool) {
+	return app.resolveRowSyncForDB(app.currentDB(), rowItem, online)
+}
+
+func (app *App) resolveRowSyncForDB(targetDB *sql.DB, rowItem expedition.Row, online bool) (resolvedCoords bool, updated bool) {
 	app.resolveMu.Lock()
 	if app.resolving[rowItem.ID] {
 		app.resolveMu.Unlock()
@@ -327,7 +348,7 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 		app.resolveMu.Unlock()
 	}()
 
-	resolvedInfo, lookupError, shouldStore := app.lookupRowSystemInfo(rowItem.SystemName, online)
+	resolvedInfo, lookupError, shouldStore := app.lookupRowSystemInfo(targetDB, rowItem.SystemName, online)
 	if !shouldStore {
 		return false, false
 	}
@@ -346,10 +367,10 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
-	if app.db == nil {
+	if app.db != targetDB || targetDB == nil {
 		return false, false
 	}
-	if setCoordsError := expedition.SetRowCoords(app.db, rowItem.ID, rowItem.SystemName, systemAddress, edsmID, positionCoords, source); setCoordsError != nil {
+	if setCoordsError := expedition.SetRowCoords(targetDB, rowItem.ID, rowItem.SystemName, systemAddress, edsmID, positionCoords, source); setCoordsError != nil {
 		log.Printf("store coords: %v", setCoordsError)
 		return false, false
 	}
@@ -358,14 +379,16 @@ func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoo
 	return positionCoords != nil, true
 }
 
-func (app *App) resolveRowAsync(rowItem expedition.Row, online bool) {
+func (app *App) resolveRowAsync(targetDB *sql.DB, rowItem expedition.Row, online bool) {
 	app.spawnBackground(func() {
-		resolvedCoords, updated := app.resolveRowSync(rowItem, online)
-		if updated {
-			if resolvedCoords {
-				app.reevaluate(rowItem.ExpeditionID)
+		resolvedCoords, updated := app.resolveRowSyncForDB(targetDB, rowItem, online)
+		if updated && !app.isShuttingDown() {
+			reevalChanged := resolvedCoords && app.reevaluateForDB(targetDB, rowItem.ExpeditionID)
+			if reevalChanged {
+				app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+			} else {
+				app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 			}
-			app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 		}
 	})
 }

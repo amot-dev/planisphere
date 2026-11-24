@@ -19,6 +19,7 @@ import (
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
+	"planisphere/internal/exporter"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
@@ -108,6 +109,9 @@ type App struct {
 	syncPauseMu     sync.Mutex
 	liveSyncPaused  bool
 	deferredTargets events.UITargetSet
+
+	exportSnapshotMu   sync.Mutex
+	lastExportSnapshot *exporter.ExpeditionExport
 
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
@@ -324,6 +328,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	})
 	app.watcher.SetPaused(app.isLiveSyncPaused())
 	app.clearDeferredTargets()
+	app.clearExportSnapshot()
 	app.resolver = app.newCoordinateResolver(dbConn)
 	app.gec = gec.NewCatalog(dbConn)
 	app.wireProjections(dbConn)
@@ -376,6 +381,7 @@ func (app *App) shutdown(ctx context.Context) {
 	tempDBPath := app.debugTempDBPath
 	app.debugTempDBPath = ""
 	app.dbMu.Unlock()
+	app.clearExportSnapshot()
 
 	if remainingWatcher != nil {
 		remainingWatcher.Stop()

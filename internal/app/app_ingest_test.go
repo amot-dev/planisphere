@@ -294,6 +294,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 		NewEvents:         1,
 		Events:            journal.NewEventSet(journal.EventFSDJump),
 		EarliestTimestamp: "2026-04-03T12:00:00Z",
+		LatestTimestamp:   "2026-04-03T12:00:00Z",
 	})
 	testApp.publishBackgroundApp(0, events.AppSettingsChanged)
 	deferredChanges, pendingAfterBackground := takeEmitted()

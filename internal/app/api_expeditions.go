@@ -206,27 +206,27 @@ func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID 
 func (app *App) UpdateRow(patch expedition.RowPatch) error {
 	var changed bool
 	var rowItem expedition.Row
+	targetDB := app.currentDB()
 	if err := func() error {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
 		if readyError := app.ready(); readyError != nil {
 			return readyError
 		}
+		targetDB = app.db
 		var updateError error
-		changed, updateError = expedition.UpdateRowTx(app.db, patch)
+		changed, updateError = expedition.UpdateRowTx(targetDB, patch)
 		if updateError != nil {
 			return updateError
 		}
 		var getError error
-		rowItem, getError = expedition.GetRow(app.db, patch.ID)
+		rowItem, getError = expedition.GetRow(targetDB, patch.ID)
 		if getError != nil {
 			return getError
 		}
-		if changed {
-			if rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
-				if poiName := app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress); poiName != "" {
-					rowItem.POIName = poiName
-				}
+		if changed && rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
+			if poiName := app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress); poiName != "" {
+				rowItem.POIName = poiName
 			}
 		}
 		return nil
@@ -234,18 +234,18 @@ func (app *App) UpdateRow(patch expedition.RowPatch) error {
 		return err
 	}
 	if changed {
-		reevalChanged := app.reevaluate(rowItem.ExpeditionID)
+		reevalChanged := app.reevaluateForDB(targetDB, rowItem.ExpeditionID)
 		if rowItem.SystemName != "" {
-			app.resolveRowAsync(rowItem, true)
+			app.resolveRowAsync(targetDB, rowItem, true)
 		}
 		if reevalChanged {
-			app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+			app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
 		} else {
-			app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+			app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 		}
 		return nil
 	}
-	app.publishApp(rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+	app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
