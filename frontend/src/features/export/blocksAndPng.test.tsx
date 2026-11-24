@@ -2,19 +2,41 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  buildCartographicsBreakdownRows,
+  buildExobiologyBreakdownRows,
+  buildRealizationLossRows,
+} from '../../domain/telemetryBreakdowns'
+import { DetailsBlock } from './blocks/DetailsBlock'
 import { ExportBlockRenderer } from './blocks/ExportBlockRenderer'
+import { HighlightsBlock } from './blocks/HighlightsBlock'
+import { SummaryBlock } from './blocks/SummaryBlock'
+import { WaypointsBlock } from './blocks/WaypointsBlock'
 import { EXPORT_CARD_CSS, EXPORT_CARD_WIDTH } from './exportCardStyles'
 import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
+import { buildSampleExportData } from './exportTestFixtures'
 import { defaultMetricsForSection, ExportBlockConfig } from './exportTypes'
+import { buildHighlightsViewModel } from './exportViewModels'
 import {
   buildPngBundleFileName,
   buildSvgForeignObjectDocument,
   renderCartBlockToPngBase64,
 } from './pngRenderer'
-import { buildSampleExportData } from './exportTestFixtures'
 
 describe('export visual blocks and PNG SVG serializer', () => {
   it('renders Summary with inline Career Diff and Details with empty-selection guard', () => {
+    for (const blockComponent of [
+      ExportBlockRenderer,
+      SummaryBlock,
+      DetailsBlock,
+      WaypointsBlock,
+      HighlightsBlock,
+    ]) {
+      expect((blockComponent as unknown as { $$typeof?: symbol }).$$typeof).toBe(
+        Symbol.for('react.memo'),
+      )
+    }
+
     const data = buildSampleExportData()
     const summaryMarkup = renderToStaticMarkup(
       createElement(ExportBlockRenderer, {
@@ -35,9 +57,23 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(summaryMarkup).toContain('Organic Samples')
     expect(summaryMarkup).toContain('NET PROFIT:')
     expect(summaryMarkup).toContain('~129,000,000 Cr')
+    expect(summaryMarkup).toContain('ed-exp-grid-top')
+    expect(summaryMarkup).toContain('ed-exp-grid-bottom')
+    expect(summaryMarkup).toContain('ed-exp-strip-bottom')
+    expect(summaryMarkup).not.toContain('#2e1f12')
+    expect(summaryMarkup).not.toContain('padding-bottom')
+    expect(summaryMarkup).not.toContain('padding-top')
+    expect(EXPORT_CARD_CSS).toContain('.ed-exp-strip-bottom')
+    expect(EXPORT_CARD_CSS).toContain('border-bottom: none;')
     expect(summaryMarkup).not.toContain('ESTIMATED PROFIT:')
     expect(summaryMarkup).not.toContain('POST')
     expect(summaryMarkup).not.toContain('career')
+
+    const cartoRows = buildCartographicsBreakdownRows(data.expedition.metrics)
+    expect(cartoRows).toHaveLength(3)
+    expect(cartoRows[2].tooltip).toContain('30 of 34 mapped bodies')
+    expect(buildExobiologyBreakdownRows(data.expedition.metrics)).toHaveLength(2)
+    expect(buildRealizationLossRows(data.expedition.realization)).toHaveLength(6)
 
     const emptyDetailsMarkup = renderToStaticMarkup(
       createElement(ExportBlockRenderer, {
@@ -223,6 +259,20 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(waypointsUnsafeColor).not.toContain('red;bad:1')
     expect(waypointsUnsafeColor).toContain('#FF7100')
     expect(waypointsUnsafeColor).toContain('#3d2816')
+
+    const highlightsUnsafeViewModel = buildHighlightsViewModel(nonEstimatedAndUnsafeData, {
+      kind: 'highlights',
+      depth: 3,
+      selectedCards: ['mostLucrative'],
+      lucrativeMetric: 'estimated',
+      distanceMetric: 'total',
+    })
+    const sanitizedEntryColors = highlightsUnsafeViewModel.boards[0].entries.map(
+      (entry) => entry.modeColor,
+    )
+    expect(sanitizedEntryColors).not.toContain('#zzzzzz')
+    expect(sanitizedEntryColors).not.toContain('red;bad:1')
+    expect(sanitizedEntryColors).toContain('#FF7100')
   })
 
   it('gates Summary NET PROFIT strip strictly on Full Expedition Combined including ship-only expeditions', () => {

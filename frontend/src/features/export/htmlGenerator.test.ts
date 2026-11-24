@@ -50,9 +50,16 @@ describe('htmlGenerator', () => {
 
     const html = generateSelfContainedHtmlReport(data, cartItems)
 
-    // Summary commander strip item and separate-mode left accent border.
+    // Summary commander strip item, CSS spacing/strip classes, and separate-mode left accent border.
     expect(html).toContain('<span>CMDR: <strong class="mono">CMDR Horizon</strong></span>')
     expect(html).toContain('<div class="kpi-val amber mono">~26,000,000 Cr</div>')
+    expect(html).toContain('<div class="kpi-grid kpi-grid-top cols-4">')
+    expect(html).toContain('<div class="kpi-grid kpi-grid-bottom cols-4">')
+    expect(html).toContain('<div class="strip-bar strip-bar-bottom">')
+    expect(html).toContain('.strip-bar-bottom{border-top:1px solid #2e1f12;border-bottom:none}')
+    expect(html).not.toContain('style="padding-bottom:10px"')
+    expect(html).not.toContain('style="padding-top:0"')
+    expect(html).not.toContain('style="border-top:1px solid #2e1f12"')
     expect(html).toContain('NET PROFIT: <strong class="mono cyan">~129,000,000 Cr</strong>')
     expect(html).toContain('<section id="section-2" class="card" style="border-left:3px solid #00D2FF">')
     expect(html).toContain('<section id="section-6" class="card" style="border-left:3px solid #00D2FF">')

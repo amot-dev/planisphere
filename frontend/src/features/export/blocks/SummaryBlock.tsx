@@ -1,21 +1,11 @@
+import { memo } from 'react'
+import { ExpeditionExportData, SummaryBlockConfig } from '../exportTypes'
 import {
-  formatCredits,
-  formatInt,
-  formatLoss,
-  formatLy,
-} from '../../../domain/galacticTime'
-import {
-  CareerDiffItem,
-  formatEstimatedCarrierCredits,
-  resolveFormattedNetProfit,
-  resolveTelemetryContext,
-  sanitizeExportHexColor,
-} from '../exportMetrics'
-import {
-  CareerDiffDisplay,
-  ExpeditionExportData,
-  SummaryBlockConfig,
-} from '../exportTypes'
+  buildSummaryViewModel,
+  SummaryKpiTileViewModel,
+  SummaryRouteSegment,
+  TelemetryHeaderViewModel,
+} from '../exportViewModels'
 
 /** Props for the self-contained Summary export card component. */
 export interface SummaryBlockProps {
@@ -27,261 +17,76 @@ export interface SummaryBlockProps {
  * SummaryBlock renders the lean fixed-layout expedition overview card with
  * optional inline Career Diff delta pills when viewing Full Expedition Combined.
  */
-export function SummaryBlock({
-  exportData,
-  config,
-}: SummaryBlockProps) {
-  const context = resolveTelemetryContext(
-    exportData,
-    config.scope,
-    config.selectedModeId,
-  )
-  const diffById = new Map<CareerDiffItem['id'], CareerDiffItem>()
-  if (config.careerDiff !== 'hide' && context.careerDiff) {
-    for (const item of context.careerDiff) {
-      diffById.set(item.id, item)
-    }
-  }
-  const showCarrierTile =
-    context.carrierCost != null &&
-    (context.metrics.carrierJumps > 0 || context.carrierCost.totalCost > 0)
-  const formattedNetProfit = resolveFormattedNetProfit(context)
-  const safeModeColor = context.modeBadge
-    ? sanitizeExportHexColor(context.modeBadge.modeColor)
-    : null
-  const accentStyle = safeModeColor
-    ? { borderLeftColor: safeModeColor, borderLeftWidth: '3px' }
+export const SummaryBlock = memo(function SummaryBlock({ exportData, config }: SummaryBlockProps) {
+  const viewModel = buildSummaryViewModel(exportData, config)
+  const accentStyle = viewModel.header.modeBadge
+    ? { borderLeftColor: viewModel.header.modeBadge.safeColor, borderLeftWidth: '3px' }
     : undefined
 
   return (
     <div className="ed-exp-root" style={accentStyle}>
-      <div className="ed-exp-header">
-        <div>
-          <div className="ed-exp-eyebrow">
-            SUMMARY // {context.scopeLabel}
-          </div>
-          <div className="ed-exp-title-row">
-            <h2 className="ed-exp-title">{context.routeTitle}</h2>
-            {context.modeBadge && safeModeColor && (
-              <span
-                className="ed-exp-badge ed-exp-mono"
-                style={{
-                  borderColor: safeModeColor,
-                  color: safeModeColor,
-                }}
-              >
-                {context.modeBadge.modeName}
-              </span>
-            )}
-            {context.inSystem && (
-              <span className="ed-exp-badge ed-exp-badge-cyan ed-exp-mono">IN SYSTEM</span>
-            )}
-          </div>
-        </div>
-        <div className="ed-exp-dates ed-exp-mono">
-          <div>
-            {context.fromGalactic} → {context.toGalactic}
-          </div>
-          {context.durationLabel && (
-            <div className="ed-exp-muted">ELAPSED: {context.durationLabel}</div>
-          )}
-        </div>
+      <SummaryCardHeader header={viewModel.header} />
+      <SummaryRouteStrip segments={viewModel.routeSegments} />
+      <div className="ed-exp-grid ed-exp-grid-top ed-exp-cols-4">
+        {viewModel.topRowTiles.map((tile) => (
+          <SummaryKpiTile key={tile.id} tile={tile} />
+        ))}
       </div>
-
-      <SummaryRouteStrip
-        visitedWaypoints={context.visitedWaypoints}
-        plannedWaypoints={context.plannedWaypoints}
-        distinctRegionCount={context.distinctRegionCount}
-        shipsFlown={context.shipsFlown}
-        commanders={exportData.commanders}
-      />
-
-      <div className="ed-exp-grid ed-exp-cols-4" style={{ paddingBottom: '10px' }}>
-        <div className="ed-exp-tile ed-exp-left-amber">
-          <div className="ed-exp-kpi-label">Distance Travelled</div>
-          <div className="ed-exp-kpi-value ed-exp-amber ed-exp-mono">
-            {formatLy(context.metrics.distanceLy, 1)}
-          </div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            Ship {formatLy(context.derived.shipDistanceLy, 1)} · Carrier{' '}
-            {formatLy(context.metrics.carrierPassengerLy, 1)}
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('distanceLy')}
-            displayMode={config.careerDiff}
-            formatValue={(value) => formatLy(value, 1)}
-          />
-        </div>
-
-        <div className="ed-exp-tile ed-exp-left-amber">
-          <div className="ed-exp-kpi-label">Hyperspace Jumps</div>
-          <div className="ed-exp-kpi-value ed-exp-mono">{formatInt(context.metrics.jumps)}</div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            {context.derived.avgJumpRangeLy != null
-              ? `${formatLy(context.derived.avgJumpRangeLy, 1)} avg`
-              : 'No piloted jumps'}
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('jumps')}
-            displayMode={config.careerDiff}
-            formatValue={formatInt}
-          />
-        </div>
-
-        <div className="ed-exp-tile ed-exp-left-cyan">
-          <div className="ed-exp-kpi-label">Estimated Exploration</div>
-          <div className="ed-exp-kpi-value ed-exp-cyan ed-exp-mono">
-            {formatCredits(context.derived.combinedEstimatedCredits)}
-          </div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            Carto {formatCredits(context.metrics.scanValueTotal)} · Exo{' '}
-            {formatCredits(context.metrics.organicValueTotal)}
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('estimatedValue')}
-            displayMode={config.careerDiff}
-            formatValue={formatCredits}
-          />
-        </div>
-
-        <div className="ed-exp-tile ed-exp-left-emerald">
-          <div className="ed-exp-kpi-label">Realized Net Value</div>
-          <div className="ed-exp-kpi-value ed-exp-amber ed-exp-mono">
-            {formatCredits(context.realization.totalRealized)}
-          </div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            {context.realization.pendingValue > 0
-              ? `Pending ${formatCredits(context.realization.pendingValue)}`
-              : `Losses ${formatLoss(context.derived.totalLossesCredits)}`}
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('realizedValue')}
-            displayMode={config.careerDiff}
-            formatValue={formatCredits}
-          />
-        </div>
+      <div className={`ed-exp-grid ed-exp-grid-bottom ed-exp-cols-${viewModel.bottomRowCols}`}>
+        {viewModel.bottomRowTiles.map((tile) => (
+          <SummaryKpiTile key={tile.id} tile={tile} />
+        ))}
       </div>
-
-      <div
-        className={`ed-exp-grid ${showCarrierTile ? 'ed-exp-cols-4' : 'ed-exp-cols-3'}`}
-        style={{ paddingTop: 0 }}
-      >
-        <div className="ed-exp-tile ed-exp-left-cyan">
-          <div className="ed-exp-kpi-label">Bodies Scanned</div>
-          <div className="ed-exp-kpi-value ed-exp-cyan ed-exp-mono">
-            {formatInt(context.metrics.bodiesScanned)}
-          </div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            {formatInt(context.metrics.firstDiscoveries)} first discovered
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('bodiesScanned')}
-            displayMode={config.careerDiff}
-            formatValue={formatInt}
-          />
-        </div>
-
-        <div className="ed-exp-tile ed-exp-left-cyan">
-          <div className="ed-exp-kpi-label">Bodies Mapped</div>
-          <div className="ed-exp-kpi-value ed-exp-cyan ed-exp-mono">
-            {formatInt(context.metrics.bodiesMapped)}
-          </div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            {formatInt(context.metrics.firstMapped)} first mapped
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('bodiesMapped')}
-            displayMode={config.careerDiff}
-            formatValue={formatInt}
-          />
-        </div>
-
-        <div className="ed-exp-tile ed-exp-left-emerald">
-          <div className="ed-exp-kpi-label">Organic Samples</div>
-          <div className="ed-exp-kpi-value ed-exp-emerald ed-exp-mono">
-            {formatInt(context.metrics.organicSamples)}
-          </div>
-          <div className="ed-exp-kpi-sub ed-exp-mono">
-            {formatInt(context.metrics.firstLogged)} first logged
-          </div>
-          <InlineCareerDiff
-            item={diffById.get('organicSamples')}
-            displayMode={config.careerDiff}
-            formatValue={formatInt}
-          />
-        </div>
-
-        {showCarrierTile && context.carrierCost && (
-          <div className="ed-exp-tile ed-exp-left-amber">
-            <div className="ed-exp-kpi-label">Carrier</div>
-            <div className="ed-exp-kpi-value ed-exp-amber ed-exp-mono">
-              {formatEstimatedCarrierCredits(
-                context.carrierCost.totalCost,
-                Boolean(context.carrierCost.totalEstimated),
-              )}
-            </div>
-            <div className="ed-exp-kpi-sub ed-exp-mono">
-              {formatInt(context.metrics.carrierJumps)} jumps ·{' '}
-              {formatLy(context.metrics.carrierDistanceLy, 1)} ·{' '}
-              {formatInt(context.metrics.tritiumUsed ?? 0)} t
-            </div>
-          </div>
-        )}
-      </div>
-
-      {formattedNetProfit && (
-        <div className="ed-exp-strip" style={{ borderTop: '1px solid #2e1f12' }}>
+      {viewModel.netProfit && (
+        <div className="ed-exp-strip ed-exp-strip-bottom">
           <span>
             NET PROFIT:{' '}
-            <strong
-              className={`ed-exp-mono ${formattedNetProfit.isNegative ? 'ed-exp-danger' : 'ed-exp-cyan'}`}
-            >
-              {formattedNetProfit.text}
+            <strong className={`ed-exp-mono ${viewModel.netProfit.isNegative ? 'ed-exp-danger' : 'ed-exp-cyan'}`}>
+              {viewModel.netProfit.text}
             </strong>
           </span>
         </div>
       )}
-
       <div className="ed-exp-footer ed-exp-mono">
         <span>PLANISPHERE // ASTROMETRIC TELEMETRY TERMINAL</span>
-        <span>EXPORTED {exportData.exportedAtGalactic}</span>
+        <span>EXPORTED {viewModel.header.exportedAtGalactic}</span>
+      </div>
+    </div>
+  )
+})
+
+function SummaryCardHeader({ header }: { header: TelemetryHeaderViewModel }) {
+  return (
+    <div className="ed-exp-header">
+      <div>
+        <div className="ed-exp-eyebrow">
+          {header.eyebrowLabel} // {header.scopeLabel}
+        </div>
+        <div className="ed-exp-title-row">
+          <h2 className="ed-exp-title">{header.routeTitle}</h2>
+          {header.modeBadge && (
+            <span
+              className="ed-exp-badge ed-exp-mono"
+              style={{ borderColor: header.modeBadge.safeColor, color: header.modeBadge.safeColor }}
+            >
+              {header.modeBadge.modeName}
+            </span>
+          )}
+          {header.inSystem && <span className="ed-exp-badge ed-exp-badge-cyan ed-exp-mono">IN SYSTEM</span>}
+        </div>
+      </div>
+      <div className="ed-exp-dates ed-exp-mono">
+        <div>
+          {header.fromGalactic} → {header.toGalactic}
+        </div>
+        {header.durationLabel && <div className="ed-exp-muted">ELAPSED: {header.durationLabel}</div>}
       </div>
     </div>
   )
 }
 
-function SummaryRouteStrip({
-  visitedWaypoints,
-  plannedWaypoints,
-  distinctRegionCount,
-  shipsFlown,
-  commanders,
-}: {
-  visitedWaypoints: number | null
-  plannedWaypoints: number | null
-  distinctRegionCount: number | null
-  shipsFlown: string[]
-  commanders: string[]
-}) {
-  const segments: Array<{ key: string; label: string; value: string }> = []
-  if (commanders.length > 0) {
-    segments.push({ key: 'cmdr', label: 'CMDR', value: commanders.join(', ') })
-  }
-  if (visitedWaypoints != null && plannedWaypoints != null) {
-    segments.push({
-      key: 'wp',
-      label: 'WAYPOINTS',
-      value: `${visitedWaypoints} / ${plannedWaypoints}`,
-    })
-  }
-  if (distinctRegionCount != null) {
-    segments.push({ key: 'reg', label: 'REGIONS', value: String(distinctRegionCount) })
-  }
-  if (shipsFlown.length > 0) {
-    segments.push({ key: 'ships', label: 'SHIPS', value: shipsFlown.join(', ') })
-  }
+function SummaryRouteStrip({ segments }: { segments: SummaryRouteSegment[] }) {
   if (segments.length === 0) return null
-
   return (
     <div className="ed-exp-strip">
       {segments.map((segment, index) => (
@@ -294,27 +99,14 @@ function SummaryRouteStrip({
   )
 }
 
-function InlineCareerDiff({
-  item,
-  displayMode,
-  formatValue,
-}: {
-  item: CareerDiffItem | undefined
-  displayMode: CareerDiffDisplay
-  formatValue: (value: number) => string
-}) {
-  if (!item || displayMode === 'hide') return null
-  const parts: string[] = []
-  if (displayMode === 'absolute' || displayMode === 'both') {
-    parts.push(`PRE ${formatValue(item.baseline)}`)
-  }
-  if (displayMode === 'percentage' || displayMode === 'both') {
-    const growth = item.isNewBaseline
-      ? 'NEW'
-      : item.growthPercent != null
-        ? `+${item.growthPercent.toFixed(1)}%`
-        : '—'
-    parts.push(growth)
-  }
-  return <div className="ed-exp-diff ed-exp-mono">{parts.join(' · ')}</div>
+function SummaryKpiTile({ tile }: { tile: SummaryKpiTileViewModel }) {
+  const valueToneClass = tile.valueTone === 'main' ? '' : `ed-exp-${tile.valueTone} `
+  return (
+    <div className={`ed-exp-tile ed-exp-left-${tile.borderAccent}`}>
+      <div className="ed-exp-kpi-label">{tile.label}</div>
+      <div className={`ed-exp-kpi-value ${valueToneClass}ed-exp-mono`}>{tile.value}</div>
+      <div className="ed-exp-kpi-sub ed-exp-mono">{tile.subValue}</div>
+      {tile.careerDiffText && <div className="ed-exp-diff ed-exp-mono">{tile.careerDiffText}</div>}
+    </div>
+  )
 }

@@ -1,5 +1,5 @@
 import { stats } from '../../api/models'
-import { formatCredits } from '../../domain/galacticTime'
+import { buildExobiologyBreakdownRows } from '../../domain/telemetryBreakdowns'
 
 /**
  * ExobiologyValueBreakdownProps defines the discovery metrics and styling
@@ -20,22 +20,21 @@ export function ExobiologyValueBreakdown({
   className = '',
   boldBonuses = false,
 }: ExobiologyValueBreakdownProps) {
+  const mainValueClass = 'font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0'
   const bonusValueClass = boldBonuses
     ? 'font-mono-tabular text-ed-emerald font-bold whitespace-nowrap shrink-0'
     : 'font-mono-tabular text-ed-emerald whitespace-nowrap shrink-0'
 
   return (
     <div className={className}>
-      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
-        <span className="truncate">Base Organic Value</span>
-        <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
-          {formatCredits(metrics.organicValueBase)}
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
-        <span className="truncate">First Logged Bonus</span>
-        <span className={bonusValueClass}>+{formatCredits(metrics.organicValueBonus)}</span>
-      </div>
+      {buildExobiologyBreakdownRows(metrics).map((row) => (
+        <div key={row.label} className="flex items-center justify-between gap-2 text-ed-text-muted">
+          <span className="truncate">{row.label}</span>
+          <span className={row.tone === 'emerald' ? bonusValueClass : mainValueClass}>
+            {row.value}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

@@ -98,12 +98,18 @@ export const EXPORT_CARD_CSS = `
   font-size: 11px;
   color: #d6c7b8;
 }
+.ed-exp-strip-bottom {
+  border-top: 1px solid #2e1f12;
+  border-bottom: none;
+}
 .ed-exp-sep { color: #3d2816; }
 .ed-exp-grid {
   display: grid;
   gap: 10px;
   padding: 14px 18px;
 }
+.ed-exp-grid-top { padding-bottom: 10px; }
+.ed-exp-grid-bottom { padding-top: 0; }
 .ed-exp-cols-1 { grid-template-columns: 1fr; }
 .ed-exp-cols-2 { grid-template-columns: repeat(2, 1fr); }
 .ed-exp-cols-3 { grid-template-columns: repeat(3, 1fr); }

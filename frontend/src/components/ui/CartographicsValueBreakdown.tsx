@@ -1,9 +1,5 @@
 import { stats } from '../../api/models'
-import {
-  formatCredits,
-  formatEfficiencyBonusLabel,
-  formatEfficiencyBonusTooltip,
-} from '../../domain/galacticTime'
+import { buildCartographicsBreakdownRows } from '../../domain/telemetryBreakdowns'
 
 /**
  * CartographicsValueBreakdownProps defines the discovery metrics and styling
@@ -27,31 +23,23 @@ export function CartographicsValueBreakdown({
   className = '',
   boldBonuses = false,
 }: CartographicsValueBreakdownProps) {
+  const mainValueClassName = 'font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0'
   const bonusValueClassName = `font-mono-tabular text-ed-cyan${boldBonuses ? ' font-bold' : ''} whitespace-nowrap shrink-0`
 
   return (
     <div className={className}>
-      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
-        <span className="truncate">Base Scans and Mapping</span>
-        <span className="font-mono-tabular text-ed-text-main whitespace-nowrap shrink-0">
-          {formatCredits(metrics.scanValueBase)}
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-2 text-ed-text-muted">
-        <span className="truncate">First Discovered / Mapped</span>
-        <span className={bonusValueClassName}>+{formatCredits(metrics.scanValueBonus)}</span>
-      </div>
-      <div
-        className="flex items-center justify-between gap-2 text-ed-text-muted"
-        title={formatEfficiencyBonusTooltip(metrics.efficientMappings, metrics.bodiesMapped)}
-      >
-        <span className="truncate">
-          {formatEfficiencyBonusLabel(metrics.efficientMappings, metrics.bodiesMapped)}
-        </span>
-        <span className={bonusValueClassName}>
-          +{formatCredits(metrics.scanValueEfficiencyBonus)}
-        </span>
-      </div>
+      {buildCartographicsBreakdownRows(metrics).map((row) => (
+        <div
+          key={row.label}
+          className="flex items-center justify-between gap-2 text-ed-text-muted"
+          title={row.tooltip}
+        >
+          <span className="truncate">{row.label}</span>
+          <span className={row.tone === 'cyan' ? bonusValueClassName : mainValueClassName}>
+            {row.value}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

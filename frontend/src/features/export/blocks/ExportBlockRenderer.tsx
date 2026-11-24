@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import {
   ExpeditionExportData,
   ExportBlockConfig,
@@ -17,29 +18,18 @@ export interface ExportBlockRendererProps {
  * ExportBlockRenderer dispatches any ExportBlockConfig to its matching
  * self-contained cockpit card component for both Live Preview and PNG export.
  */
-export function ExportBlockRenderer({
+export const ExportBlockRenderer = memo(function ExportBlockRenderer({
   exportData,
   config,
 }: ExportBlockRendererProps) {
   switch (config.kind) {
     case 'summary':
-      return (
-        <SummaryBlock
-          exportData={exportData}
-          config={config}
-        />
-      )
+      return <SummaryBlock exportData={exportData} config={config} />
     case 'details':
-      return (
-        <DetailsBlock
-          exportData={exportData}
-          config={config}
-        />
-      )
+      return <DetailsBlock exportData={exportData} config={config} />
     case 'waypoints':
       return <WaypointsBlock exportData={exportData} config={config} />
     case 'highlights':
       return <HighlightsBlock exportData={exportData} config={config} />
   }
-}
-
+})
