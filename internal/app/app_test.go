@@ -17,6 +17,7 @@ import (
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
 
 func setupTestApp(testingContext *testing.T) *App {
@@ -787,7 +788,7 @@ func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *
 
 	spawned := debugApp.spawnBackground(func() {
 		close(workerStarted)
-		<-debugApp.ctx.Done()
+		<-debugApp.context().Done()
 
 		debugApp.dbMu.RLock()
 		var workerError error
@@ -856,9 +857,9 @@ func TestExternalLinksSettings(testingContext *testing.T) {
 	if initialError != nil {
 		testingContext.Fatalf("GetSettings initial: %v", initialError)
 	}
-	if initialSettings.ExternalLinkInara != ExternalLinkOn ||
-		initialSettings.ExternalLinkEDSM != ExternalLinkIfNoGEC ||
-		initialSettings.ExternalLinkGEC != ExternalLinkOn {
+	if initialSettings.ExternalLinkInara != settings.ExternalLinkOn ||
+		initialSettings.ExternalLinkEDSM != settings.ExternalLinkIfNoGEC ||
+		initialSettings.ExternalLinkGEC != settings.ExternalLinkOn {
 		testingContext.Fatalf(
 			"unexpected default external link settings: inara=%q edsm=%q gec=%q",
 			initialSettings.ExternalLinkInara,
@@ -871,9 +872,9 @@ func TestExternalLinksSettings(testingContext *testing.T) {
 	if updateError != nil {
 		testingContext.Fatalf("SetExternalLinks: %v", updateError)
 	}
-	if updatedSettings.ExternalLinkInara != ExternalLinkOff ||
-		updatedSettings.ExternalLinkEDSM != ExternalLinkOn ||
-		updatedSettings.ExternalLinkGEC != ExternalLinkOff {
+	if updatedSettings.ExternalLinkInara != settings.ExternalLinkOff ||
+		updatedSettings.ExternalLinkEDSM != settings.ExternalLinkOn ||
+		updatedSettings.ExternalLinkGEC != settings.ExternalLinkOff {
 		testingContext.Fatalf(
 			"unexpected persisted external link settings: inara=%q edsm=%q gec=%q",
 			updatedSettings.ExternalLinkInara,
@@ -886,9 +887,9 @@ func TestExternalLinksSettings(testingContext *testing.T) {
 	if normalizeError != nil {
 		testingContext.Fatalf("SetExternalLinks normalize: %v", normalizeError)
 	}
-	if normalizedSettings.ExternalLinkInara != ExternalLinkOn ||
-		normalizedSettings.ExternalLinkEDSM != ExternalLinkIfNoGEC ||
-		normalizedSettings.ExternalLinkGEC != ExternalLinkOff {
+	if normalizedSettings.ExternalLinkInara != settings.ExternalLinkOn ||
+		normalizedSettings.ExternalLinkEDSM != settings.ExternalLinkIfNoGEC ||
+		normalizedSettings.ExternalLinkGEC != settings.ExternalLinkOff {
 		testingContext.Fatalf(
 			"unexpected normalized external link settings: inara=%q edsm=%q gec=%q",
 			normalizedSettings.ExternalLinkInara,

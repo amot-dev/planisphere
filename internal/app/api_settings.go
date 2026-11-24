@@ -18,13 +18,6 @@ import (
 	"planisphere/internal/version"
 )
 
-// External link visibility modes preserved for package-internal tests.
-const (
-	ExternalLinkOn      = settings.ExternalLinkOn
-	ExternalLinkOff     = settings.ExternalLinkOff
-	ExternalLinkIfNoGEC = settings.ExternalLinkIfNoGEC
-)
-
 // Settings is the user-configurable application state.
 type Settings struct {
 	SetupCompleted              bool               `json:"setupCompleted"`
@@ -108,12 +101,13 @@ func (app *App) BrowseDBPath() (string, error) {
 	app.dbMu.RLock()
 	app.waitStartupLocked()
 	currentDBPath := app.dbPath
+	dialogContext := app.contextLocked()
 	app.dbMu.RUnlock()
 	if currentDBPath != "" {
 		defaultDir = filepath.Dir(currentDBPath)
 		defaultFilename = filepath.Base(currentDBPath)
 	}
-	return runtime.SaveFileDialog(app.ctx, runtime.SaveDialogOptions{
+	return runtime.SaveFileDialog(dialogContext, runtime.SaveDialogOptions{
 		Title:                fmt.Sprintf("Select %s Database Location", version.ProductName),
 		DefaultDirectory:     defaultDir,
 		DefaultFilename:      defaultFilename,
@@ -186,10 +180,11 @@ func (app *App) SetupConfigureJournals(dir string) (IngestStatus, error) {
 	if err := app.saveJournalDirSetting(dir); err != nil {
 		return IngestStatus{}, err
 	}
-	hasNewEvents := app.runScan()
+	setupCompleted := app.isSetupCompleted()
+	_, _, affectedTargets := app.executeJournalScan(false)
 	app.startConfiguredWatcher()
-	if !hasNewEvents {
-		app.emitDataChanged(0, events.NewUITargetSet(events.UITargetIngest))
+	if setupCompleted {
+		app.emitDataChanged(0, affectedTargets.Union(events.NewUITargetSet(events.UITargetIngest, events.UITargetSettings)))
 	}
 	return app.GetIngestStatus()
 }
@@ -208,7 +203,7 @@ func (app *App) CompleteSetup() (Settings, error) {
 			return saveError
 		}
 		if app.watcher != nil && (app.ctx == nil || app.ctx.Err() == nil) {
-			activeWatcher, watchContext, configuredDir = app.watcher, app.ctx, settings.JournalDir(app.db, journal.DefaultJournalDir())
+			activeWatcher, watchContext, configuredDir = app.watcher, app.contextLocked(), settings.JournalDir(app.db, journal.DefaultJournalDir())
 		}
 		if settings.OnlineLookups(app.db) && app.gec != nil && app.gec.Count() == 0 {
 			shouldRefresh = true
@@ -240,7 +235,7 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 
 // BrowseEDDiscoveryDB opens a file picker to select an EDDUser.sqlite file.
 func (app *App) BrowseEDDiscoveryDB() (string, error) {
-	return runtime.OpenFileDialog(app.ctx, runtime.OpenDialogOptions{
+	return runtime.OpenFileDialog(app.context(), runtime.OpenDialogOptions{
 		Title: "Select EDDiscovery SQLite Database (EDDUser.sqlite)",
 		Filters: []runtime.FileFilter{
 			{DisplayName: "SQLite Database (*.sqlite, *.db)", Pattern: "*.sqlite;*.db"},
@@ -252,7 +247,8 @@ func (app *App) BrowseEDDiscoveryDB() (string, error) {
 // EDDiscovery SQLite database (EDDUser.sqlite) into our self-contained SQLite
 // archive so deleted older .log files are permanently recovered.
 func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
-	if readyError := app.withReadyReadLock(nil); readyError != nil {
+	importContext, readyError := app.readyContext()
+	if readyError != nil {
 		return 0, readyError
 	}
 
@@ -273,7 +269,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
 
-	importResult, importError := eddiscovery.Import(app.ctx, ingester, eddPath, func(current, total, files int, stage string) {
+	importResult, importError := eddiscovery.Import(importContext, ingester, eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError != nil {
@@ -311,8 +307,9 @@ func (app *App) BrowseJournalDir() (string, error) {
 	if app.db != nil {
 		defaultDir = settings.JournalDir(app.db, defaultDir)
 	}
+	dialogContext := app.contextLocked()
 	app.dbMu.RUnlock()
-	return runtime.OpenDirectoryDialog(app.ctx, runtime.OpenDialogOptions{
+	return runtime.OpenDirectoryDialog(dialogContext, runtime.OpenDialogOptions{
 		Title:            "Select Elite Dangerous Journal Directory",
 		DefaultDirectory: defaultDir,
 	})

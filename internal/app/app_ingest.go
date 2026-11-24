@@ -20,7 +20,7 @@ import (
 // re-evaluates active expeditions when new events are ingested, and returns
 // whether any new events were stored.
 func (app *App) runScan() bool {
-	hasNewEvents, didStartScan, affectedTargets := app.executeJournalScan()
+	hasNewEvents, didStartScan, affectedTargets := app.executeJournalScan(true)
 	if !didStartScan {
 		return false
 	}
@@ -31,18 +31,21 @@ func (app *App) runScan() bool {
 	return hasNewEvents
 }
 
-func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
+func (app *App) executeJournalScan(emitProgress bool) (bool, bool, events.UITargetSet) {
 	if !app.scanning.CompareAndSwap(false, true) {
 		return false, false, 0
 	}
 	defer app.scanning.Store(false)
-	app.emit(EventIngest, nil)
+	if emitProgress {
+		app.emit(EventIngest, nil)
+	}
 	app.ingestMu.RLock()
 	defer app.ingestMu.RUnlock()
 	app.dbMu.RLock()
 	ingester := app.ingester
 	database := app.db
 	activeWatcher := app.watcher
+	scanContext := app.contextLocked()
 	dir := ""
 	if ingester != nil && database != nil {
 		dir = settings.JournalDir(database, journal.DefaultJournalDir())
@@ -57,7 +60,17 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 			app.emit(EventSyncPending, false)
 		}
 	}
-	scanResult, scanError := ingester.ScanDir(app.ctx, dir)
+	scanResult, scanError := ingester.ScanDir(scanContext, dir)
+	app.recordJournalScanOutcome(database, scanResult, scanError)
+	hasNewEvents := scanResult.NewEvents > 0
+	var affectedTargets events.UITargetSet
+	if hasNewEvents {
+		affectedTargets = app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
+	}
+	return hasNewEvents, true, affectedTargets
+}
+
+func (app *App) recordJournalScanOutcome(database *sql.DB, scanResult journal.Result, scanError error) {
 	if scanError != nil {
 		app.setError(scanError.Error())
 	} else if len(scanResult.Errors) > 0 {
@@ -72,12 +85,6 @@ func (app *App) executeJournalScan() (bool, bool, events.UITargetSet) {
 		}
 	}
 	app.dbMu.RUnlock()
-	hasNewEvents := scanResult.NewEvents > 0
-	var affectedTargets events.UITargetSet
-	if hasNewEvents {
-		affectedTargets = app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp)
-	}
-	return hasNewEvents, true, affectedTargets
 }
 
 // warmInitialStats pre-populates the all-time and active expedition statistics
@@ -185,6 +192,7 @@ func (app *App) maybeRefreshGEC() {
 		lastFetched = settings.GECFetchedAt(app.db)
 	}
 	gecCatalog := app.gec
+	refreshContext := app.contextLocked()
 	app.dbMu.RUnlock()
 	if !online || gecCatalog == nil {
 		return
@@ -194,7 +202,7 @@ func (app *App) maybeRefreshGEC() {
 			return
 		}
 	}
-	if _, refreshError := gecCatalog.Refresh(app.ctx); refreshError != nil {
+	if _, refreshError := gecCatalog.Refresh(refreshContext); refreshError != nil {
 		log.Printf("gec refresh: %v", refreshError)
 		return
 	}
@@ -215,6 +223,7 @@ func (app *App) maybeCatchUpEDD() {
 	app.dbMu.RLock()
 	database := app.db
 	ingester := app.ingester
+	importContext := app.contextLocked()
 	app.dbMu.RUnlock()
 	if database == nil || ingester == nil {
 		return
@@ -233,7 +242,7 @@ func (app *App) maybeCatchUpEDD() {
 		return
 	}
 	defer app.emitEDDProgress(false, 0, 0, 0, "")
-	importResult, importError := eddiscovery.Import(app.ctx, ingester, eddPath, func(current, total, files int, stage string) {
+	importResult, importError := eddiscovery.Import(importContext, ingester, eddPath, func(current, total, files int, stage string) {
 		app.emitEDDProgress(stage != "Complete", current, total, files, stage)
 	})
 	if importError == nil {

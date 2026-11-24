@@ -114,11 +114,15 @@ func (app *App) RefreshGEC() (int, error) {
 	}
 	defer app.gecRefreshing.Store(false)
 
+	refreshContext, readyError := app.readyContext()
+	if readyError != nil {
+		return 0, readyError
+	}
 	gecCatalog, catalogError := app.readyGECCatalog()
 	if catalogError != nil {
 		return 0, catalogError
 	}
-	refreshCount, refreshError := gecCatalog.Refresh(app.ctx)
+	refreshCount, refreshError := gecCatalog.Refresh(refreshContext)
 	if refreshError != nil {
 		return 0, refreshError
 	}
@@ -139,6 +143,6 @@ func (app *App) OpenURL(link string) error {
 	if parseError != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
 		return fmt.Errorf("refusing to open %q", link)
 	}
-	runtime.BrowserOpenURL(app.ctx, link)
+	runtime.BrowserOpenURL(app.context(), link)
 	return nil
 }

@@ -15,6 +15,9 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
+	"planisphere/internal/projections"
+	"planisphere/internal/projections/realization"
+	"planisphere/internal/projections/stats"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
@@ -25,6 +28,19 @@ type exportTestFixture struct {
 	databaseConnection    *sql.DB
 	bus                   *projection.Bus
 	expeditionProjections *expedition.Projections
+}
+
+func newTestProjections(databaseConnection *sql.DB, bus *projection.Bus) *expedition.Projections {
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, bus)
+	salesLedger := realization.NewSalesLedger(databaseConnection, bus)
+	return &expedition.Projections{
+		Arrivals:       projections.NewSystemArrivals(databaseConnection, bus),
+		VisitCounts:    projections.NewSystemVisitCounts(databaseConnection, bus, recoveredJumps),
+		ShipHistory:    projections.NewShipHistory(databaseConnection, bus),
+		TimeRangeStats: stats.NewTimeRangeStats(databaseConnection, bus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
+		SalesLedger:    salesLedger,
+		RecoveredJumps: recoveredJumps,
+	}
 }
 
 func setupExportFixture(testingContext *testing.T) *exportTestFixture {
@@ -41,7 +57,7 @@ func setupExportFixture(testingContext *testing.T) *exportTestFixture {
 	})
 
 	bus := projection.NewBus()
-	expeditionProjections := expedition.NewProjections(databaseConnection, bus)
+	expeditionProjections := newTestProjections(databaseConnection, bus)
 	return &exportTestFixture{
 		databaseConnection:    databaseConnection,
 		bus:                   bus,

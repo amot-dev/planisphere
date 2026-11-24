@@ -11,6 +11,9 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/projection"
+	"planisphere/internal/projections"
+	"planisphere/internal/projections/realization"
+	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
@@ -21,7 +24,16 @@ import (
 
 func newExpeditionProjections(databaseConnection *sql.DB) (*projection.Bus, *expedition.Projections) {
 	eventBus := projection.NewBus()
-	return eventBus, expedition.NewProjections(databaseConnection, eventBus)
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	return eventBus, &expedition.Projections{
+		Arrivals:       projections.NewSystemArrivals(databaseConnection, eventBus),
+		VisitCounts:    projections.NewSystemVisitCounts(databaseConnection, eventBus, recoveredJumps),
+		ShipHistory:    projections.NewShipHistory(databaseConnection, eventBus),
+		TimeRangeStats: stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
+		SalesLedger:    salesLedger,
+		RecoveredJumps: recoveredJumps,
+	}
 }
 
 func openExpeditionTestDB(testingContext *testing.T) *sql.DB {

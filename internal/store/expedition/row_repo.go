@@ -727,3 +727,87 @@ func SetRowPOIIfBlank(queryer db.Queryer, rowID int64, poiName string) error {
 	)
 	return execError
 }
+
+// ResolvedWaypointUpdate carries resolved coordinates and optional POI metadata for a waypoint row.
+type ResolvedWaypointUpdate struct {
+	RowID         int64
+	SystemName    string
+	SystemAddress int64
+	EDSMID        int64
+	Pos           *reference.Vec3
+	Source        string
+	POIName       string
+}
+
+// ApplyResolvedWaypointsTx persists a batch of locally resolved waypoint coordinates
+// and optional blank-POI backfills inside a single transaction.
+func ApplyResolvedWaypointsTx(dbConn *sql.DB, updates []ResolvedWaypointUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		statement, prepareError := transaction.Prepare(`UPDATE expedition_rows
+			SET system_address = ?, edsm_id = ?, x = ?, y = ?, z = ?, coords_source = ?,
+			    poi_name = CASE WHEN ? != '' AND (poi_name IS NULL OR TRIM(poi_name) = '') THEN ? ELSE poi_name END
+			WHERE id = ? AND system_name = ?`)
+		if prepareError != nil {
+			return fmt.Errorf("prepare resolved waypoint update: %w", prepareError)
+		}
+		defer statement.Close()
+
+		for _, update := range updates {
+			var xCoord, yCoord, zCoord, addressValue, edsmIDValue any
+			if update.Pos != nil {
+				xCoord, yCoord, zCoord = update.Pos.X, update.Pos.Y, update.Pos.Z
+			}
+			if update.SystemAddress != 0 {
+				addressValue = update.SystemAddress
+			}
+			if update.EDSMID != 0 {
+				edsmIDValue = update.EDSMID
+			}
+			trimmedPOI := strings.TrimSpace(update.POIName)
+			if _, execError := statement.Exec(
+				addressValue, edsmIDValue, xCoord, yCoord, zCoord, update.Source,
+				trimmedPOI, trimmedPOI, update.RowID, update.SystemName,
+			); execError != nil {
+				return fmt.Errorf("apply resolved waypoint %d: %w", update.RowID, execError)
+			}
+		}
+		return nil
+	})
+}
+
+// RowPOIUpdate pairs a waypoint row ID and expected system name with a resolved POI label to backfill when blank.
+type RowPOIUpdate struct {
+	RowID      int64
+	SystemName string
+	POIName    string
+}
+
+// SetMissingRowPOIsTx populates blank poi_name columns across updates inside a single transaction.
+func SetMissingRowPOIsTx(dbConn *sql.DB, updates []RowPOIUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
+		statement, prepareError := transaction.Prepare(
+			`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND system_name = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`,
+		)
+		if prepareError != nil {
+			return fmt.Errorf("prepare missing poi update: %w", prepareError)
+		}
+		defer statement.Close()
+
+		for _, update := range updates {
+			trimmedPOI := strings.TrimSpace(update.POIName)
+			if trimmedPOI == "" {
+				continue
+			}
+			if _, execError := statement.Exec(trimmedPOI, update.RowID, update.SystemName); execError != nil {
+				return fmt.Errorf("update poi name for row %d: %w", update.RowID, execError)
+			}
+		}
+		return nil
+	})
+}

@@ -29,7 +29,7 @@ func (app *App) GetExpeditionExportData(expeditionID int64) (exporter.Expedition
 func (app *App) PickExportSavePath(defaultFilename, fileExt string) (string, error) {
 	cleanedExtension := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileExt)), ".")
 	dialogFilters := exportDialogFilters(cleanedExtension)
-	return runtime.SaveFileDialog(app.ctx, runtime.SaveDialogOptions{
+	return runtime.SaveFileDialog(app.context(), runtime.SaveDialogOptions{
 		Title:                fmt.Sprintf("Export %s Expedition", version.ProductName),
 		DefaultFilename:      strings.TrimSpace(defaultFilename),
 		CanCreateDirectories: true,

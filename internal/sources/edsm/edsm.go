@@ -1,5 +1,5 @@
 // Package edsm resolves star system coordinates, first from the local
-// journal archive, then from a shared cache, then from the EDSM API.
+// journal archive via injected callbacks, then from a shared cache, then from the EDSM API.
 package edsm
 
 import (
@@ -33,13 +33,15 @@ var ErrorNotFound = errors.New("system not found")
 
 // Resolver looks up systems.
 type Resolver struct {
-	DB         *sql.DB
-	HTTP       *http.Client
-	EDSMBase   string
-	Online     func() bool // whether online lookups are allowed
-	mu         sync.Mutex
-	lastCall   time.Time
-	minSpacing time.Duration
+	DB                 *sql.DB
+	HTTP               *http.Client
+	EDSMBase           string
+	Online             func() bool // whether online lookups are allowed
+	JournalLookup      func(systemName string) (*Info, error)
+	JournalBatchLookup func(systemNames []string) (map[string]*Info, error)
+	mu                 sync.Mutex
+	lastCall           time.Time
+	minSpacing         time.Duration
 }
 
 // NewResolver creates a resolver using the public EDSM API.
@@ -53,30 +55,103 @@ func NewResolver(dbConn *sql.DB, online func() bool) *Resolver {
 	}
 }
 
-// ResolveLocal looks a system up offline from the local journal archive and
+// ResolveLocal looks a system up offline from the injected journal lookup and
 // shared system cache, returning (nil, nil) when no cached coordinates exist.
 func (resolver *Resolver) ResolveLocal(name string) (*Info, error) {
 	normalizedName := strings.Join(strings.Fields(name), " ")
 	if normalizedName == "" {
 		return nil, nil
 	}
-	if journalInfo, journalError := FromJournal(resolver.DB, normalizedName); journalError != nil || journalInfo != nil {
-		if journalInfo != nil {
-			// Enrich with a cached EDSM id when available.
-			if cachedInfo, _ := resolver.fromCache(normalizedName); cachedInfo != nil && cachedInfo.EDSMID != 0 {
-				journalInfo.EDSMID = cachedInfo.EDSMID
-			}
+	if resolver.JournalLookup != nil {
+		journalSystem, journalError := resolver.JournalLookup(normalizedName)
+		if journalError != nil {
+			return nil, journalError
 		}
-		return journalInfo, journalError
+		if journalSystem != nil {
+			cachedSystem, cacheError := resolver.fromCache(normalizedName)
+			if cacheError != nil {
+				return nil, cacheError
+			}
+			resolvedCopy := *journalSystem
+			if cachedSystem != nil && cachedSystem.EDSMID != 0 {
+				resolvedCopy.EDSMID = cachedSystem.EDSMID
+			}
+			return &resolvedCopy, nil
+		}
 	}
-	cachedInfo, cacheError := resolver.fromCache(normalizedName)
+	cachedSystem, cacheError := resolver.fromCache(normalizedName)
 	if cacheError != nil {
 		return nil, cacheError
 	}
-	if cachedInfo != nil && cachedInfo.Pos != nil {
-		return cachedInfo, nil
+	if cachedSystem != nil && cachedSystem.Pos != nil {
+		return cachedSystem, nil
 	}
 	return nil, nil
+}
+
+// ResolveLocalBatch looks up multiple systems offline in chunked batches from
+// the injected journal lookup and shared system_cache, keyed by lowercased
+// whitespace-normalized system name.
+func (resolver *Resolver) ResolveLocalBatch(names []string) (map[string]*Info, error) {
+	uniqueNames, uniqueKeys := deduplicateSystemNames(names)
+	if len(uniqueNames) == 0 {
+		return map[string]*Info{}, nil
+	}
+	journalByKey, journalError := resolver.lookupJournalBatch(uniqueNames)
+	if journalError != nil {
+		return nil, journalError
+	}
+	cachedByKey, cacheError := resolver.fromCacheBatch(uniqueKeys)
+	if cacheError != nil {
+		return nil, cacheError
+	}
+
+	resolvedByKey := make(map[string]*Info, len(uniqueKeys))
+	for _, systemKey := range uniqueKeys {
+		if journalSystem := journalByKey[systemKey]; journalSystem != nil {
+			resolvedCopy := *journalSystem
+			if cachedSystem := cachedByKey[systemKey]; cachedSystem != nil && cachedSystem.EDSMID != 0 {
+				resolvedCopy.EDSMID = cachedSystem.EDSMID
+			}
+			resolvedByKey[systemKey] = &resolvedCopy
+			continue
+		}
+		if cachedSystem := cachedByKey[systemKey]; cachedSystem != nil && cachedSystem.Pos != nil {
+			resolvedByKey[systemKey] = cachedSystem
+		}
+	}
+	return resolvedByKey, nil
+}
+
+func (resolver *Resolver) lookupJournalBatch(uniqueNames []string) (map[string]*Info, error) {
+	resolvedByKey := make(map[string]*Info, len(uniqueNames))
+	if resolver.JournalBatchLookup != nil {
+		for chunkStart := 0; chunkStart < len(uniqueNames); chunkStart += systemCacheChunkSize {
+			chunkEnd := min(chunkStart+systemCacheChunkSize, len(uniqueNames))
+			chunkMap, lookupError := resolver.JournalBatchLookup(uniqueNames[chunkStart:chunkEnd])
+			if lookupError != nil {
+				return nil, lookupError
+			}
+			for systemKey, journalSystem := range chunkMap {
+				if journalSystem != nil {
+					resolvedByKey[normalizeSystemCacheKey(systemKey)] = journalSystem
+				}
+			}
+		}
+		return resolvedByKey, nil
+	}
+	if resolver.JournalLookup != nil {
+		for _, systemName := range uniqueNames {
+			journalSystem, lookupError := resolver.JournalLookup(systemName)
+			if lookupError != nil {
+				return nil, lookupError
+			}
+			if journalSystem != nil {
+				resolvedByKey[normalizeSystemCacheKey(systemName)] = journalSystem
+			}
+		}
+	}
+	return resolvedByKey, nil
 }
 
 // Resolve looks a system up (journal -> cache -> EDSM).
@@ -95,7 +170,9 @@ func (resolver *Resolver) Resolve(ctx context.Context, name string) (*Info, erro
 	if edsmError != nil {
 		return nil, edsmError
 	}
-	resolver.store(name, edsmInfo)
+	if storeError := resolver.store(name, edsmInfo); storeError != nil {
+		return nil, storeError
+	}
 	if edsmInfo.Pos == nil {
 		return edsmInfo, ErrorNotFound
 	}

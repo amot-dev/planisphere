@@ -129,31 +129,33 @@ func normalizeCarrierPlotParameters(carrierType string, capacityUsed int, depotT
 	return carrierType, capacityUsed, depotTritium
 }
 
-// PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination,
-// falling back cleanly to manual mode on unknown systems, offline mode, or API timeouts.
-func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string, depotTritium int) (CarrierRouteResult, error) {
-	var (
-		canonicalSource string
-		canonicalDest   string
-		resolvedDepot   int
-		parentCtx       context.Context
-	)
+func (app *App) resolveCarrierPlotInputs(source, destination string, depotTritium int) (string, string, int, context.Context) {
 	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
 	app.waitStartupLocked()
-	canonicalSource = edsm.CanonicalSystemName(app.db, source)
-	canonicalDest = edsm.CanonicalSystemName(app.db, destination)
+	resolvedDepot := depotTritium
+	if app.db == nil {
+		return strings.TrimSpace(source), strings.TrimSpace(destination), resolvedDepot, app.contextLocked()
+	}
+	canonicalLookup := func(systemName string) (string, error) {
+		return replay.QueryCanonicalSystemName(app.db, systemName)
+	}
+	canonicalSource := edsm.CanonicalSystemName(app.db, source, canonicalLookup)
+	canonicalDest := edsm.CanonicalSystemName(app.db, destination, canonicalLookup)
 	if depotTritium <= 0 && app.carrierState != nil {
 		if snapshot, snapshotError := app.carrierState.LatestStats(); snapshotError == nil {
 			if depotInfo, depotError := replay.QueryCarrierDepotInfo(app.db, snapshot); depotError == nil {
 				resolvedDepot = depotInfo.DepotTritium
 			}
 		}
-	} else {
-		resolvedDepot = depotTritium
 	}
-	parentCtx = app.ctx
-	app.dbMu.RUnlock()
+	return canonicalSource, canonicalDest, resolvedDepot, app.contextLocked()
+}
 
+// PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination,
+// falling back cleanly to manual mode on unknown systems, offline mode, or API timeouts.
+func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string, depotTritium int) (CarrierRouteResult, error) {
+	canonicalSource, canonicalDest, resolvedDepot, parentCtx := app.resolveCarrierPlotInputs(source, destination, depotTritium)
 	carrierType, capacityUsed, resolvedDepot = normalizeCarrierPlotParameters(carrierType, capacityUsed, resolvedDepot)
 	routeResult := CarrierRouteResult{
 		Origin:       canonicalSource,
@@ -174,9 +176,6 @@ func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, c
 		return routeResult, nil
 	}
 
-	if parentCtx == nil {
-		parentCtx = context.Background()
-	}
 	requestCtx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
 	defer cancel()
 

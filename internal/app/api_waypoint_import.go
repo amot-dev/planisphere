@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"planisphere/internal/core/events"
+	"planisphere/internal/sources/edsm"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
 )
@@ -28,7 +30,7 @@ type WaypointImportFile struct {
 // BrowseWaypointImportFile opens a native file picker for a plain-text or CSV
 // waypoint list and returns its filename and UTF-8 contents (empty when cancelled).
 func (app *App) BrowseWaypointImportFile() (WaypointImportFile, error) {
-	selectedPath, dialogError := runtime.OpenFileDialog(app.ctx, runtime.OpenDialogOptions{
+	selectedPath, dialogError := runtime.OpenFileDialog(app.context(), runtime.OpenDialogOptions{
 		Title: "Select Waypoint List or Spansh CSV",
 		Filters: []runtime.FileFilter{
 			{DisplayName: "Waypoint Lists (*.txt, *.csv)", Pattern: "*.txt;*.csv"},
@@ -64,49 +66,66 @@ func readWaypointImportFile(filePath string) (WaypointImportFile, error) {
 	}, nil
 }
 
-// resolveSeedWaypointLocally populates coordinates from the local journal or
-// cache and any matching GEC POI name without performing network requests.
-// Caller must hold app.dbMu.RLock.
-func (app *App) resolveSeedWaypointLocally(normalizedName string) expedition.SeedWaypoint {
-	seedWaypoint := expedition.SeedWaypoint{SystemName: normalizedName}
-	if app.resolver != nil {
-		if localInfo, resolveError := app.resolver.ResolveLocal(normalizedName); resolveError == nil && localInfo != nil {
-			if localInfo.Name != "" {
-				seedWaypoint.SystemName = localInfo.Name
-			}
-			seedWaypoint.SystemAddress = localInfo.SystemAddress
-			seedWaypoint.EDSMID = localInfo.EDSMID
-			if localInfo.Pos != nil {
-				seedWaypoint.HasCoords = true
-				seedWaypoint.X = localInfo.Pos.X
-				seedWaypoint.Y = localInfo.Pos.Y
-				seedWaypoint.Z = localInfo.Pos.Z
-				seedWaypoint.CoordsSource = localInfo.Source
-			}
+func (app *App) buildUniqueSeedWaypoint(uniqueName string, localSystem *edsm.Info) expedition.SeedWaypoint {
+	seedWaypoint := expedition.SeedWaypoint{SystemName: uniqueName}
+	if localSystem != nil {
+		if localSystem.Name != "" {
+			seedWaypoint.SystemName = localSystem.Name
+		}
+		seedWaypoint.SystemAddress = localSystem.SystemAddress
+		seedWaypoint.EDSMID = localSystem.EDSMID
+		if localSystem.Pos != nil {
+			seedWaypoint.HasCoords = true
+			seedWaypoint.X, seedWaypoint.Y, seedWaypoint.Z = localSystem.Pos.X, localSystem.Pos.Y, localSystem.Pos.Z
+			seedWaypoint.CoordsSource = localSystem.Source
 		}
 	}
 	seedWaypoint.POIName = app.lookupGECPOIName(seedWaypoint.SystemName, seedWaypoint.SystemAddress)
 	return seedWaypoint
 }
 
-// buildSeedWaypoints normalizes systemNames and deduplicates offline lookups so
-// revisited systems query SQLite and GEC only once. Caller must hold app.dbMu.RLock.
+// buildSeedWaypoints normalizes systemNames, resolves unique systems in a single
+// offline batch against the journal archive and system_cache, and populates cached
+// GEC POI names without per-system SQL queries. Caller must hold app.dbMu.RLock.
 func (app *App) buildSeedWaypoints(systemNames []string) ([]expedition.SeedWaypoint, bool) {
-	seedWaypoints := make([]expedition.SeedWaypoint, 0, len(systemNames))
-	resolvedByKey := make(map[string]expedition.SeedWaypoint, len(systemNames))
-	hasUnresolvedCoords := false
-
+	lookupKeys := make([]string, 0, len(systemNames))
+	uniqueNames := make([]string, 0, len(systemNames))
+	uniqueKeys := make([]string, 0, len(systemNames))
+	seenKeys := make(map[string]struct{}, len(systemNames))
 	for _, rawSystemName := range systemNames {
 		normalizedName := strings.Join(strings.Fields(rawSystemName), " ")
 		if normalizedName == "" {
 			continue
 		}
 		lookupKey := strings.ToLower(normalizedName)
-		seedWaypoint, alreadyResolved := resolvedByKey[lookupKey]
-		if !alreadyResolved {
-			seedWaypoint = app.resolveSeedWaypointLocally(normalizedName)
-			resolvedByKey[lookupKey] = seedWaypoint
+		lookupKeys = append(lookupKeys, lookupKey)
+		if _, exists := seenKeys[lookupKey]; !exists {
+			seenKeys[lookupKey] = struct{}{}
+			uniqueNames = append(uniqueNames, normalizedName)
+			uniqueKeys = append(uniqueKeys, lookupKey)
 		}
+	}
+	if len(lookupKeys) == 0 {
+		return []expedition.SeedWaypoint{}, false
+	}
+	var localByKey map[string]*edsm.Info
+	if app.resolver != nil {
+		resolvedBatch, resolveError := app.resolver.ResolveLocalBatch(uniqueNames)
+		if resolveError != nil {
+			log.Printf("batch resolve seed waypoints locally: %v", resolveError)
+		} else {
+			localByKey = resolvedBatch
+		}
+	}
+	seedByKey := make(map[string]expedition.SeedWaypoint, len(uniqueNames))
+	for index, uniqueName := range uniqueNames {
+		lookupKey := uniqueKeys[index]
+		seedByKey[lookupKey] = app.buildUniqueSeedWaypoint(uniqueName, localByKey[lookupKey])
+	}
+	seedWaypoints := make([]expedition.SeedWaypoint, 0, len(lookupKeys))
+	hasUnresolvedCoords := false
+	for _, lookupKey := range lookupKeys {
+		seedWaypoint := seedByKey[lookupKey]
 		if !seedWaypoint.HasCoords {
 			hasUnresolvedCoords = true
 		}
@@ -145,4 +164,3 @@ func (app *App) CreateExpeditionWithWaypoints(name, description string, systemNa
 	app.publishApp(createdExpedition.ID, events.AppExpeditionPlanChanged)
 	return createdExpedition, nil
 }
-

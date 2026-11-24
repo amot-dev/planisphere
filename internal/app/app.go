@@ -143,6 +143,43 @@ func (app *App) markStartupComplete() {
 	})
 }
 
+func (app *App) isShuttingDown() bool {
+	app.backgroundMu.Lock()
+	defer app.backgroundMu.Unlock()
+	return app.shuttingDown
+}
+
+// contextLocked returns app.ctx, falling back to context.Background only in
+// headless tests where ctx is nil. Caller must hold app.dbMu.RLock or Lock.
+func (app *App) contextLocked() context.Context {
+	if app.ctx == nil {
+		return context.Background()
+	}
+	return app.ctx
+}
+
+// context returns the active application lifecycle context under dbMu.RLock,
+// falling back to context.Background only in headless tests where ctx is nil.
+func (app *App) context() context.Context {
+	app.dbMu.RLock()
+	capturedContext := app.contextLocked()
+	app.dbMu.RUnlock()
+	return capturedContext
+}
+
+// readyContext waits for database readiness and returns the active lifecycle
+// context captured atomically under dbMu.RLock.
+func (app *App) readyContext() (context.Context, error) {
+	app.dbMu.RLock()
+	readyError := app.ready()
+	capturedContext := app.contextLocked()
+	app.dbMu.RUnlock()
+	if readyError != nil {
+		return nil, readyError
+	}
+	return capturedContext, nil
+}
+
 // spawnBackground launches task in a tracked goroutine unless shutdown has
 // already begun, preventing WaitGroup Add calls from racing with Wait.
 func (app *App) spawnBackground(task func()) bool {
@@ -287,14 +324,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	})
 	app.watcher.SetPaused(app.isLiveSyncPaused())
 	app.clearDeferredTargets()
-	app.resolver = edsm.NewResolver(dbConn, func() bool {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if app.db != dbConn {
-			return false
-		}
-		return settings.OnlineLookups(dbConn)
-	})
+	app.resolver = app.newCoordinateResolver(dbConn)
 	app.gec = gec.NewCatalog(dbConn)
 	app.wireProjections(dbConn)
 	app.dbMu.Unlock()
@@ -368,16 +398,16 @@ func (app *App) isSetupCompleted() bool {
 }
 
 func (app *App) startConfiguredWatcher() {
-	watcher, configuredJournalDir := func() (*journal.Watcher, string) {
+	watcher, watchContext, configuredJournalDir := func() (*journal.Watcher, context.Context, string) {
 		app.dbMu.RLock()
 		defer app.dbMu.RUnlock()
 		if app.db == nil || (app.ctx != nil && app.ctx.Err() != nil) {
-			return nil, ""
+			return nil, nil, ""
 		}
-		return app.watcher, settings.JournalDir(app.db, journal.DefaultJournalDir())
+		return app.watcher, app.contextLocked(), settings.JournalDir(app.db, journal.DefaultJournalDir())
 	}()
 	if watcher != nil {
-		watcher.Start(app.ctx, configuredJournalDir)
+		watcher.Start(watchContext, configuredJournalDir)
 	}
 }
 

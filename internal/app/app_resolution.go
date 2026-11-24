@@ -1,16 +1,215 @@
 package app
 
 import (
+	"context"
+	"database/sql"
 	"html"
 	"log"
 	"strings"
-	"time"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/edsm"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
+
+func (app *App) newCoordinateResolver(dbConn *sql.DB) *edsm.Resolver {
+	coordinateResolver := edsm.NewResolver(dbConn, func() bool {
+		app.dbMu.RLock()
+		defer app.dbMu.RUnlock()
+		if app.db != dbConn {
+			return false
+		}
+		return settings.OnlineLookups(dbConn)
+	})
+	coordinateResolver.JournalLookup = func(systemName string) (*edsm.Info, error) {
+		journalSystem, queryError := replay.QueryJournalSystemCoords(dbConn, systemName)
+		if queryError != nil || journalSystem == nil {
+			return nil, queryError
+		}
+		position := journalSystem.Pos
+		return &edsm.Info{
+			Name:          journalSystem.Name,
+			SystemAddress: journalSystem.SystemAddress,
+			Pos:           &position,
+			Source:        "journal",
+		}, nil
+	}
+	coordinateResolver.JournalBatchLookup = func(systemNames []string) (map[string]*edsm.Info, error) {
+		journalBatch, queryError := replay.QueryJournalSystemCoordsBatch(dbConn, systemNames)
+		if queryError != nil {
+			return nil, queryError
+		}
+		resolvedByKey := make(map[string]*edsm.Info, len(journalBatch))
+		for systemKey, journalSystem := range journalBatch {
+			position := journalSystem.Pos
+			resolvedByKey[systemKey] = &edsm.Info{
+				Name:          journalSystem.Name,
+				SystemAddress: journalSystem.SystemAddress,
+				Pos:           &position,
+				Source:        "journal",
+			}
+		}
+		return resolvedByKey, nil
+	}
+	return coordinateResolver
+}
+
+func classifyPendingResolutionRows(rows []expedition.Row) ([]expedition.Row, []string) {
+	candidateRows := make([]expedition.Row, 0, len(rows))
+	systemNames := make([]string, 0, len(rows))
+	for _, rowItem := range rows {
+		if !rowItem.IsWaypoint() || rowItem.SystemName == "" || rowItem.HasCoords {
+			continue
+		}
+		if rowItem.CoordsSource != "" && rowItem.CoordsSource != "notfound" && rowItem.CoordsSource != "error" {
+			continue
+		}
+		candidateRows = append(candidateRows, rowItem)
+		systemNames = append(systemNames, rowItem.SystemName)
+	}
+	return candidateRows, systemNames
+}
+
+func isRowOnlineEligible(rowItem expedition.Row, allowRetry bool) bool {
+	return rowItem.CoordsSource == "" || ((rowItem.CoordsSource == "notfound" || rowItem.CoordsSource == "error") && allowRetry)
+}
+
+func (app *App) isRowResolving(rowID int64) bool {
+	app.resolveMu.Lock()
+	inFlight := app.resolving[rowID]
+	app.resolveMu.Unlock()
+	return inFlight
+}
+
+type localResolutionBatch struct {
+	resolvedRowIDs map[int64]bool
+	anyUpdated     bool
+	anyCoords      bool
+	onlineLookups  bool
+}
+
+// buildLocalWaypointUpdate builds a transactional update when localSystem has
+// coordinates, or marks online-eligible rows notfound offline when onlineLookups is false.
+// Caller must hold app.dbMu.RLock.
+func (app *App) buildLocalWaypointUpdate(
+	rowItem expedition.Row,
+	localSystem *edsm.Info,
+	onlineLookups bool,
+	allowRetry bool,
+) (expedition.ResolvedWaypointUpdate, bool) {
+	if localSystem != nil && localSystem.Pos != nil {
+		if app.isRowResolving(rowItem.ID) {
+			return expedition.ResolvedWaypointUpdate{}, false
+		}
+		poiName := ""
+		if strings.TrimSpace(rowItem.POIName) == "" {
+			poiName = app.lookupGECPOIName(rowItem.SystemName, localSystem.SystemAddress)
+		}
+		return expedition.ResolvedWaypointUpdate{
+			RowID:         rowItem.ID,
+			SystemName:    rowItem.SystemName,
+			SystemAddress: localSystem.SystemAddress,
+			EDSMID:        localSystem.EDSMID,
+			Pos:           localSystem.Pos,
+			Source:        localSystem.Source,
+			POIName:       poiName,
+		}, true
+	}
+	if !onlineLookups && isRowOnlineEligible(rowItem, allowRetry) && !app.isRowResolving(rowItem.ID) {
+		poiName := ""
+		if strings.TrimSpace(rowItem.POIName) == "" {
+			poiName = app.lookupGECPOIName(rowItem.SystemName, rowItem.SystemAddress)
+		}
+		return expedition.ResolvedWaypointUpdate{
+			RowID:      rowItem.ID,
+			SystemName: rowItem.SystemName,
+			Source:     "notfound",
+			POIName:    poiName,
+		}, true
+	}
+	return expedition.ResolvedWaypointUpdate{}, false
+}
+
+func (app *App) resolvePendingRowsLocally(
+	expeditionID int64,
+	candidateRows []expedition.Row,
+	systemNames []string,
+	allowRetry bool,
+) localResolutionBatch {
+	result := localResolutionBatch{resolvedRowIDs: make(map[int64]bool)}
+	if len(candidateRows) == 0 {
+		return result
+	}
+
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil || app.resolver == nil {
+		return result
+	}
+	result.onlineLookups = settings.OnlineLookups(app.db)
+	localByKey, resolveError := app.resolver.ResolveLocalBatch(systemNames)
+	if resolveError != nil {
+		log.Printf("batch resolve expedition %d waypoints locally: %v", expeditionID, resolveError)
+		return result
+	}
+
+	localUpdates := make([]expedition.ResolvedWaypointUpdate, 0, len(candidateRows))
+	for _, rowItem := range candidateRows {
+		localSystem := localByKey[replay.NormalizeSystemKey(rowItem.SystemName)]
+		if update, shouldApply := app.buildLocalWaypointUpdate(rowItem, localSystem, result.onlineLookups, allowRetry); shouldApply {
+			localUpdates = append(localUpdates, update)
+		}
+	}
+	if applyError := expedition.ApplyResolvedWaypointsTx(app.db, localUpdates); applyError != nil {
+		log.Printf("store locally resolved waypoints for expedition %d: %v", expeditionID, applyError)
+		return result
+	}
+	result.anyUpdated = len(localUpdates) > 0
+	for _, update := range localUpdates {
+		result.resolvedRowIDs[update.RowID] = true
+		if update.Pos != nil {
+			result.anyCoords = true
+		}
+	}
+	return result
+}
+
+func (app *App) listExpeditionRowsForResolution(expeditionID int64) ([]expedition.Row, bool) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil {
+		return nil, false
+	}
+	rows, listError := expedition.ListRows(app.db, expeditionID)
+	return rows, listError == nil
+}
+
+func (app *App) resolvePendingRowsOnline(
+	workerContext context.Context,
+	candidateRows []expedition.Row,
+	resolvedRowIDs map[int64]bool,
+	allowRetry bool,
+) (anyCoords bool, anyUpdated bool) {
+	for _, rowItem := range candidateRows {
+		if resolvedRowIDs[rowItem.ID] || !isRowOnlineEligible(rowItem, allowRetry) {
+			continue
+		}
+		if workerContext.Err() != nil {
+			break
+		}
+		resolvedCoords, updated := app.resolveRowSync(rowItem, true)
+		if updated {
+			anyUpdated = true
+			if resolvedCoords {
+				anyCoords = true
+			}
+		}
+	}
+	return anyCoords, anyUpdated
+}
 
 func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry bool) {
 	defer func() {
@@ -19,57 +218,33 @@ func (app *App) runExpeditionResolutionWorker(expeditionID int64, allowRetry boo
 		app.resolveMu.Unlock()
 	}()
 
-	app.dbMu.RLock()
-	if app.db == nil {
-		app.dbMu.RUnlock()
+	workerContext := app.context()
+	if workerContext.Err() != nil {
 		return
 	}
-	rows, listError := expedition.ListRows(app.db, expeditionID)
-	app.dbMu.RUnlock()
-	if listError != nil {
+	rows, loaded := app.listExpeditionRowsForResolution(expeditionID)
+	if !loaded {
+		return
+	}
+	candidateRows, systemNames := classifyPendingResolutionRows(rows)
+	if len(candidateRows) == 0 {
 		return
 	}
 
-	anyCoords := false
-	anyUpdated := false
-	lastEmit := time.Now()
-	for _, rowItem := range rows {
-		if app.ctx != nil {
-			select {
-			case <-app.ctx.Done():
-				return
-			default:
-			}
+	localBatch := app.resolvePendingRowsLocally(expeditionID, candidateRows, systemNames, allowRetry)
+	if localBatch.anyUpdated && !app.isShuttingDown() {
+		if localBatch.anyCoords {
+			app.reevaluate(expeditionID)
 		}
-		if !rowItem.IsWaypoint() || rowItem.SystemName == "" || rowItem.HasCoords {
-			continue
-		}
-		online := false
-		switch rowItem.CoordsSource {
-		case "":
-			online = true
-		case "notfound", "error":
-			online = allowRetry
-		default:
-			continue
-		}
-		resolvedCoords, updated := app.resolveRowSync(rowItem, online)
-		if updated {
-			anyUpdated = true
-			if resolvedCoords {
-				anyCoords = true
-			}
-			if time.Since(lastEmit) > 1*time.Second {
-				if anyCoords {
-					app.reevaluate(expeditionID)
-				}
-				app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
-				lastEmit = time.Now()
-			}
-		}
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	}
-	if anyUpdated {
-		if anyCoords {
+	if !localBatch.onlineLookups {
+		return
+	}
+
+	anyOnlineCoords, anyOnlineUpdated := app.resolvePendingRowsOnline(workerContext, candidateRows, localBatch.resolvedRowIDs, allowRetry)
+	if anyOnlineUpdated && !app.isShuttingDown() {
+		if anyOnlineCoords {
 			app.reevaluate(expeditionID)
 		}
 		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
@@ -104,14 +279,11 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 
 func (app *App) lookupRowSystemInfo(systemName string, online bool) (*edsm.Info, error, bool) {
 	if online {
-		if app.ctx != nil {
-			select {
-			case <-app.ctx.Done():
-				return nil, nil, false
-			case app.resolutionSemaphore <- struct{}{}:
-			}
-		} else {
-			app.resolutionSemaphore <- struct{}{}
+		lookupContext := app.context()
+		select {
+		case <-lookupContext.Done():
+			return nil, nil, false
+		case app.resolutionSemaphore <- struct{}{}:
 		}
 		defer func() {
 			<-app.resolutionSemaphore
@@ -122,16 +294,16 @@ func (app *App) lookupRowSystemInfo(systemName string, online bool) (*edsm.Info,
 		if coordinateResolver == nil {
 			return nil, nil, true
 		}
-		resolvedInfo, lookupError := coordinateResolver.Resolve(app.ctx, systemName)
+		resolvedInfo, lookupError := coordinateResolver.Resolve(lookupContext, systemName)
 		return resolvedInfo, lookupError, true
 	}
 
 	var resolvedInfo *edsm.Info
 	var lookupError error
 	app.dbMu.RLock()
-	database := app.db
-	if database != nil {
-		resolvedInfo, lookupError = edsm.FromJournal(database, systemName)
+	coordinateResolver := app.resolver
+	if coordinateResolver != nil {
+		resolvedInfo, lookupError = coordinateResolver.ResolveLocal(systemName)
 	}
 	app.dbMu.RUnlock()
 	if resolvedInfo == nil && lookupError == nil {
@@ -242,7 +414,17 @@ func (app *App) populateMissingPOIs() {
 		log.Printf("query missing poi rows: %v", queryError)
 		return
 	}
+	poiUpdates := make([]expedition.RowPOIUpdate, 0, len(missingRows))
 	for _, rowItem := range missingRows {
-		app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress)
+		if poiName := app.lookupGECPOIName(rowItem.SystemName, rowItem.SystemAddress); poiName != "" {
+			poiUpdates = append(poiUpdates, expedition.RowPOIUpdate{
+				RowID:      rowItem.ID,
+				SystemName: rowItem.SystemName,
+				POIName:    poiName,
+			})
+		}
+	}
+	if updateError := expedition.SetMissingRowPOIsTx(app.db, poiUpdates); updateError != nil {
+		log.Printf("populate missing poi names: %v", updateError)
 	}
 }

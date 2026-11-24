@@ -17,10 +17,8 @@ func (app *App) getVersionStatus() (string, bool) {
 }
 
 func (app *App) checkLatestVersionOnStartup() {
-	app.dbMu.RLock()
-	requestContext := app.ctx
-	app.dbMu.RUnlock()
-	if requestContext == nil {
+	requestContext := app.context()
+	if requestContext.Err() != nil {
 		return
 	}
 

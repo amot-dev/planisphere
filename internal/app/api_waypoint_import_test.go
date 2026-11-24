@@ -1,11 +1,23 @@
 package app
 
 import (
+	"context"
+	"database/sql"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"planisphere/internal/reference"
+	"planisphere/internal/replay"
+	"planisphere/internal/sources/edsm"
+	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
 )
 
@@ -121,3 +133,307 @@ func TestReadWaypointImportFileValidation(testingContext *testing.T) {
 	}
 }
 
+func TestBuildSeedWaypointsBatchSinglePassAndDisabledCommanderFilter(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	if _, execError := testApp.db.Exec(`
+		INSERT INTO commanders (name, fid, enabled) VALUES ('CmdrEnabled', 'F1', 1), ('CmdrDisabled', 'F2', 0);
+		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, commander, raw_json, ingested_at) VALUES
+		('seed-alpha', '2026-01-01T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, 1, 2, 3, 'CmdrEnabled', '{}', '2026-01-01T00:00:00Z'),
+		('seed-muted', '2026-01-01T00:01:00Z', 'FSDJump', 'Disabled Haven', 9009, 9, 9, 9, 'CmdrDisabled', '{}', '2026-01-01T00:01:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed journal events: %v", execError)
+	}
+
+	var batchCalls, singleCalls atomic.Int32
+	originalBatch := testApp.resolver.JournalBatchLookup
+	originalSingle := testApp.resolver.JournalLookup
+	testApp.resolver.JournalBatchLookup = func(systemNames []string) (map[string]*edsm.Info, error) {
+		batchCalls.Add(1)
+		return originalBatch(systemNames)
+	}
+	testApp.resolver.JournalLookup = func(systemName string) (*edsm.Info, error) {
+		singleCalls.Add(1)
+		return originalSingle(systemName)
+	}
+
+	testApp.dbMu.RLock()
+	seedWaypoints, hasUnresolved := testApp.buildSeedWaypoints([]string{"  alpha centauri ", "Disabled Haven", "ALPHA CENTAURI", "Unvisited Sector"})
+	testApp.dbMu.RUnlock()
+
+	if batchCalls.Load() != 1 || singleCalls.Load() != 0 {
+		testingContext.Fatalf("expected 1 batch lookup and 0 single lookups, got batch=%d single=%d", batchCalls.Load(), singleCalls.Load())
+	}
+	if !hasUnresolved || len(seedWaypoints) != 4 || !seedWaypoints[0].HasCoords || !seedWaypoints[2].HasCoords || seedWaypoints[1].HasCoords {
+		testingContext.Fatalf("unexpected seed waypoints: %+v (unresolved=%v)", seedWaypoints, hasUnresolved)
+	}
+}
+
+func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	if setOnlineErr := settings.SetOnlineLookups(testApp.db, true); setOnlineErr != nil {
+		testingContext.Fatalf("enable online lookups: %v", setOnlineErr)
+	}
+	if setGECFetchErr := settings.SetGECFetchedAt(testApp.db, reference.NowISO()); setGECFetchErr != nil {
+		testingContext.Fatalf("set GEC timestamp: %v", setGECFetchErr)
+	}
+
+	if _, execError := testApp.db.Exec(`
+		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, raw_json, ingested_at)
+		VALUES ('res-sol', '2026-01-01T00:00:00Z', 'FSDJump', 'Sol', 10477373803, 0, 0, 0, '{}', '2026-01-01T00:00:00Z');
+		INSERT INTO system_cache (name_key, system_name, system_address, edsm_id, x, y, z, source, fetched_at)
+		VALUES ('colonia', 'Colonia', 3238296097059, 43805, -9530.5, -910.28125, 19808.125, 'edsm', '2026-01-01T00:00:00Z');
+		INSERT INTO gec_pois_cache (id, name, system_name, system_address, poi_type, region, summary, poi_url, raw_json, source, fetched_at) VALUES
+		(101, 'Jaques Station', 'Colonia', 3238296097059, 'Historical', 'Colonia', '', 'https://edastro.com/gec/view/101', '{}', 'GEC', '2026-01-01T00:00:00Z'),
+		(102, 'Distant View in Blue', 'Beagle Point', 827689533218, 'Vista', 'The Abyss', '', 'https://edastro.com/gec/view/102', '{}', 'GEC', '2026-01-01T00:00:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed resolution fixtures: %v", execError)
+	}
+	if reloadError := testApp.gec.Reload(); reloadError != nil {
+		testingContext.Fatalf("reload GEC: %v", reloadError)
+	}
+
+	createdExpedition, createError := expedition.CreateWithWaypoints(testApp.db, "Coalesced Worker Route", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol"},
+		{SystemName: "Colonia"},
+		{SystemName: "Barnards Loop"},
+		{SystemName: "Sgr A Star"},
+		{SystemName: "Beagle Point"},
+	})
+	if createError != nil {
+		testingContext.Fatalf("create seeded expedition: %v", createError)
+	}
+
+	var emittedMutex sync.Mutex
+	var planEmitCount int
+	testApp.emit = func(eventName string, payload ...any) {
+		if eventName == EventDataChanged && len(payload) > 0 {
+			if dataChanged, ok := payload[0].(DataChanged); ok && slices.Contains(dataChanged.Domains, "plan") {
+				emittedMutex.Lock()
+				planEmitCount++
+				emittedMutex.Unlock()
+			}
+		}
+	}
+
+	var onlineRequests atomic.Int32
+	offlineVerifiedBeforeFirstHTTP := atomic.Bool{}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestNumber := onlineRequests.Add(1)
+		if requestNumber == 1 {
+			rowsBeforeOnline, _ := expedition.ListRows(testApp.db, createdExpedition.ID)
+			emittedMutex.Lock()
+			emitsSoFar := planEmitCount
+			emittedMutex.Unlock()
+			if len(rowsBeforeOnline) == 5 && rowsBeforeOnline[0].HasCoords && rowsBeforeOnline[1].HasCoords && rowsBeforeOnline[1].POIName == "Jaques Station" && emitsSoFar == 1 {
+				offlineVerifiedBeforeFirstHTTP.Store(true)
+			}
+		}
+		if requestNumber == 3 {
+			time.Sleep(150 * time.Millisecond)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Query().Get("systemName") {
+		case "Barnards Loop":
+			_, _ = writer.Write([]byte(`{"name":"Barnards Loop","id":10,"id64":5001,"coords":{"x":100,"y":-200,"z":-1300}}`))
+		case "Beagle Point":
+			_, _ = writer.Write([]byte(`{"name":"Beagle Point","id":20,"id64":827689533218,"coords":{"x":-1111.5,"y":-134.2,"z":65269.75}}`))
+		default:
+			_, _ = writer.Write([]byte(`[]`))
+		}
+	}))
+	testingContext.Cleanup(mockServer.Close)
+	testApp.resolver.EDSMBase = mockServer.URL
+	testApp.resolver.HTTP = mockServer.Client()
+
+	testApp.runExpeditionResolutionWorker(createdExpedition.ID, false)
+
+	if !offlineVerifiedBeforeFirstHTTP.Load() {
+		testingContext.Fatalf("expected offline batch resolution and single emit to finish before first online EDSM request")
+	}
+	if onlineRequests.Load() != 3 {
+		testingContext.Fatalf("expected 3 online EDSM requests, got %d", onlineRequests.Load())
+	}
+	emittedMutex.Lock()
+	totalPlanEmits := planEmitCount
+	planEmitCount = 0
+	emittedMutex.Unlock()
+	if totalPlanEmits != 2 {
+		testingContext.Fatalf("expected 2 coalesced plan emissions (offline pass + online completion), got %d", totalPlanEmits)
+	}
+
+	// When OnlineLookups is disabled, unresolved waypoints commit notfound + GEC POI in one batch with 0 online calls and 1 emit.
+	if setOfflineErr := settings.SetOnlineLookups(testApp.db, false); setOfflineErr != nil {
+		testingContext.Fatalf("disable online lookups: %v", setOfflineErr)
+	}
+	offlineExpedition, offlineCreateErr := expedition.CreateWithWaypoints(testApp.db, "Offline Batch Route", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol"},
+		{SystemName: "Uncached Frontier"},
+	})
+	if offlineCreateErr != nil {
+		testingContext.Fatalf("create offline expedition: %v", offlineCreateErr)
+	}
+	onlineRequests.Store(0)
+	testApp.runExpeditionResolutionWorker(offlineExpedition.ID, false)
+	offlineRows, _ := expedition.ListRows(testApp.db, offlineExpedition.ID)
+	emittedMutex.Lock()
+	offlinePlanEmits := planEmitCount
+	emittedMutex.Unlock()
+	if onlineRequests.Load() != 0 || offlinePlanEmits != 1 || !offlineRows[0].HasCoords || offlineRows[1].CoordsSource != "notfound" {
+		testingContext.Fatalf("expected single transactional offline batch (0 HTTP, 1 emit), got http=%d emits=%d rows=%+v", onlineRequests.Load(), offlinePlanEmits, offlineRows)
+	}
+
+	// Verify transactional populateMissingPOIs backfills blank POIs and guards system_name against TOCTOU edits.
+	if _, execError := testApp.db.Exec(`
+		UPDATE expedition_rows SET poi_name = '' WHERE expedition_id = ? AND system_name = 'Colonia';
+		UPDATE expedition_rows SET poi_name = 'Custom Beagle Label' WHERE expedition_id = ? AND system_name = 'Beagle Point'
+	`, createdExpedition.ID, createdExpedition.ID); execError != nil {
+		testingContext.Fatalf("prepare missing POI rows: %v", execError)
+	}
+	testApp.populateMissingPOIs()
+	updatedRows, _ := expedition.ListRows(testApp.db, createdExpedition.ID)
+	if updatedRows[1].POIName != "Jaques Station" || updatedRows[4].POIName != "Custom Beagle Label" {
+		testingContext.Fatalf("unexpected POI backfill: colonia=%q beagle=%q", updatedRows[1].POIName, updatedRows[4].POIName)
+	}
+	if staleUpdateErr := expedition.SetMissingRowPOIsTx(testApp.db, []expedition.RowPOIUpdate{
+		{RowID: updatedRows[3].ID, SystemName: "Stale System Name", POIName: "Should Not Apply"},
+	}); staleUpdateErr != nil {
+		testingContext.Fatalf("SetMissingRowPOIsTx stale system guard: %v", staleUpdateErr)
+	}
+	guardedRow, _ := expedition.GetRow(testApp.db, updatedRows[3].ID)
+	if guardedRow.POIName != "" {
+		testingContext.Fatalf("expected mismatched system_name POI update to be skipped, got %q", guardedRow.POIName)
+	}
+}
+
+func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	journalDirectory := testingContext.TempDir()
+	journalPath := filepath.Join(journalDirectory, "Journal.2026-02-01T000000.01.log")
+	journalLine := `{"timestamp":"2026-02-01T00:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}` + "\n"
+	if writeError := os.WriteFile(journalPath, []byte(journalLine), 0o600); writeError != nil {
+		testingContext.Fatalf("write setup journal: %v", writeError)
+	}
+
+	var emittedMutex sync.Mutex
+	var emittedEventNames []string
+	var emittedDomains [][]string
+	testApp.emit = func(eventName string, payload ...any) {
+		emittedMutex.Lock()
+		defer emittedMutex.Unlock()
+		emittedEventNames = append(emittedEventNames, eventName)
+		if eventName == EventDataChanged && len(payload) > 0 {
+			if dataChanged, ok := payload[0].(DataChanged); ok {
+				emittedDomains = append(emittedDomains, dataChanged.Domains)
+			}
+		}
+	}
+
+	initialStatus, setupError := testApp.SetupConfigureJournals(journalDirectory)
+	if setupError != nil || initialStatus.EventsStored != 1 {
+		testingContext.Fatalf("SetupConfigureJournals initial: status=%+v err=%v", initialStatus, setupError)
+	}
+	watcherStarted := false
+	for attempt := 0; attempt < 50; attempt++ {
+		if status, _ := testApp.GetIngestStatus(); status.WatcherActive {
+			watcherStarted = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !watcherStarted {
+		testingContext.Fatalf("expected live journal watcher to become active after SetupConfigureJournals")
+	}
+	emittedMutex.Lock()
+	if len(emittedEventNames) != 0 {
+		testingContext.Fatalf("expected 0 redundant emissions during pre-completion setup scan, got %v", emittedEventNames)
+	}
+	emittedMutex.Unlock()
+
+	if setCompleteErr := settings.SetSetupCompleted(testApp.db, true); setCompleteErr != nil {
+		testingContext.Fatalf("mark setup completed: %v", setCompleteErr)
+	}
+	if _, postSetupErr := testApp.SetupConfigureJournals(journalDirectory); postSetupErr != nil {
+		testingContext.Fatalf("SetupConfigureJournals post-setup: %v", postSetupErr)
+	}
+	emittedMutex.Lock()
+	defer emittedMutex.Unlock()
+	if !slices.Equal(emittedEventNames, []string{EventDataChanged}) || len(emittedDomains) != 1 ||
+		!slices.Contains(emittedDomains[0], "ingest") || !slices.Contains(emittedDomains[0], "settings") {
+		testingContext.Fatalf("expected 1 post-setup DataChanged event with ingest and settings, got events=%v domains=%v", emittedEventNames, emittedDomains)
+	}
+}
+
+func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) {
+	// Verify typed-nil (*sql.DB)(nil) safety on system query and canonical name helpers,
+	// and on PlotCarrierRoute when startup completed with app.db == nil.
+	var typedNilDB *sql.DB
+	if coords, coordsErr := replay.QueryJournalSystemCoords(typedNilDB, "Sol"); coordsErr != nil || coords != nil {
+		testingContext.Fatalf("expected nil result for typed-nil *sql.DB in QueryJournalSystemCoords, got %+v err=%v", coords, coordsErr)
+	}
+	if gotCanonical := edsm.CanonicalSystemName(typedNilDB, "  Sol ", nil); gotCanonical != "Sol" {
+		testingContext.Fatalf("expected trimmed fallback for typed-nil *sql.DB in CanonicalSystemName, got %q", gotCanonical)
+	}
+	uninitializedApp := New()
+	uninitializedPlot, uninitErr := uninitializedApp.PlotCarrierRoute("Sol", "sol", 5000, "player", 0)
+	if uninitErr != nil || !uninitializedPlot.ManualMode {
+		testingContext.Fatalf("expected manual fallback on nil-db PlotCarrierRoute, got %+v err=%v", uninitializedPlot, uninitErr)
+	}
+
+	temporaryDirectory := testingContext.TempDir()
+	databasePath := filepath.Join(temporaryDirectory, "ctx-race.sqlite")
+	seedDatabaseWithExpedition(testingContext, databasePath, "Concurrent Init Route", "")
+
+	raceApp := New()
+	raceApp.debugMode = false
+	_ = StartupHook(raceApp)
+	onShutdown := ShutdownHook(raceApp)
+
+	appContext, cancelApp := context.WithCancel(context.Background())
+	defer cancelApp()
+	defer onShutdown(appContext)
+
+	var workers sync.WaitGroup
+	stopReaders := make(chan struct{})
+	for workerIndex := 0; workerIndex < 4; workerIndex++ {
+		workers.Add(1)
+		go func(index int) {
+			defer workers.Done()
+			for {
+				select {
+				case <-stopReaders:
+					return
+				default:
+				}
+				_ = raceApp.context()
+				switch index % 4 {
+				case 0:
+					_, _ = raceApp.readyContext()
+				case 1:
+					_, _ = raceApp.GetSettings()
+				case 2:
+					_, _ = raceApp.PlotCarrierRoute("Sol", "sol", 5000, "player", 0)
+				case 3:
+					_ = raceApp.OpenURL("ftp://invalid-scheme")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}(workerIndex)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if initError := raceApp.initialize(appContext, databasePath); initError != nil {
+		close(stopReaders)
+		workers.Wait()
+		testingContext.Fatalf("initialize: %v", initError)
+	}
+	raceApp.markStartupComplete()
+
+	readyCtx, readyErr := raceApp.readyContext()
+	if readyErr != nil || readyCtx == nil {
+		close(stopReaders)
+		workers.Wait()
+		testingContext.Fatalf("expected non-nil readyContext after initialize, got ctx=%v err=%v", readyCtx, readyErr)
+	}
+	close(stopReaders)
+	workers.Wait()
+}

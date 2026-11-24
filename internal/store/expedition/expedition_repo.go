@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"planisphere/internal/core/db"
-	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
@@ -52,20 +51,6 @@ type Projections struct {
 	TimeRangeStats *stats.TimeRangeStats
 	SalesLedger    *realization.SalesLedger
 	RecoveredJumps *projections.RecoveredJumps
-}
-
-// NewProjections creates and registers a full suite of expedition projections on bus.
-func NewProjections(dbConn *sql.DB, bus *projection.Bus) *Projections {
-	recoveredJumps := projections.NewRecoveredJumps(dbConn, bus)
-	salesLedger := realization.NewSalesLedger(dbConn, bus)
-	return &Projections{
-		Arrivals:       projections.NewSystemArrivals(dbConn, bus),
-		VisitCounts:    projections.NewSystemVisitCounts(dbConn, bus, recoveredJumps),
-		ShipHistory:    projections.NewShipHistory(dbConn, bus),
-		TimeRangeStats: stats.NewTimeRangeStats(dbConn, bus, salesLedger, recoveredJumps, LoadModeLookup),
-		SalesLedger:    salesLedger,
-		RecoveredJumps: recoveredJumps,
-	}
 }
 
 // Expedition statuses.
