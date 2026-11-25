@@ -67,7 +67,11 @@ export function GetWaypointDetails(arg1:number):Promise<expedition.WaypointDetai
 
 export function ImportEDDiscoveryHistory(arg1:string):Promise<number>;
 
+export function ListCommanderLoadGamesOnDate(arg1:string,arg2:string):Promise<Array<replay.CommanderSession>>;
+
 export function ListExpeditions():Promise<Array<expedition.Expedition>>;
+
+export function MergeCommanders(arg1:string,arg2:string):Promise<app.Settings>;
 
 export function MoveRow(arg1:number,arg2:number):Promise<void>;
 
@@ -87,9 +91,13 @@ export function ReopenExpedition(arg1:number):Promise<void>;
 
 export function RescanJournals():Promise<void>;
 
+export function ResetCommanderOverrides(arg1:string):Promise<app.Settings>;
+
 export function SaveActiveCarrierRoute(arg1:expedition.ActiveCarrierRouteState):Promise<void>;
 
 export function SetActiveExpedition(arg1:number):Promise<void>;
+
+export function SetCareerBaselineScope(arg1:string):Promise<app.Settings>;
 
 export function SetCommanderEnabled(arg1:string,arg2:boolean):Promise<app.Settings>;
 
@@ -113,11 +121,19 @@ export function SetTritiumPricePerTonne(arg1:number):Promise<app.Settings>;
 
 export function SetupConfigureJournals(arg1:string):Promise<app.IngestStatus>;
 
+export function SplitCommander(arg1:string,arg2:string):Promise<app.Settings>;
+
 export function StartExpedition(arg1:number,arg2:string,arg3:number):Promise<void>;
+
+export function StartExpeditionScoped(arg1:number,arg2:string,arg3:number,arg4:string,arg5:Array<number>):Promise<void>;
+
+export function UnmergeCommanderAlias(arg1:string,arg2:string):Promise<app.Settings>;
 
 export function UpdateExpedition(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function UpdateExpeditionCarrierConfig(arg1:number,arg2:string,arg3:number):Promise<void>;
+
+export function UpdateExpeditionScoped(arg1:number,arg2:string,arg3:string,arg4:string,arg5:Array<number>):Promise<void>;
 
 export function UpdateMode(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 

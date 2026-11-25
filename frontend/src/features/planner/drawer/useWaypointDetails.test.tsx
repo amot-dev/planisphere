@@ -435,5 +435,94 @@ describe('useWaypointDetails', () => {
     expect(latestState.loadingDetails[102]).toBe(false)
     await act(async () => { root.unmount() })
   })
+
+  it('refreshes open closed-leg drawers in place without loading flash when expedition commander scope changes', async () => {
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    const buildScopedPlan = (commanderScope: string, commanderProfileIds: number[]) =>
+      expedition.PlanView.createFrom({
+        expedition: {
+          id: 12,
+          name: 'Scope Change Refresh',
+          status: 'completed',
+          commanderScope,
+          commanderProfileIds,
+        },
+        rows: [
+          {
+            row: {
+              id: 301,
+              expeditionId: 12,
+              rowType: 'waypoint',
+              systemName: 'Sol',
+              visitedAt: '2026-01-01T10:00:00Z',
+              departedAt: '2026-01-01T10:15:00Z',
+            },
+            number: 1,
+            visitState: 'visited',
+            drawerTo: '2026-01-01T10:15:00Z',
+          },
+        ],
+      })
+
+    const initialOriginLoad = createDeferred<expedition.WaypointDetails>()
+    const scopedOriginRefresh = createDeferred<expedition.WaypointDetails>()
+    getWaypointDetailsMock
+      .mockReturnValueOnce(initialOriginLoad.promise)
+      .mockReturnValueOnce(scopedOriginRefresh.promise)
+
+    let latestState!: WaypointDetailsState
+    function Harness({ plan }: { plan: expedition.PlanView }) {
+      latestState = useWaypointDetails(plan, false, 'rev-1', false, 1, '/data/main.db')
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    await act(async () => {
+      root.render(createElement(Harness, { plan: buildScopedPlan('all_enabled', []) }))
+    })
+    await act(async () => {
+      latestState.toggleExpand(301)
+    })
+    await act(async () => {
+      initialOriginLoad.resolve(
+        expedition.WaypointDetails.createFrom({
+          rowId: 301,
+          kind: 'origin',
+          number: 1,
+          from: '2024-01-01T00:00:00Z',
+          to: '2026-01-01T10:15:00Z',
+          arrivedAt: '2026-01-01T10:00:00Z',
+          metrics: { jumps: 50 },
+        }),
+      )
+      await initialOriginLoad.promise
+    })
+    expect(latestState.detailsById[301]?.metrics.jumps).toBe(50)
+
+    await act(async () => {
+      root.render(createElement(Harness, { plan: buildScopedPlan('selected', [2]) }))
+    })
+    expect(getWaypointDetailsMock).toHaveBeenCalledTimes(2)
+    expect(latestState.loadingDetails[301]).toBe(false)
+
+    await act(async () => {
+      scopedOriginRefresh.resolve(
+        expedition.WaypointDetails.createFrom({
+          rowId: 301,
+          kind: 'origin',
+          number: 1,
+          from: '2025-06-01T00:00:00Z',
+          to: '2026-01-01T10:15:00Z',
+          arrivedAt: '2026-01-01T10:00:00Z',
+          metrics: { jumps: 14 },
+        }),
+      )
+      await scopedOriginRefresh.promise
+    })
+    expect(latestState.detailsById[301]?.metrics.jumps).toBe(14)
+    await act(async () => {
+      root.unmount()
+    })
+  })
 })
 

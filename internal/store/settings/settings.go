@@ -28,6 +28,7 @@ const (
 	keyEDDHistoryRecovered  = "edd_history_recovered_v1"
 	keyEDDDisconnectsDone   = "edd_history_disconnects_v7"
 	keyEDDDatabasePath      = "edd_db_path"
+	keyCareerBaselineScope  = "career_baseline_scope"
 )
 
 // External link visibility modes.
@@ -35,6 +36,12 @@ const (
 	ExternalLinkOn      = "on"
 	ExternalLinkOff     = "off"
 	ExternalLinkIfNoGEC = "if_no_gec"
+)
+
+// Career and origin baseline scope modes.
+const (
+	CareerScopeExpedition = "expedition"
+	CareerScopeAllEnabled = "all_enabled"
 )
 
 // Get returns the persisted setting value for key, or "" when absent.
@@ -280,22 +287,73 @@ func MarkEDDDisconnectsRecovered(queryer db.Queryer) error {
 	return Set(queryer, keyEDDDisconnectsDone, "1")
 }
 
-// SetCommanderEnabled enables or disables a discovered commander in statistics and plans.
-func SetCommanderEnabled(queryer db.Queryer, name string, enabled bool) error {
-	enabledValue := 0
+// CareerBaselineScope returns the configured career and origin baseline scope
+// ("expedition" by default when unset or invalid, or "all_enabled").
+func CareerBaselineScope(queryer db.Queryer) string {
+	if queryer == nil {
+		return CareerScopeExpedition
+	}
+	rawScope, _ := Get(queryer, keyCareerBaselineScope)
+	if strings.EqualFold(strings.TrimSpace(rawScope), CareerScopeAllEnabled) {
+		return CareerScopeAllEnabled
+	}
+	return CareerScopeExpedition
+}
+
+// SetCareerBaselineScope validates and stores the career and origin baseline scope.
+func SetCareerBaselineScope(queryer db.Queryer, scope string) error {
+	normalized := strings.ToLower(strings.TrimSpace(scope))
+	if normalized != CareerScopeExpedition && normalized != CareerScopeAllEnabled {
+		return fmt.Errorf("invalid career baseline scope %q", scope)
+	}
+	return Set(queryer, keyCareerBaselineScope, normalized)
+}
+
+// SetCommanderEnabled enables or disables a commander profile (by profileKey or
+// display name) and synchronizes any matching legacy commanders row.
+func SetCommanderEnabled(queryer db.Queryer, identifier string, enabled bool) error {
+	trimmed := strings.TrimSpace(identifier)
+	if trimmed == "" {
+		return fmt.Errorf("commander %q not found", identifier)
+	}
+	enabledInt := 0
 	if enabled {
-		enabledValue = 1
+		enabledInt = 1
 	}
-	result, execError := queryer.Exec(`UPDATE commanders SET enabled = ? WHERE name = ? COLLATE NOCASE`, enabledValue, name)
-	if execError != nil {
-		return fmt.Errorf("update commander %q enabled state: %w", name, execError)
+	byKeyRows, err := execRowsAffected(queryer, `UPDATE commander_profiles SET enabled = ? WHERE LOWER(profile_key) = LOWER(?)`, enabledInt, trimmed)
+	if err != nil {
+		return fmt.Errorf("update commander profile %q enabled state: %w", identifier, err)
 	}
-	rowsAffected, rowsError := result.RowsAffected()
-	if rowsError != nil {
-		return fmt.Errorf("check commander update rows affected: %w", rowsError)
+	var byNameRows int64
+	if byKeyRows == 0 {
+		if byNameRows, err = execRowsAffected(queryer, `UPDATE commander_profiles SET enabled = ? WHERE display_name = ? COLLATE NOCASE`, enabledInt, trimmed); err != nil {
+			return fmt.Errorf("update commander profile %q by name: %w", identifier, err)
+		}
 	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("commander %q not found", name)
+	legacyRows, legacyErr := syncLegacyCommanderEnabled(queryer, trimmed, enabledInt, byKeyRows > 0)
+	if legacyErr != nil {
+		return fmt.Errorf("update legacy commander %q enabled state: %w", identifier, legacyErr)
+	}
+	if byKeyRows == 0 && byNameRows == 0 && legacyRows == 0 {
+		return fmt.Errorf("commander %q not found", identifier)
 	}
 	return nil
+}
+
+func execRowsAffected(queryer db.Queryer, query string, args ...any) (int64, error) {
+	result, err := queryer.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func syncLegacyCommanderEnabled(queryer db.Queryer, identifier string, enabledValue int, matchedByProfileKey bool) (int64, error) {
+	if !matchedByProfileKey {
+		return execRowsAffected(queryer, `UPDATE commanders SET enabled = ? WHERE name = ? COLLATE NOCASE`, enabledValue, identifier)
+	}
+	return execRowsAffected(queryer,
+		`UPDATE commanders SET enabled = CASE WHEN EXISTS (SELECT 1 FROM commander_profiles cp WHERE cp.display_name = commanders.name COLLATE NOCASE AND cp.enabled != 0) THEN 1 ELSE 0 END
+		 WHERE EXISTS (SELECT 1 FROM commander_profiles cp WHERE LOWER(cp.profile_key) = LOWER(?) AND cp.display_name = commanders.name COLLATE NOCASE)`,
+		identifier)
 }

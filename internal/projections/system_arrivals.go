@@ -56,13 +56,19 @@ func (arrivals *SystemArrivals) Triggers() projection.Triggers {
 }
 
 // InWindow returns cached chronological arrivals within [startTimestamp, endTimestamp]
-// (inclusive lower bound; optional inclusive upper bound when non-empty).
+// (inclusive lower bound; optional inclusive upper bound when non-empty) across enabled profiles.
 func (arrivals *SystemArrivals) InWindow(startTimestamp, endTimestamp string) ([]Arrival, error) {
+	return arrivals.InWindowScoped(startTimestamp, endTimestamp, replay.ProfileScope{})
+}
+
+// InWindowScoped returns cached chronological arrivals within
+// [startTimestamp, endTimestamp] matching scope.
+func (arrivals *SystemArrivals) InWindowScoped(startTimestamp, endTimestamp string, scope replay.ProfileScope) ([]Arrival, error) {
 	if arrivals.database == nil {
 		return nil, nil
 	}
-	windowKey := startTimestamp + "|" + endTimestamp
+	windowKey := startTimestamp + "|" + endTimestamp + scope.CacheKeySuffix()
 	return arrivals.windows.GetOrLoad(windowKey, func() ([]Arrival, error) {
-		return replay.QueryArrivalsInWindow(arrivals.database, startTimestamp, endTimestamp)
+		return replay.QueryArrivalsInWindowScoped(arrivals.database, startTimestamp, endTimestamp, scope)
 	})
 }

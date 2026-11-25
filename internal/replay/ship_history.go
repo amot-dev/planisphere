@@ -42,12 +42,19 @@ type ShipTransition struct {
 }
 
 // QueryShipTimeline queries chronological player ship switches directly against
-// queryer for [startTimestamp, endTimestamp].
+// queryer for [startTimestamp, endTimestamp] across globally enabled profiles.
 func QueryShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) ([]ShipSwitch, error) {
+	return QueryShipTimelineScoped(queryer, startTimestamp, endTimestamp, ProfileScope{})
+}
+
+// QueryShipTimelineScoped queries chronological player ship switches directly
+// against queryer for [startTimestamp, endTimestamp] matching scope.
+func QueryShipTimelineScoped(queryer db.Queryer, startTimestamp, endTimestamp string, scope ProfileScope) ([]ShipSwitch, error) {
+	scopePredicate := scope.SQLPredicate("")
 	var switches []ShipSwitch
 	if startTimestamp != "" {
 		seedQuery := `SELECT timestamp, event, raw_json FROM journal_events
-			WHERE event IN ('LoadGame','ShipyardSwap') AND timestamp <= ? AND ` + playerShipSQLFilter + ` AND ` + CmdrFilterSQL + `
+			WHERE event IN ('LoadGame','ShipyardSwap') AND timestamp <= ? AND ` + playerShipSQLFilter + ` AND ` + scopePredicate + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1`
 		var seedError error
 		switches, seedError = appendQueriedShipSwitches(queryer, switches, seedQuery, startTimestamp)
@@ -66,17 +73,29 @@ func QueryShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) 
 		query += ` AND timestamp <= ?`
 		queryArgs = append(queryArgs, endTimestamp)
 	}
-	query += ` AND ` + CmdrFilterSQL + ` ORDER BY timestamp, id`
+	query += ` AND ` + scopePredicate + ` ORDER BY timestamp, id`
 	return appendQueriedShipSwitches(queryer, switches, query, queryArgs...)
 }
 
 // QueryJumpTimestamps loads chronological piloted hyperspace jump timestamps in
-// [afterTimestamp, untilTimestamp], excluding Taxi and Multicrew FSDJump rows
-// and merging remaining jumps with recovered.
+// [afterTimestamp, untilTimestamp] across globally enabled profiles, excluding
+// Taxi and Multicrew FSDJump rows and merging remaining jumps with recovered.
 func QueryJumpTimestamps(
 	queryer db.Queryer,
 	afterTimestamp, untilTimestamp string,
 	recovered []RecoveredJump,
+) ([]string, error) {
+	return QueryJumpTimestampsScoped(queryer, afterTimestamp, untilTimestamp, recovered, ProfileScope{})
+}
+
+// QueryJumpTimestampsScoped loads chronological piloted hyperspace jump
+// timestamps in [afterTimestamp, untilTimestamp] matching scope, excluding Taxi
+// and Multicrew FSDJump rows and merging remaining jumps with recovered.
+func QueryJumpTimestampsScoped(
+	queryer db.Queryer,
+	afterTimestamp, untilTimestamp string,
+	recovered []RecoveredJump,
+	scope ProfileScope,
 ) ([]string, error) {
 	query := `SELECT timestamp FROM journal_events WHERE event = 'FSDJump' AND timestamp >= ?`
 	queryArgs := []any{afterTimestamp}
@@ -84,7 +103,7 @@ func QueryJumpTimestamps(
 		query += ` AND timestamp <= ?`
 		queryArgs = append(queryArgs, untilTimestamp)
 	}
-	query += ` AND ` + pilotedFSDJumpSQLFilter + ` AND ` + CmdrFilterSQL + ` ORDER BY timestamp, id`
+	query += ` AND ` + pilotedFSDJumpSQLFilter + ` AND ` + scope.SQLPredicate("") + ` ORDER BY timestamp, id`
 	databaseRows, queryError := queryer.Query(query, queryArgs...)
 	if queryError != nil {
 		return nil, queryError
@@ -148,11 +167,18 @@ func ExtractShipsUsedOnLeg(
 }
 
 // QueryCurrentShip returns the latest player starship display name and custom ship
-// name (looking up custom ShipName by ShipID across prior LoadGame events after a
-// ShipyardSwap), ignoring non-starship vessels.
+// name across globally enabled profiles.
 func QueryCurrentShip(queryer db.Queryer) (string, error) {
+	return QueryCurrentShipScoped(queryer, ProfileScope{})
+}
+
+// QueryCurrentShipScoped returns the latest player starship display name and
+// custom ship name matching scope (looking up custom ShipName by ShipID across
+// prior LoadGame events after a ShipyardSwap), ignoring non-starship vessels.
+func QueryCurrentShipScoped(queryer db.Queryer, scope ProfileScope) (string, error) {
+	scopePredicate := scope.SQLPredicate("")
 	query := `SELECT event, raw_json FROM journal_events
-		WHERE event IN ('LoadGame','ShipyardSwap') AND ` + playerShipSQLFilter + ` AND ` + CmdrFilterSQL + `
+		WHERE event IN ('LoadGame','ShipyardSwap') AND ` + playerShipSQLFilter + ` AND ` + scopePredicate + `
 		ORDER BY timestamp DESC, id DESC LIMIT 10`
 	databaseRows, queryError := queryer.Query(query)
 	if queryError != nil {
@@ -198,7 +224,7 @@ func QueryCurrentShip(queryer db.Queryer) (string, error) {
 	}
 	if matchedShipyardSwap != nil {
 		hullDisplayName := reference.ShipDisplayName(matchedShipyardSwap.ShipType, matchedShipyardSwap.ShipTypeLocalised)
-		customShipName := lookupShipNameByShipID(queryer, matchedShipyardSwap.ShipID, matchedShipyardSwap.ShipType)
+		customShipName := lookupShipNameByShipID(queryer, matchedShipyardSwap.ShipID, matchedShipyardSwap.ShipType, scopePredicate)
 		return formatCurrentShipName(hullDisplayName, customShipName), nil
 	}
 	return "", nil
@@ -211,9 +237,9 @@ func formatCurrentShipName(hullDisplayName, customShipName string) string {
 	return hullDisplayName + " \u201c" + customShipName + "\u201d"
 }
 
-func lookupShipNameByShipID(queryer db.Queryer, shipID int64, shipType string) string {
+func lookupShipNameByShipID(queryer db.Queryer, shipID int64, shipType string, scopePredicate string) string {
 	query := `SELECT raw_json FROM journal_events
-		WHERE event = 'LoadGame' AND json_extract(raw_json, '$.ShipID') = ? AND ` + playerShipSQLFilter + ` AND ` + CmdrFilterSQL + `
+		WHERE event = 'LoadGame' AND json_extract(raw_json, '$.ShipID') = ? AND ` + playerShipSQLFilter + ` AND ` + scopePredicate + `
 		ORDER BY timestamp DESC, id DESC LIMIT 1`
 	var rawLoadGame string
 	if queryer.QueryRow(query, shipID).Scan(&rawLoadGame) != nil {

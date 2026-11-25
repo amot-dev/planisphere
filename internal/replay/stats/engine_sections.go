@@ -35,12 +35,18 @@ var (
 	)
 )
 
-// QueryCareerCarrierOps loads lifetime Personal Carrier Operations jump and distance totals
-// from Frontier's latest Statistics event.
+// QueryCareerCarrierOps loads lifetime Personal Carrier Operations jump and
+// distance totals from Frontier's latest Statistics event across enabled profiles.
 func QueryCareerCarrierOps(queryer db.Queryer) (CarrierOpsMetrics, error) {
+	return QueryCareerCarrierOpsScoped(queryer, replay.ProfileScope{})
+}
+
+// QueryCareerCarrierOpsScoped loads lifetime Personal Carrier Operations jump
+// and distance totals from Frontier's latest Statistics event matching scope.
+func QueryCareerCarrierOpsScoped(queryer db.Queryer, scope replay.ProfileScope) (CarrierOpsMetrics, error) {
 	var rawStatistics string
 	queryError := queryer.QueryRow(`SELECT raw_json FROM journal_events
-		WHERE event = 'Statistics' AND json_extract(raw_json, '$.FLEETCARRIER') IS NOT NULL AND ` + replay.CmdrFilterSQL + `
+		WHERE event = 'Statistics' AND json_extract(raw_json, '$.FLEETCARRIER') IS NOT NULL AND ` + scope.SQLPredicate("") + `
 		ORDER BY timestamp DESC, id DESC LIMIT 1`).Scan(&rawStatistics)
 	if errors.Is(queryError, sql.ErrNoRows) {
 		return CarrierOpsMetrics{}, nil
@@ -61,21 +67,29 @@ func QueryCareerCarrierOps(queryer db.Queryer) (CarrierOpsMetrics, error) {
 	}, nil
 }
 
+// ComputeCarrierOps returns Personal Carrier Operations metrics for the
+// effective profile scope.
+func (engine *Engine) ComputeCarrierOps(filter *Filter) (CarrierOpsMetrics, error) {
+	return QueryCareerCarrierOpsScoped(engine.DB, effectiveScope(engine.Scope, filter))
+}
+
 // ComputeTravel returns Flight Operations navigation metrics for events in timeRange,
 // loading only arrival events (Location, FSDJump, CarrierJump) and recovered jumps.
 func (engine *Engine) ComputeTravel(timeRange Range, filter *Filter) (TravelMetrics, error) {
 	var metrics Metrics
+	scope := effectiveScope(engine.Scope, filter)
 	after, until := timeRange.bounds()
 	filterSet, prepareError := filter.prepare(engine.DB, engine.ModeLoader)
 	if prepareError != nil {
 		return TravelMetrics{}, fmt.Errorf("prepare travel stats filter: %w", prepareError)
 	}
-	loadedEvents, loadError := replay.LoadEvents(engine.DB, after, until, TravelReplayEvents)
+	loadedEvents, loadError := replay.LoadEventsScoped(engine.DB, after, until, TravelReplayEvents, scope)
 	if loadError != nil {
 		return TravelMetrics{}, fmt.Errorf("load travel stats events: %w", loadError)
 	}
 	accumulator := &computeAccumulator{
 		engine:    engine,
+		scope:     scope,
 		after:     after,
 		until:     until,
 		filterSet: filterSet,
@@ -85,7 +99,7 @@ func (engine *Engine) ComputeTravel(timeRange Range, filter *Filter) (TravelMetr
 			return TravelMetrics{}, stepError
 		}
 	}
-	recoveredJumps, recoverError := engine.loadRecoveredJumps(after, until)
+	recoveredJumps, recoverError := engine.loadRecoveredJumps(after, until, scope)
 	if recoverError != nil {
 		return TravelMetrics{}, fmt.Errorf("recover disconnected jumps: %w", recoverError)
 	}
@@ -103,30 +117,32 @@ func (engine *Engine) ComputeTravel(timeRange Range, filter *Filter) (TravelMetr
 // for events in timeRange, optionally filtered by Discovery mode selections.
 func (engine *Engine) ComputeCartographics(timeRange Range, filter *Filter) (CartographicsMetrics, error) {
 	var metrics Metrics
+	scope := effectiveScope(engine.Scope, filter)
 	after, until := timeRange.bounds()
 	filterSet, prepareError := filter.prepare(engine.DB, engine.ModeLoader)
 	if prepareError != nil {
 		return CartographicsMetrics{}, fmt.Errorf("prepare cartographics stats filter: %w", prepareError)
 	}
-	loadedEvents, loadError := replay.LoadEvents(engine.DB, after, until, CartographicsReplayEvents)
+	loadedEvents, loadError := replay.LoadEventsScoped(engine.DB, after, until, CartographicsReplayEvents, scope)
 	if loadError != nil {
 		return CartographicsMetrics{}, fmt.Errorf("load cartographics stats events: %w", loadError)
 	}
 
 	session := replay.NewSessionState(engine.Odyssey, len(loadedEvents)/8)
-	if seedError := replay.SeedLoadGameBefore(engine.DB, after, session); seedError != nil {
+	if seedError := replay.SeedLoadGameBeforeScoped(engine.DB, after, session, scope); seedError != nil {
 		return CartographicsMetrics{}, fmt.Errorf("seed initial loadgame state: %w", seedError)
 	}
-	if preloadPopError := replay.PreloadSystemPopulations(engine.DB, after, loadedEvents, until, session); preloadPopError != nil {
+	if preloadPopError := replay.PreloadSystemPopulationsScoped(engine.DB, after, loadedEvents, until, session, scope); preloadPopError != nil {
 		return CartographicsMetrics{}, fmt.Errorf("preload system populations: %w", preloadPopError)
 	}
-	scans, missingScans, preloadScanError := engine.prepareComputeScans(after, loadedEvents)
+	scans, missingScans, preloadScanError := engine.prepareComputeScans(after, loadedEvents, scope)
 	if preloadScanError != nil {
 		return CartographicsMetrics{}, fmt.Errorf("prepare cartographics scans: %w", preloadScanError)
 	}
 
 	accumulator := &computeAccumulator{
 		engine:        engine,
+		scope:         scope,
 		after:         after,
 		until:         until,
 		filterSet:     filterSet,
@@ -170,12 +186,13 @@ func (accumulator *computeAccumulator) processCartographicsEvent(rowItem replay.
 // body scans and system populations.
 func (engine *Engine) ComputeExobiology(timeRange Range, filter *Filter) (ExobiologyMetrics, error) {
 	var metrics Metrics
+	scope := effectiveScope(engine.Scope, filter)
 	after, until := timeRange.bounds()
 	filterSet, prepareError := filter.prepare(engine.DB, engine.ModeLoader)
 	if prepareError != nil {
 		return ExobiologyMetrics{}, fmt.Errorf("prepare exobiology stats filter: %w", prepareError)
 	}
-	loadedEvents, loadError := replay.LoadEvents(engine.DB, after, until, ExobiologyReplayEvents)
+	loadedEvents, loadError := replay.LoadEventsScoped(engine.DB, after, until, ExobiologyReplayEvents, scope)
 	if loadError != nil {
 		return ExobiologyMetrics{}, fmt.Errorf("load exobiology stats events: %w", loadError)
 	}
@@ -184,16 +201,17 @@ func (engine *Engine) ComputeExobiology(timeRange Range, filter *Filter) (Exobio
 	}
 
 	session := replay.NewSessionState(engine.Odyssey, len(loadedEvents)/4)
-	if preloadPopError := replay.PreloadSystemPopulationsForRows(engine.DB, loadedEvents, until, session); preloadPopError != nil {
+	if preloadPopError := replay.PreloadSystemPopulationsForRowsScoped(engine.DB, loadedEvents, until, session, scope); preloadPopError != nil {
 		return ExobiologyMetrics{}, fmt.Errorf("preload exobiology system populations: %w", preloadPopError)
 	}
-	chronologicalScans, preloadScanError := engine.prepareExobiologyScans(until, loadedEvents)
+	chronologicalScans, preloadScanError := engine.prepareExobiologyScans(until, loadedEvents, scope)
 	if preloadScanError != nil {
 		return ExobiologyMetrics{}, fmt.Errorf("prepare exobiology scans: %w", preloadScanError)
 	}
 
 	accumulator := &computeAccumulator{
 		engine:             engine,
+		scope:              scope,
 		after:              after,
 		until:              until,
 		filterSet:          filterSet,
@@ -208,7 +226,7 @@ func (engine *Engine) ComputeExobiology(timeRange Range, filter *Filter) (Exobio
 	return ExtractExobiologyMetrics(metrics), nil
 }
 
-func (engine *Engine) prepareExobiologyScans(untilTimestamp string, loadedEvents []replay.Row) (map[bodyKey][]*journal.ScanEvent, error) {
+func (engine *Engine) prepareExobiologyScans(untilTimestamp string, loadedEvents []replay.Row, scope replay.ProfileScope) (map[bodyKey][]*journal.ScanEvent, error) {
 	seenBodies := make(map[bodyKey]bool)
 	var neededKeys []bodyKey
 	for _, rowItem := range loadedEvents {
@@ -228,7 +246,7 @@ func (engine *Engine) prepareExobiologyScans(untilTimestamp string, loadedEvents
 	if len(neededKeys) == 0 {
 		return map[bodyKey][]*journal.ScanEvent{}, nil
 	}
-	chronologicalScans, preloadError := engine.preloadChronologicalScans(neededKeys, untilTimestamp)
+	chronologicalScans, preloadError := engine.preloadChronologicalScans(neededKeys, untilTimestamp, scope)
 	if preloadError != nil {
 		return nil, fmt.Errorf("preload exobiology parent scans before %s: %w", untilTimestamp, preloadError)
 	}

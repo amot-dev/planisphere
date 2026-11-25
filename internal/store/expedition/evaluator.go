@@ -77,11 +77,24 @@ func exclusiveBoundaryBefore(departedAt, visitedAt string) string {
 	return boundedTimestamp
 }
 
+type stayActor struct {
+	uid       string
+	profileID int64
+	commander string
+}
+
 func sameStayCommander(stayCommander, candidateCommander string) bool {
 	if stayCommander == "" || candidateCommander == "" {
 		return true
 	}
 	return strings.EqualFold(stayCommander, candidateCommander)
+}
+
+func sameStayActor(stay stayActor, candidate Arrival) bool {
+	if stay.profileID > 0 && candidate.ProfileID > 0 {
+		return stay.profileID == candidate.ProfileID
+	}
+	return sameStayCommander(stay.commander, candidate.Commander)
 }
 
 func sameNormalizedSystem(leftName string, leftAddress int64, rightName string, rightAddress int64) bool {
@@ -94,13 +107,13 @@ func sameNormalizedSystem(leftName string, leftAddress int64, rightName string, 
 func findDepartureTimestamp(
 	waypointRow *Row,
 	normalizedWaypointSystem string,
-	stayCommander string,
+	stay stayActor,
 	transitions []Arrival,
 	startIndex int,
 ) string {
 	for index := startIndex; index < len(transitions); index++ {
 		candidate := transitions[index]
-		if !sameStayCommander(stayCommander, candidate.Commander) {
+		if !sameStayActor(stay, candidate) {
 			continue
 		}
 		if matchesNormalizedWaypoint(waypointRow, normalizedWaypointSystem, candidate.SystemAddress, candidate.SystemName) {
@@ -111,18 +124,20 @@ func findDepartureTimestamp(
 	return ""
 }
 
-// prepareNormalizedTransitions extracts the origin visit event UID and commander
-// and filters arrivals into chronological system-change transitions with normalized names.
-func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startTimestamp string, arrivals []Arrival) (string, string, []Arrival) {
-	originVisitUID := ""
-	originCommander := ""
+// prepareNormalizedTransitions extracts the origin visit stay actor and filters
+// arrivals into chronological system-change transitions with normalized names.
+func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startTimestamp string, arrivals []Arrival) (stayActor, []Arrival) {
+	var originStay stayActor
 	lastSystemName := normalizedOriginSystem
 	lastSystemAddress := originRow.SystemAddress
 	for _, arrival := range arrivals {
 		normalizedArrivalSystem := strings.ToLower(strings.TrimSpace(arrival.SystemName))
 		if arrival.Timestamp == startTimestamp && matchesNormalizedWaypoint(originRow, normalizedOriginSystem, arrival.SystemAddress, normalizedArrivalSystem) {
-			originVisitUID = arrival.UID
-			originCommander = arrival.Commander
+			originStay = stayActor{
+				uid:       arrival.UID,
+				profileID: arrival.ProfileID,
+				commander: arrival.Commander,
+			}
 			if normalizedArrivalSystem != "" {
 				lastSystemName = normalizedArrivalSystem
 			}
@@ -135,7 +150,7 @@ func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startT
 
 	transitions := make([]Arrival, 0, len(arrivals))
 	for _, arrival := range arrivals {
-		if arrival.Timestamp == startTimestamp && arrival.UID == originVisitUID {
+		if arrival.Timestamp == startTimestamp && arrival.UID == originStay.uid {
 			continue
 		}
 		if arrival.Timestamp <= startTimestamp {
@@ -151,7 +166,7 @@ func prepareNormalizedTransitions(originRow *Row, normalizedOriginSystem, startT
 		transitionItem.SystemName = normalizedArrivalSystem
 		transitions = append(transitions, transitionItem)
 	}
-	return originVisitUID, originCommander, transitions
+	return originStay, transitions
 }
 
 func replayNormalizedTransitions(
@@ -159,16 +174,15 @@ func replayNormalizedTransitions(
 	normalizedSystemNames []string,
 	firstWaypointIndex int,
 	startTimestamp string,
-	originVisitUID string,
-	originCommander string,
+	originStay stayActor,
 	transitions []Arrival,
 ) []Row {
 	rows[firstWaypointIndex].VisitedAt = startTimestamp
-	rows[firstWaypointIndex].VisitEventUID = originVisitUID
+	rows[firstWaypointIndex].VisitEventUID = originStay.uid
 	rows[firstWaypointIndex].DepartedAt = findDepartureTimestamp(
 		&rows[firstWaypointIndex],
 		normalizedSystemNames[firstWaypointIndex],
-		originCommander,
+		originStay,
 		transitions,
 		0,
 	)
@@ -186,7 +200,7 @@ func replayNormalizedTransitions(
 		rows[nextWaypointIndex].DepartedAt = findDepartureTimestamp(
 			&rows[nextWaypointIndex],
 			normalizedSystemNames[nextWaypointIndex],
-			arrival.Commander,
+			stayActor{uid: arrival.UID, profileID: arrival.ProfileID, commander: arrival.Commander},
 			transitions,
 			i+1,
 		)
@@ -202,8 +216,8 @@ func replayExpeditionArrivals(rows []Row, firstWaypointIndex int, startTimestamp
 			normalizedSystemNames[i] = strings.ToLower(strings.TrimSpace(rows[i].SystemName))
 		}
 	}
-	originVisitUID, originCommander, transitions := prepareNormalizedTransitions(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], startTimestamp, arrivals)
-	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originVisitUID, originCommander, transitions)
+	originStay, transitions := prepareNormalizedTransitions(&rows[firstWaypointIndex], normalizedSystemNames[firstWaypointIndex], startTimestamp, arrivals)
+	return replayNormalizedTransitions(rows, normalizedSystemNames, firstWaypointIndex, startTimestamp, originStay, transitions)
 }
 
 // reconcileEvaluatedRowState synchronizes derived row fields after chronological
@@ -341,7 +355,7 @@ func Reevaluate(queryer db.Queryer, expeditionID int64) (bool, error) {
 		activeModeID = modes.DefaultFallbackModeID(queryer)
 	}
 
-	arrivals, arrivalsError := replay.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	arrivals, arrivalsError := replay.QueryArrivalsInWindowScoped(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, expeditionRecord.ProfileScope())
 	if arrivalsError != nil {
 		return false, arrivalsError
 	}

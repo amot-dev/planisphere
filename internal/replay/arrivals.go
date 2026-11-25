@@ -33,28 +33,50 @@ type Arrival struct {
 	Event         string `json:"event"`
 	SystemName    string `json:"systemName"`
 	SystemAddress int64  `json:"systemAddress"`
-	Commander     string `json:"-"`
+	ProfileID     int64  `json:"profileId,omitempty"`
+	Commander     string `json:"commander,omitempty"`
 }
 
-// QueryArrivalsInWindow queries chronological arrivals within [startTimestamp, endTimestamp].
+// ArrivalStayContext identifies the resolved star system address and pilot
+// identity (save-slot ProfileID and Commander name) for a waypoint stay.
+type ArrivalStayContext struct {
+	SystemAddress int64
+	ProfileID     int64
+	Commander     string
+}
+
+// QueryArrivalsInWindow queries chronological arrivals within [startTimestamp, endTimestamp]
+// across globally enabled profiles.
 func QueryArrivalsInWindow(queryer db.Queryer, startTimestamp, endTimestamp string) ([]Arrival, error) {
+	return QueryArrivalsInWindowScoped(queryer, startTimestamp, endTimestamp, ProfileScope{})
+}
+
+// QueryArrivalsInWindowScoped queries chronological arrivals within
+// [startTimestamp, endTimestamp] matching scope.
+func QueryArrivalsInWindowScoped(queryer db.Queryer, startTimestamp, endTimestamp string, scope ProfileScope) ([]Arrival, error) {
 	if endTimestamp != "" {
-		return loadArrivalsWhere(queryer, `timestamp >= ? AND timestamp <= ?`, startTimestamp, endTimestamp)
+		return loadArrivalsWhereScoped(queryer, scope, `timestamp >= ? AND timestamp <= ?`, startTimestamp, endTimestamp)
 	}
-	return loadArrivalsWhere(queryer, `timestamp >= ?`, startTimestamp)
+	return loadArrivalsWhereScoped(queryer, scope, `timestamp >= ?`, startTimestamp)
 }
 
 // QuerySystemArrivalCandidates queries every recorded visit to systemName or
-// systemAddress in reverse chronological order (newest first).
+// systemAddress across globally enabled profiles in reverse chronological order.
 func QuerySystemArrivalCandidates(queryer db.Queryer, systemName string, systemAddress int64) ([]Arrival, error) {
+	return QuerySystemArrivalCandidatesScoped(queryer, systemName, systemAddress, ProfileScope{})
+}
+
+// QuerySystemArrivalCandidatesScoped queries every recorded visit to systemName
+// or systemAddress matching scope in reverse chronological order (newest first).
+func QuerySystemArrivalCandidatesScoped(queryer db.Queryer, systemName string, systemAddress int64, scope ProfileScope) ([]Arrival, error) {
 	var (
 		loadedArrivals []Arrival
 		loadError      error
 	)
 	if systemAddress != 0 {
-		loadedArrivals, loadError = loadArrivalsWhere(queryer, `(system_name = ? COLLATE NOCASE OR system_address = ?)`, systemName, systemAddress)
+		loadedArrivals, loadError = loadArrivalsWhereScoped(queryer, scope, `(system_name = ? COLLATE NOCASE OR system_address = ?)`, systemName, systemAddress)
 	} else {
-		loadedArrivals, loadError = loadArrivalsWhere(queryer, `system_name = ? COLLATE NOCASE`, systemName)
+		loadedArrivals, loadError = loadArrivalsWhereScoped(queryer, scope, `system_name = ? COLLATE NOCASE`, systemName)
 	}
 	if loadError != nil {
 		return nil, loadError
@@ -68,35 +90,36 @@ func QuerySystemArrivalCandidates(queryer db.Queryer, systemName string, systemA
 // QueryLatestPlayerLocation queries the most recent coordinates and star system
 // for the active commanders across FSDJump, Location, and CarrierJump events.
 func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, error) {
+	return QueryLatestPlayerLocationScoped(queryer, ProfileScope{})
+}
+
+// QueryLatestPlayerLocationScoped queries the most recent coordinates and star
+// system matching scope across FSDJump, Location, and CarrierJump events.
+func QueryLatestPlayerLocationScoped(queryer db.Queryer, scope ProfileScope) (*reference.Vec3, string, error) {
 	var (
 		starX, starY, starZ sql.NullFloat64
 		systemName          sql.NullString
 	)
+	scopePredicate := scope.SQLPredicate("")
 	query := `SELECT star_x, star_y, star_z, system_name FROM (
 		SELECT * FROM (
 			SELECT star_x, star_y, star_z, system_name, timestamp, id
 			FROM journal_events
-			WHERE event = 'FSDJump'
-			  AND ` + CmdrFilterSQL + `
-			  AND ` + nonMulticrewSQLFilter + `
+			WHERE event = 'FSDJump' AND ` + scopePredicate + ` AND ` + nonMulticrewSQLFilter + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1
 		)
 		UNION ALL
 		SELECT * FROM (
 			SELECT star_x, star_y, star_z, system_name, timestamp, id
 			FROM journal_events
-			WHERE event = 'Location'
-			  AND ` + CmdrFilterSQL + `
-			  AND ` + nonMulticrewSQLFilter + `
+			WHERE event = 'Location' AND ` + scopePredicate + ` AND ` + nonMulticrewSQLFilter + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1
 		)
 		UNION ALL
 		SELECT * FROM (
 			SELECT star_x, star_y, star_z, system_name, timestamp, id
 			FROM journal_events
-			WHERE event = 'CarrierJump'
-			  AND ` + CmdrFilterSQL + `
-			  AND ` + nonMulticrewSQLFilter + `
+			WHERE event = 'CarrierJump' AND ` + scopePredicate + ` AND ` + nonMulticrewSQLFilter + `
 			ORDER BY timestamp DESC, id DESC LIMIT 1
 		)
 	) ORDER BY timestamp DESC, id DESC LIMIT 1`
@@ -114,53 +137,59 @@ func QueryLatestPlayerLocation(queryer db.Queryer) (*reference.Vec3, string, err
 }
 
 // ResolveArrivalStayContext resolves the star system address and stay commander
-// for a waypoint arrival by visitEventUID first, falling back to a matching
-// arrival event at visitedAt when visitEventUID is absent or missing.
+// for a waypoint arrival by visitEventUID first, falling back to visitedAt.
 func ResolveArrivalStayContext(queryer db.Queryer, visitEventUID, visitedAt, systemName string, systemAddress int64) (int64, string, error) {
+	stayContext, err := ResolveArrivalStayContextScoped(queryer, visitEventUID, visitedAt, systemName, systemAddress, ProfileScope{})
+	return stayContext.SystemAddress, stayContext.Commander, err
+}
+
+// ResolveArrivalStayContextScoped resolves the star system address, save-slot
+// ProfileID, and stay commander for a waypoint arrival within scope.
+func ResolveArrivalStayContextScoped(queryer db.Queryer, visitEventUID, visitedAt, systemName string, systemAddress int64, scope ProfileScope) (ArrivalStayContext, error) {
 	if visitEventUID != "" {
-		var arrivalAddress int64
+		uidQuery := `SELECT COALESCE(system_address, 0), COALESCE(profile_id, 0), COALESCE(commander, '') FROM journal_events WHERE event_uid = ? AND ` + NonMulticrewSQLFilter
+		if !scope.IsAllEnabled() {
+			uidQuery += ` AND ` + scope.SQLPredicate("")
+		}
+		var arrivalAddress, stayProfileID int64
 		var stayCommander string
-		lookupError := queryer.QueryRow(
-			`SELECT COALESCE(system_address, 0), COALESCE(commander, '')
-			 FROM journal_events WHERE event_uid = ? AND `+NonMulticrewSQLFilter,
-			visitEventUID,
-		).Scan(&arrivalAddress, &stayCommander)
+		lookupError := queryer.QueryRow(uidQuery, visitEventUID).Scan(&arrivalAddress, &stayProfileID, &stayCommander)
 		if lookupError == nil {
 			if systemAddress != 0 {
-				return systemAddress, stayCommander, nil
+				arrivalAddress = systemAddress
 			}
-			return arrivalAddress, stayCommander, nil
+			return ArrivalStayContext{SystemAddress: arrivalAddress, ProfileID: stayProfileID, Commander: stayCommander}, nil
 		}
 		if !errors.Is(lookupError, sql.ErrNoRows) {
-			return 0, "", fmt.Errorf("resolve arrival stay context by uid %q: %w", visitEventUID, lookupError)
+			return ArrivalStayContext{}, fmt.Errorf("resolve arrival stay context by uid %q: %w", visitEventUID, lookupError)
 		}
 	}
 
 	trimmedSystemName := strings.TrimSpace(systemName)
 	if visitedAt == "" || (systemAddress == 0 && trimmedSystemName == "") {
-		return systemAddress, "", nil
+		return ArrivalStayContext{SystemAddress: systemAddress}, nil
 	}
 	systemPredicate, queryArgs := `system_name = ? COLLATE NOCASE`, []any{visitedAt, trimmedSystemName}
 	if systemAddress != 0 {
 		systemPredicate, queryArgs = `system_address = ?`, []any{visitedAt, systemAddress}
 	}
-	fallbackQuery := `SELECT COALESCE(system_address, 0), COALESCE(commander, '')
+	fallbackQuery := `SELECT COALESCE(system_address, 0), COALESCE(profile_id, 0), COALESCE(commander, '')
 		FROM journal_events
 		WHERE event IN (` + journal.FormatSQLInClause(ArrivalEvents) + `)
-		  AND timestamp = ? AND ` + systemPredicate + ` AND ` + CmdrFilterSQL + ` AND ` + NonMulticrewSQLFilter + `
+		  AND timestamp = ? AND ` + systemPredicate + ` AND ` + scope.SQLPredicate("") + ` AND ` + NonMulticrewSQLFilter + `
 		ORDER BY id LIMIT 1`
-	var arrivalAddress int64
+	var arrivalAddress, stayProfileID int64
 	var stayCommander string
-	if fallbackError := queryer.QueryRow(fallbackQuery, queryArgs...).Scan(&arrivalAddress, &stayCommander); fallbackError != nil {
+	if fallbackError := queryer.QueryRow(fallbackQuery, queryArgs...).Scan(&arrivalAddress, &stayProfileID, &stayCommander); fallbackError != nil {
 		if errors.Is(fallbackError, sql.ErrNoRows) {
-			return systemAddress, "", nil
+			return ArrivalStayContext{SystemAddress: systemAddress}, nil
 		}
-		return 0, "", fmt.Errorf("resolve arrival stay context at %s: %w", visitedAt, fallbackError)
+		return ArrivalStayContext{}, fmt.Errorf("resolve arrival stay context at %s: %w", visitedAt, fallbackError)
 	}
 	if systemAddress != 0 {
-		return systemAddress, stayCommander, nil
+		arrivalAddress = systemAddress
 	}
-	return arrivalAddress, stayCommander, nil
+	return ArrivalStayContext{SystemAddress: arrivalAddress, ProfileID: stayProfileID, Commander: stayCommander}, nil
 }
 
 // QueryLastInSystemActivityTimestamp returns the latest non-multicrew exploration
@@ -168,6 +197,14 @@ func ResolveArrivalStayContext(queryer db.Queryer, visitEventUID, visitedAt, sys
 // Analyse) for the target system and stayCommander within (afterTimestamp, untilTimestamp],
 // or an empty string when none exist.
 func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, untilTimestamp, systemName string, systemAddress int64, stayCommander string) (string, error) {
+	return QueryLastInSystemActivityTimestampForStay(queryer, afterTimestamp, untilTimestamp, systemName, systemAddress, ArrivalStayContext{Commander: stayCommander}, ProfileScope{})
+}
+
+// QueryLastInSystemActivityTimestampForStay returns the latest non-multicrew
+// exploration activity timestamp (non-belt body Scan, planet SAAScanComplete, or
+// ScanOrganic Analyse) for the target system and stay actor within
+// (afterTimestamp, untilTimestamp] and scope, or an empty string when none exist.
+func QueryLastInSystemActivityTimestampForStay(queryer db.Queryer, afterTimestamp, untilTimestamp, systemName string, systemAddress int64, stay ArrivalStayContext, scope ProfileScope) (string, error) {
 	query := `SELECT COALESCE(MAX(timestamp), '')
 		FROM journal_events
 		WHERE timestamp > ?`
@@ -189,11 +226,18 @@ func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, unti
 		query += ` AND system_name = ? COLLATE NOCASE`
 		queryArgs = append(queryArgs, trimmedSystemName)
 	}
-	if trimmedCommander := strings.TrimSpace(stayCommander); trimmedCommander != "" {
+	trimmedCommander := strings.TrimSpace(stay.Commander)
+	if stay.ProfileID > 0 && trimmedCommander != "" && scope.IsAllEnabled() {
+		query += ` AND (+profile_id = ? OR (COALESCE(profile_id, 0) = 0 AND (COALESCE(commander, '') = '' OR commander = ? COLLATE NOCASE)))`
+		queryArgs = append(queryArgs, stay.ProfileID, trimmedCommander)
+	} else if stay.ProfileID > 0 {
+		query += ` AND +profile_id = ?`
+		queryArgs = append(queryArgs, stay.ProfileID)
+	} else if trimmedCommander != "" {
 		query += ` AND (COALESCE(commander, '') = '' OR commander = ? COLLATE NOCASE)`
 		queryArgs = append(queryArgs, trimmedCommander)
 	}
-	query += commanderFilterPredicate(queryer) + ` AND ` + NonMulticrewSQLFilter
+	query += commanderFilterPredicate(queryer, scope) + ` AND ` + NonMulticrewSQLFilter
 
 	var lastTimestamp string
 	if scanError := queryer.QueryRow(query, queryArgs...).Scan(&lastTimestamp); scanError != nil {
@@ -202,10 +246,10 @@ func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, unti
 	return lastTimestamp, nil
 }
 
-func loadArrivalsWhere(queryer db.Queryer, whereClause string, queryArgs ...any) ([]Arrival, error) {
+func loadArrivalsWhereScoped(queryer db.Queryer, scope ProfileScope, whereClause string, queryArgs ...any) ([]Arrival, error) {
 	databaseRows, queryError := queryer.Query(
-		`SELECT event_uid, timestamp, event, COALESCE(system_name,''), COALESCE(system_address,0), COALESCE(commander,'')
-		FROM journal_events WHERE event IN (`+journal.FormatSQLInClause(ArrivalEvents)+`) AND (`+whereClause+`) AND `+CmdrFilterSQL+` AND `+nonMulticrewSQLFilter+` ORDER BY timestamp, id`,
+		`SELECT event_uid, timestamp, event, COALESCE(system_name,''), COALESCE(system_address,0), COALESCE(profile_id,0), COALESCE(commander,'')
+		FROM journal_events WHERE event IN (`+journal.FormatSQLInClause(ArrivalEvents)+`) AND (`+whereClause+`) AND `+scope.SQLPredicate("")+` AND `+nonMulticrewSQLFilter+` ORDER BY timestamp, id`,
 		queryArgs...,
 	)
 	if queryError != nil {
@@ -215,7 +259,7 @@ func loadArrivalsWhere(queryer db.Queryer, whereClause string, queryArgs ...any)
 	var arrivals []Arrival
 	for databaseRows.Next() {
 		var arrival Arrival
-		if scanError := databaseRows.Scan(&arrival.UID, &arrival.Timestamp, &arrival.Event, &arrival.SystemName, &arrival.SystemAddress, &arrival.Commander); scanError != nil {
+		if scanError := databaseRows.Scan(&arrival.UID, &arrival.Timestamp, &arrival.Event, &arrival.SystemName, &arrival.SystemAddress, &arrival.ProfileID, &arrival.Commander); scanError != nil {
 			return nil, scanError
 		}
 		arrival.Galactic = reference.ToGalactic(arrival.Timestamp)

@@ -13,11 +13,24 @@ func NormalizeSystemKey(systemName string) string {
 }
 
 // QuerySystemVisitCounts queries commander visit counts for missingNormalizedNames
-// against queryer, adding any matching crash-recovered jumps from recovered.
+// against queryer across globally enabled profiles, adding any matching
+// crash-recovered jumps from recovered.
 func QuerySystemVisitCounts(
 	queryer db.Queryer,
 	missingNormalizedNames []string,
 	recovered []RecoveredJump,
+) (map[string]int, error) {
+	return QuerySystemVisitCountsScoped(queryer, missingNormalizedNames, recovered, ProfileScope{})
+}
+
+// QuerySystemVisitCountsScoped queries commander visit counts for
+// missingNormalizedNames matching scope against queryer, adding any matching
+// crash-recovered jumps from recovered.
+func QuerySystemVisitCountsScoped(
+	queryer db.Queryer,
+	missingNormalizedNames []string,
+	recovered []RecoveredJump,
+	scope ProfileScope,
 ) (map[string]int, error) {
 	if len(missingNormalizedNames) == 0 {
 		return map[string]int{}, nil
@@ -32,7 +45,7 @@ func QuerySystemVisitCounts(
 		FROM journal_events
 		WHERE system_name COLLATE NOCASE IN (` + strings.Join(placeholders, ",") + `)
 		  AND (event IN ('FSDJump', 'Location', 'CarrierJump') OR star_x IS NOT NULL)
-		  AND ` + CmdrFilterSQL + `
+		  AND ` + scope.SQLPredicate("") + `
 		  AND ` + nonMulticrewSQLFilter + `
 		GROUP BY system_name COLLATE NOCASE`
 	databaseRows, queryError := queryer.Query(query, queryArgs...)
@@ -57,7 +70,12 @@ func QuerySystemVisitCounts(
 		return nil, iterationError
 	}
 
+	explicitScope := !scope.IsAllEnabled()
+	scopeMatcher := scope.Matcher()
 	for _, recoveredJump := range recovered {
+		if explicitScope && !scopeMatcher.Matches(recoveredJump.ProfileID, recoveredJump.Commander) {
+			continue
+		}
 		normalizedSystem := NormalizeSystemKey(recoveredJump.SystemName)
 		if totalBySystem[normalizedSystem] > 0 {
 			jumpsBySystem[normalizedSystem]++

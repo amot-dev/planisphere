@@ -53,6 +53,7 @@ func (columns nullableArrivalColumns) toSnapshot(eventType journal.EventType) ar
 type primedDisconnectCandidate struct {
 	loadGameID         int64
 	loadGameTimestamp  string
+	profileID          int64
 	commander          string
 	locationID         int64
 	locationUID        string
@@ -70,6 +71,7 @@ type primedDisconnectCandidate struct {
 type preDisconnectEvent struct {
 	id            int64
 	timestamp     string
+	profileID     int64
 	commander     string
 	eventType     journal.EventType
 	systemName    string
@@ -106,15 +108,8 @@ func selectLatestArrival(candidates ...arrivalSnapshot) arrivalSnapshot {
 	return chosen
 }
 
-func commanderFilterForAlias(alias string, applyFilter bool) string {
-	if !applyFilter {
-		return ""
-	}
-	return ` AND (` + alias + `.commander IS NULL OR ` + alias + `.commander = '' OR NOT EXISTS (SELECT 1 FROM commanders c WHERE c.name = ` + alias + `.commander COLLATE NOCASE AND c.enabled = 0))`
-}
-
-func sameCommanderAsSQL(alias, referenceCommanderExpr string) string {
-	return ` AND (COALESCE(` + alias + `.commander, '') = '' OR COALESCE(` + referenceCommanderExpr + `, '') = '' OR ` + alias + `.commander = ` + referenceCommanderExpr + ` COLLATE NOCASE)`
+func sameActorAsSQL(alias, refProfileExpr, refCommanderExpr string) string {
+	return ` AND ((COALESCE(` + refProfileExpr + `, 0) > 0 AND (` + alias + `.profile_id = ` + refProfileExpr + ` OR (COALESCE(` + alias + `.profile_id, 0) = 0 AND COALESCE(` + alias + `.commander, '') = ''))) OR (COALESCE(` + refProfileExpr + `, 0) = 0 AND COALESCE(` + alias + `.profile_id, 0) = 0 AND (COALESCE(` + alias + `.commander, '') = '' OR COALESCE(` + refCommanderExpr + `, '') = '' OR ` + alias + `.commander = ` + refCommanderExpr + ` COLLATE NOCASE)))`
 }
 
 func isCarrierConcourseLocation(locationEvent journal.LocationEvent) bool {
@@ -131,40 +126,33 @@ func isCarrierConcourseLocation(locationEvent journal.LocationEvent) bool {
 // whereas prev_fsd_id and prev_cj_id scan up to Location so normal jumps logged
 // between LoadGame and Location advance previousArrival past LoadGame and cause
 // evaluatePrimedRow to reject the candidate.
-func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
-	loadGameFilter := commanderFilterForAlias("lg", applyCommanderFilter)
-	nextLocFilter := commanderFilterForAlias("loc", applyCommanderFilter)
-	startJumpFilter := commanderFilterForAlias("sj", applyCommanderFilter)
-	completedFSDFilter := commanderFilterForAlias("f2", applyCommanderFilter)
-	prevLocFilter := commanderFilterForAlias("l2", applyCommanderFilter)
-	prevFSDFilter := commanderFilterForAlias("f", applyCommanderFilter)
-	prevCarrierFilter := commanderFilterForAlias("c", applyCommanderFilter)
+func buildPrimedCandidatesSQL() string {
+	actorLG := func(alias string) string { return sameActorAsSQL(alias, "lg.profile_id", "lg.commander") }
+	actorU := func(alias string) string { return sameActorAsSQL(alias, "u.lg_pid", "u.lg_cmdr") }
 
 	return `WITH lg_uncompleted_sj AS (
 		SELECT
-			lg.id AS lg_id,
-			lg.timestamp AS lg_ts,
-			COALESCE(lg.commander, '') AS lg_cmdr,
+			lg.id AS lg_id, lg.timestamp AS lg_ts, COALESCE(lg.profile_id, 0) AS lg_pid, COALESCE(lg.commander, '') AS lg_cmdr,
 			(SELECT loc.id FROM journal_events loc
-			 WHERE loc.event = 'Location' AND (loc.timestamp, loc.id) > (lg.timestamp, lg.id)` + nextLocFilter + sameCommanderAsSQL("loc", "lg.commander") + `
+			 WHERE loc.event = 'Location' AND (loc.timestamp, loc.id) > (lg.timestamp, lg.id)` + actorLG("loc") + `
 			 ORDER BY loc.timestamp ASC, loc.id ASC LIMIT 1) AS next_loc_id,
 			(SELECT sj.id FROM journal_events sj
-			 WHERE sj.event = 'StartJump' AND (sj.timestamp, sj.id) < (lg.timestamp, lg.id)` + startJumpFilter + sameCommanderAsSQL("sj", "lg.commander") + `
+			 WHERE sj.event = 'StartJump' AND (sj.timestamp, sj.id) < (lg.timestamp, lg.id)` + actorLG("sj") + `
 			 ORDER BY sj.timestamp DESC, sj.id DESC LIMIT 1) AS last_sj_id
 		FROM journal_events lg
-		WHERE lg.event = 'LoadGame'` + loadGameFilter + `
+		WHERE lg.event = 'LoadGame'
 	),
 	uncompleted AS (
 		SELECT
-			u.lg_id, u.lg_ts, u.lg_cmdr, u.next_loc_id,
+			u.lg_id, u.lg_ts, u.lg_pid, u.lg_cmdr, u.next_loc_id,
 			(SELECT l2.id FROM journal_events l2
-			 WHERE l2.event = 'Location' AND (l2.timestamp, l2.id) < (u.lg_ts, u.lg_id)` + prevLocFilter + sameCommanderAsSQL("l2", "u.lg_cmdr") + `
+			 WHERE l2.event = 'Location' AND (l2.timestamp, l2.id) < (u.lg_ts, u.lg_id)` + actorU("l2") + `
 			 ORDER BY l2.timestamp DESC, l2.id DESC LIMIT 1) AS prev_loc_id,
 			(SELECT f.id FROM journal_events f
-			 WHERE f.event = 'FSDJump' AND (f.timestamp, f.id) < (loc.timestamp, loc.id)` + prevFSDFilter + sameCommanderAsSQL("f", "u.lg_cmdr") + `
+			 WHERE f.event = 'FSDJump' AND (f.timestamp, f.id) < (loc.timestamp, loc.id)` + actorU("f") + `
 			 ORDER BY f.timestamp DESC, f.id DESC LIMIT 1) AS prev_fsd_id,
 			(SELECT c.id FROM journal_events c
-			 WHERE c.event = 'CarrierJump' AND (c.timestamp, c.id) < (loc.timestamp, loc.id)` + prevCarrierFilter + sameCommanderAsSQL("c", "u.lg_cmdr") + `
+			 WHERE c.event = 'CarrierJump' AND (c.timestamp, c.id) < (loc.timestamp, loc.id)` + actorU("c") + `
 			 ORDER BY c.timestamp DESC, c.id DESC LIMIT 1) AS prev_cj_id
 		FROM lg_uncompleted_sj u
 		JOIN journal_events loc ON loc.id = u.next_loc_id
@@ -172,19 +160,15 @@ func buildPrimedCandidatesSQL(applyCommanderFilter bool) string {
 		WHERE (
 			instr(loc.raw_json, '"FleetCarrier"') > 0
 			OR instr(loc.raw_json, '"OnFoot"') > 0
-			OR (
-				u.last_sj_id IS NOT NULL
-				AND NOT EXISTS (
-					SELECT 1 FROM journal_events f2
-					WHERE f2.event = 'FSDJump'
-					  AND (f2.timestamp, f2.id) > (sj.timestamp, sj.id)
-					  AND (f2.timestamp, f2.id) < (loc.timestamp, loc.id)` + completedFSDFilter + sameCommanderAsSQL("f2", "u.lg_cmdr") + `
-				)
-			)
+			OR (u.last_sj_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM journal_events f2
+				WHERE f2.event = 'FSDJump' AND (f2.timestamp, f2.id) > (sj.timestamp, sj.id)
+				  AND (f2.timestamp, f2.id) < (loc.timestamp, loc.id)` + actorU("f2") + `
+			))
 		)
 	)
 	SELECT
-		u.lg_id, u.lg_ts, u.lg_cmdr, lg.raw_json,
+		u.lg_id, u.lg_ts, u.lg_pid, u.lg_cmdr, lg.raw_json,
 		loc.id, loc.event_uid, loc.timestamp, COALESCE(loc.system_name, ''), COALESCE(loc.system_address, 0),
 		loc.star_x, loc.star_y, loc.star_z, loc.raw_json,
 		prev_f.id, prev_f.timestamp, prev_f.system_name, prev_f.system_address, prev_f.star_x, prev_f.star_y, prev_f.star_z,
@@ -229,7 +213,7 @@ func classifyLocationCandidate(locationJSON, loadGameJSON string, candidate *pri
 }
 
 func evaluatePrimedRow(
-	loadGameID, locationID, locationAddress int64,
+	loadGameID, loadGameProfileID, locationID, locationAddress int64,
 	loadGameTimestamp, loadGameCommander, loadGameJSON, locationUID, locationTimestamp string,
 	locationSystem, locationJSON string,
 	locX, locY, locZ sql.NullFloat64,
@@ -247,6 +231,7 @@ func evaluatePrimedRow(
 	candidate := primedDisconnectCandidate{
 		loadGameID:        loadGameID,
 		loadGameTimestamp: loadGameTimestamp,
+		profileID:         loadGameProfileID,
 		commander:         loadGameCommander,
 		locationID:        locationID,
 		locationUID:       locationUID,
@@ -262,8 +247,8 @@ func evaluatePrimedRow(
 	return candidate, true
 }
 
-func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]primedDisconnectCandidate, error) {
-	databaseRows, queryError := queryer.Query(buildPrimedCandidatesSQL(applyCommanderFilter))
+func queryPrimedCandidates(queryer db.Queryer) ([]primedDisconnectCandidate, error) {
+	databaseRows, queryError := queryer.Query(buildPrimedCandidatesSQL())
 	if queryError != nil {
 		return nil, fmt.Errorf("query primed disconnect candidates: %w", queryError)
 	}
@@ -272,14 +257,14 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 	var candidates []primedDisconnectCandidate
 	for databaseRows.Next() {
 		var (
-			loadGameID, locationID, locationAddress                                            int64
+			loadGameID, loadGameProfileID, locationID, locationAddress                         int64
 			loadGameTimestamp, loadGameCommander, loadGameJSON, locationUID, locationTimestamp string
 			locationSystem, locationJSON                                                       string
 			locX, locY, locZ                                                                   sql.NullFloat64
 			prevFSD, prevLoc, prevCarrier                                                      nullableArrivalColumns
 		)
 		scanError := databaseRows.Scan(
-			&loadGameID, &loadGameTimestamp, &loadGameCommander, &loadGameJSON,
+			&loadGameID, &loadGameTimestamp, &loadGameProfileID, &loadGameCommander, &loadGameJSON,
 			&locationID, &locationUID, &locationTimestamp, &locationSystem, &locationAddress,
 			&locX, &locY, &locZ, &locationJSON,
 			&prevFSD.id, &prevFSD.timestamp, &prevFSD.systemName, &prevFSD.systemAddress, &prevFSD.starX, &prevFSD.starY, &prevFSD.starZ,
@@ -295,15 +280,15 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 			prevCarrier.toSnapshot(journal.EventCarrierJump),
 		)
 		candidate, isCandidate := evaluatePrimedRow(
-			loadGameID, locationID, locationAddress,
+			loadGameID, loadGameProfileID, locationID, locationAddress,
 			loadGameTimestamp, loadGameCommander, loadGameJSON, locationUID, locationTimestamp,
 			locationSystem, locationJSON,
 			locX, locY, locZ, latestPrevious,
 		)
-		// Multiple consecutive LoadGame rows resolving to the same Location keep only the final login state.
-		if len(candidates) > 0 && candidates[len(candidates)-1].locationID == locationID {
-			candidates = candidates[:len(candidates)-1]
-		}
+		// Multiple LoadGame rows resolving to the same Location keep only the final login state.
+		candidates = slices.DeleteFunc(candidates, func(existing primedDisconnectCandidate) bool {
+			return existing.locationID == locationID
+		})
 		if isCandidate {
 			candidates = append(candidates, candidate)
 		}
@@ -320,7 +305,6 @@ func queryPrimedCandidates(queryer db.Queryer, applyCommanderFilter bool) ([]pri
 func loadPreDisconnectChunk(
 	queryer db.Queryer,
 	chunk []primedDisconnectCandidate,
-	applyCommanderFilter bool,
 ) ([]preDisconnectEvent, error) {
 	rangePredicates := make([]string, 0, len(chunk))
 	queryArgs := make([]any, 0, len(chunk)*2)
@@ -329,11 +313,10 @@ func loadPreDisconnectChunk(
 		queryArgs = append(queryArgs, candidate.previousArrival.timestamp, candidate.locationTimestamp)
 	}
 	// Omit SQL ORDER BY across MULTI-INDEX OR ranges to avoid a temporary B-tree sort; sort the tiny slice in Go.
-	query := `SELECT je.id, je.timestamp, COALESCE(je.commander, ''), je.event, COALESCE(je.system_name, ''), COALESCE(je.system_address, 0), je.raw_json
+	query := `SELECT je.id, je.timestamp, COALESCE(je.profile_id, 0), COALESCE(je.commander, ''), je.event, COALESCE(je.system_name, ''), COALESCE(je.system_address, 0), je.raw_json
 		FROM journal_events je
-		WHERE +je.event IN ('Resurrect', 'ShipyardSwap', 'StartJump', 'JetConeBoost', 'Synthesis', 'Docked', 'Undocked')` +
-		commanderFilterForAlias("je", applyCommanderFilter) +
-		` AND (` + strings.Join(rangePredicates, " OR ") + `)`
+		WHERE +je.event IN ('Resurrect', 'ShipyardSwap', 'StartJump', 'JetConeBoost', 'Synthesis', 'Docked', 'Undocked')
+		  AND (` + strings.Join(rangePredicates, " OR ") + `)`
 
 	databaseRows, queryError := queryer.Query(query, queryArgs...)
 	if queryError != nil {
@@ -345,7 +328,7 @@ func loadPreDisconnectChunk(
 	for databaseRows.Next() {
 		var item preDisconnectEvent
 		var eventName string
-		if scanError := databaseRows.Scan(&item.id, &item.timestamp, &item.commander, &eventName, &item.systemName, &item.systemAddress, &item.rawJSON); scanError != nil {
+		if scanError := databaseRows.Scan(&item.id, &item.timestamp, &item.profileID, &item.commander, &eventName, &item.systemName, &item.systemAddress, &item.rawJSON); scanError != nil {
 			return nil, fmt.Errorf("scan pre-disconnect verification event: %w", scanError)
 		}
 		if parsedType, knownType := journal.ParseEventType(eventName); knownType {
@@ -360,13 +343,7 @@ func loadPreDisconnectChunk(
 		if left.timestamp != right.timestamp {
 			return strings.Compare(left.timestamp, right.timestamp)
 		}
-		if left.id < right.id {
-			return -1
-		}
-		if left.id > right.id {
-			return 1
-		}
-		return 0
+		return int(left.id - right.id)
 	})
 	return loadedEvents, nil
 }
@@ -377,17 +354,22 @@ func loadPreDisconnectChunk(
 func queryPriorCarrierBoardingState(
 	queryer db.Queryer,
 	arrival arrivalSnapshot,
+	profileID int64,
 	commander string,
-	applyCommanderFilter bool,
 ) (carrierStayState, error) {
+	actorClause := ` AND COALESCE(je.profile_id, 0) = 0 AND (COALESCE(je.commander, '') = '' OR ? = '' OR je.commander = ? COLLATE NOCASE)`
+	queryArgs := []any{arrival.timestamp, arrival.id, commander, commander}
+	if profileID > 0 {
+		actorClause = ` AND (+je.profile_id = ? OR (COALESCE(je.profile_id, 0) = 0 AND COALESCE(je.commander, '') = ''))`
+		queryArgs = []any{arrival.timestamp, arrival.id, profileID}
+	}
 	query := `SELECT je.event, je.raw_json
 		FROM journal_events je
 		WHERE +je.event IN ('Docked', 'Undocked', 'FSDJump', 'CarrierJump', 'Resurrect', 'Location')
 		  AND (je.timestamp, je.id) < (?, ?)` +
-		commanderFilterForAlias("je", applyCommanderFilter) +
-		` AND (COALESCE(je.commander, '') = '' OR ? = '' OR je.commander = ? COLLATE NOCASE)
+		actorClause + `
 		ORDER BY je.timestamp DESC, je.id DESC`
-	databaseRows, queryError := queryer.Query(query, arrival.timestamp, arrival.id, commander, commander)
+	databaseRows, queryError := queryer.Query(query, queryArgs...)
 	if queryError != nil {
 		return carrierStayState{}, fmt.Errorf("query prior carrier boarding state: %w", queryError)
 	}

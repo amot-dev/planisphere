@@ -55,9 +55,26 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 	if err := settings.SetCommanderEnabled(databaseConnection, "CmdrFirst", false); err != nil {
 		testingContext.Fatal(err)
 	}
+	if _, err := databaseConnection.Exec(`UPDATE commander_profiles SET enabled = 0 WHERE display_name = 'CmdrFirst'`); err != nil {
+		testingContext.Fatal(err)
+	}
 	updatedStart, _ := replay.CareerStart(databaseConnection)
 	if updatedStart != "2026-05-02T10:00:00Z" {
 		testingContext.Fatalf("expected updated CareerStart 2026-05-02T10:00:00Z, got %q", updatedStart)
+	}
+
+	// Explicit ProfileScope on disabled CmdrFirst still resolves its arrivals and ship timeline.
+	eventBus := projection.NewBus()
+	systemArrivals := projections.NewSystemArrivals(databaseConnection, eventBus)
+	shipHistory := projections.NewShipHistory(databaseConnection, eventBus)
+	firstScope := replay.NewProfileScope([]int64{commanders[0].ID})
+	scopedArrivals, scopedArrErr := systemArrivals.InWindowScoped("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z", firstScope)
+	if scopedArrErr != nil || len(scopedArrivals) != 1 || scopedArrivals[0].SystemName != "Sol" || scopedArrivals[0].ProfileID != commanders[0].ID {
+		testingContext.Fatalf("unexpected scoped arrivals for disabled CmdrFirst: %+v err=%v", scopedArrivals, scopedArrErr)
+	}
+	scopedTimeline, scopedShipErr := shipHistory.TimelineScoped("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z", firstScope)
+	if scopedShipErr != nil || len(scopedTimeline) != 1 || scopedTimeline[0].HullName != "Mandalay" {
+		testingContext.Fatalf("unexpected scoped ship timeline for disabled CmdrFirst: %+v err=%v", scopedTimeline, scopedShipErr)
 	}
 }
 

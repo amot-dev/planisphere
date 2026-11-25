@@ -9,6 +9,7 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/replay/realization"
 )
 
@@ -274,12 +275,15 @@ type ModeLookup = func(timestamp string) int64
 // ModeLookupLoader loads a ModeLookup closure scoped to expeditionID against queryer.
 type ModeLookupLoader = func(queryer db.Queryer, expeditionID int64) (ModeLookup, error)
 
-// Filter restricts metrics to events that occurred while selected modes were
-// active. A nil Filter (or Enabled == false) includes everything.
+// Filter restricts computed telemetry by Flight Mode selections and commander
+// save-slot ProfileScope. Enabled gates Flight Mode filtering (when false or
+// when Filter is nil, all modes are included), while Scope independently
+// restricts events to the selected commander ProfileScope.
 type Filter struct {
-	Enabled      bool            `json:"enabled"`
-	ExpeditionID int64           `json:"expeditionId,omitempty"`
-	Modes        []ModeSelection `json:"modes"`
+	Enabled      bool                `json:"enabled"`
+	ExpeditionID int64               `json:"expeditionId,omitempty"`
+	Modes        []ModeSelection     `json:"modes"`
+	Scope        replay.ProfileScope `json:"-"`
 }
 
 type filterSets struct {

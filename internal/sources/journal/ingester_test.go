@@ -417,3 +417,161 @@ func TestParseLinePreJumpFilters(testingContext *testing.T) {
 		}
 	}
 }
+
+func TestIngestMidFileClearSavedGameAndNewCommander(testingContext *testing.T) {
+	conn := openJournalTestDB(testingContext)
+	tempDir := testingContext.TempDir()
+	logPath := filepath.Join(tempDir, "Journal.2026-04-10T120000.01.log")
+	preWipeLines := []string{
+		`{"timestamp":"2026-04-10T12:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
+		`{"timestamp":"2026-04-10T12:00:01Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-10T12:00:02Z","event":"LoadGame","Commander":"CmdrPreWipe","FID":"F42","Ship":"SideWinder","Odyssey":true}`,
+		`{"timestamp":"2026-04-10T12:05:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1002,"StarPos":[1,2,3],"JumpDist":5.9}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(preWipeLines, "\n")+"\n"), 0o644); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	ingester := journal.NewIngester(conn)
+	if _, err := ingester.IngestFile(logPath); err != nil {
+		testingContext.Fatalf("initial IngestFile: %v", err)
+	}
+	var initialArchived, initialEnabled int
+	if err := conn.QueryRow(`SELECT is_archived_career, enabled FROM commander_profiles WHERE profile_key = 'live:f42:era:0'`).Scan(&initialArchived, &initialEnabled); err != nil {
+		testingContext.Fatalf("query initial era 0 state: %v", err)
+	}
+	if initialArchived != 0 || initialEnabled != 1 {
+		testingContext.Fatalf("expected initial live:f42:era:0 to have archived=0 enabled=1, got archived=%d enabled=%d", initialArchived, initialEnabled)
+	}
+
+	postWipeLines := []string{
+		`{"timestamp":"2026-04-10T12:10:00Z","event":"ClearSavedGame","Name":"CmdrPreWipe","FID":"F42"}`,
+		`{"timestamp":"2026-04-10T12:10:05Z","event":"NewCommander","Name":"CmdrPostWipe","FID":"F42","Package":"Sidewinder"}`,
+		`{"timestamp":"2026-04-10T12:10:10Z","event":"LoadGame","Commander":"CmdrPostWipe","FID":"F42","Ship":"SideWinder","Odyssey":true}`,
+		`{"timestamp":"2026-04-10T12:15:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1003,"StarPos":[2,3,4],"JumpDist":4.3}`,
+	}
+	appendHandle, openErr := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if openErr != nil {
+		testingContext.Fatal(openErr)
+	}
+	if _, writeErr := appendHandle.WriteString(strings.Join(postWipeLines, "\n") + "\n"); writeErr != nil {
+		_ = appendHandle.Close()
+		testingContext.Fatal(writeErr)
+	}
+	_ = appendHandle.Close()
+
+	if _, err := ingester.IngestFile(logPath); err != nil {
+		testingContext.Fatalf("incremental IngestFile after wipe: %v", err)
+	}
+
+	rows, err := conn.Query(`
+		SELECT je.event, COALESCE(je.commander, ''), je.fid, cp.profile_key, cp.is_archived_career, cp.enabled
+		FROM journal_events je
+		JOIN commander_profiles cp ON cp.id = je.profile_id
+		ORDER BY je.timestamp ASC, je.id ASC`)
+	if err != nil {
+		testingContext.Fatal(err)
+	}
+	defer rows.Close()
+
+	type wantEventRow struct {
+		event      string
+		commander  string
+		profileKey string
+		archived   int
+		enabled    int
+	}
+	wantRows := []wantEventRow{
+		{"Location", "CmdrPreWipe", "live:f42:era:0", 1, 0},
+		{"LoadGame", "CmdrPreWipe", "live:f42:era:0", 1, 0},
+		{"FSDJump", "CmdrPreWipe", "live:f42:era:0", 1, 0},
+		{"ClearSavedGame", "CmdrPreWipe", "live:f42:era:0", 1, 0},
+		{"NewCommander", "CmdrPostWipe", "live:f42:era:1", 0, 1},
+		{"LoadGame", "CmdrPostWipe", "live:f42:era:1", 0, 1},
+		{"FSDJump", "CmdrPostWipe", "live:f42:era:1", 0, 1},
+	}
+
+	rowIndex := 0
+	for rows.Next() {
+		var eventName, cmdr, fid, key string
+		var archived, enabled int
+		if scanErr := rows.Scan(&eventName, &cmdr, &fid, &key, &archived, &enabled); scanErr != nil {
+			testingContext.Fatal(scanErr)
+		}
+		if rowIndex >= len(wantRows) {
+			testingContext.Fatalf("extra row %s (%s)", eventName, cmdr)
+		}
+		want := wantRows[rowIndex]
+		if eventName != want.event || cmdr != want.commander || fid != "F42" || key != want.profileKey || archived != want.archived || enabled != want.enabled {
+			testingContext.Errorf("row %d = (%s, %s, %s, %s, arch=%d, en=%d), want %+v",
+				rowIndex, eventName, cmdr, fid, key, archived, enabled, want)
+		}
+		rowIndex++
+	}
+	if rowIndex != len(wantRows) {
+		testingContext.Fatalf("got %d rows, want %d", rowIndex, len(wantRows))
+	}
+}
+
+func TestIngestContinuedRolloverInheritsIdentityAndProfile(testingContext *testing.T) {
+	conn := openJournalTestDB(testingContext)
+	tempDir := testingContext.TempDir()
+
+	// Seed BOTH a newer 2026 Live rollover session (which sorts BEFORE Journal.23... in ASCII)
+	// and an older 2023 Legacy 2-digit-year rollover session so ScanDir verifies timestamp-bounded
+	// rollover resolution and universe preservation.
+	live2026PartOne := filepath.Join(tempDir, "Journal.2026-04-12T180000.01.log")
+	live2026PartTwo := filepath.Join(tempDir, "Journal.2026-04-12T200000.02.log")
+	legacy2023PartOne := filepath.Join(tempDir, "Journal.230501100000.01.log")
+	legacy2023PartTwo := filepath.Join(tempDir, "Journal.230501120000.02.log")
+
+	filesToWrite := map[string][]string{
+		live2026PartOne: {
+			`{"timestamp":"2026-04-12T18:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
+			`{"timestamp":"2026-04-12T18:01:00Z","event":"LoadGame","Commander":"CmdrRollover","FID":"F707","Ship":"Mandalay","Odyssey":true}`,
+			`{"timestamp":"2026-04-12T19:59:59Z","event":"Continued","Part":2}`,
+		},
+		live2026PartTwo: {
+			`{"timestamp":"2026-04-12T20:00:00Z","event":"Fileheader","part":2,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
+			`{"timestamp":"2026-04-12T20:05:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":5001,"StarPos":[10,20,30],"JumpDist":65.2}`,
+		},
+		legacy2023PartOne: {
+			`{"timestamp":"2023-05-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"3.8.0.404","build":"r280100/r0 "}`,
+			`{"timestamp":"2023-05-01T10:01:00Z","event":"LoadGame","Commander":"CmdrLegacyRoll","FID":"F308","Ship":"Asp"}`,
+			`{"timestamp":"2023-05-01T11:59:59Z","event":"Continued","Part":2}`,
+		},
+		legacy2023PartTwo: {
+			`{"timestamp":"2023-05-01T12:00:00Z","event":"Fileheader","part":2}`,
+			`{"timestamp":"2023-05-01T12:05:00Z","event":"FSDJump","StarSystem":"Sagittarius A*","SystemAddress":6001,"StarPos":[25,0,25900],"JumpDist":35.0}`,
+		},
+	}
+	for filePath, lines := range filesToWrite {
+		if err := os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			testingContext.Fatal(err)
+		}
+	}
+
+	ingester := journal.NewIngester(conn)
+	if _, err := ingester.ScanDir(context.Background(), tempDir); err != nil {
+		testingContext.Fatalf("ScanDir: %v", err)
+	}
+
+	assertJump := func(starSystem, wantCmdr, wantFID, wantUniverse, wantKey string) {
+		testingContext.Helper()
+		var gotCmdr, gotFID, gotUniverse, gotKey string
+		if err := conn.QueryRow(`
+			SELECT COALESCE(je.commander, ''), je.fid, je.universe, cp.profile_key
+			FROM journal_events je
+			JOIN commander_profiles cp ON cp.id = je.profile_id
+			WHERE je.event = 'FSDJump' AND je.system_name = ?`, starSystem,
+		).Scan(&gotCmdr, &gotFID, &gotUniverse, &gotKey); err != nil {
+			testingContext.Fatalf("query FSDJump %s: %v", starSystem, err)
+		}
+		if gotCmdr != wantCmdr || gotFID != wantFID || gotUniverse != wantUniverse || gotKey != wantKey {
+			testingContext.Fatalf("%s attribution = (%q, %q, %q, %q), want (%q, %q, %q, %q)",
+				starSystem, gotCmdr, gotFID, gotUniverse, gotKey, wantCmdr, wantFID, wantUniverse, wantKey)
+		}
+	}
+	assertJump("Colonia", "CmdrRollover", "F707", "live", "live:f707:era:0")
+	assertJump("Sagittarius A*", "CmdrLegacyRoll", "F308", "legacy", "legacy:f308:era:0")
+}

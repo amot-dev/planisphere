@@ -62,6 +62,15 @@ Whether you're taking your own carrier into the black, flying with a squadron, o
 - **Manual Jump Logging:** Switch to manual mode or log unscheduled carrier jumps directly from the sidebar without needing a planned Carrier Stop.
 - **Expedition Carrier Costs:** Tracks overall carrier operating costs for an expedition across tritium, jump maintenance, and pro-rated weekly upkeep.
 
+### Commander Save Slots
+
+Fly multiple accounts, rename your commander, or start fresh after a save wipe without tangling your routes and career totals together.
+
+- **Automatic Save-Slot Separation and Renames:** Separates alt accounts, cleared saves, Legacy 3.8, and Beta servers into distinct save-slot profiles while keeping Frontier Store character renames unified under one career. Config lists historic names with individual event counts, while exports show only your current name.
+- **Per-Expedition Save-Slot Scoping:** Scope any expedition to specific save slots when starting or editing it, or track all enabled save slots together.
+- **Career and Baseline Scope:** Choose in Config whether Sidebar All-Time, Waypoint #1 Origin Baseline, and Export Career Diff totals follow your active expedition's save-slot scope or all enabled save slots.
+- **One-Time Manual Overrides:** Merge profiles after a rename, separate linked aliases, split a career at a save-wipe date (down to the exact `LoadGame` session), or reset back to auto-detection in Config.
+
 ### Expedition Export
 
 Share finished or in-progress journeys as cockpit telemetry cards, offline HTML reports, or raw JSON archives.
@@ -211,6 +220,12 @@ Under realized accounting, unsold data is marked lost when your `Resurrect` even
 
 - **Static Weekly Upkeep:** Expedition carrier upkeep uses a single static weekly rate per expedition, pro-rated continuously over the expedition's elapsed duration. Carrier services can only be installed or removed at Carrier Administration systems in the Bubble or Colonia, so your upkeep rate doesn't change out in deep space anyway.
 
+### Commander Save Slots and Career Continuity
+
+- **Save-Slot and Rename Resolution:** Planisphere resolves save slots from galaxy server headers (`Fileheader` version and build fields distinguishing Live, Legacy 3.8, and Beta) and your Frontier account `FID`, carrying identity forward across multi-part `Continued` log rollovers and bridging older pre-`FID` logs when a name maps unambiguously to one Live `FID`. Frontier Store character renames share the same `FID` and stay unified under your current name, while cleared saves split into archived `PRE-WIPE` eras via `ClearSavedGame`, `NewCommander`, and steep drops in `Statistics` exploration counters (`Systems_Visited` and `Total_Hyperspace_Jumps`).
+
+- **Rescan-Safe Manual Overrides:** Manual Merge, Separate, and Split actions in Config are stored as declarative override rules rather than one-off edits to past journal rows. Full journal rescans and EDDiscovery imports replay those rules automatically so your customizations survive intact.
+
 ### Disconnect Recovery and Non-Ship Travel
 
 - **Mid-Jump Disconnects:** When Elite throws an Orange Sidewinder, Mauve Adder, or Taupe Cobra mid-hyperspace, Frontier's servers still finish the jump and add it to your lifetime `Statistics`, while the client closes before writing an `FSDJump`. On your next login, if a jump-capable ship spawns undocked in space via `Location` in a new system and the prior session had a matching hyperspace `StartJump` to that exact system, Planisphere recovers the jump count, exact 3D distance, visit count, and leg vessel history automatically. Any armed `JetConeBoost` or FSD injection `Synthesis` from that uninterrupted stay is credited too. If no matching `StartJump` exists (such as playing across two unsynced PCs), Planisphere does not guess.
@@ -232,6 +247,8 @@ A few journal quirks can't be reconstructed reliably from Frontier's logs. Plani
 - **Detention Ship Impounds and Unmanned Mothership Rebuys:** When your ship is impounded after an on-foot bounty death, or an unmanned mothership is destroyed while you are on foot, in an SRV, or in a Nomad, Odyssey keeps your shipboard cartography intact yet still logs `Resurrect` with `Option: "rebuy"` and a positive `Cost`, identical to a manned ship loss. Planisphere logs pending cartography under `Cartographics Lost (Death)` on `rebuy` and does not retroactively clear it if those systems later appear in `MultiSellExplorationData` (which would erase real ship-destruction losses whenever you passively honk a system on the way back). When that surviving data is sold, the payout still lands in `Realized Value`.
 
 - **Voluntary Starter Sidewinder Forfeit:** If you can afford your rebuy (`Bankrupt: false`) but voluntarily forfeit your ship for a free Sidewinder and Elite logs `Option: "free"` with `Cost: 0` instead of `"freewinder"`, the journal makes it indistinguishable from a free on-foot redeployment to orbit.
+
+- **Simultaneous Dual-Boxing on Jumping Fleet Carriers:** When two accounts run simultaneously on the same PC aboard the same jumping Fleet Carrier, Elite can write `CarrierJump` events with identical timestamps and `SystemAddress` values in both logs, causing event deduplication to collapse one of the two identical `CarrierJump` entries.
 
 
 ## Development

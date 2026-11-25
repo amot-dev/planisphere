@@ -5,6 +5,7 @@ import (
 	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
 )
 
 // SidebarStats is the content of the Stats Sidebar.
@@ -53,17 +54,23 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 		Adjustments:  manualAdjustments,
 	}
 
+	expScope := expeditionRecord.ProfileScope()
+	careerScope := expScope
+	if settings.CareerBaselineScope(app.db) == settings.CareerScopeAllEnabled {
+		careerScope = replay.ProfileScope{}
+	}
+
 	// Mode filters apply only to the current expedition, never to All Time.
 	// All-time personal carrier data comes directly from Frontier's lifetime Statistics.
 	if app.careerStats != nil {
-		if allTimeSummary, careerError := app.careerStats.Get(); careerError == nil {
+		if allTimeSummary, careerError := app.careerStats.GetScoped(careerScope); careerError == nil {
 			sidebar.AllJournals = allTimeSummary.Metrics
 			sidebar.AllJournalsRealization = allTimeSummary.Realization
 		}
 	}
 
-	// Career metrics across all ingested journals for active commanders (populated at all times).
-	if careerStart, careerStartGalactic := replay.CareerStart(app.db); careerStart != "" {
+	// Career metrics across ingested journals for the configured career scope.
+	if careerStart, careerStartGalactic := replay.CareerStartScoped(app.db, careerScope); careerStart != "" {
 		sidebar.CareerStart = careerStart
 		sidebar.CareerStartGalactic = careerStartGalactic
 		sidebar.CareerDuration = reference.Elapsed(careerStart, "")
@@ -89,6 +96,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 			sidebar.Duration = reference.Elapsed(displayStart, sidebar.End)
 
 			expeditionRange := stats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
+			filter.Scope = expScope
 			if filter.Enabled {
 				filter.ExpeditionID = expeditionID
 			}

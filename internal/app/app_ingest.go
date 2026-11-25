@@ -9,6 +9,7 @@ import (
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/eddiscovery"
 	"planisphere/internal/sources/journal"
@@ -95,11 +96,6 @@ func (app *App) warmInitialStats() {
 	if app.db == nil {
 		return
 	}
-	if app.careerStats != nil {
-		if _, metricsError := app.careerStats.Get(); metricsError != nil {
-			log.Printf("warm initial career stats: %v", metricsError)
-		}
-	}
 	activeID := settings.ActiveExpeditionID(app.db)
 	if activeID == 0 {
 		expeditionsList, listError := expedition.List(app.db)
@@ -109,24 +105,55 @@ func (app *App) warmInitialStats() {
 			activeID = expeditionsList[0].ID
 		}
 	}
-	if activeID > 0 && app.timeRangeStats != nil {
-		expeditionRecord, getError := expedition.Get(app.db, activeID)
+	var activeExpedition *expedition.Expedition
+	if activeID > 0 {
+		loadedExpedition, getError := expedition.Get(app.db, activeID)
 		if getError != nil {
 			if !errors.Is(getError, sql.ErrNoRows) {
 				log.Printf("warm initial stats load expedition %d: %v", activeID, getError)
 			}
-		} else if expeditionRecord.StartTimestamp != "" {
-			queryAfter, _, departed, startError := expedition.EffectiveStart(app.db, expeditionRecord)
-			if startError != nil {
-				log.Printf("warm initial stats resolve effective start %d: %v", activeID, startError)
-			} else if departed {
-				expeditionRange := stats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
-				if _, statsError := app.timeRangeStats.Compute(expeditionRange, &stats.Filter{}); statsError != nil {
-					log.Printf("warm initial stats compute expedition %d: %v", activeID, statsError)
-				}
+		} else {
+			activeExpedition = &loadedExpedition
+		}
+	}
+	if app.careerStats != nil {
+		var careerScope replay.ProfileScope
+		if activeExpedition != nil && settings.CareerBaselineScope(app.db) != settings.CareerScopeAllEnabled {
+			careerScope = activeExpedition.ProfileScope()
+		}
+		if _, metricsError := app.careerStats.GetScoped(careerScope); metricsError != nil {
+			log.Printf("warm initial career stats: %v", metricsError)
+		}
+	}
+	if activeExpedition != nil && app.timeRangeStats != nil && activeExpedition.StartTimestamp != "" {
+		queryAfter, _, departed, startError := expedition.EffectiveStart(app.db, *activeExpedition)
+		if startError != nil {
+			log.Printf("warm initial stats resolve effective start %d: %v", activeID, startError)
+		} else if departed {
+			expeditionRange := stats.Range{After: queryAfter, Until: activeExpedition.EndTimestamp}
+			if _, statsError := app.timeRangeStats.Compute(expeditionRange, &stats.Filter{Scope: activeExpedition.ProfileScope()}); statsError != nil {
+				log.Printf("warm initial stats compute expedition %d: %v", activeID, statsError)
 			}
 		}
 	}
+}
+
+func (app *App) withExclusiveCommanderDB(mutation func() error) error {
+	if readyError := app.withReadyReadLock(nil); readyError != nil {
+		return readyError
+	}
+	app.ingestMu.RLock()
+	defer app.ingestMu.RUnlock()
+
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if app.db == nil || app.ingester == nil {
+		return errorNotReady
+	}
+	_, execErr := app.ingester.WithExclusiveConn(func(_ *sql.DB) (journal.Result, error) {
+		return journal.Result{}, mutation()
+	})
+	return execErr
 }
 
 // onJournalBatch runs after the live tailer stored new events.

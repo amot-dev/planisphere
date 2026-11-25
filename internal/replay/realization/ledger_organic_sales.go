@@ -22,11 +22,15 @@ type crewWageMatcher struct {
 	wageEvents []parsedWageEvent
 }
 
-// newCrewWageMatcher indexes all NpcCrewPaidWage events in chronological order
-// so sales can binary-search and claim concurrent crew wage deductions once.
-func newCrewWageMatcher(loadedEvents []replay.Row) *crewWageMatcher {
-	wageEvents := make([]parsedWageEvent, 0, 50)
+// buildActorWageMatchersAndCounts indexes NpcCrewPaidWage events and total
+// event counts per actor key in chronological order so each pilot's sales
+// claim only that pilot's crew wage deductions.
+func buildActorWageMatchersAndCounts(loadedEvents []replay.Row) (map[actorKey]*crewWageMatcher, map[actorKey]int) {
+	counts := make(map[actorKey]int, 4)
+	matchers := make(map[actorKey]*crewWageMatcher, 2)
 	for _, journalEvent := range loadedEvents {
+		key := actorKeyForRow(journalEvent)
+		counts[key]++
 		if journalEvent.Type != journal.EventNpcCrewPaidWage {
 			continue
 		}
@@ -35,13 +39,18 @@ func newCrewWageMatcher(loadedEvents []replay.Row) *crewWageMatcher {
 			continue
 		}
 		if unixSeconds, parsedOk := parseUnixSeconds(wageEvent.Timestamp); parsedOk {
-			wageEvents = append(wageEvents, parsedWageEvent{
+			matcher := matchers[key]
+			if matcher == nil {
+				matcher = &crewWageMatcher{wageEvents: make([]parsedWageEvent, 0, 16)}
+				matchers[key] = matcher
+			}
+			matcher.wageEvents = append(matcher.wageEvents, parsedWageEvent{
 				unixSeconds: unixSeconds,
 				amount:      wageEvent.Amount,
 			})
 		}
 	}
-	return &crewWageMatcher{wageEvents: wageEvents}
+	return matchers, counts
 }
 
 // claimWage matches and consumes NpcCrewPaidWage events within 5 seconds of
@@ -155,10 +164,12 @@ func (builder *ledgerBuilder) applyOrganicSaleItem(
 	if len(claimedIndices) == 0 {
 		itemGross := bioItem.Value + bioItem.Bonus
 		builder.ledger.unattributedSales = append(builder.ledger.unattributedSales, unattributedSale{
-			timestamp:   sellEvent.Timestamp,
-			kind:        "organic",
-			netRealized: itemGross - itemCrewWage,
-			crewLoss:    itemCrewWage,
+			profileID:       builder.profileID,
+			nocaseCommander: builder.nocaseCommander,
+			timestamp:       sellEvent.Timestamp,
+			kind:            "organic",
+			netRealized:     itemGross - itemCrewWage,
+			crewLoss:        itemCrewWage,
 		})
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
 )
 
@@ -72,6 +73,8 @@ type bodyKey struct {
 }
 
 type scanRecord struct {
+	profileID            int64
+	nocaseCommander      string
 	eventUID             string
 	timestamp            string
 	systemAddress        int64
@@ -108,6 +111,8 @@ type scanRecord struct {
 }
 
 type unattributedSale struct {
+	profileID         int64
+	nocaseCommander   string
 	timestamp         string
 	kind              string // "carto" or "organic"
 	netRealized       int64
@@ -115,11 +120,13 @@ type unattributedSale struct {
 	carrierTariffLoss int64
 }
 
-// Ledger tracks all scans and their final realization outcomes across a commander's history.
+// Ledger tracks all scans and their final realization outcomes across all
+// commander save-slot profiles in the archive.
 type Ledger struct {
 	records           []*scanRecord
 	organicSales      map[string]OrganicSaleOutcome
 	unattributedSales []unattributedSale
+	enabledActors     replay.EnabledProfileMatcher
 }
 
 // OrganicSaleDetails returns realized Vista Genomics sale metadata for a
@@ -134,9 +141,19 @@ func (ledger *Ledger) OrganicSaleDetails(eventUID string) (OrganicSaleOutcome, b
 }
 
 // Breakdown aggregates realized earnings, losses, and pending transit value
-// for all records falling inside (afterTimestamp, untilTimestamp].
+// across globally enabled profiles for records inside (afterTimestamp, untilTimestamp].
 func (ledger *Ledger) Breakdown(
 	afterTimestamp, untilTimestamp string,
+	allowDiscovery func(timestamp string) bool,
+) Breakdown {
+	return ledger.BreakdownForScope(afterTimestamp, untilTimestamp, replay.ProfileScope{}, allowDiscovery)
+}
+
+// BreakdownForScope aggregates realized earnings, losses, and pending transit
+// value for records matching scope inside (afterTimestamp, untilTimestamp].
+func (ledger *Ledger) BreakdownForScope(
+	afterTimestamp, untilTimestamp string,
+	scope replay.ProfileScope,
 	allowDiscovery func(timestamp string) bool,
 ) Breakdown {
 	if ledger == nil {
@@ -145,14 +162,25 @@ func (ledger *Ledger) Breakdown(
 	if untilTimestamp == "" {
 		untilTimestamp = "9999-12-31T23:59:59Z"
 	}
+	var allowActor func(profileID int64, nocaseCommander string) bool
+	if !scope.IsAllEnabled() {
+		explicitMatcher := scope.Matcher()
+		allowActor = explicitMatcher.Matches
+	} else if !ledger.enabledActors.MatchesAll() {
+		allowActor = ledger.enabledActors.Matches
+	}
 	var breakdown Breakdown
-	accumulateRealizedRecords(&breakdown, ledger.records, afterTimestamp, untilTimestamp, allowDiscovery)
-	accumulateUnattributedSales(&breakdown, ledger.unattributedSales, afterTimestamp, untilTimestamp, allowDiscovery)
+	accumulateRealizedRecords(&breakdown, ledger.records, afterTimestamp, untilTimestamp, allowActor, allowDiscovery)
+	accumulateUnattributedSales(&breakdown, ledger.unattributedSales, afterTimestamp, untilTimestamp, allowActor, allowDiscovery)
 	return breakdown
 }
 
 func accumulateRealizedRecords(
-	breakdown *Breakdown, records []*scanRecord, after, until string, allowDiscovery func(string) bool,
+	breakdown *Breakdown,
+	records []*scanRecord,
+	after, until string,
+	allowActor func(int64, string) bool,
+	allowDiscovery func(string) bool,
 ) {
 	firstRecordIndex := sort.Search(len(records), func(recordIndex int) bool {
 		return records[recordIndex].timestamp > after
@@ -161,6 +189,9 @@ func accumulateRealizedRecords(
 		scanEntry := records[recordIndex]
 		if scanEntry.timestamp > until {
 			break
+		}
+		if allowActor != nil && !allowActor(scanEntry.profileID, scanEntry.nocaseCommander) {
+			continue
 		}
 		if allowDiscovery != nil && !allowDiscovery(scanEntry.timestamp) {
 			continue
@@ -182,7 +213,11 @@ func accumulateRealizedRecords(
 }
 
 func accumulateUnattributedSales(
-	breakdown *Breakdown, sales []unattributedSale, after, until string, allowDiscovery func(string) bool,
+	breakdown *Breakdown,
+	sales []unattributedSale,
+	after, until string,
+	allowActor func(int64, string) bool,
+	allowDiscovery func(string) bool,
 ) {
 	firstSaleIndex := sort.Search(len(sales), func(saleIndex int) bool {
 		return sales[saleIndex].timestamp > after
@@ -191,6 +226,9 @@ func accumulateUnattributedSales(
 		saleEntry := sales[saleIndex]
 		if saleEntry.timestamp > until {
 			break
+		}
+		if allowActor != nil && !allowActor(saleEntry.profileID, saleEntry.nocaseCommander) {
+			continue
 		}
 		if allowDiscovery != nil && !allowDiscovery(saleEntry.timestamp) {
 			continue

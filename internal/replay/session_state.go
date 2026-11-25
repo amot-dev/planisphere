@@ -189,12 +189,18 @@ func ToBodyScanWithPopulation(scanEvent *journal.ScanEvent, systemPopulation int
 // SeedLoadGameBefore loads the latest LoadGame event at or before afterTimestamp
 // into state when replaying a bounded window.
 func SeedLoadGameBefore(queryer db.Queryer, afterTimestamp string, state *SessionState) error {
+	return SeedLoadGameBeforeScoped(queryer, afterTimestamp, state, ProfileScope{})
+}
+
+// SeedLoadGameBeforeScoped loads the latest LoadGame event matching scope at or
+// before afterTimestamp into state when replaying a bounded window.
+func SeedLoadGameBeforeScoped(queryer db.Queryer, afterTimestamp string, state *SessionState, scope ProfileScope) error {
 	if afterTimestamp == "" {
 		return nil
 	}
 	var rawLoadGame string
 	queryError := queryer.QueryRow(`SELECT raw_json FROM journal_events
-		WHERE event = 'LoadGame' AND timestamp <= ? AND `+CmdrFilterSQL+`
+		WHERE event = 'LoadGame' AND timestamp <= ? AND `+scope.SQLPredicate("")+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`, afterTimestamp).Scan(&rawLoadGame)
 	if queryError == sql.ErrNoRows {
 		return nil
@@ -209,40 +215,58 @@ func SeedLoadGameBefore(queryer db.Queryer, afterTimestamp string, state *Sessio
 // PreloadSystemPopulations batch-loads the latest known Population up to
 // untilTimestamp for any system scanned, mapped, or sampled in loadedRows whose
 // arrival event occurred prior to the loaded time window.
-func PreloadSystemPopulations(
-	queryer db.Queryer,
-	afterTimestamp string,
-	loadedRows []Row,
-	untilTimestamp string,
-	state *SessionState,
-) error {
+func PreloadSystemPopulations(queryer db.Queryer, afterTimestamp string, loadedRows []Row, untilTimestamp string, state *SessionState) error {
+	return PreloadSystemPopulationsScoped(queryer, afterTimestamp, loadedRows, untilTimestamp, state, ProfileScope{})
+}
+
+// PreloadSystemPopulationsScoped batch-loads the latest known Population up to
+// untilTimestamp matching scope when afterTimestamp is non-empty.
+func PreloadSystemPopulationsScoped(queryer db.Queryer, afterTimestamp string, loadedRows []Row, untilTimestamp string, state *SessionState, scope ProfileScope) error {
 	if afterTimestamp == "" {
 		return nil
 	}
-	return PreloadSystemPopulationsForRows(queryer, loadedRows, untilTimestamp, state)
+	return PreloadSystemPopulationsForRowsScoped(queryer, loadedRows, untilTimestamp, state, scope)
 }
 
 // PreloadSystemPopulationsForRows batch-loads the latest known Population up to
 // untilTimestamp for every system scanned, mapped, or sampled in loadedRows that
 // does not have an accompanying arrival row in loadedRows.
-func PreloadSystemPopulationsForRows(
-	queryer db.Queryer,
-	loadedRows []Row,
-	untilTimestamp string,
-	state *SessionState,
-) error {
-	missingAddresses := collectUnseenSystemAddresses(loadedRows)
-	if len(missingAddresses) == 0 {
-		return nil
+func PreloadSystemPopulationsForRows(queryer db.Queryer, loadedRows []Row, untilTimestamp string, state *SessionState) error {
+	return PreloadSystemPopulationsForRowsScoped(queryer, loadedRows, untilTimestamp, state, ProfileScope{})
+}
+
+// PreloadSystemPopulationsForRowsScoped batch-loads the latest known Population
+// up to untilTimestamp matching scope for unseen systems in loadedRows.
+func PreloadSystemPopulationsForRowsScoped(queryer db.Queryer, loadedRows []Row, untilTimestamp string, state *SessionState, scope ProfileScope) error {
+	populations, err := LoadPopulationMapScoped(queryer, collectUnseenSystemAddresses(loadedRows), untilTimestamp, scope)
+	if err != nil {
+		return err
 	}
-	const chunkSize = 200
-	for startIndex := 0; startIndex < len(missingAddresses); startIndex += chunkSize {
-		endIndex := min(startIndex+chunkSize, len(missingAddresses))
-		if chunkError := loadPopulationChunk(queryer, missingAddresses[startIndex:endIndex], untilTimestamp, state); chunkError != nil {
-			return chunkError
-		}
+	for systemAddress, population := range populations {
+		state.populationBySystem[systemAddress] = population
 	}
 	return nil
+}
+
+// LoadPopulationMapScoped batch-loads the latest known Population up to
+// untilTimestamp matching scope for systemAddresses.
+func LoadPopulationMapScoped(queryer db.Queryer, systemAddresses []int64, untilTimestamp string, scope ProfileScope) (map[int64]int64, error) {
+	populations := make(map[int64]int64, len(systemAddresses))
+	if len(systemAddresses) == 0 {
+		return populations, nil
+	}
+	if untilTimestamp == "" {
+		untilTimestamp = "9999-12-31T23:59:59Z"
+	}
+	const chunkSize = 200
+	scopePredicate := scope.SQLPredicate("")
+	for startIndex := 0; startIndex < len(systemAddresses); startIndex += chunkSize {
+		endIndex := min(startIndex+chunkSize, len(systemAddresses))
+		if err := loadPopulationChunk(queryer, systemAddresses[startIndex:endIndex], untilTimestamp, scopePredicate, populations); err != nil {
+			return nil, err
+		}
+	}
+	return populations, nil
 }
 
 func collectUnseenSystemAddresses(loadedRows []Row) []int64 {
@@ -272,7 +296,7 @@ func collectUnseenSystemAddresses(loadedRows []Row) []int64 {
 	return missingAddresses
 }
 
-func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestamp string, state *SessionState) error {
+func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestamp, scopePredicate string, populations map[int64]int64) error {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(addressChunk)), ",")
 	queryArgs := make([]any, 0, len(addressChunk)+1)
 	queryArgs = append(queryArgs, untilTimestamp)
@@ -285,7 +309,7 @@ func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestam
 		       ROW_NUMBER() OVER (PARTITION BY system_address ORDER BY timestamp DESC, id DESC) as row_rank
 		FROM journal_events
 		WHERE +event IN ('FSDJump', 'Location', 'CarrierJump')
-		  AND timestamp <= ? AND ` + CmdrFilterSQL + `
+		  AND timestamp <= ? AND ` + scopePredicate + `
 		  AND system_address IN (` + placeholders + `)
 	) WHERE row_rank = 1`
 
@@ -306,7 +330,7 @@ func loadPopulationChunk(queryer db.Queryer, addressChunk []int64, untilTimestam
 		}
 		populationPayload.Population = 0
 		if json.Unmarshal([]byte(rawJSON), &populationPayload) == nil {
-			state.populationBySystem[systemAddress] = populationPayload.Population
+			populations[systemAddress] = populationPayload.Population
 		}
 	}
 	if iterationError := databaseRows.Err(); iterationError != nil {

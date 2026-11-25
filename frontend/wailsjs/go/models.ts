@@ -125,6 +125,7 @@ export namespace app {
 	    gecCount: number;
 	    gecFetchedAt: string;
 	    commanders: replay.Commander[];
+	    careerBaselineScope: string;
 	    edDiscoveryDbPath: string;
 	    defaultEdDiscoveryDbPath: string;
 	    edDiscoveryDbExists: boolean;
@@ -155,6 +156,7 @@ export namespace app {
 	        this.gecCount = source["gecCount"];
 	        this.gecFetchedAt = source["gecFetchedAt"];
 	        this.commanders = this.convertValues(source["commanders"], replay.Commander);
+	        this.careerBaselineScope = source["careerBaselineScope"];
 	        this.edDiscoveryDbPath = source["edDiscoveryDbPath"];
 	        this.defaultEdDiscoveryDbPath = source["defaultEdDiscoveryDbPath"];
 	        this.edDiscoveryDbExists = source["edDiscoveryDbExists"];
@@ -494,6 +496,8 @@ export namespace expedition {
 	    carrierType: string;
 	    carrierWeeklyUpkeep: number;
 	    activeModeId: number;
+	    commanderScope: string;
+	    commanderProfileIds: number[];
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -513,6 +517,8 @@ export namespace expedition {
 	        this.carrierType = source["carrierType"];
 	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];
 	        this.activeModeId = source["activeModeId"];
+	        this.commanderScope = source["commanderScope"];
+	        this.commanderProfileIds = source["commanderProfileIds"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
@@ -1168,6 +1174,8 @@ export namespace replay {
 	    event: string;
 	    systemName: string;
 	    systemAddress: number;
+	    profileId?: number;
+	    commander?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Arrival(source);
@@ -1181,6 +1189,8 @@ export namespace replay {
 	        this.event = source["event"];
 	        this.systemName = source["systemName"];
 	        this.systemAddress = source["systemAddress"];
+	        this.profileId = source["profileId"];
+	        this.commander = source["commander"];
 	    }
 	}
 	export class CarrierDepotInfo {
@@ -1199,15 +1209,48 @@ export namespace replay {
 	        this.cargo = source["cargo"];
 	    }
 	}
-	export class Commander {
+	export class CommanderAlias {
 	    name: string;
 	    fid: string;
+	    universe: string;
+	    startTimestamp: string;
+	    endTimestamp: string;
+	    eventCount: number;
+	    isCurrent: boolean;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CommanderAlias(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.fid = source["fid"];
+	        this.universe = source["universe"];
+	        this.startTimestamp = source["startTimestamp"];
+	        this.endTimestamp = source["endTimestamp"];
+	        this.eventCount = source["eventCount"];
+	        this.isCurrent = source["isCurrent"];
+	        this.source = source["source"];
+	    }
+	}
+	export class Commander {
+	    id: number;
+	    profileKey: string;
+	    name: string;
+	    fid: string;
+	    universe: string;
+	    eraIndex: number;
+	    isArchivedCareer: boolean;
+	    hasManualOverride: boolean;
 	    enabled: boolean;
 	    firstSeen: string;
 	    lastSeen: string;
 	    firstGalactic: string;
 	    lastGalactic: string;
 	    eventCount: number;
+	    aliases: CommanderAlias[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Commander(source);
@@ -1215,14 +1258,72 @@ export namespace replay {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.profileKey = source["profileKey"];
 	        this.name = source["name"];
 	        this.fid = source["fid"];
+	        this.universe = source["universe"];
+	        this.eraIndex = source["eraIndex"];
+	        this.isArchivedCareer = source["isArchivedCareer"];
+	        this.hasManualOverride = source["hasManualOverride"];
 	        this.enabled = source["enabled"];
 	        this.firstSeen = source["firstSeen"];
 	        this.lastSeen = source["lastSeen"];
 	        this.firstGalactic = source["firstGalactic"];
 	        this.lastGalactic = source["lastGalactic"];
 	        this.eventCount = source["eventCount"];
+	        this.aliases = this.convertValues(source["aliases"], CommanderAlias);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class CommanderSession {
+	    timestamp: string;
+	    galactic: string;
+	    ship: string;
+	    systemName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CommanderSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timestamp = source["timestamp"];
+	        this.galactic = source["galactic"];
+	        this.ship = source["ship"];
+	        this.systemName = source["systemName"];
+	    }
+	}
+	export class ProfileScope {
+	    Selected: boolean;
+	    ProfileIDs: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ProfileScope(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Selected = source["Selected"];
+	        this.ProfileIDs = source["ProfileIDs"];
 	    }
 	}
 

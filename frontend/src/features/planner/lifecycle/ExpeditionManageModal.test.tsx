@@ -2,12 +2,14 @@
 import { act, createElement, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { app, expedition } from '../../../api/models'
+import { app, expedition, replay } from '../../../api/models'
 
 const mockBrowseWaypointImportFile = vi.fn<() => Promise<app.WaypointImportFile>>()
 const mockCloneExpedition = vi.fn()
 const mockCreateExpedition = vi.fn()
 const mockCreateExpeditionWithWaypoints = vi.fn()
+const mockUpdateExpedition = vi.fn()
+const mockUpdateExpeditionScoped = vi.fn()
 
 vi.mock('../../../api/backend', () => ({
   BrowseWaypointImportFile: () => mockBrowseWaypointImportFile(),
@@ -15,7 +17,8 @@ vi.mock('../../../api/backend', () => ({
   CreateExpedition: (...args: unknown[]) => mockCreateExpedition(...args),
   CreateExpeditionWithWaypoints: (...args: unknown[]) => mockCreateExpeditionWithWaypoints(...args),
   DeleteExpedition: vi.fn(),
-  UpdateExpedition: vi.fn(),
+  UpdateExpedition: (...args: unknown[]) => mockUpdateExpedition(...args),
+  UpdateExpeditionScoped: (...args: unknown[]) => mockUpdateExpeditionScoped(...args),
 }))
 
 import { ExpeditionManageModal } from './ExpeditionManageModal'
@@ -40,9 +43,10 @@ function mountElement(element: ReactElement): { container: HTMLDivElement; unmou
 }
 
 function findButtonByText(container: HTMLElement, textMatch: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((element) =>
-    element.textContent?.includes(textMatch),
-  )
+  const buttons = Array.from(container.querySelectorAll('button'))
+  const button =
+    buttons.find((element) => element.textContent?.trim() === textMatch) ??
+    buttons.find((element) => element.textContent?.includes(textMatch))
   if (!button) {
     throw new Error(`Expected button containing "${textMatch}" to exist`)
   }
@@ -275,6 +279,62 @@ describe('ExpeditionManageModal', () => {
 
       expect(onSelect).toHaveBeenCalledWith(99, { persist: false })
       expect(onClose).toHaveBeenCalledTimes(1)
+    } finally {
+      modalView.unmount()
+    }
+  })
+
+  it('renders EDIT with Save-Slot Scope picker when multiple commanders exist and calls UpdateExpeditionScoped', async () => {
+    mockUpdateExpeditionScoped.mockResolvedValueOnce(undefined)
+    const savedExpeditions = [
+      expedition.Expedition.createFrom({
+        id: 5,
+        name: 'Outer Arm Survey',
+        description: 'Initial',
+        status: 'active',
+        commanderScope: 'all_enabled',
+        commanderProfileIds: [],
+      }),
+    ]
+    const commanders = [
+      replay.Commander.createFrom({ id: 10, profileKey: 'live:f10:era:0', name: 'Primary', enabled: true, eventCount: 300 }),
+      replay.Commander.createFrom({ id: 20, profileKey: 'live:f20:era:0', name: 'Secondary', enabled: false, eventCount: 80 }),
+    ]
+
+    const modalView = mountElement(
+      createElement(ExpeditionManageModal, {
+        expeditions: savedExpeditions,
+        activeId: 5,
+        commanders,
+        onSelect: () => {},
+        onClose: () => {},
+      }),
+    )
+
+    try {
+      act(() => findButtonByText(modalView.container, 'EDIT').click())
+      expect(modalView.container.textContent).toContain('Save-Slot Scope')
+
+      act(() => findButtonByText(modalView.container, 'Selected Save Slot(s)').click())
+      const checkboxes = Array.from(
+        modalView.container.querySelectorAll('input[type="checkbox"]'),
+      ) as HTMLInputElement[]
+      expect(checkboxes).toHaveLength(2)
+      expect(checkboxes[0].checked).toBe(true)
+      expect(checkboxes[1].checked).toBe(false)
+
+      await act(async () => {
+        findButtonByText(modalView.container, 'SAVE').click()
+        await Promise.resolve()
+      })
+      expect(mockUpdateExpeditionScoped).toHaveBeenCalledWith(
+        5,
+        'Outer Arm Survey',
+        'Initial',
+        'selected',
+        [10],
+      )
+      expect(mockUpdateExpedition).not.toHaveBeenCalled()
     } finally {
       modalView.unmount()
     }

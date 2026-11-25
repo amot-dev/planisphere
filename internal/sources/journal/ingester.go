@@ -117,6 +117,12 @@ func (ingester *Ingester) loadAllTrackedOffsets() (map[string]int64, error) {
 	return trackedOffsets, nil
 }
 
+func (ingester *Ingester) resolveCommandersLocked() error {
+	ingester.mu.Lock()
+	defer ingester.mu.Unlock()
+	return db.WithTx(ingester.conn, db.ResolveCommanders)
+}
+
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
 func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, error) {
 	var scanResult Result
@@ -131,9 +137,15 @@ func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, erro
 	if offsetError != nil {
 		return scanResult, offsetError
 	}
+	anyShouldResolve := false
 	for _, filePath := range files {
 		select {
 		case <-ctx.Done():
+			if anyShouldResolve {
+				if resolveErr := ingester.resolveCommandersLocked(); resolveErr != nil {
+					scanResult.Errors = append(scanResult.Errors, resolveErr.Error())
+				}
+			}
 			return scanResult, ctx.Err()
 		default:
 		}
@@ -143,53 +155,54 @@ func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, erro
 				continue
 			}
 		}
-		fileResult, ingestError := ingester.IngestFile(filePath)
+		fileResult, shouldResolve, ingestError := ingester.ingestFile(filePath, false)
 		if ingestError != nil {
 			scanResult.Errors = append(scanResult.Errors, fmt.Sprintf("%s: %v", filepath.Base(filePath), ingestError))
 		}
+		anyShouldResolve = anyShouldResolve || shouldResolve
 		scanResult.merge(fileResult)
+	}
+	if anyShouldResolve {
+		if resolveErr := ingester.resolveCommandersLocked(); resolveErr != nil {
+			return scanResult, resolveErr
+		}
 	}
 	return scanResult, nil
 }
 
 type fileState struct {
-	offset int64
-	lines  int64
-	stored int64
-	first  sql.NullString
-	last   sql.NullString
+	offset, lines, stored        int64
+	first, last                  sql.NullString
+	part, continuedPart          int
+	gameVersion, build, universe string
+	lastCommander, lastFID       string
 }
 
 func (ingester *Ingester) loadTrackedFileState(fileName string, fileSize int64) (fileState, bool, error) {
-	var state fileState
-	queryError := ingester.conn.QueryRow(`SELECT byte_offset, line_count, events_stored, first_timestamp, last_timestamp
-		FROM ingested_journals WHERE file_name = ?`, fileName).Scan(&state.offset, &state.lines, &state.stored, &state.first, &state.last)
+	defaultState := func() fileState {
+		state := fileState{part: 1, universe: "live"}
+		if _, parsedPart, ok := db.ParseJournalFilenamePart(fileName); ok {
+			state.part = parsedPart
+		}
+		return state
+	}
+	state := defaultState()
+	queryError := ingester.conn.QueryRow(`
+		SELECT byte_offset, line_count, events_stored, first_timestamp, last_timestamp,
+		       part, game_version, build, universe, continued_part, last_commander, last_fid
+		FROM ingested_journals WHERE file_name = ?`, fileName,
+	).Scan(&state.offset, &state.lines, &state.stored, &state.first, &state.last,
+		&state.part, &state.gameVersion, &state.build, &state.universe, &state.continuedPart, &state.lastCommander, &state.lastFID)
 	if queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
 		return state, false, queryError
 	}
 	if state.offset > fileSize {
-		// File was truncated or replaced: re-read it; dedup makes this safe.
-		state = fileState{}
+		state = defaultState()
 	}
 	if state.offset == fileSize && queryError == nil {
 		return state, true, nil
 	}
 	return state, false, nil
-}
-
-func loadLatestFileCommander(transaction *sql.Tx, fileName string) (string, error) {
-	var previousCommander sql.NullString
-	queryError := transaction.QueryRow(
-		`SELECT commander FROM journal_events WHERE source_file = ? AND commander IS NOT NULL AND commander != '' ORDER BY timestamp DESC LIMIT 1`,
-		fileName,
-	).Scan(&previousCommander)
-	if errors.Is(queryError, sql.ErrNoRows) {
-		return "", nil
-	}
-	if queryError != nil {
-		return "", fmt.Errorf("load latest commander for %s: %w", fileName, queryError)
-	}
-	return previousCommander.String, nil
 }
 
 // InsertJournalEventPrefixSQL is the shared INSERT header for journal_events
@@ -243,33 +256,23 @@ func ingestAppendedLines(
 	newOffset *int64,
 	result *Result,
 	ingestedAt string,
-) error {
-	currentCommander, cmdError := loadLatestFileCommander(transaction, fileName)
-	if cmdError != nil {
-		return cmdError
+) (bool, error) {
+	tracker, initError := newTailingSessionTracker(transaction, fileName, state)
+	if initError != nil {
+		return false, initError
 	}
-	hasUnattributedEvents := state.offset == 0 || currentCommander == ""
-
-	// Atomic insert-or-ignore avoids a SELECT check per line during large journal ingestion.
-	insertEventStmt, prepError := transaction.Prepare(InsertJournalEventPrefixSQL + ` ON CONFLICT(event_uid) DO NOTHING`)
-	if prepError != nil {
-		return prepError
+	statements, closeStatements, prepErr := prepareLineIngestStatements(transaction, state.offset == 0, ingestedAt)
+	if prepErr != nil {
+		return false, prepErr
 	}
-	defer insertEventStmt.Close()
+	defer closeStatements()
 
-	upsertCommanderStmt, prepCommanderError := transaction.Prepare(UpsertCommanderSQL)
-	if prepCommanderError != nil {
-		return prepCommanderError
-	}
-	defer upsertCommanderStmt.Close()
-
+	shouldResolve := false
 	for {
 		rawLine, readError := reader.ReadBytes('\n')
 		if readError != nil && !errors.Is(readError, io.EOF) {
-			return readError
+			return false, readError
 		}
-		// Only consume complete lines; a partially written trailing line is
-		// picked up on the next pass.
 		if len(rawLine) == 0 || rawLine[len(rawLine)-1] != '\n' {
 			break
 		}
@@ -278,88 +281,114 @@ func ingestAppendedLines(
 		if len(bytes.TrimSpace(trimmedLine)) == 0 {
 			continue
 		}
-		state.lines++
-		result.LinesRead++
-		parsedEvent, keepEvent, parseError := ParseLine(trimmedLine, fileName)
-		if parseError != nil {
-			if len(result.Errors) < 20 {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s line %d: %v", fileName, state.lines, parseError))
-			}
-			continue
+		lineMutated, lineErr := processAppendedJournalLine(&statements, &tracker, trimmedLine, fileName, state, result)
+		if lineErr != nil {
+			return false, lineErr
 		}
-		if !keepEvent {
-			continue
+		shouldResolve = shouldResolve || lineMutated
+	}
+	if err := finalizeSessionState(&statements, &tracker, state); err != nil {
+		return false, err
+	}
+	return shouldResolve, nil
+}
+
+func processAppendedJournalLine(
+	statements *lineIngestStatements,
+	tracker *SessionTracker,
+	trimmedLine []byte,
+	fileName string,
+	state *fileState,
+	result *Result,
+) (bool, error) {
+	state.lines++
+	result.LinesRead++
+	if consumed, headerErr := tracker.ObserveHeaderOrContinued(trimmedLine); headerErr != nil || consumed {
+		return false, headerErr
+	}
+	parsedEvent, keepEvent, parseError := ParseLine(trimmedLine, fileName)
+	if parseError != nil {
+		if len(result.Errors) < 20 {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s line %d: %v", fileName, state.lines, parseError))
 		}
-		if parsedEvent.Commander != "" {
-			currentCommander = parsedEvent.Commander
-			if _, execError := upsertCommanderStmt.Exec(parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, parsedEvent.Timestamp); execError != nil {
-				return fmt.Errorf("upsert commander %s: %w", parsedEvent.Commander, execError)
-			}
-			if hasUnattributedEvents {
-				// Backfill any earlier events in the same file that arrived before LoadGame or Commander.
-				if _, execError := transaction.Exec(BackfillFileCommanderSQL, currentCommander, fileName); execError != nil {
-					return fmt.Errorf("backfill commander for %s: %w", fileName, execError)
-				}
-				if state.first.Valid {
-					result.ObserveTimestamp(state.first.String)
-				}
-				if state.last.Valid {
-					result.ObserveTimestamp(state.last.String)
-				}
-				hasUnattributedEvents = false
-			}
-		} else if currentCommander != "" {
-			parsedEvent.Commander = currentCommander
-		} else {
-			hasUnattributedEvents = true
+		return false, nil
+	}
+	if !keepEvent {
+		return false, nil
+	}
+	onSighting := func(commander, fid, timestamp string) error {
+		_, err := statements.upsertCmdrStmt.Exec(commander, fid, timestamp, timestamp)
+		return err
+	}
+	didBackfill, prepEventError := tracker.PrepareEvent(statements.transaction, &parsedEvent, onSighting)
+	if prepEventError != nil {
+		return false, prepEventError
+	}
+	if didBackfill {
+		if state.first.Valid {
+			result.ObserveTimestamp(state.first.String)
 		}
-		execResult, execError := ExecJournalEvent(insertEventStmt, &parsedEvent, fileName, ingestedAt)
-		if execError != nil {
-			return execError
-		}
-		rowsAffected, rowsError := execResult.RowsAffected()
-		if rowsError != nil {
-			return fmt.Errorf("read rows affected for %s: %w", fileName, rowsError)
-		}
-		if rowsAffected > 0 {
-			state.stored++
-			result.NewEvents++
-			result.Events = result.Events.Add(parsedEvent.Type)
-			result.ObserveTimestamp(parsedEvent.Timestamp)
-			if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
-				state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
-			}
-			if !state.last.Valid || parsedEvent.Timestamp > state.last.String {
-				state.last = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
-			}
+		if state.last.Valid {
+			result.ObserveTimestamp(state.last.String)
 		}
 	}
-	if currentCommander != "" && state.last.Valid {
-		if _, execError := upsertCommanderStmt.Exec(currentCommander, "", state.last.String, state.last.String); execError != nil {
-			return fmt.Errorf("update trailing commander %s: %w", currentCommander, execError)
+	inserted, mutated, storeErr := persistIngestedEvent(statements.insertEventStmt, statements.updateByteZeroStmt, &parsedEvent, fileName, statements.ingestedAt)
+	if storeErr != nil {
+		return false, storeErr
+	}
+	if inserted {
+		state.recordInsertedEvent(&parsedEvent, result)
+	}
+	return didBackfill || inserted || mutated, nil
+}
+
+func (state *fileState) recordInsertedEvent(parsedEvent *Event, result *Result) {
+	state.stored++
+	result.NewEvents++
+	result.Events = result.Events.Add(parsedEvent.Type)
+	result.ObserveTimestamp(parsedEvent.Timestamp)
+	if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
+		state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
+	}
+	if !state.last.Valid || parsedEvent.Timestamp > state.last.String {
+		state.last = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
+	}
+}
+
+func finalizeSessionState(statements *lineIngestStatements, tracker *SessionTracker, state *fileState) error {
+	if err := tracker.ResolveTrailingRollover(); err != nil {
+		return err
+	}
+	state.part, state.gameVersion, state.build = tracker.Part, tracker.GameVersion, tracker.Build
+	state.universe, state.continuedPart = tracker.Universe, tracker.ContinuedPart
+	state.lastCommander, state.lastFID = tracker.CurrentCommander, tracker.CurrentFID
+	if tracker.CurrentCommander != "" && state.last.Valid {
+		firstSeen := state.last.String
+		if tracker.InheritedRollover && state.first.Valid {
+			firstSeen = state.first.String
+		}
+		if _, err := statements.upsertCmdrStmt.Exec(tracker.CurrentCommander, tracker.CurrentFID, firstSeen, state.last.String); err != nil {
+			return fmt.Errorf("update trailing commander %s: %w", tracker.CurrentCommander, err)
 		}
 	}
 	return nil
 }
 
-func saveTrackedFileState(
-	transaction *sql.Tx,
-	fileName string,
-	filePath string,
-	newOffset int64,
-	fileSize int64,
-	state fileState,
-	ingestedAt string,
-) error {
+func saveTrackedFileState(transaction *sql.Tx, fileName, filePath string, newOffset, fileSize int64, state fileState, ingestedAt string) error {
 	_, execError := transaction.Exec(`INSERT INTO ingested_journals
-		(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?)
+		(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp,
+		 part, game_version, build, universe, continued_part, last_commander, last_fid, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(file_name) DO UPDATE SET
 			file_path = excluded.file_path, byte_offset = excluded.byte_offset, line_count = excluded.line_count,
 			file_size = excluded.file_size, events_stored = excluded.events_stored,
 			first_timestamp = excluded.first_timestamp, last_timestamp = excluded.last_timestamp,
+			part = excluded.part, game_version = excluded.game_version, build = excluded.build,
+			universe = excluded.universe, continued_part = excluded.continued_part,
+			last_commander = excluded.last_commander, last_fid = excluded.last_fid,
 			updated_at = excluded.updated_at`,
-		fileName, filePath, newOffset, state.lines, fileSize, state.stored, state.first, state.last, ingestedAt)
+		fileName, filePath, newOffset, state.lines, fileSize, state.stored, state.first, state.last,
+		state.part, state.gameVersion, state.build, state.universe, state.continuedPart, state.lastCommander, state.lastFID, ingestedAt)
 	if execError != nil {
 		return execError
 	}
@@ -368,46 +397,52 @@ func saveTrackedFileState(
 
 // IngestFile ingests any new complete lines appended to path since the last pass.
 func (ingester *Ingester) IngestFile(path string) (Result, error) {
+	result, _, err := ingester.ingestFile(path, true)
+	return result, err
+}
+
+func (ingester *Ingester) ingestFile(path string, resolveProfiles bool) (Result, bool, error) {
 	ingester.mu.Lock()
 	defer ingester.mu.Unlock()
-
 	result := Result{FilesScanned: 1}
 	fileInfo, statError := os.Stat(path)
 	if statError != nil {
-		return result, statError
+		return result, false, statError
 	}
-	fileName := filepath.Base(path)
-	fileSize := fileInfo.Size()
-
+	fileName, fileSize := filepath.Base(path), fileInfo.Size()
 	state, alreadyUpToDate, loadStateError := ingester.loadTrackedFileState(fileName, fileSize)
-	if loadStateError != nil {
-		return result, loadStateError
+	if loadStateError != nil || alreadyUpToDate {
+		return result, false, loadStateError
 	}
-	if alreadyUpToDate {
-		return result, nil
-	}
-
 	fileHandle, openError := os.Open(path)
 	if openError != nil {
-		return result, openError
+		return result, false, openError
 	}
 	defer fileHandle.Close()
 	if _, seekError := fileHandle.Seek(state.offset, io.SeekStart); seekError != nil {
-		return result, seekError
+		return result, false, seekError
 	}
 	newOffset := state.offset
 	reader := bufio.NewReader(io.LimitReader(fileHandle, fileSize-state.offset))
-
+	shouldResolve := false
 	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
 		ingestedAt := reference.NowISO()
-		if lineError := ingestAppendedLines(transaction, reader, fileName, &state, &newOffset, &result, ingestedAt); lineError != nil {
+		var lineError error
+		shouldResolve, lineError = ingestAppendedLines(transaction, reader, fileName, &state, &newOffset, &result, ingestedAt)
+		if lineError != nil {
 			return lineError
 		}
-		return saveTrackedFileState(transaction, fileName, path, newOffset, fileSize, state, ingestedAt)
+		if saveError := saveTrackedFileState(transaction, fileName, path, newOffset, fileSize, state, ingestedAt); saveError != nil {
+			return saveError
+		}
+		if resolveProfiles && shouldResolve {
+			return db.ResolveCommanders(transaction)
+		}
+		return nil
 	})
 	if txError != nil {
-		return result, txError
+		return result, false, txError
 	}
 	result.FilesUpdated = 1
-	return result, nil
+	return result, shouldResolve, nil
 }

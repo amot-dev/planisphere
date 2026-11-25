@@ -6,36 +6,43 @@ import {
   CreateExpeditionWithWaypoints,
   DeleteExpedition,
   UpdateExpedition,
+  UpdateExpeditionScoped,
 } from '../../../api/backend'
-import { expedition } from '../../../api/models'
+import { expedition, replay } from '../../../api/models'
 import { ModalShell } from '../../../components/ui/ModalShell'
 import {
   deriveExpeditionNameFromFilename,
   parseWaypointImportText,
 } from '../../../domain/waypointImport'
+import {
+  ScopedExpeditionInlineEditor,
+  type CommanderScopeMode,
+} from './ExpeditionCommanderScopePicker'
 import { WaypointImportSection } from './WaypointImportSection'
 
 /**
  * ExpeditionManageModalProps defines the saved expedition list, active selection,
- * and callbacks for creating, cloning, renaming, switching, and deleting flight
- * plans. Passing `{ persist: false }` to `onSelect` updates local selection
- * without issuing a redundant `SetActiveExpedition` RPC when the backend already
- * persisted the active expedition ID.
+ * commander profiles, and callbacks for creating, cloning, renaming, switching, and
+ * deleting flight plans. Passing `{ persist: false }` to `onSelect` updates local
+ * selection without issuing a redundant `SetActiveExpedition` RPC when the backend
+ * already persisted the active expedition ID.
  */
 export interface ExpeditionManageModalProps {
   expeditions: expedition.Expedition[]
   activeId: number
+  commanders?: replay.Commander[]
   onSelect: (id: number, options?: { persist?: boolean }) => void
   onClose: () => void
 }
 
 /**
  * ExpeditionManageModal renders the dialog for creating new expedition plans,
- * switching between saved expeditions, cloning plans, and renaming or deleting plans.
+ * switching between saved expeditions, cloning plans, and editing or deleting plans.
  */
 export function ExpeditionManageModal({
   expeditions,
   activeId,
+  commanders = [],
   onSelect,
   onClose,
 }: ExpeditionManageModalProps) {
@@ -51,8 +58,11 @@ export function ExpeditionManageModal({
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
+  const [editScopeMode, setEditScopeMode] = useState<CommanderScopeMode>('all_enabled')
+  const [editProfileIds, setEditProfileIds] = useState<number[]>([])
   const [errorMessage, setErrorMessage] = useState('')
 
+  const hasMultipleCommanders = commanders.length > 1
   const busy = creating || loadingFile || mutating
   const parsedImport = useMemo(() => parseWaypointImportText(rawImportText), [rawImportText])
   const hasRawImportText = rawImportText.trim().length > 0
@@ -144,8 +154,22 @@ export function ExpeditionManageModal({
   }
 
   function handleSaveEdit(id: number) {
+    if (hasMultipleCommanders && editScopeMode === 'selected' && editProfileIds.length === 0) {
+      setErrorMessage('Select at least one commander save slot.')
+      return
+    }
     return runExpeditionAction(async () => {
-      await UpdateExpedition(id, editName, editDescription)
+      if (hasMultipleCommanders) {
+        await UpdateExpeditionScoped(
+          id,
+          editName,
+          editDescription,
+          editScopeMode,
+          editScopeMode === 'selected' ? editProfileIds : [],
+        )
+      } else {
+        await UpdateExpedition(id, editName, editDescription)
+      }
       setEditingId(null)
     })
   }
@@ -245,30 +269,50 @@ export function ExpeditionManageModal({
         {expeditions.map((expeditionItem) => (
           <div key={expeditionItem.id} className="p-2.5 flex items-center justify-between gap-2">
             {editingId === expeditionItem.id ? (
-              <div className="flex-1 flex items-center gap-2">
-                <input
-                  type="text"
-                  disabled={busy}
-                  value={editName}
-                  onChange={(event) => setEditName(event.target.value)}
-                  className="bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
+              hasMultipleCommanders ? (
+                <ScopedExpeditionInlineEditor
+                  editName={editName}
+                  editDescription={editDescription}
+                  commanders={commanders}
+                  scopeMode={editScopeMode}
+                  selectedProfileIds={editProfileIds}
+                  busy={busy}
+                  onChangeName={setEditName}
+                  onChangeDescription={setEditDescription}
+                  onChangeScopeMode={setEditScopeMode}
+                  onChangeSelectedProfileIds={setEditProfileIds}
+                  onCancel={() => {
+                    setEditingId(null)
+                    setErrorMessage('')
+                  }}
+                  onSave={() => handleSaveEdit(expeditionItem.id)}
                 />
-                <input
-                  type="text"
-                  disabled={busy}
-                  value={editDescription}
-                  onChange={(event) => setEditDescription(event.target.value)}
-                  className="flex-1 bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
-                />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleSaveEdit(expeditionItem.id)}
-                  className="ed-btn-cyan"
-                >
-                  SAVE
-                </button>
-              </div>
+              ) : (
+                <div className="flex-1 flex items-center gap-2">
+                  <input
+                    type="text"
+                    disabled={busy}
+                    value={editName}
+                    onChange={(event) => setEditName(event.target.value)}
+                    className="bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
+                  />
+                  <input
+                    type="text"
+                    disabled={busy}
+                    value={editDescription}
+                    onChange={(event) => setEditDescription(event.target.value)}
+                    className="flex-1 bg-ed-void border border-ed-border px-2 py-1 text-ed-text-main"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleSaveEdit(expeditionItem.id)}
+                    className="ed-btn-cyan"
+                  >
+                    SAVE
+                  </button>
+                </div>
+              )
             ) : (
               <>
                 <button
@@ -335,13 +379,22 @@ export function ExpeditionManageModal({
                         disabled={busy}
                         onClick={() => {
                           setConfirmDeleteId(null)
+                          setErrorMessage('')
                           setEditingId(expeditionItem.id)
                           setEditName(expeditionItem.name)
                           setEditDescription(expeditionItem.description)
+                          const nextScope: CommanderScopeMode =
+                            expeditionItem.commanderScope === 'selected' ? 'selected' : 'all_enabled'
+                          setEditScopeMode(nextScope)
+                          setEditProfileIds(
+                            nextScope === 'selected'
+                              ? [...(expeditionItem.commanderProfileIds ?? [])]
+                              : [],
+                          )
                         }}
                         className="ed-btn"
                       >
-                        RENAME
+                        {hasMultipleCommanders ? 'EDIT' : 'RENAME'}
                       </button>
                       {expeditions.length > 1 && (
                         <button

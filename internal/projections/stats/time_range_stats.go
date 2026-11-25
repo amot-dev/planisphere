@@ -221,7 +221,7 @@ func newTimeRangeDomainCache[V any](
 	if bus != nil {
 		bus.OnTrigger(projection.Triggers{App: events.NewAppSet(events.AppExpeditionModesChanged)}, func(_ projection.Triggers) {
 			entries.InvalidateWhere(func(cacheKey string) bool {
-				return !strings.HasSuffix(cacheKey, "|all")
+				return strings.Contains(cacheKey, "|exp:")
 			})
 		})
 	}
@@ -229,8 +229,12 @@ func newTimeRangeDomainCache[V any](
 }
 
 func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bool) string {
+	var scopeSuffix string
+	if filter != nil {
+		scopeSuffix = filter.Scope.CacheKeySuffix()
+	}
 	if filter == nil || !filter.Enabled {
-		return timeRange.After + "|" + timeRange.Until + "|all"
+		return timeRange.After + "|" + timeRange.Until + "|all" + scopeSuffix
 	}
 	seenIDs := make(map[int64]bool, len(filter.Modes))
 	selectedIDs := make([]int64, 0, len(filter.Modes))
@@ -256,6 +260,7 @@ func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bo
 	builder.WriteString(strconv.FormatInt(filter.ExpeditionID, 10))
 	if len(selectedIDs) == 0 {
 		builder.WriteString("|none")
+		builder.WriteString(scopeSuffix)
 		return builder.String()
 	}
 	builder.WriteString("|modes:")
@@ -265,5 +270,6 @@ func buildModeDomainStatsKey(timeRange Range, filter *Filter, discoveryDomain bo
 		}
 		builder.WriteString(strconv.FormatInt(modeID, 10))
 	}
+	builder.WriteString(scopeSuffix)
 	return builder.String()
 }

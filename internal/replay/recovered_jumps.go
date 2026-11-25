@@ -24,16 +24,35 @@ type RecoveredJump struct {
 	JumpDist         float64
 	BoostUsed        int
 	IsCarrier        bool
+	ProfileID        int64
+	Commander        string
 }
 
 // ComputeRecoveredJumps reconstructs all crash-recovered hyperspace jumps and
-// offline or disconnected Fleet Carrier passenger jumps in chronological order.
+// offline or disconnected Fleet Carrier passenger jumps across globally enabled
+// commander profiles in chronological order.
 func ComputeRecoveredJumps(queryer db.Queryer) ([]RecoveredJump, error) {
-	hasDisabled, checkError := HasDisabledCommanders(queryer)
-	if checkError != nil {
-		return nil, fmt.Errorf("check disabled commanders for disconnect recovery: %w", checkError)
+	return ComputeRecoveredJumpsScoped(queryer, ProfileScope{})
+}
+
+// ComputeRecoveredJumpsScoped reconstructs crash-recovered jumps matching scope.
+func ComputeRecoveredJumpsScoped(queryer db.Queryer, scope ProfileScope) ([]RecoveredJump, error) {
+	matcher, matcherError := LoadProfileMatcher(queryer, scope)
+	if matcherError != nil {
+		return nil, fmt.Errorf("check disabled commanders for disconnect recovery: %w", matcherError)
 	}
-	candidates, queryError := queryPrimedCandidates(queryer, hasDisabled)
+	allRecovered, computeError := ComputeRecoveredJumpsAll(queryer)
+	if computeError != nil || len(allRecovered) == 0 {
+		return nil, computeError
+	}
+	return FilterRecoveredJumpsByMatcher(allRecovered, matcher), nil
+}
+
+// ComputeRecoveredJumpsAll reconstructs crash-recovered jumps across all
+// commander profiles without global enabled filtering, stamping ProfileID and
+// Commander onto every RecoveredJump while isolating each pilot's session state.
+func ComputeRecoveredJumpsAll(queryer db.Queryer) ([]RecoveredJump, error) {
+	candidates, queryError := queryPrimedCandidates(queryer)
 	if queryError != nil || len(candidates) == 0 {
 		return nil, queryError
 	}
@@ -43,22 +62,14 @@ func ComputeRecoveredJumps(queryer db.Queryer) ([]RecoveredJump, error) {
 	recoveredCarriersByLocID := make(map[int64]carrierStayState)
 	for chunkStart := 0; chunkStart < len(candidates); chunkStart += candidateChunkSize {
 		chunk := candidates[chunkStart:min(chunkStart+candidateChunkSize, len(candidates))]
-		loadedEvents, loadError := loadPreDisconnectChunk(queryer, chunk, hasDisabled)
+		loadedEvents, loadError := loadPreDisconnectChunk(queryer, chunk)
 		if loadError != nil {
 			return nil, loadError
 		}
-		cursor := 0
 		for _, candidate := range chunk {
-			for cursor < len(loadedEvents) && eventOrderedBefore(loadedEvents[cursor].timestamp, loadedEvents[cursor].id, candidate.previousArrival.timestamp, candidate.previousArrival.id) {
-				cursor++
-			}
-			sliceEnd := cursor
-			for sliceEnd < len(loadedEvents) && !eventOrderedBefore(candidate.locationTimestamp, candidate.locationID, loadedEvents[sliceEnd].timestamp, loadedEvents[sliceEnd].id) {
-				sliceEnd++
-			}
-			windowEvents := loadedEvents[cursor:sliceEnd]
+			windowEvents := sliceCandidatePreDisconnectWindow(loadedEvents, candidate)
 			if candidate.isCarrier {
-				jump, matched, resolveError := resolveCarrierCandidateFromSlice(queryer, candidate, windowEvents, hasDisabled, recoveredCarriersByLocID)
+				jump, matched, resolveError := resolveCarrierCandidateFromSlice(queryer, candidate, windowEvents, recoveredCarriersByLocID)
 				if resolveError != nil {
 					return nil, resolveError
 				}
@@ -74,6 +85,19 @@ func ComputeRecoveredJumps(queryer db.Queryer) ([]RecoveredJump, error) {
 	return recovered, nil
 }
 
+func sliceCandidatePreDisconnectWindow(loadedEvents []preDisconnectEvent, candidate primedDisconnectCandidate) []preDisconnectEvent {
+	sliceStart := sort.Search(len(loadedEvents), func(index int) bool {
+		return !eventOrderedBefore(loadedEvents[index].timestamp, loadedEvents[index].id, candidate.previousArrival.timestamp, candidate.previousArrival.id)
+	})
+	sliceEnd := sort.Search(len(loadedEvents), func(index int) bool {
+		return eventOrderedBefore(candidate.locationTimestamp, candidate.locationID, loadedEvents[index].timestamp, loadedEvents[index].id)
+	})
+	if sliceStart >= sliceEnd {
+		return nil
+	}
+	return loadedEvents[sliceStart:sliceEnd]
+}
+
 func compareRecoveredJumps(left, right RecoveredJump) int {
 	if timestampCmp := strings.Compare(left.Timestamp, right.Timestamp); timestampCmp != 0 {
 		return timestampCmp
@@ -82,13 +106,36 @@ func compareRecoveredJumps(left, right RecoveredJump) int {
 }
 
 // ComputeRecoveredJumpsInRange computes crash-recovered hyperspace jumps directly
-// against queryer for (afterTimestamp, untilTimestamp].
+// against queryer for (afterTimestamp, untilTimestamp] across enabled profiles.
 func ComputeRecoveredJumpsInRange(queryer db.Queryer, afterTimestamp, untilTimestamp string) ([]RecoveredJump, error) {
-	allRecovered, computeError := ComputeRecoveredJumps(queryer)
-	if computeError != nil || len(allRecovered) == 0 {
+	return ComputeRecoveredJumpsInRangeScoped(queryer, afterTimestamp, untilTimestamp, ProfileScope{})
+}
+
+// ComputeRecoveredJumpsInRangeScoped computes crash-recovered jumps directly
+// against queryer for (afterTimestamp, untilTimestamp] matching scope.
+func ComputeRecoveredJumpsInRangeScoped(queryer db.Queryer, afterTimestamp, untilTimestamp string, scope ProfileScope) ([]RecoveredJump, error) {
+	scopedRecovered, computeError := ComputeRecoveredJumpsScoped(queryer, scope)
+	if computeError != nil || len(scopedRecovered) == 0 {
 		return nil, computeError
 	}
-	return FilterRecoveredJumpsInRange(allRecovered, afterTimestamp, untilTimestamp), nil
+	return FilterRecoveredJumpsInRange(scopedRecovered, afterTimestamp, untilTimestamp), nil
+}
+
+// FilterRecoveredJumpsByMatcher filters recovered jumps to entries matching matcher.
+func FilterRecoveredJumpsByMatcher(jumps []RecoveredJump, matcher EnabledProfileMatcher) []RecoveredJump {
+	if len(jumps) == 0 || matcher.MatchesAll() {
+		return jumps
+	}
+	filtered := make([]RecoveredJump, 0, len(jumps))
+	for _, jump := range jumps {
+		if matcher.Matches(jump.ProfileID, jump.Commander) {
+			filtered = append(filtered, jump)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // FilterRecoveredJumpsInRange filters a chronologically sorted slice of recovered jumps
@@ -137,8 +184,18 @@ func applyPreDisconnectEvent(item preDisconnectEvent, boostUsed *int, latestStar
 	}
 }
 
+func sameDisconnectActor(refProfileID int64, refCommander string, itemProfileID int64, itemCommander string) bool {
+	if refProfileID > 0 {
+		return itemProfileID == refProfileID || (itemProfileID == 0 && itemCommander == "")
+	}
+	if itemProfileID > 0 {
+		return refCommander == ""
+	}
+	return refCommander == "" || itemCommander == "" || strings.EqualFold(refCommander, itemCommander)
+}
+
 // walkPreDisconnectWindow iterates verification events in (previousArrival, location]
-// for candidate's commander, returning false if a Resurrect aborts recovery and
+// for candidate's actor, returning false if a Resurrect aborts recovery and
 // invoking onPreLoad for every event at or before LoadGame.
 func walkPreDisconnectWindow(
 	candidate primedDisconnectCandidate,
@@ -146,7 +203,7 @@ func walkPreDisconnectWindow(
 	onPreLoad func(preDisconnectEvent),
 ) bool {
 	for _, item := range windowEvents {
-		if candidate.commander != "" && item.commander != "" && !strings.EqualFold(candidate.commander, item.commander) {
+		if !sameDisconnectActor(candidate.profileID, candidate.commander, item.profileID, item.commander) {
 			continue
 		}
 		if !eventOrderedBefore(candidate.previousArrival.timestamp, candidate.previousArrival.id, item.timestamp, item.id) ||
@@ -181,6 +238,8 @@ func buildRecoveredJump(candidate primedDisconnectCandidate, boostUsed int) (Rec
 		JumpDist:         jumpDistance,
 		BoostUsed:        boostUsed,
 		IsCarrier:        candidate.isCarrier,
+		ProfileID:        candidate.profileID,
+		Commander:        candidate.commander,
 	}, true
 }
 
@@ -224,7 +283,6 @@ func sameCarrierIdentity(priorMarketID int64, priorStationName string, locationM
 func initialCarrierStayState(
 	queryer db.Queryer,
 	candidate primedDisconnectCandidate,
-	hasDisabled bool,
 	recoveredCarriersByLocID map[int64]carrierStayState,
 ) (carrierStayState, error) {
 	switch candidate.previousArrival.eventType {
@@ -248,7 +306,7 @@ func initialCarrierStayState(
 			if chainedStay, exists := recoveredCarriersByLocID[candidate.previousArrival.id]; exists {
 				return chainedStay, nil
 			}
-			return queryPriorCarrierBoardingState(queryer, candidate.previousArrival, candidate.commander, hasDisabled)
+			return queryPriorCarrierBoardingState(queryer, candidate.previousArrival, candidate.profileID, candidate.commander)
 		}
 	}
 	return carrierStayState{}, nil
@@ -294,10 +352,9 @@ func resolveCarrierCandidateFromSlice(
 	queryer db.Queryer,
 	candidate primedDisconnectCandidate,
 	windowEvents []preDisconnectEvent,
-	hasDisabled bool,
 	recoveredCarriersByLocID map[int64]carrierStayState,
 ) (RecoveredJump, bool, error) {
-	stay, stateError := initialCarrierStayState(queryer, candidate, hasDisabled, recoveredCarriersByLocID)
+	stay, stateError := initialCarrierStayState(queryer, candidate, recoveredCarriersByLocID)
 	if stateError != nil {
 		return RecoveredJump{}, false, stateError
 	}

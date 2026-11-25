@@ -7,6 +7,7 @@ import (
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
+	"planisphere/internal/replay"
 	replayreal "planisphere/internal/replay/realization"
 	"planisphere/internal/sources/journal"
 )
@@ -32,7 +33,7 @@ var (
 )
 
 // Ledger holds the chronological, lifetime-reconciled settlement state of all
-// scan and organic records across a commander's history.
+// scan and organic records across all commander profiles in the archive.
 type Ledger = replayreal.Ledger
 
 // Breakdown captures realized payouts, unrealized pending data, losses, and deductions.
@@ -82,17 +83,29 @@ func (salesLedger *SalesLedger) Generation() uint64 {
 	return salesLedger.ledger.Generation()
 }
 
-// Breakdown computes the aggregated realization breakdown across (afterTimestamp, untilTimestamp],
-// optionally applying filterAllowsDiscovery for discovery mode filtering.
+// Breakdown computes the aggregated realization breakdown across
+// (afterTimestamp, untilTimestamp] for globally enabled profiles, optionally
+// applying filterAllowsDiscovery for discovery mode filtering.
 func (salesLedger *SalesLedger) Breakdown(
 	afterTimestamp, untilTimestamp string,
+	filterAllowsDiscovery func(timestamp string) bool,
+) (Breakdown, error) {
+	return salesLedger.BreakdownScoped(afterTimestamp, untilTimestamp, replay.ProfileScope{}, filterAllowsDiscovery)
+}
+
+// BreakdownScoped computes the aggregated realization breakdown across
+// (afterTimestamp, untilTimestamp] for scope, optionally applying
+// filterAllowsDiscovery for discovery mode filtering.
+func (salesLedger *SalesLedger) BreakdownScoped(
+	afterTimestamp, untilTimestamp string,
+	scope replay.ProfileScope,
 	filterAllowsDiscovery func(timestamp string) bool,
 ) (Breakdown, error) {
 	ledgerInstance, getError := salesLedger.Get()
 	if getError != nil {
 		return Breakdown{}, getError
 	}
-	return ledgerInstance.Breakdown(afterTimestamp, untilTimestamp, filterAllowsDiscovery), nil
+	return ledgerInstance.BreakdownForScope(afterTimestamp, untilTimestamp, scope, filterAllowsDiscovery), nil
 }
 
 // OrganicSaleDetails returns the settled bonus details for an organic scan UID.

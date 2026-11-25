@@ -148,9 +148,16 @@ func TestRecoveredJumpsPositiveAndBoostLifecycle(testingContext *testing.T) {
 		testingContext.Fatalf("expected 5 recovered jumps after EventLocation invalidation, got %+v", refreshedRecovered)
 	}
 
-	// Disabling the commander and publishing AppCommanderFilterChanged must suppress recovered jumps.
+	// Disabling the commander and publishing AppCommanderFilterChanged must suppress recovered jumps in AllEnabled while preserving explicit scope.
+	commanders, listErr := replay.ListCommanders(databaseConnection)
+	if listErr != nil || len(commanders) != 1 {
+		testingContext.Fatalf("ListCommanders: %+v err=%v", commanders, listErr)
+	}
 	if disableError := settings.SetCommanderEnabled(databaseConnection, "CmdrTest", false); disableError != nil {
 		testingContext.Fatal(disableError)
+	}
+	if _, execErr := databaseConnection.Exec(`UPDATE commander_profiles SET enabled = 0 WHERE id = ?`, commanders[0].ID); execErr != nil {
+		testingContext.Fatal(execErr)
 	}
 	eventBus.PublishApp(events.AppCommanderFilterChanged)
 
@@ -160,6 +167,10 @@ func TestRecoveredJumpsPositiveAndBoostLifecycle(testingContext *testing.T) {
 	}
 	if len(disabledRecovered) != 0 {
 		testingContext.Fatalf("expected 0 recovered jumps when commander disabled, got %d", len(disabledRecovered))
+	}
+	scopedRecovered, scopedErr := recoveredJumps.InRangeScoped("", "", replay.NewProfileScope([]int64{commanders[0].ID}))
+	if scopedErr != nil || len(scopedRecovered) != 5 {
+		testingContext.Fatalf("expected 5 recovered jumps via explicit scope on disabled profile, got %d err=%v", len(scopedRecovered), scopedErr)
 	}
 }
 
@@ -380,5 +391,80 @@ func TestRecoveredCarrierJumpsRejections(testingContext *testing.T) {
 	}
 	if len(recovered) != 0 {
 		testingContext.Fatalf("expected all invalid carrier Location transitions to be rejected, got %+v", recovered)
+	}
+}
+
+func TestRecoveredJumpsMidJumpRenameAndSameNameWipeIsolation(testingContext *testing.T) {
+	databaseConnection := openProjectionTestDB(testingContext)
+	temporaryDirectory := testingContext.TempDir()
+
+	files := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			// Mid-jump character rename under same FID F900 -> must recover jump with BoostUsed=4.
+			name: "Journal.2026-11-24T010000.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-24T01:00:00Z","event":"LoadGame","Commander":"CmdrBeforeRename","FID":"F900","Ship":"Mandalay"}`,
+				`{"timestamp":"2026-11-24T01:00:05Z","event":"Location","StarSystem":"RenameOrigin","SystemAddress":9001,"StarPos":[0,0,0],"Docked":false}`,
+				`{"timestamp":"2026-11-24T01:01:00Z","event":"JetConeBoost","BoostValue":4.0}`,
+				`{"timestamp":"2026-11-24T01:01:30Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"RenameDest","SystemAddress":9002}`,
+			},
+		},
+		{
+			// Interleaved second profile disconnecting and reconnecting between F900's StartJump (01:01:30Z) and F900's reconnect LoadGame (01:05:00Z).
+			name: "Journal.2026-11-24T010200.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-24T01:02:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
+				`{"timestamp":"2026-11-24T01:02:05Z","event":"Location","StarSystem":"InterleavedOrigin","SystemAddress":9201,"StarPos":[0,0,0],"Docked":false}`,
+				`{"timestamp":"2026-11-24T01:02:20Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"InterleavedDest","SystemAddress":9202}`,
+				`{"timestamp":"2026-11-24T01:03:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
+				`{"timestamp":"2026-11-24T01:03:10Z","event":"Location","StarSystem":"InterleavedDest","SystemAddress":9202,"StarPos":[0,0,90],"Docked":false}`,
+			},
+		},
+		{
+			name: "Journal.2026-11-24T010500.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-24T01:05:00Z","event":"LoadGame","Commander":"CmdrAfterRename","FID":"F900","Ship":"Mandalay"}`,
+				`{"timestamp":"2026-11-24T01:05:10Z","event":"Location","StarSystem":"RenameDest","SystemAddress":9002,"StarPos":[0,150,0],"Docked":false}`,
+			},
+		},
+		{
+			// Same-name Clear Save under FID F901 -> Era 0 StartJump must NEVER match Era 1 LoadGame/Location.
+			name: "Journal.2026-11-24T020000.01.log",
+			lines: []string{
+				`{"timestamp":"2026-11-24T02:00:00Z","event":"LoadGame","Commander":"CmdrSameWipe","FID":"F901","Ship":"Mandalay"}`,
+				`{"timestamp":"2026-11-24T02:00:05Z","event":"Location","StarSystem":"WipeOrigin","SystemAddress":9101,"StarPos":[0,0,0],"Docked":false}`,
+				`{"timestamp":"2026-11-24T02:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"WipeDest","SystemAddress":9102}`,
+				`{"timestamp":"2026-11-24T02:02:00Z","event":"ClearSavedGame","Name":"CmdrSameWipe","FID":"F901"}`,
+				`{"timestamp":"2026-11-24T02:02:10Z","event":"NewCommander","Name":"CmdrSameWipe","FID":"F901","Package":"Sidewinder"}`,
+				`{"timestamp":"2026-11-24T02:02:20Z","event":"LoadGame","Commander":"CmdrSameWipe","FID":"F901","Ship":"SideWinder"}`,
+				`{"timestamp":"2026-11-24T02:02:30Z","event":"Location","StarSystem":"WipeDest","SystemAddress":9102,"StarPos":[0,80,0],"Docked":false}`,
+			},
+		},
+	}
+	for _, spec := range files {
+		if err := os.WriteFile(filepath.Join(temporaryDirectory, spec.name), []byte(strings.Join(spec.lines, "\n")+"\n"), 0o644); err != nil {
+			testingContext.Fatal(err)
+		}
+	}
+	if _, err := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	allRecovered, err := replay.ComputeRecoveredJumpsAll(databaseConnection)
+	if err != nil {
+		testingContext.Fatalf("ComputeRecoveredJumpsAll: %v", err)
+	}
+	if len(allRecovered) != 2 {
+		testingContext.Fatalf("expected interleaved and renamed-pilot jumps to recover (wipe jump rejected), got %+v", allRecovered)
+	}
+	interleavedJump, renamedJump := allRecovered[0], allRecovered[1]
+	if interleavedJump.SystemName != "InterleavedDest" || math.Abs(interleavedJump.JumpDist-90.0) > 1e-6 || interleavedJump.BoostUsed != 0 || interleavedJump.ProfileID <= 0 {
+		testingContext.Fatalf("unexpected interleaved recovered jump: %+v", interleavedJump)
+	}
+	if renamedJump.SystemName != "RenameDest" || math.Abs(renamedJump.JumpDist-150.0) > 1e-6 || renamedJump.BoostUsed != 4 || renamedJump.ProfileID <= 0 || renamedJump.ProfileID == interleavedJump.ProfileID {
+		testingContext.Fatalf("unexpected recovered jump across mid-jump rename after interleaved candidate: %+v", renamedJump)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/store/settings"
 )
 
 // Sentinel errors returned when export preconditions are not met.
@@ -35,7 +36,7 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 	if expeditionRecord.Status == expedition.StatusPlanning || (!departed && expeditionRecord.Status != expedition.StatusCompleted) {
 		return ExpeditionExport{}, ErrNotExportable
 	}
-	enabledCommanders, commandersError := replay.ListEnabledCommanderNames(databaseConnection)
+	enabledCommanders, commandersError := replay.ListCommanderNamesForScope(databaseConnection, expeditionRecord.ProfileScope())
 	if commandersError != nil {
 		return ExpeditionExport{}, fmt.Errorf("list enabled commanders for export %d: %w", expeditionID, commandersError)
 	}
@@ -77,7 +78,11 @@ func initializeExportHeader(
 	if endIsNow {
 		effectiveEndGalactic = reference.TimeToGalactic(currentTime)
 	}
-	careerStart, careerStartGalactic := replay.CareerStart(databaseConnection)
+	baselineScope := expeditionRecord.ProfileScope()
+	if settings.CareerBaselineScope(databaseConnection) == settings.CareerScopeAllEnabled {
+		baselineScope = replay.ProfileScope{}
+	}
+	careerStart, careerStartGalactic := replay.CareerStartScoped(databaseConnection, baselineScope)
 	careerDuration := ""
 	if careerStart != "" {
 		careerDuration = reference.Elapsed(careerStart, "")
@@ -122,7 +127,8 @@ func populateExpeditionTelemetry(
 	manualAdjustments := expeditionRecord.Adjustments.ToMetrics()
 	if departed {
 		expeditionRange := replaystats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
-		expeditionSummary, computeError := dependencies.Projections.TimeRangeStats.Compute(expeditionRange, nil)
+		expeditionFilter := replaystats.Filter{Scope: expeditionRecord.ProfileScope()}
+		expeditionSummary, computeError := dependencies.Projections.TimeRangeStats.Compute(expeditionRange, &expeditionFilter)
 		if computeError != nil {
 			return fmt.Errorf("compute expedition telemetry: %w", computeError)
 		}
@@ -192,6 +198,7 @@ func computeFilteredModeBuckets(
 	candidateModes []modes.Mode,
 	expeditionProjections *expedition.Projections,
 ) ([]ModeBucket, error) {
+	expScope := expeditionRecord.ProfileScope()
 	expeditionRange := replaystats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
 	buckets := make([]ModeBucket, 0, len(candidateModes))
 	for _, modeItem := range candidateModes {
@@ -199,6 +206,7 @@ func computeFilteredModeBuckets(
 			Enabled:      true,
 			ExpeditionID: expeditionRecord.ID,
 			Modes:        []replaystats.ModeSelection{{ModeID: modeItem.ID, Travel: true, Discovery: true}},
+			Scope:        expScope,
 		}
 		summary, computeError := expeditionProjections.TimeRangeStats.Compute(expeditionRange, &modeFilter)
 		if computeError != nil {

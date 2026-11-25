@@ -11,6 +11,8 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
+const selectJournalRowColumnsSQL = `SELECT id, event_uid, timestamp, event, COALESCE(system_name, ''), system_address, body_id, star_x, star_y, star_z, COALESCE(profile_id, 0), COALESCE(commander, ''), raw_json`
+
 // Row is a persisted journal_events record loaded for replay.
 type Row struct {
 	ID            int64
@@ -22,6 +24,8 @@ type Row struct {
 	SystemAddress sql.NullInt64
 	BodyID        sql.NullInt64
 	StarPos       *reference.Vec3
+	ProfileID     int64
+	Commander     string
 	RawJSON       string
 }
 
@@ -43,6 +47,8 @@ func scanJournalRow(scanner rowScanner) (Row, error) {
 		&starX,
 		&starY,
 		&starZ,
+		&rowItem.ProfileID,
+		&rowItem.Commander,
 		&rowItem.RawJSON,
 	)
 	if scanError != nil {
@@ -57,7 +63,10 @@ func scanJournalRow(scanner rowScanner) (Row, error) {
 	return rowItem, nil
 }
 
-func commanderFilterPredicate(queryer db.Queryer) string {
+func commanderFilterPredicate(queryer db.Queryer, scope ProfileScope) string {
+	if !scope.IsAllEnabled() {
+		return " AND " + scope.SQLPredicate("")
+	}
 	hasDisabled, checkError := HasDisabledCommanders(queryer)
 	if checkError != nil || hasDisabled {
 		return " AND " + CmdrFilterSQL
@@ -66,8 +75,30 @@ func commanderFilterPredicate(queryer db.Queryer) string {
 }
 
 // LoadEvents queries persisted journal events matching eventSet within
-// (afterTimestamp, untilTimestamp] in chronological (timestamp, id) order.
+// (afterTimestamp, untilTimestamp] across globally enabled profiles in
+// chronological (timestamp, id) order.
 func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet journal.EventSet) ([]Row, error) {
+	return LoadEventsScoped(queryer, afterTimestamp, untilTimestamp, eventSet, ProfileScope{})
+}
+
+// LoadEventsScoped queries persisted journal events matching eventSet and scope
+// within (afterTimestamp, untilTimestamp] in chronological (timestamp, id) order.
+func LoadEventsScoped(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet journal.EventSet, scope ProfileScope) ([]Row, error) {
+	return loadEventsWithPredicate(queryer, afterTimestamp, untilTimestamp, eventSet, commanderFilterPredicate(queryer, scope))
+}
+
+// LoadEventsAllProfiles queries persisted journal events matching eventSet
+// across all enabled and disabled profiles in chronological (timestamp, id) order.
+func LoadEventsAllProfiles(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet journal.EventSet) ([]Row, error) {
+	return loadEventsWithPredicate(queryer, afterTimestamp, untilTimestamp, eventSet, "")
+}
+
+func loadEventsWithPredicate(
+	queryer db.Queryer,
+	afterTimestamp, untilTimestamp string,
+	eventSet journal.EventSet,
+	filterClause string,
+) ([]Row, error) {
 	if eventSet.IsEmpty() {
 		return nil, nil
 	}
@@ -82,9 +113,9 @@ func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, event
 		eventColumn = "+event"
 	}
 
-	query := `SELECT id, event_uid, timestamp, event, COALESCE(system_name, ''), system_address, body_id, star_x, star_y, star_z, raw_json
+	query := selectJournalRowColumnsSQL + `
 		FROM journal_events WHERE ` + eventColumn + ` IN (` + journal.FormatSQLInClause(eventSet) + `) AND timestamp > ? AND timestamp <= ?` +
-		commanderFilterPredicate(queryer) + ` ORDER BY timestamp, id`
+		filterClause + ` ORDER BY timestamp, id`
 
 	rows, queryError := queryer.Query(query, afterTimestamp, untilTimestamp)
 	if queryError != nil {
@@ -109,12 +140,18 @@ func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, event
 // QueryLatestEvent returns the most recent persisted journal event matching eventSet,
 // or nil when no matching event exists for enabled commanders.
 func QueryLatestEvent(queryer db.Queryer, eventSet journal.EventSet) (*Row, error) {
+	return QueryLatestEventScoped(queryer, eventSet, ProfileScope{})
+}
+
+// QueryLatestEventScoped returns the most recent persisted journal event
+// matching eventSet and scope, or nil when none exists.
+func QueryLatestEventScoped(queryer db.Queryer, eventSet journal.EventSet, scope ProfileScope) (*Row, error) {
 	if eventSet.IsEmpty() {
 		return nil, nil
 	}
-	query := `SELECT id, event_uid, timestamp, event, COALESCE(system_name, ''), system_address, body_id, star_x, star_y, star_z, raw_json
+	query := selectJournalRowColumnsSQL + `
 		FROM journal_events WHERE event IN (` + journal.FormatSQLInClause(eventSet) + `)` +
-		commanderFilterPredicate(queryer) + ` ORDER BY timestamp DESC, id DESC LIMIT 1`
+		commanderFilterPredicate(queryer, scope) + ` ORDER BY timestamp DESC, id DESC LIMIT 1`
 
 	rowItem, scanError := scanJournalRow(queryer.QueryRow(query))
 	if errors.Is(scanError, sql.ErrNoRows) {

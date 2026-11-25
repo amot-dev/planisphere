@@ -18,7 +18,7 @@ import (
 // loadedEvents and preloads their latest prior Scan at or before afterTimestamp.
 // Two passes ensure same-second mappings ordered before their matching Scan in
 // loadedEvents are not marked missing.
-func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []replay.Row) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
+func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []replay.Row, scope replay.ProfileScope) (map[bodyKey]*journal.ScanEvent, map[bodyKey]bool, error) {
 	scans := make(map[bodyKey]*journal.ScanEvent)
 	missingScans := make(map[bodyKey]bool)
 	scannedInEvents := make(map[bodyKey]bool, len(loadedEvents)/2)
@@ -47,7 +47,7 @@ func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []
 		}
 		return scans, missingScans, nil
 	}
-	preloaded, preloadError := engine.preloadScans(neededKeys, afterTimestamp)
+	preloaded, preloadError := engine.preloadScans(neededKeys, afterTimestamp, scope)
 	if preloadError != nil {
 		return nil, nil, fmt.Errorf("preload compute scans before %s: %w", afterTimestamp, preloadError)
 	}
@@ -64,6 +64,7 @@ func (engine *Engine) prepareComputeScans(afterTimestamp string, loadedEvents []
 
 type computeAccumulator struct {
 	engine                  *Engine
+	scope                   replay.ProfileScope
 	after                   string
 	until                   string
 	filterSet               *filterSets
@@ -116,7 +117,7 @@ func (accumulator *computeAccumulator) ensurePreviousPosition() error {
 	var starX, starY, starZ sql.NullFloat64
 	queryError := accumulator.engine.DB.QueryRow(`SELECT star_x, star_y, star_z FROM journal_events
 		WHERE event IN ('FSDJump', 'Location', 'CarrierJump') AND star_x IS NOT NULL
-		AND timestamp <= ? AND `+replay.CmdrFilterSQL+` AND `+replay.NonMulticrewSQLFilter+`
+		AND timestamp <= ? AND `+accumulator.scope.SQLPredicate("")+` AND `+replay.NonMulticrewSQLFilter+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`, accumulator.after).Scan(&starX, &starY, &starZ)
 	if queryError != nil && !errors.Is(queryError, sql.ErrNoRows) {
 		return fmt.Errorf("seed previous star position before %s: %w", accumulator.after, queryError)
@@ -303,7 +304,7 @@ func (accumulator *computeAccumulator) resolveParentScan(key bodyKey, timestamp 
 	if parentScan != nil || accumulator.missingScans[key] {
 		return parentScan, nil
 	}
-	lookedUpScan, lookupError := accumulator.engine.lookupScan(key, timestamp)
+	lookedUpScan, lookupError := accumulator.engine.lookupScan(key, timestamp, accumulator.scope)
 	if lookupError != nil {
 		return nil, lookupError
 	}

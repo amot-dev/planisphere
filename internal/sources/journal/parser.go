@@ -30,6 +30,7 @@ type Event struct {
 	Event         string
 	Commander     string
 	FID           string
+	Universe      string
 	SystemName    string
 	SystemAddress *int64
 	BodyID        *int64
@@ -157,6 +158,12 @@ func keyIdentifiers(eventType EventType, fields *commonFields, raw []byte) []str
 		return []string{optInt(fields.SystemAddress), body, fields.Species, fields.ScanType}
 	case EventCommander:
 		return []string{fields.FID, fields.Commander}
+	case EventClearSavedGame, EventNewCommander:
+		commanderName := strings.TrimSpace(fields.Name)
+		if commanderName == "" {
+			commanderName = strings.TrimSpace(fields.Commander)
+		}
+		return []string{strings.TrimSpace(fields.FID), commanderName}
 	case EventLoadGame:
 		return []string{fields.FID, optInt(fields.ShipID)}
 	case EventShipyardSwap:
@@ -214,7 +221,7 @@ func shouldPersistRelevantEvent(fields *commonFields) (EventType, bool) {
 }
 
 func populateParsedEventDetails(parsedEvent *Event, eventType EventType, fields *commonFields) {
-	if eventType == EventCommander && parsedEvent.Commander == "" {
+	if (eventType == EventCommander || eventType == EventClearSavedGame || eventType == EventNewCommander) && parsedEvent.Commander == "" {
 		parsedEvent.Commander = strings.TrimSpace(fields.Name)
 	}
 	switch {

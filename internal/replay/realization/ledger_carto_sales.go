@@ -35,6 +35,8 @@ func (builder *ledgerBuilder) recordSingleCartoSale(rawJSON string) {
 
 	if len(matchedRecords) == 0 {
 		builder.ledger.unattributedSales = append(builder.ledger.unattributedSales, unattributedSale{
+			profileID:         builder.profileID,
+			nocaseCommander:   builder.nocaseCommander,
 			timestamp:         sellEvent.Timestamp,
 			kind:              "carto",
 			netRealized:       sellEvent.TotalEarnings,
@@ -88,6 +90,8 @@ func (builder *ledgerBuilder) recordMultiCartoSale(rawJSON string) {
 	matchedRecords := builder.claimSoldCartoRecords(soldSystemSet, multiSellEvent.Timestamp)
 	if len(matchedRecords) == 0 {
 		builder.ledger.unattributedSales = append(builder.ledger.unattributedSales, unattributedSale{
+			profileID:         builder.profileID,
+			nocaseCommander:   builder.nocaseCommander,
 			timestamp:         multiSellEvent.Timestamp,
 			kind:              "carto",
 			netRealized:       multiSellEvent.TotalEarnings,

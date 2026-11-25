@@ -57,13 +57,21 @@ func (history *ShipHistory) Triggers() projection.Triggers {
 }
 
 // Timeline returns cached chronological player ship switches covering
-// [startTimestamp, endTimestamp], seeded with the active ship at or before startTimestamp.
+// [startTimestamp, endTimestamp] across globally enabled profiles, seeded with
+// the active ship at or before startTimestamp.
 func (history *ShipHistory) Timeline(startTimestamp, endTimestamp string) ([]ShipSwitch, error) {
+	return history.TimelineScoped(startTimestamp, endTimestamp, replay.ProfileScope{})
+}
+
+// TimelineScoped returns cached chronological player ship switches covering
+// [startTimestamp, endTimestamp] for scope, seeded with the active ship at or
+// before startTimestamp.
+func (history *ShipHistory) TimelineScoped(startTimestamp, endTimestamp string, scope replay.ProfileScope) ([]ShipSwitch, error) {
 	if history.database == nil {
 		return nil, nil
 	}
-	windowKey := startTimestamp + "|" + endTimestamp
+	windowKey := startTimestamp + "|" + endTimestamp + scope.CacheKeySuffix()
 	return history.windows.GetOrLoad(windowKey, func() ([]ShipSwitch, error) {
-		return replay.QueryShipTimeline(history.database, startTimestamp, endTimestamp)
+		return replay.QueryShipTimelineScoped(history.database, startTimestamp, endTimestamp, scope)
 	})
 }

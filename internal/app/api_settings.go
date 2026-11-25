@@ -38,6 +38,7 @@ type Settings struct {
 	GECCount                    int                `json:"gecCount"`
 	GECFetchedAt                string             `json:"gecFetchedAt"`
 	Commanders                  []replay.Commander `json:"commanders"`
+	CareerBaselineScope         string             `json:"careerBaselineScope"`
 	EDDiscoveryDBPath           string             `json:"edDiscoveryDbPath"`
 	DefaultEDDiscoveryDBPath    string             `json:"defaultEdDiscoveryDbPath"`
 	EDDiscoveryDBExists         bool               `json:"edDiscoveryDbExists"`
@@ -89,6 +90,7 @@ func (app *App) GetSettings() (Settings, error) {
 		GECCount:                    gecCount,
 		GECFetchedAt:                gecFetched,
 		Commanders:                  commanders,
+		CareerBaselineScope:         settings.CareerBaselineScope(app.db),
 		EDDiscoveryDBPath:           discoveredEDDPath,
 		DefaultEDDiscoveryDBPath:    defaultEDDPath,
 		EDDiscoveryDBExists:         discoveredEDDPath != "" || fileExists(defaultEDDPath),
@@ -232,6 +234,7 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 	}); toggleError != nil {
 		return Settings{}, toggleError
 	}
+	app.clearExportSnapshot()
 	app.publishApp(0, events.AppCommanderFilterChanged)
 	return app.GetSettings()
 }

@@ -9,6 +9,7 @@ import (
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/store/settings"
 )
 
 // WaypointDetails is the content of a waypoint's expandable drawer.
@@ -30,8 +31,19 @@ type WaypointDetails struct {
 	Realization        replaystats.RealizationBreakdown `json:"realization"`
 }
 
-func populateWindowTelemetry(expeditionProjections *Projections, timeRange replaystats.Range, waypointDetails *WaypointDetails) error {
-	summary, computeError := expeditionProjections.TimeRangeStats.Compute(timeRange, nil)
+func resolveOriginBaselineScope(dbConn *sql.DB, expeditionRecord Expedition) replay.ProfileScope {
+	if settings.CareerBaselineScope(dbConn) == settings.CareerScopeAllEnabled {
+		return replay.ProfileScope{}
+	}
+	return expeditionRecord.ProfileScope()
+}
+
+func populateWindowTelemetry(expeditionProjections *Projections, timeRange replaystats.Range, scope replay.ProfileScope, waypointDetails *WaypointDetails) error {
+	var filter *replaystats.Filter
+	if !scope.IsAllEnabled() {
+		filter = &replaystats.Filter{Scope: scope}
+	}
+	summary, computeError := expeditionProjections.TimeRangeStats.Compute(timeRange, filter)
 	if computeError != nil {
 		return computeError
 	}
@@ -40,10 +52,17 @@ func populateWindowTelemetry(expeditionProjections *Projections, timeRange repla
 	return nil
 }
 
-func populateOriginWaypointDetails(dbConn *sql.DB, targetRow Row, waypointDetails *WaypointDetails, expeditionProjections *Projections) error {
+func populateOriginWaypointDetails(
+	dbConn *sql.DB,
+	expeditionRecord Expedition,
+	targetRow Row,
+	waypointDetails *WaypointDetails,
+	expeditionProjections *Projections,
+) error {
+	baselineScope := resolveOriginBaselineScope(dbConn, expeditionRecord)
 	waypointDetails.Kind = "origin"
 	waypointDetails.ArrivedAt = targetRow.VisitedAt
-	firstTimestamp := replay.FirstEventTimestamp(dbConn)
+	firstTimestamp := replay.FirstEventTimestampScoped(dbConn, baselineScope)
 	waypointDetails.From, waypointDetails.FromGalactic = firstTimestamp, reference.ToGalactic(firstTimestamp)
 	untilQuery := ""
 	if targetRow.DepartedAt != "" {
@@ -54,7 +73,7 @@ func populateOriginWaypointDetails(dbConn *sql.DB, targetRow Row, waypointDetail
 	} else {
 		waypointDetails.InSystem = true
 	}
-	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: untilQuery}, waypointDetails)
+	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: untilQuery}, baselineScope, waypointDetails)
 }
 
 func distinctTimelineHulls(shipTimeline []replay.ShipSwitch) ([]string, bool) {
@@ -85,11 +104,12 @@ func resolveLegShipsUsed(
 	expeditionProjections *Projections,
 	afterTimestamp, untilTimestamp string,
 	pilotedJumpCount int,
+	scope replay.ProfileScope,
 ) ([]string, error) {
 	if pilotedJumpCount <= 0 {
 		return []string{}, nil
 	}
-	shipTimeline, timelineError := expeditionProjections.ShipHistory.Timeline(afterTimestamp, untilTimestamp)
+	shipTimeline, timelineError := expeditionProjections.ShipHistory.TimelineScoped(afterTimestamp, untilTimestamp, scope)
 	if timelineError != nil {
 		return nil, timelineError
 	}
@@ -102,11 +122,11 @@ func resolveLegShipsUsed(
 	if singleLeadingHull && shipTimeline[0].Timestamp <= afterTimestamp {
 		return distinctHulls, nil
 	}
-	recoveredJumps, recoverError := expeditionProjections.RecoveredJumps.InRange(afterTimestamp, untilTimestamp)
+	recoveredJumps, recoverError := expeditionProjections.RecoveredJumps.InRangeScoped(afterTimestamp, untilTimestamp, scope)
 	if recoverError != nil {
 		return nil, recoverError
 	}
-	jumpTimestamps, jumpError := replay.QueryJumpTimestamps(dbConn, afterTimestamp, untilTimestamp, recoveredJumps)
+	jumpTimestamps, jumpError := replay.QueryJumpTimestampsScoped(dbConn, afterTimestamp, untilTimestamp, recoveredJumps, scope)
 	if jumpError != nil {
 		return nil, jumpError
 	}
@@ -224,12 +244,13 @@ func populateLegWindowBounds(expeditionRecord Expedition, targetRow Row, precedi
 }
 
 func populateLegDetails(dbConn *sql.DB, expeditionRecord Expedition, targetRow Row, rows []Row, waypointDetails *WaypointDetails, expeditionProjections *Projections) error {
+	expScope := expeditionRecord.ProfileScope()
 	precedingRow := findPrecedingVisitedWaypoint(rows, targetRow)
 	legRange := populateLegWindowBounds(expeditionRecord, targetRow, precedingRow, waypointDetails)
-	if telemetryError := populateWindowTelemetry(expeditionProjections, legRange, waypointDetails); telemetryError != nil {
+	if telemetryError := populateWindowTelemetry(expeditionProjections, legRange, expScope, waypointDetails); telemetryError != nil {
 		return telemetryError
 	}
-	shipsUsed, shipsError := resolveLegShipsUsed(dbConn, expeditionProjections, legRange.After, legRange.Until, waypointDetails.Metrics.Jumps)
+	shipsUsed, shipsError := resolveLegShipsUsed(dbConn, expeditionProjections, legRange.After, legRange.Until, waypointDetails.Metrics.Jumps, expScope)
 	if shipsError != nil {
 		return shipsError
 	}
@@ -316,7 +337,7 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 
 	waypointDetails := WaypointDetails{RowID: rowID, Number: selfNumber, ShipsUsed: []string{}}
 	if selfNumber == 1 {
-		if originError := populateOriginWaypointDetails(dbConn, targetRow, &waypointDetails, expeditionProjections); originError != nil {
+		if originError := populateOriginWaypointDetails(dbConn, expeditionRecord, targetRow, &waypointDetails, expeditionProjections); originError != nil {
 			return waypointDetails, originError
 		}
 	} else if legError := populateLegDetails(dbConn, expeditionRecord, targetRow, rows, &waypointDetails, expeditionProjections); legError != nil {
@@ -324,159 +345,4 @@ func Details(dbConn *sql.DB, rowID int64, expeditionProjections *Projections) (W
 	}
 	waypointDetails.Elapsed = formatLegElapsed(waypointDetails.From, waypointDetails.To)
 	return waypointDetails, nil
-}
-
-func extractPlanWaypointState(planRows []RowView) ([]Row, *Row, int64) {
-	rows := make([]Row, len(planRows))
-	var nextWaypointID int64
-	for index := range planRows {
-		rows[index] = planRows[index].Row
-		if rows[index].IsWaypoint() && rows[index].VisitedAt == "" && nextWaypointID == 0 {
-			nextWaypointID = rows[index].ID
-		}
-	}
-	latestVisitedRow, _ := latestVisitedWaypoint(rows)
-	return rows, latestVisitedRow, nextWaypointID
-}
-
-func computeJumpedLegSpan(rowDetails []WaypointDetails, legRanges []replaystats.Range) (string, string, bool) {
-	hasJumpedLeg := false
-	hasOpenEndedLeg := false
-	earliestLegAfter := ""
-	latestLegUntil := ""
-	for index := range rowDetails {
-		if rowDetails[index].Metrics.Jumps <= 0 {
-			continue
-		}
-		legRange := legRanges[index]
-		if !hasJumpedLeg || legRange.After < earliestLegAfter {
-			earliestLegAfter = legRange.After
-		}
-		if legRange.Until == "" {
-			hasOpenEndedLeg = true
-		} else if !hasOpenEndedLeg && (!hasJumpedLeg || legRange.Until > latestLegUntil) {
-			latestLegUntil = legRange.Until
-		}
-		hasJumpedLeg = true
-	}
-	if hasOpenEndedLeg {
-		latestLegUntil = ""
-	}
-	return earliestLegAfter, latestLegUntil, hasJumpedLeg
-}
-
-func partitionBatchLegTimelines(fullTimeline []replay.ShipSwitch, rowDetails []WaypointDetails, legRanges []replaystats.Range) ([][]replay.ShipSwitch, []bool, bool) {
-	legTimelines := make([][]replay.ShipSwitch, len(rowDetails))
-	needsJumpTimestamps := make([]bool, len(rowDetails))
-	anyNeedsJumpTimestamps := false
-	for index := range rowDetails {
-		if rowDetails[index].Metrics.Jumps <= 0 {
-			continue
-		}
-		legRange := legRanges[index]
-		legTimeline := sliceShipTimelineForLeg(fullTimeline, legRange.After, legRange.Until)
-		distinctHulls, singleLeadingHull := distinctTimelineHulls(legTimeline)
-		if len(distinctHulls) == 0 {
-			continue
-		}
-		if singleLeadingHull && legTimeline[0].Timestamp <= legRange.After {
-			rowDetails[index].ShipsUsed = distinctHulls
-			continue
-		}
-		legTimelines[index] = legTimeline
-		needsJumpTimestamps[index] = true
-		anyNeedsJumpTimestamps = true
-	}
-	return legTimelines, needsJumpTimestamps, anyNeedsJumpTimestamps
-}
-
-func populateBatchLegShipsUsed(dbConn *sql.DB, expeditionProjections *Projections, rowDetails []WaypointDetails, legRanges []replaystats.Range) error {
-	earliestLegAfter, latestLegUntil, hasJumpedLeg := computeJumpedLegSpan(rowDetails, legRanges)
-	if !hasJumpedLeg {
-		return nil
-	}
-	fullTimeline, timelineError := expeditionProjections.ShipHistory.Timeline(earliestLegAfter, latestLegUntil)
-	if timelineError != nil {
-		return timelineError
-	}
-	legTimelines, needsJumpTimestamps, anyNeedsJumpTimestamps := partitionBatchLegTimelines(fullTimeline, rowDetails, legRanges)
-	if !anyNeedsJumpTimestamps {
-		return nil
-	}
-	recoveredJumps, recoverError := expeditionProjections.RecoveredJumps.InRange(earliestLegAfter, latestLegUntil)
-	if recoverError != nil {
-		return recoverError
-	}
-	sharedJumpTimestamps, jumpError := replay.QueryJumpTimestamps(dbConn, earliestLegAfter, latestLegUntil, recoveredJumps)
-	if jumpError != nil {
-		return jumpError
-	}
-	for index := range rowDetails {
-		if needsJumpTimestamps[index] {
-			rowDetails[index].ShipsUsed = extractTransitionHullNames(legTimelines[index], sharedJumpTimestamps, legRanges[index].After, legRanges[index].Until)
-		}
-	}
-	return nil
-}
-
-func buildOriginBaselineDetails(dbConn *sql.DB, targetRow Row, expeditionProjections *Projections) (*WaypointDetails, error) {
-	originDetails := WaypointDetails{RowID: targetRow.ID, Number: 1, ShipsUsed: []string{}}
-	if originError := populateOriginWaypointDetails(dbConn, targetRow, &originDetails, expeditionProjections); originError != nil {
-		return nil, originError
-	}
-	originDetails.Elapsed = formatLegElapsed(originDetails.From, originDetails.To)
-	return &originDetails, nil
-}
-
-// DetailsBatch computes the origin baseline (when Waypoint #1 is visited) and
-// ordered leg details (visited non-origin waypoints plus any eligible active
-// current leg) directly from planView without re-querying expedition or row
-// tables, batching ship timeline and jump timestamp lookups across all legs.
-func DetailsBatch(dbConn *sql.DB, planView PlanView, expeditionProjections *Projections) (*WaypointDetails, []WaypointDetails, error) {
-	if validationError := validateDetailsProjections(expeditionProjections); validationError != nil {
-		return nil, nil, validationError
-	}
-	rows, latestVisitedRow, nextWaypointID := extractPlanWaypointState(planView.Rows)
-	precedingByRowID := indexPrecedingVisitedWaypoints(rows)
-	legCapacity := max(len(rows)-1, 0)
-	rowDetails := make([]WaypointDetails, 0, legCapacity)
-	legRanges := make([]replaystats.Range, 0, legCapacity)
-	var originBaseline *WaypointDetails
-
-	waypointNumber := 0
-	for index := range rows {
-		targetRow := rows[index]
-		if !targetRow.IsWaypoint() {
-			continue
-		}
-		waypointNumber++
-		if !isWaypointDetailsEligible(planView.Expedition, targetRow, latestVisitedRow, nextWaypointID) {
-			continue
-		}
-		if waypointNumber == 1 {
-			var originError error
-			if originBaseline, originError = buildOriginBaselineDetails(dbConn, targetRow, expeditionProjections); originError != nil {
-				return nil, nil, originError
-			}
-			continue
-		}
-		precedingRow := latestVisitedRow
-		if targetRow.VisitedAt != "" {
-			precedingRow = precedingByRowID[targetRow.ID]
-		}
-		waypointDetails := WaypointDetails{RowID: targetRow.ID, Number: waypointNumber, ShipsUsed: []string{}}
-		legRange := populateLegWindowBounds(planView.Expedition, targetRow, precedingRow, &waypointDetails)
-		if telemetryError := populateWindowTelemetry(expeditionProjections, legRange, &waypointDetails); telemetryError != nil {
-			return nil, nil, telemetryError
-		}
-		rowDetails = append(rowDetails, waypointDetails)
-		legRanges = append(legRanges, legRange)
-	}
-	if shipsError := populateBatchLegShipsUsed(dbConn, expeditionProjections, rowDetails, legRanges); shipsError != nil {
-		return nil, nil, shipsError
-	}
-	for index := range rowDetails {
-		rowDetails[index].Elapsed = formatLegElapsed(rowDetails[index].From, rowDetails[index].To)
-	}
-	return originBaseline, rowDetails, nil
 }

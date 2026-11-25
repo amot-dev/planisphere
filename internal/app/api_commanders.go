@@ -1,0 +1,122 @@
+package app
+
+import (
+	"planisphere/internal/core/events"
+	"planisphere/internal/replay"
+	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/settings"
+)
+
+func (app *App) applyCommanderOverride(mutation func() error) (Settings, error) {
+	if err := app.withExclusiveCommanderDB(mutation); err != nil {
+		return Settings{}, err
+	}
+	app.clearExportSnapshot()
+	app.publishApp(0, events.AppCommanderFilterChanged, events.AppSettingsChanged, events.AppExpeditionPlanChanged)
+	return app.GetSettings()
+}
+
+// MergeCommanders merges sourceKey into targetKey, refreshes commander save-slot
+// resolution, and returns updated Settings.
+func (app *App) MergeCommanders(sourceKey, targetKey string) (Settings, error) {
+	return app.applyCommanderOverride(func() error {
+		return settings.MergeCommanders(app.db, sourceKey, targetKey)
+	})
+}
+
+// UnmergeCommanderAlias detaches aliasName from profileKey into its own
+// commander profile and returns updated Settings.
+func (app *App) UnmergeCommanderAlias(aliasName, profileKey string) (Settings, error) {
+	return app.applyCommanderOverride(func() error {
+		return settings.UnmergeCommanderAlias(app.db, aliasName, profileKey)
+	})
+}
+
+// SplitCommander splits profileKey's career history at splitTimestamp (ISO-8601
+// or YYYY-MM-DD) and returns updated Settings.
+func (app *App) SplitCommander(profileKey, splitTimestamp string) (Settings, error) {
+	return app.applyCommanderOverride(func() error {
+		return settings.SplitCommander(app.db, profileKey, splitTimestamp)
+	})
+}
+
+// ResetCommanderOverrides clears all manual merge, split, and unmerge overrides
+// affecting profileKey and returns updated Settings.
+func (app *App) ResetCommanderOverrides(profileKey string) (Settings, error) {
+	return app.applyCommanderOverride(func() error {
+		return settings.ResetCommanderOverrides(app.db, profileKey)
+	})
+}
+
+// ListCommanderLoadGamesOnDate returns chronological LoadGame sessions recorded
+// for profileKey on the UTC calendar date dateISO ("YYYY-MM-DD").
+func (app *App) ListCommanderLoadGamesOnDate(profileKey, dateISO string) ([]replay.CommanderSession, error) {
+	app.dbMu.RLock()
+	defer app.dbMu.RUnlock()
+	if readyError := app.ready(); readyError != nil {
+		return nil, readyError
+	}
+	sessions, queryError := replay.ListCommanderLoadGamesOnDate(app.db, profileKey, dateISO)
+	if sessions == nil && queryError == nil {
+		sessions = []replay.CommanderSession{}
+	}
+	return sessions, queryError
+}
+
+// SetCareerBaselineScope updates whether sidebar All Time and Waypoint #1
+// OriginBaseline metrics follow the active expedition's commander scope
+// ("expedition") or all globally enabled commanders ("all_enabled").
+func (app *App) SetCareerBaselineScope(scope string) (Settings, error) {
+	if saveError := app.withReadyReadLock(func() error {
+		return settings.SetCareerBaselineScope(app.db, scope)
+	}); saveError != nil {
+		return Settings{}, saveError
+	}
+	app.clearExportSnapshot()
+	app.publishApp(0, events.AppCommanderFilterChanged, events.AppSettingsChanged)
+	return app.GetSettings()
+}
+
+// UpdateExpeditionScoped updates an expedition's metadata and commander save-slot
+// scope atomically, re-evaluating active or completed waypoint progress when scope changes.
+func (app *App) UpdateExpeditionScoped(
+	id int64,
+	name, description, commanderScope string,
+	commanderProfileIDs []int64,
+) error {
+	var scopeChanged bool
+	if updateError := app.withReadyReadLock(func() error {
+		var err error
+		scopeChanged, err = expedition.UpdateMetaAndScopeTx(app.db, id, name, description, commanderScope, commanderProfileIDs)
+		return err
+	}); updateError != nil {
+		return updateError
+	}
+	app.clearExportSnapshot()
+	if scopeChanged {
+		app.publishApp(id, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
+		return nil
+	}
+	app.publishApp(id, events.AppExpeditionPlanChanged)
+	return nil
+}
+
+// StartExpeditionScoped applies the expedition's commander save-slot scope (when
+// non-empty), activates the expedition at timestamp with initialModeID, and
+// replays scoped arrival history.
+func (app *App) StartExpeditionScoped(
+	expeditionID int64,
+	timestamp string,
+	initialModeID int64,
+	commanderScope string,
+	commanderProfileIDs []int64,
+) error {
+	if startError := app.withReadyReadLock(func() error {
+		return expedition.StartScopedTx(app.db, expeditionID, timestamp, initialModeID, commanderScope, commanderProfileIDs)
+	}); startError != nil {
+		return startError
+	}
+	app.clearExportSnapshot()
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
+	return nil
+}

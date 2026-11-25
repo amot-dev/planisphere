@@ -15,6 +15,7 @@ import (
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/modes"
@@ -528,5 +529,121 @@ func TestTimeRangeStatsClosedWindowRevisionRangeAndShipHistoryBackfill(testingCo
 	timeRangeStats.EnsureMinClosedWindowRevision(4)
 	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 8 {
 		testingContext.Fatalf("expected EnsureMinClosedWindowRevision monotonic floor 8, got %d", gotRevision)
+	}
+}
+
+func TestScopedTimeRangeAndCareerStatsIsolateProfilesAndSupportDisabledArchive(testingContext *testing.T) {
+	databaseConnection, openError := db.Open(":memory:")
+	if openError != nil {
+		testingContext.Fatalf("open in-memory db: %v", openError)
+	}
+	testingContext.Cleanup(func() {
+		_ = databaseConnection.Close()
+	})
+
+	temporaryDirectory := testingContext.TempDir()
+	files := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			// FID F10 Era 0 (archived, disabled by default) + Era 1 (active, enabled).
+			name: "Journal.2026-02-01T100000.01.log",
+			lines: []string{
+				`{"timestamp":"2026-02-01T10:00:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
+				`{"timestamp":"2026-02-01T10:05:00Z","event":"Location","StarSystem":"ArchivedStart","SystemAddress":100,"StarPos":[0,0,0]}`,
+				`{"timestamp":"2026-02-01T10:10:00Z","event":"FSDJump","StarSystem":"ArchivedHop","SystemAddress":101,"StarPos":[40,0,0],"JumpDist":40.0}`,
+				`{"timestamp":"2026-02-01T10:15:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":7,"FLEETCARRIER_DISTANCE_TRAVELLED":3500.0}}`,
+				`{"timestamp":"2026-02-01T11:00:00Z","event":"ClearSavedGame","Name":"CmdrMain","FID":"F10"}`,
+				`{"timestamp":"2026-02-01T11:01:00Z","event":"NewCommander","Name":"CmdrMain","FID":"F10","Package":"Sidewinder"}`,
+				`{"timestamp":"2026-02-01T11:02:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
+				`{"timestamp":"2026-02-01T11:10:00Z","event":"FSDJump","StarSystem":"MainHop","SystemAddress":201,"StarPos":[0,60,0],"JumpDist":60.0}`,
+				`{"timestamp":"2026-02-01T11:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"MainHop","SystemAddress":201,"BodyID":1,"BodyName":"MainHop 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+			},
+		},
+		{
+			// Interleaved second enabled save slot FID F20.
+			name: "Journal.2026-02-01T110500.01.log",
+			lines: []string{
+				`{"timestamp":"2026-02-01T11:05:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"Explorer_NX","Odyssey":true}`,
+				`{"timestamp":"2026-02-01T11:15:00Z","event":"FSDJump","StarSystem":"AltHop","SystemAddress":301,"StarPos":[0,0,25],"JumpDist":25.0}`,
+				`{"timestamp":"2026-02-01T11:25:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":301,"Body":1}`,
+			},
+		},
+	}
+	for _, spec := range files {
+		if err := os.WriteFile(filepath.Join(temporaryDirectory, spec.name), []byte(strings.Join(spec.lines, "\n")+"\n"), 0o644); err != nil {
+			testingContext.Fatal(err)
+		}
+	}
+	if _, err := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	commanders, err := replay.ListCommanders(databaseConnection)
+	if err != nil || len(commanders) != 3 {
+		testingContext.Fatalf("expected 3 profiles, got %+v err=%v", commanders, err)
+	}
+	archivedScope := replay.NewProfileScope([]int64{commanders[0].ID})
+	mainScope := replay.NewProfileScope([]int64{commanders[1].ID})
+	altScope := replay.NewProfileScope([]int64{commanders[2].ID})
+
+	eventBus := projection.NewBus()
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	careerStats := stats.NewCareerStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
+	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
+	staticModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
+		return func(_ string) int64 { return fallbackModeID }, nil
+	}
+	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, staticModeLoader)
+
+	allCareer, err := careerStats.Get()
+	if err != nil {
+		testingContext.Fatalf("CareerStats.Get: %v", err)
+	}
+	if allCareer.Metrics.Jumps != 2 || allCareer.Metrics.DistanceLy != 85.0 || allCareer.Metrics.CarrierJumps != 0 {
+		testingContext.Fatalf("expected AllEnabled CareerStats to combine main+alt and exclude archived era, got %+v", allCareer.Metrics)
+	}
+
+	archivedCareer, err := careerStats.GetScoped(archivedScope)
+	if err != nil {
+		testingContext.Fatalf("CareerStats.GetScoped(archived): %v", err)
+	}
+	if archivedCareer.Metrics.Jumps != 1 || archivedCareer.Metrics.DistanceLy != 40.0 || archivedCareer.Metrics.CarrierJumps != 7 {
+		testingContext.Fatalf("expected explicit disabled archived CareerStats to return full era metrics, got %+v", archivedCareer.Metrics)
+	}
+
+	window := stats.Range{After: "2026-02-01T11:00:00Z", Until: "2026-02-01T12:00:00Z"}
+	mainRange, err := timeRangeStats.Compute(window, &stats.Filter{Scope: mainScope})
+	if err != nil {
+		testingContext.Fatalf("TimeRangeStats.Compute(main): %v", err)
+	}
+	altRange, err := timeRangeStats.Compute(window, &stats.Filter{Scope: altScope})
+	if err != nil {
+		testingContext.Fatalf("TimeRangeStats.Compute(alt): %v", err)
+	}
+	if mainRange.Metrics.Jumps != 1 || mainRange.Metrics.DistanceLy != 60.0 || mainRange.Metrics.BodiesScanned != 1 || mainRange.Metrics.OrganicSamples != 0 {
+		testingContext.Fatalf("unexpected main scoped window metrics: %+v", mainRange.Metrics)
+	}
+	if altRange.Metrics.Jumps != 1 || altRange.Metrics.DistanceLy != 25.0 || altRange.Metrics.BodiesScanned != 0 || altRange.Metrics.OrganicSamples != 1 {
+		testingContext.Fatalf("unexpected alt scoped window metrics: %+v", altRange.Metrics)
+	}
+
+	// Mode-filtered scoped entry must be evicted by AppExpeditionModesChanged while mode-unfiltered scoped entries ("|all|prof:...") stay cached!
+	if _, err := timeRangeStats.Compute(window, &stats.Filter{
+		Enabled:      true,
+		ExpeditionID: 1,
+		Modes:        []stats.ModeSelection{{ModeID: fallbackModeID, Travel: true, Discovery: true}},
+		Scope:        mainScope,
+	}); err != nil {
+		testingContext.Fatalf("TimeRangeStats.Compute(mode+scope): %v", err)
+	}
+	if timeRangeStats.CachedCount() != 3 {
+		testingContext.Fatalf("expected 3 cached window entries (main, alt, main+mode), got %d", timeRangeStats.CachedCount())
+	}
+	eventBus.PublishApp(events.AppExpeditionModesChanged)
+	if timeRangeStats.CachedCount() != 2 {
+		testingContext.Fatalf("expected AppExpeditionModesChanged to preserve both unfiltered scoped '|all|prof:...' keys (want 2), got %d", timeRangeStats.CachedCount())
 	}
 }

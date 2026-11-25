@@ -122,8 +122,16 @@ export function ImportEDDiscoveryHistory(arg1) {
   return window['go']['app']['App']['ImportEDDiscoveryHistory'](arg1);
 }
 
+export function ListCommanderLoadGamesOnDate(arg1, arg2) {
+  return window['go']['app']['App']['ListCommanderLoadGamesOnDate'](arg1, arg2);
+}
+
 export function ListExpeditions() {
   return window['go']['app']['App']['ListExpeditions']();
+}
+
+export function MergeCommanders(arg1, arg2) {
+  return window['go']['app']['App']['MergeCommanders'](arg1, arg2);
 }
 
 export function MoveRow(arg1, arg2) {
@@ -162,12 +170,20 @@ export function RescanJournals() {
   return window['go']['app']['App']['RescanJournals']();
 }
 
+export function ResetCommanderOverrides(arg1) {
+  return window['go']['app']['App']['ResetCommanderOverrides'](arg1);
+}
+
 export function SaveActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['SaveActiveCarrierRoute'](arg1);
 }
 
 export function SetActiveExpedition(arg1) {
   return window['go']['app']['App']['SetActiveExpedition'](arg1);
+}
+
+export function SetCareerBaselineScope(arg1) {
+  return window['go']['app']['App']['SetCareerBaselineScope'](arg1);
 }
 
 export function SetCommanderEnabled(arg1, arg2) {
@@ -214,8 +230,20 @@ export function SetupConfigureJournals(arg1) {
   return window['go']['app']['App']['SetupConfigureJournals'](arg1);
 }
 
+export function SplitCommander(arg1, arg2) {
+  return window['go']['app']['App']['SplitCommander'](arg1, arg2);
+}
+
 export function StartExpedition(arg1, arg2, arg3) {
   return window['go']['app']['App']['StartExpedition'](arg1, arg2, arg3);
+}
+
+export function StartExpeditionScoped(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['StartExpeditionScoped'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function UnmergeCommanderAlias(arg1, arg2) {
+  return window['go']['app']['App']['UnmergeCommanderAlias'](arg1, arg2);
 }
 
 export function UpdateExpedition(arg1, arg2, arg3) {
@@ -224,6 +252,10 @@ export function UpdateExpedition(arg1, arg2, arg3) {
 
 export function UpdateExpeditionCarrierConfig(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateExpeditionCarrierConfig'](arg1, arg2, arg3);
+}
+
+export function UpdateExpeditionScoped(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['UpdateExpeditionScoped'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function UpdateMode(arg1, arg2, arg3, arg4) {

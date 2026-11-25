@@ -11,6 +11,11 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
+type actorKey struct {
+	profileID       int64
+	nocaseCommander string
+}
+
 type saleDedupKey struct {
 	kind       string
 	timestamp  string
@@ -22,6 +27,8 @@ type saleDedupKey struct {
 
 type ledgerBuilder struct {
 	ledger              *Ledger
+	profileID           int64
+	nocaseCommander     string
 	session             *replay.SessionState
 	wageMatcher         *crewWageMatcher
 	scans               map[bodyKey]*journal.ScanEvent
@@ -33,33 +40,84 @@ type ledgerBuilder struct {
 	seenSales           map[saleDedupKey]bool
 }
 
-// BuildLedger constructs the full chronological lifecycle realization ledger from queryer.
+func actorKeyForRow(row replay.Row) actorKey {
+	if row.ProfileID > 0 {
+		return actorKey{profileID: row.ProfileID}
+	}
+	return actorKey{nocaseCommander: replay.SqliteNocaseKey(strings.TrimSpace(row.Commander))}
+}
+
+// LoadEnabledActorSet queries globally enabled commander profiles and legacy
+// commander flags for filtering default AllEnabled ledger breakdowns.
+func LoadEnabledActorSet(queryer db.Queryer) (replay.EnabledProfileMatcher, error) {
+	return replay.LoadProfileMatcher(queryer, replay.ProfileScope{})
+}
+
+// BuildLedger constructs the full chronological lifecycle realization ledger
+// across all commander save-slot profiles from queryer.
 func BuildLedger(queryer db.Queryer, defaultOdyssey bool) (*Ledger, error) {
-	loadedEvents, loadError := replay.LoadEvents(queryer, "", "9999-12-31T23:59:59Z", SalesLedgerReplayEvents)
+	enabledActors, actorErr := LoadEnabledActorSet(queryer)
+	if actorErr != nil {
+		return nil, actorErr
+	}
+	loadedEvents, loadError := replay.LoadEventsAllProfiles(queryer, "", "9999-12-31T23:59:59Z", SalesLedgerReplayEvents)
 	if loadError != nil {
 		return nil, loadError
 	}
 
-	builder := &ledgerBuilder{
-		ledger: &Ledger{
-			records:      make([]*scanRecord, 0, len(loadedEvents)/2),
-			organicSales: make(map[string]OrganicSaleOutcome),
-		},
-		session:             replay.NewSessionState(defaultOdyssey, len(loadedEvents)/16),
-		wageMatcher:         newCrewWageMatcher(loadedEvents),
-		scans:               make(map[bodyKey]*journal.ScanEvent, len(loadedEvents)/2),
-		unsoldCarto:         make(map[bodyKey]*scanRecord, len(loadedEvents)/2),
-		unsoldCartoBySystem: make(map[string][]*scanRecord, len(loadedEvents)/8),
-		soldScan:            make(map[bodyKey]bool, len(loadedEvents)/2),
-		soldMapped:          make(map[bodyKey]bool, len(loadedEvents)/8),
-		unsoldOrganic:       make([]*scanRecord, 0, 100),
-		seenSales:           make(map[saleDedupKey]bool, len(loadedEvents)/16),
+	sharedLedger := &Ledger{
+		records:       make([]*scanRecord, 0, len(loadedEvents)/2),
+		organicSales:  make(map[string]OrganicSaleOutcome),
+		enabledActors: enabledActors,
+	}
+	if len(loadedEvents) == 0 {
+		return sharedLedger, nil
 	}
 
+	wageMatchers, countsByActor := buildActorWageMatchersAndCounts(loadedEvents)
+	actors := make(map[actorKey]*ledgerBuilder, len(countsByActor))
+	var cachedKey actorKey
+	var cachedBuilder *ledgerBuilder
+
 	for _, journalEvent := range loadedEvents {
-		builder.processEvent(journalEvent)
+		key := actorKeyForRow(journalEvent)
+		if cachedBuilder == nil || key != cachedKey {
+			cachedKey = key
+			cachedBuilder = actors[key]
+			if cachedBuilder == nil {
+				cachedBuilder = newActorLedgerBuilder(sharedLedger, key, defaultOdyssey, countsByActor[key], wageMatchers[key])
+				actors[key] = cachedBuilder
+			}
+		}
+		cachedBuilder.processEvent(journalEvent)
 	}
-	return builder.ledger, nil
+	return sharedLedger, nil
+}
+
+func newActorLedgerBuilder(
+	sharedLedger *Ledger,
+	key actorKey,
+	defaultOdyssey bool,
+	actorEventCount int,
+	wageMatcher *crewWageMatcher,
+) *ledgerBuilder {
+	if wageMatcher == nil {
+		wageMatcher = &crewWageMatcher{}
+	}
+	return &ledgerBuilder{
+		ledger:              sharedLedger,
+		profileID:           key.profileID,
+		nocaseCommander:     key.nocaseCommander,
+		session:             replay.NewSessionState(defaultOdyssey, actorEventCount/16),
+		wageMatcher:         wageMatcher,
+		scans:               make(map[bodyKey]*journal.ScanEvent, max(actorEventCount/2, 8)),
+		unsoldCarto:         make(map[bodyKey]*scanRecord, max(actorEventCount/2, 8)),
+		unsoldCartoBySystem: make(map[string][]*scanRecord, max(actorEventCount/8, 4)),
+		soldScan:            make(map[bodyKey]bool, max(actorEventCount/2, 8)),
+		soldMapped:          make(map[bodyKey]bool, max(actorEventCount/8, 4)),
+		unsoldOrganic:       make([]*scanRecord, 0, 16),
+		seenSales:           make(map[saleDedupKey]bool, max(actorEventCount/16, 4)),
+	}
 }
 
 func (builder *ledgerBuilder) processEvent(journalEvent replay.Row) {
@@ -130,6 +188,8 @@ func (builder *ledgerBuilder) recordCartoScan(journalEvent replay.Row) {
 
 	normalizedSystemName := strings.ToLower(strings.TrimSpace(scanEvent.StarSystem))
 	scanEntry := &scanRecord{
+		profileID:            builder.profileID,
+		nocaseCommander:      builder.nocaseCommander,
 		timestamp:            journalEvent.Timestamp,
 		systemAddress:        scanEvent.SystemAddress,
 		starSystem:           scanEvent.StarSystem,
@@ -191,6 +251,8 @@ func (builder *ledgerBuilder) recordCartoMapping(journalEvent replay.Row) {
 	// Fall back to CanExpectFirstDiscovered when creating a mapping-only record whose initial
 	// Scan was sold in an earlier session so undiscovered status is preserved.
 	scanEntry := &scanRecord{
+		profileID:            builder.profileID,
+		nocaseCommander:      builder.nocaseCommander,
 		timestamp:            journalEvent.Timestamp,
 		systemAddress:        mappingEvent.SystemAddress,
 		starSystem:           parentScan.StarSystem,
@@ -230,6 +292,8 @@ func (builder *ledgerBuilder) recordOrganicScan(journalEvent replay.Row) {
 		FirstLogged:      firstLogged,
 	})
 	scanEntry := &scanRecord{
+		profileID:          builder.profileID,
+		nocaseCommander:    builder.nocaseCommander,
 		eventUID:           journalEvent.UID,
 		timestamp:          journalEvent.Timestamp,
 		systemAddress:      scanOrganicEvent.SystemAddress,

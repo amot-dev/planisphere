@@ -22,20 +22,6 @@ type Status struct {
 	LastEventAt  string `json:"lastEventAt"`
 }
 
-// CmdrFilterSQL is a SQL predicate on journal_events that excludes events
-// belonging to any commander the user has explicitly disabled in Settings.
-const CmdrFilterSQL = `(commander IS NULL OR commander = '' OR NOT EXISTS (SELECT 1 FROM commanders c WHERE c.name = journal_events.commander COLLATE NOCASE AND c.enabled = 0))`
-
-// HasDisabledCommanders reports whether any discovered commander is currently
-// disabled in Settings.
-func HasDisabledCommanders(queryer db.Queryer) (bool, error) {
-	var hasDisabled int
-	if queryError := queryer.QueryRow(`SELECT EXISTS(SELECT 1 FROM commanders WHERE enabled = 0)`).Scan(&hasDisabled); queryError != nil {
-		return false, queryError
-	}
-	return hasDisabled != 0, nil
-}
-
 // ArchiveStatus returns counts of tracked files and stored events.
 func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	var status Status
@@ -68,8 +54,15 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 
 // FirstEventTimestamp returns the earliest ISO-8601 timestamp across enabled commanders.
 func FirstEventTimestamp(queryer db.Queryer) string {
+	return FirstEventTimestampScoped(queryer, ProfileScope{})
+}
+
+// FirstEventTimestampScoped returns the earliest ISO-8601 timestamp matching scope.
+func FirstEventTimestampScoped(queryer db.Queryer, scope ProfileScope) string {
 	var firstTimestamp sql.NullString
-	_ = queryer.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + CmdrFilterSQL).Scan(&firstTimestamp)
+	if err := queryer.QueryRow(`SELECT MIN(timestamp) FROM journal_events WHERE ` + scope.SQLPredicate("")).Scan(&firstTimestamp); err != nil {
+		return ""
+	}
 	return firstTimestamp.String
 }
 
@@ -83,35 +76,6 @@ func LatestEventTimestamp(queryer db.Queryer) string {
 		return ""
 	}
 	return latestTimestamp
-}
-
-// CareerStart returns the earliest active commander timestamp in ISO-8601 UTC
-// and Galactic Standard Time formats.
-func CareerStart(queryer db.Queryer) (string, string) {
-	var earliestSeenTimestamp sql.NullString
-	_ = queryer.QueryRow(
-		`SELECT MIN(commanders.first_seen) FROM commanders WHERE commanders.enabled = 1 AND commanders.first_seen IS NOT NULL AND commanders.first_seen != ''`,
-	).Scan(&earliestSeenTimestamp)
-	if !earliestSeenTimestamp.Valid || earliestSeenTimestamp.String == "" {
-		earliestTimestamp := FirstEventTimestamp(queryer)
-		if earliestTimestamp == "" {
-			return "", ""
-		}
-		return earliestTimestamp, reference.ToGalactic(earliestTimestamp)
-	}
-	return earliestSeenTimestamp.String, reference.ToGalactic(earliestSeenTimestamp.String)
-}
-
-// Commander represents a player commander identity discovered in journals.
-type Commander struct {
-	Name          string `json:"name"`
-	FID           string `json:"fid"`
-	Enabled       bool   `json:"enabled"`
-	FirstSeen     string `json:"firstSeen"`
-	LastSeen      string `json:"lastSeen"`
-	FirstGalactic string `json:"firstGalactic"`
-	LastGalactic  string `json:"lastGalactic"`
-	EventCount    int    `json:"eventCount"`
 }
 
 // sqliteNocaseKey folds ASCII uppercase bytes to lowercase to match SQLite's
@@ -339,8 +303,7 @@ func queryCommanderEventCounts(queryer db.Queryer) (map[string]int, error) {
 	return countsByCommander, nil
 }
 
-// ListCommanders returns all discovered commanders ordered by first_seen.
-func ListCommanders(queryer db.Queryer) ([]Commander, error) {
+func queryLegacyCommanderRows(queryer db.Queryer) ([]Commander, error) {
 	rows, queryError := queryer.Query(`SELECT name, COALESCE(fid, ''), enabled, COALESCE(first_seen, ''), COALESCE(last_seen, '')
 		FROM commanders
 		ORDER BY first_seen ASC, name ASC`)
@@ -356,6 +319,8 @@ func ListCommanders(queryer db.Queryer) ([]Commander, error) {
 		if scanError := rows.Scan(&commander.Name, &commander.FID, &enabledFlag, &commander.FirstSeen, &commander.LastSeen); scanError != nil {
 			return nil, fmt.Errorf("scan commander row: %w", scanError)
 		}
+		commander.ProfileKey = commander.Name
+		commander.Universe = "live"
 		commander.Enabled = enabledFlag != 0
 		commander.FirstGalactic = reference.ToGalactic(commander.FirstSeen)
 		commander.LastGalactic = reference.ToGalactic(commander.LastSeen)
@@ -364,10 +329,14 @@ func ListCommanders(queryer db.Queryer) ([]Commander, error) {
 	if iterationError := rows.Err(); iterationError != nil {
 		return nil, fmt.Errorf("iterate commander rows: %w", iterationError)
 	}
-	if len(discoveredCommanders) == 0 {
-		return discoveredCommanders, nil
-	}
+	return discoveredCommanders, nil
+}
 
+func listLegacyCommanders(queryer db.Queryer) ([]Commander, error) {
+	discoveredCommanders, queryError := queryLegacyCommanderRows(queryer)
+	if queryError != nil || len(discoveredCommanders) == 0 {
+		return discoveredCommanders, queryError
+	}
 	countsByCommander, usedFastPath, countsError := queryCommanderEventCountsFast(queryer, discoveredCommanders)
 	if countsError != nil {
 		return nil, countsError
@@ -379,30 +348,18 @@ func ListCommanders(queryer db.Queryer) ([]Commander, error) {
 		}
 	}
 	for index := range discoveredCommanders {
-		discoveredCommanders[index].EventCount = countsByCommander[sqliteNocaseKey(discoveredCommanders[index].Name)]
+		count := countsByCommander[sqliteNocaseKey(discoveredCommanders[index].Name)]
+		discoveredCommanders[index].EventCount = count
+		discoveredCommanders[index].Aliases = []CommanderAlias{{
+			Name:           discoveredCommanders[index].Name,
+			FID:            discoveredCommanders[index].FID,
+			Universe:       "live",
+			StartTimestamp: discoveredCommanders[index].FirstSeen,
+			EndTimestamp:   discoveredCommanders[index].LastSeen,
+			EventCount:     count,
+			IsCurrent:      true,
+			Source:         "auto",
+		}}
 	}
 	return discoveredCommanders, nil
-}
-
-// ListEnabledCommanderNames returns the names of all enabled commanders ordered
-// by first_seen without scanning journal_events for per-commander event counts.
-func ListEnabledCommanderNames(queryer db.Queryer) ([]string, error) {
-	rows, queryError := queryer.Query(`SELECT name FROM commanders WHERE enabled != 0 AND TRIM(name) != '' ORDER BY first_seen ASC, name ASC`)
-	if queryError != nil {
-		return nil, fmt.Errorf("query enabled commander names: %w", queryError)
-	}
-	defer rows.Close()
-
-	enabledNames := []string{}
-	for rows.Next() {
-		var commanderName string
-		if scanError := rows.Scan(&commanderName); scanError != nil {
-			return nil, fmt.Errorf("scan enabled commander name: %w", scanError)
-		}
-		enabledNames = append(enabledNames, commanderName)
-	}
-	if iterationError := rows.Err(); iterationError != nil {
-		return nil, fmt.Errorf("iterate enabled commander names: %w", iterationError)
-	}
-	return enabledNames, nil
 }

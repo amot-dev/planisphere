@@ -1,4 +1,5 @@
 import { app } from '../../api/models'
+import { CommanderAliasSublist, CommanderBadges } from '../../components/ui/CommanderBadges'
 import { SquareCheckbox } from '../../components/ui/SquareCheckbox'
 
 /**
@@ -47,38 +48,53 @@ export function CommandersOnlineStep({
         </p>
 
         {localSettings?.commanders && localSettings.commanders.length > 0 ? (
-          <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
-            {localSettings.commanders.map((commander) => (
-              <label
-                key={commander.name}
-                className={`flex items-center justify-between p-2.5 border border-ed-border bg-ed-card ${
-                  isBusy ? 'cursor-not-allowed' : 'cursor-pointer hover:border-ed-border-strong'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <SquareCheckbox
-                    checked={commander.enabled}
-                    disabled={isBusy}
-                    onChange={(checked) => onToggleCommander(commander.name, checked)}
-                  />
-                  <div>
-                    <div className="font-bold text-ed-text-main tracking-wider">
-                      CMDR {commander.name}
-                    </div>
-                    <div className="text-[10px] font-mono-tabular text-ed-text-muted">
-                      {commander.eventCount.toLocaleString()} journal events
-                    </div>
-                  </div>
-                </div>
-                <span
-                  className={
-                    commander.enabled ? 'ed-badge ed-badge-active' : 'ed-badge ed-badge-planned'
-                  }
+          <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+            {localSettings.commanders.map((commander) => {
+              const commanderIdentifier = commander.profileKey || commander.name
+              return (
+                <div
+                  key={commanderIdentifier}
+                  className="p-2.5 border border-ed-border bg-ed-card hover:border-ed-border-strong"
                 >
-                  {commander.enabled ? 'TRACKING' : 'IGNORED'}
-                </span>
-              </label>
-            ))}
+                  <label
+                    className={`flex items-center justify-between gap-2 ${
+                      isBusy ? 'cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <SquareCheckbox
+                        checked={commander.enabled}
+                        disabled={isBusy}
+                        onChange={(checked) => onToggleCommander(commanderIdentifier, checked)}
+                      />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-bold text-ed-text-main tracking-wider">
+                            CMDR {commander.name}
+                          </span>
+                          <CommanderBadges
+                            universe={commander.universe}
+                            isArchivedCareer={commander.isArchivedCareer}
+                            hasManualOverride={commander.hasManualOverride}
+                          />
+                        </div>
+                        <div className="text-[10px] font-mono-tabular text-ed-text-muted">
+                          {(commander.eventCount ?? 0).toLocaleString()} journal events
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      className={
+                        commander.enabled ? 'ed-badge ed-badge-active' : 'ed-badge ed-badge-planned'
+                      }
+                    >
+                      {commander.enabled ? 'TRACKING' : 'IGNORED'}
+                    </span>
+                  </label>
+                  <CommanderAliasSublist aliases={commander.aliases} />
+                </div>
+              )
+            })}
           </div>
         ) : (
           <div className="p-3 border border-ed-border bg-ed-card text-[11px] text-ed-text-muted italic">

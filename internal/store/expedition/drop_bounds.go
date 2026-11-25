@@ -304,7 +304,7 @@ func prepareBoundsEvaluation(
 		}
 	}
 
-	originVisitUID, _, rawTransitions := prepareNormalizedTransitions(
+	originStay, rawTransitions := prepareNormalizedTransitions(
 		&rows[firstWaypointIndex],
 		normalizedSystemNames[firstWaypointIndex],
 		expeditionRecord.StartTimestamp,
@@ -314,7 +314,7 @@ func prepareBoundsEvaluation(
 	return &boundsEvaluationContext{
 		firstWaypointIndex:      firstWaypointIndex,
 		startTimestamp:          expeditionRecord.StartTimestamp,
-		originVisitUID:          originVisitUID,
+		originVisitUID:          originStay.uid,
 		lockedSpanshTargetRowID: readLockedSpanshTargetRowID(queryer, expeditionRecord.ID),
 		normalizedSystemNames:   normalizedSystemNames,
 		originalVisitedAt:       originalVisitedAt,
@@ -354,7 +354,7 @@ func ComputeRowDropPreviews(queryer db.Queryer, rowID int64, expeditionProjectio
 	if fromIndex < 0 {
 		return nil, nil
 	}
-	arrivals, arrivalsError := expeditionProjections.Arrivals.InWindow(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	arrivals, arrivalsError := expeditionProjections.Arrivals.InWindowScoped(expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, expeditionRecord.ProfileScope())
 	if arrivalsError != nil {
 		return nil, arrivalsError
 	}
@@ -385,7 +385,7 @@ func validateWaypointMove(queryer db.Queryer, expeditionRecord Expedition, rows 
 	if lockedSpanshTargetRowID > 0 && rows[fromIndex].ID == lockedSpanshTargetRowID {
 		return DropSlotPreview{}, errors.New("waypoint cannot be moved while fleet carrier route is active")
 	}
-	arrivals, arrivalsError := replay.QueryArrivalsInWindow(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp)
+	arrivals, arrivalsError := replay.QueryArrivalsInWindowScoped(queryer, expeditionRecord.StartTimestamp, expeditionRecord.EndTimestamp, expeditionRecord.ProfileScope())
 	if arrivalsError != nil {
 		return DropSlotPreview{}, arrivalsError
 	}

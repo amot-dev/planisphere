@@ -150,6 +150,9 @@ export default function App() {
           expeditionId={activeExpeditionId}
           modesList={plan?.modes ?? modesState?.modes ?? []}
           initialModeId={plan?.expedition?.activeModeId ?? 0}
+          commanders={settings?.commanders ?? []}
+          initialCommanderScope={plan?.expedition?.commanderScope}
+          initialCommanderProfileIds={plan?.expedition?.commanderProfileIds}
           onClose={() => setActiveModal(null)}
         />
       )}
@@ -182,6 +185,7 @@ export default function App() {
         <ExpeditionManageModal
           expeditions={expeditions}
           activeId={activeExpeditionId}
+          commanders={settings?.commanders ?? []}
           onSelect={handleSelectExpedition}
           onClose={() => setActiveModal(null)}
         />

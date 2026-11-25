@@ -116,7 +116,7 @@ func buildPreviousVisitMap(rows []Row) map[int64]string {
 	return previousVisitByID
 }
 
-func resolvePlanVisitCounts(rows []Row, expeditionProjections *Projections) (map[string]int, error) {
+func resolvePlanVisitCounts(rows []Row, scope replay.ProfileScope, expeditionProjections *Projections) (map[string]int, error) {
 	waypointSystems := make([]string, 0, len(rows))
 	seenKeys := make(map[string]bool, len(rows))
 	for _, rowItem := range rows {
@@ -132,11 +132,12 @@ func resolvePlanVisitCounts(rows []Row, expeditionProjections *Projections) (map
 	if len(waypointSystems) == 0 {
 		return nil, nil
 	}
-	return expeditionProjections.VisitCounts.CountsForSystems(waypointSystems)
+	return expeditionProjections.VisitCounts.CountsForSystemsScoped(waypointSystems, scope)
 }
 
 func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows []Row, gecLookup GECLookup, planView *PlanView, expeditionProjections *Projections) (*planBuildContext, error) {
-	visitCountBySystem, visitCountsError := resolvePlanVisitCounts(rows, expeditionProjections)
+	expScope := expeditionRecord.ProfileScope()
+	visitCountBySystem, visitCountsError := resolvePlanVisitCounts(rows, expScope, expeditionProjections)
 	if visitCountsError != nil {
 		return nil, visitCountsError
 	}
@@ -158,7 +159,7 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		planView.CurrentRowID = buildContext.currentWaypoint.ID
 	}
 
-	playerPosition, playerSystem, playerLocationError := replay.QueryLatestPlayerLocation(queryer)
+	playerPosition, playerSystem, playerLocationError := replay.QueryLatestPlayerLocationScoped(queryer, expScope)
 	if playerLocationError != nil && !errors.Is(playerLocationError, sql.ErrNoRows) {
 		return nil, playerLocationError
 	}

@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS ingested_journals (
     events_stored   INTEGER NOT NULL DEFAULT 0,
     first_timestamp TEXT,
     last_timestamp  TEXT,
+    part            INTEGER NOT NULL DEFAULT 1,
+    game_version    TEXT NOT NULL DEFAULT '',
+    build           TEXT NOT NULL DEFAULT '',
+    universe        TEXT NOT NULL DEFAULT 'live',
+    continued_part  INTEGER NOT NULL DEFAULT 0,
+    last_commander  TEXT NOT NULL DEFAULT '',
+    last_fid        TEXT NOT NULL DEFAULT '',
     updated_at      TEXT NOT NULL
 );
 
@@ -50,6 +57,9 @@ CREATE TABLE IF NOT EXISTS journal_events (
     star_y         REAL,
     star_z         REAL,
     commander      TEXT,
+    fid            TEXT NOT NULL DEFAULT '',
+    universe       TEXT NOT NULL DEFAULT 'live',
+    profile_id     INTEGER NOT NULL DEFAULT 0,
     source_file    TEXT,
     raw_json       TEXT NOT NULL,
     ingested_at    TEXT NOT NULL
@@ -58,8 +68,48 @@ CREATE INDEX IF NOT EXISTS idx_journal_events_ts       ON journal_events(timesta
 CREATE INDEX IF NOT EXISTS idx_journal_events_event_ts ON journal_events(event, timestamp);
 CREATE INDEX IF NOT EXISTS idx_journal_events_system   ON journal_events(system_name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_journal_events_body     ON journal_events(system_address, body_id);
-CREATE INDEX IF NOT EXISTS idx_journal_events_cmdr     ON journal_events(commander COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_journal_events_cmdr     ON journal_events(commander COLLATE NOCASE, fid, universe, timestamp, profile_id);
 CREATE INDEX IF NOT EXISTS idx_journal_events_source   ON journal_events(source_file);
+CREATE INDEX IF NOT EXISTS idx_journal_events_profile  ON journal_events(profile_id, commander COLLATE NOCASE, timestamp, fid);
+
+-- Save-slot career profiles resolved from commander, FID, universe, and wipe signals.
+CREATE TABLE IF NOT EXISTS commander_profiles (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_key         TEXT NOT NULL UNIQUE,
+    display_name        TEXT NOT NULL,
+    fid                 TEXT NOT NULL DEFAULT '',
+    universe            TEXT NOT NULL DEFAULT 'live' CHECK (universe IN ('live', 'legacy', 'beta')),
+    era_index           INTEGER NOT NULL DEFAULT 0,
+    is_archived_career  INTEGER NOT NULL DEFAULT 0,
+    has_manual_override INTEGER NOT NULL DEFAULT 0,
+    enabled             INTEGER NOT NULL DEFAULT 1,
+    first_seen          TEXT,
+    last_seen           TEXT
+);
+
+-- Commander name sightings grouped per resolved save-slot profile.
+CREATE TABLE IF NOT EXISTS commander_aliases (
+    profile_id      INTEGER NOT NULL REFERENCES commander_profiles(id) ON DELETE CASCADE,
+    raw_name        TEXT NOT NULL COLLATE NOCASE,
+    fid             TEXT NOT NULL DEFAULT '',
+    universe        TEXT NOT NULL DEFAULT 'live',
+    start_timestamp TEXT NOT NULL DEFAULT '',
+    end_timestamp   TEXT NOT NULL DEFAULT '',
+    event_count     INTEGER NOT NULL DEFAULT 0,
+    is_current      INTEGER NOT NULL DEFAULT 0,
+    source          TEXT NOT NULL DEFAULT 'auto'
+);
+CREATE INDEX IF NOT EXISTS idx_commander_aliases_profile ON commander_aliases(profile_id);
+
+-- Declarative user rules overriding automatic commander save-slot grouping or splitting.
+CREATE TABLE IF NOT EXISTS commander_overrides (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_type       TEXT NOT NULL CHECK (rule_type IN ('merge', 'split', 'unmerge')),
+    source_key      TEXT NOT NULL,
+    target_key      TEXT NOT NULL DEFAULT '',
+    split_timestamp TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL
+);
 
 -- Tracking modes (Exploration / Tourism / Travel + user-defined).
 CREATE TABLE IF NOT EXISTS modes (
@@ -97,8 +147,16 @@ CREATE TABLE IF NOT EXISTS expeditions (
     carrier_type          TEXT NOT NULL DEFAULT 'player',
     carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0,
     active_mode_id        INTEGER NOT NULL DEFAULT 0,
+    commander_scope       TEXT NOT NULL DEFAULT 'all_enabled',
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
+);
+
+-- Selected commander save-slot profiles when expeditions.commander_scope = 'selected'.
+CREATE TABLE IF NOT EXISTS expedition_commanders (
+    expedition_id INTEGER NOT NULL REFERENCES expeditions(id) ON DELETE CASCADE,
+    profile_id    INTEGER NOT NULL REFERENCES commander_profiles(id) ON DELETE CASCADE,
+    PRIMARY KEY (expedition_id, profile_id)
 );
 
 -- Planner rows: waypoints and galactic region headers, ordered by position.

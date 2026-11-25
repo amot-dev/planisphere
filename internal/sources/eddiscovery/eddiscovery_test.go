@@ -148,7 +148,7 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 	if len(commanders) != 2 {
 		t.Fatalf("expected 2 commanders, got %d", len(commanders))
 	}
-	if commanders[0].name != "CmdrOne" || commanders[0].fid != "F001" || commanders[0].firstSeen != "2026-01-18T19:05:00Z" || commanders[0].lastSeen != "2026-01-18T19:20:00Z" {
+	if commanders[0].name != "CmdrOne" || commanders[0].fid != "F001" || commanders[0].firstSeen != "2026-01-18T19:00:00Z" || commanders[0].lastSeen != "2026-01-18T19:20:00Z" {
 		t.Errorf("unexpected CmdrOne record: %+v", commanders[0])
 	}
 	if commanders[1].name != "CmdrTwo" || commanders[1].fid != "F002" || commanders[1].firstSeen != "2026-01-19T20:00:00Z" || commanders[1].lastSeen != "2026-01-19T20:30:00Z" {
@@ -171,5 +171,69 @@ func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
 	_, importError := eddiscovery.Import(cancelledContext, ingesterInstance, "nonexistent.sqlite", nil)
 	if !errors.Is(importError, context.Canceled) {
 		t.Fatalf("expected context.Canceled error from ImportEDDiscoveryDB, got %v", importError)
+	}
+}
+
+func TestImportEDDiscoveryCommanderFallbackAndRollover(testingContext *testing.T) {
+	temporaryDir := testingContext.TempDir()
+	eddPath := filepath.Join(temporaryDir, "EDDFallback.sqlite")
+
+	eddConn, err := sql.Open("sqlite", eddPath)
+	if err != nil {
+		testingContext.Fatal(err)
+	}
+	defer eddConn.Close()
+
+	if _, err := eddConn.Exec(`
+		CREATE TABLE Commanders (Id INTEGER PRIMARY KEY, Name TEXT, Deleted INTEGER);
+		CREATE TABLE TravelLogUnit (Id INTEGER PRIMARY KEY, Name TEXT, Path TEXT, CommanderId INTEGER);
+		CREATE TABLE JournalEntries (Id INTEGER PRIMARY KEY, TravelLogId INTEGER, EventType TEXT, EventData TEXT);
+
+		INSERT INTO Commanders (Id, Name, Deleted) VALUES
+			(1, 'Trebor Johnson', 0),
+			(2, 'DeletedCmdr', 1);
+
+		INSERT INTO TravelLogUnit (Id, Name, Path, CommanderId) VALUES
+			(10, 'netLog.1605011200.01.log', 'C:\ED\Logs\netLog.1605011200.01.log', 1),
+			(11, 'Journal.2026-03-01T100000.01.log', 'C:\ED\Journal.2026-03-01T100000.01.log', 1),
+			(12, 'Journal.2026-03-01T120000.02.log', 'C:\ED\Journal.2026-03-01T120000.02.log', 2);
+
+		INSERT INTO JournalEntries (Id, TravelLogId, EventType, EventData) VALUES
+			(1, 10, 'FSDJump', '{"timestamp":"2016-05-01T12:05:00Z","event":"FSDJump","StarSystem":"Beagle Point","StarPos":[-1111.56,-134.21,65269.75]}'),
+			(2, 11, 'Fileheader', '{"timestamp":"2026-03-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}'),
+			(3, 11, 'LoadGame', '{"timestamp":"2026-03-01T10:01:00Z","event":"LoadGame","Commander":"Trebor Johnson","FID":"F4293989","Ship":"Mandalay","Odyssey":true}'),
+			(4, 11, 'Continued', '{"timestamp":"2026-03-01T11:59:59Z","event":"Continued","Part":2}'),
+			(5, 12, 'Fileheader', '{"timestamp":"2026-03-01T12:00:00Z","event":"Fileheader","part":2,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}'),
+			(6, 12, 'FSDJump', '{"timestamp":"2026-03-01T12:10:00Z","event":"FSDJump","StarSystem":"Ishum''s Reach","SystemAddress":9001,"StarPos":[-500,0,65600]}');
+	`); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	destConn, err := db.Open(":memory:")
+	if err != nil {
+		testingContext.Fatal(err)
+	}
+	defer destConn.Close()
+
+	if _, err := eddiscovery.Import(context.Background(), journal.NewIngester(destConn), eddPath, nil); err != nil {
+		testingContext.Fatalf("Import failed: %v", err)
+	}
+
+	// Both pre-2.2 netLog FSDJump (via CommanderId fallback + pre-v3 FID bridging) and part 2 rollover FSDJump resolve into live:f4293989:era:0.
+	var profileCount int
+	var profileKey, displayName string
+	if err := destConn.QueryRow(`SELECT COUNT(*), MIN(profile_key), MIN(display_name) FROM commander_profiles`).Scan(&profileCount, &profileKey, &displayName); err != nil {
+		testingContext.Fatal(err)
+	}
+	if profileCount != 1 || profileKey != "live:f4293989:era:0" || displayName != "Trebor Johnson" {
+		testingContext.Fatalf("expected 1 unified profile live:f4293989:era:0 (Trebor Johnson), got count=%d key=%q name=%q", profileCount, profileKey, displayName)
+	}
+
+	var aliasEventCount int
+	if err := destConn.QueryRow(`SELECT event_count FROM commander_aliases WHERE raw_name = 'Trebor Johnson'`).Scan(&aliasEventCount); err != nil {
+		testingContext.Fatal(err)
+	}
+	if aliasEventCount != 3 {
+		testingContext.Fatalf("expected 3 events attributed to Trebor Johnson across netLog, part 1, and part 2, got %d", aliasEventCount)
 	}
 }

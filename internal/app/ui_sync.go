@@ -56,7 +56,7 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetStats,
 		projection.TriggersFrom(app.careerStats, app.timeRangeStats).
-			WithJournal(journal.EventCommander).
+			WithJournal(journal.EventCommander, journal.EventLoadGame, journal.EventClearSavedGame, journal.EventNewCommander).
 			WithApp(events.AppAdjustmentsChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged),
 	)
 	bus.SubscribeUI(
@@ -84,7 +84,7 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetSettings,
 		projection.Triggers{
-			Journal: journal.NewEventSet(journal.EventCommander),
+			Journal: journal.NewEventSet(journal.EventCommander, journal.EventLoadGame, journal.EventClearSavedGame, journal.EventNewCommander),
 			App:     events.NewAppSet(events.AppSettingsChanged, events.AppCommanderFilterChanged, events.AppDatabaseSwitched),
 		},
 	)
@@ -137,12 +137,22 @@ func (app *App) publishJournalEvents(journalEvents journal.EventSet) events.UITa
 	return app.publishJournalBatch(journalEvents, "", "")
 }
 
+var careerWipeJournalEvents = journal.NewEventSet(
+	journal.EventClearSavedGame,
+	journal.EventNewCommander,
+)
+
 func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTimestamp, latestTimestamp string) events.UITargetSet {
 	bus := app.currentBus()
 	if bus == nil {
 		return 0
 	}
-	return bus.PublishJournalRange(journalEvents, earliestTimestamp, latestTimestamp)
+	targets := bus.PublishJournalRange(journalEvents, earliestTimestamp, latestTimestamp)
+	if journalEvents.Intersects(careerWipeJournalEvents) {
+		app.clearExportSnapshot()
+		targets = targets.Union(bus.PublishApp(events.AppCommanderFilterChanged))
+	}
+	return targets
 }
 
 func (app *App) emitDataChanged(expeditionID int64, targets events.UITargetSet) {

@@ -18,7 +18,8 @@ func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTi
 	return execError
 }
 
-// StartCandidates returns recorded arrivals matching Waypoint #1 (newest first).
+// StartCandidates returns recorded arrivals matching Waypoint #1 (newest first)
+// scoped to the expedition's commander save-slot selection.
 func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, candidates []Arrival, loadError error) {
 	rows, listError := ListRows(queryer, expeditionID)
 	if listError != nil {
@@ -28,8 +29,12 @@ func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, can
 	if firstIndex < 0 || strings.TrimSpace(rows[firstIndex].SystemName) == "" {
 		return "", nil, errors.New("waypoint #1 needs a system name before the expedition can start")
 	}
+	expeditionRecord, getError := Get(queryer, expeditionID)
+	if getError != nil {
+		return "", nil, getError
+	}
 	waypoint := rows[firstIndex]
-	arrivals, arrivalsError := replay.QuerySystemArrivalCandidates(queryer, waypoint.SystemName, waypoint.SystemAddress)
+	arrivals, arrivalsError := replay.QuerySystemArrivalCandidatesScoped(queryer, waypoint.SystemName, waypoint.SystemAddress, expeditionRecord.ProfileScope())
 	if arrivalsError != nil {
 		return waypoint.SystemName, nil, arrivalsError
 	}
@@ -121,24 +126,27 @@ func Complete(transaction *sql.Tx, expeditionID int64) error {
 	if visitedWaypointCount < 2 || finalRow == nil {
 		return errors.New("at least 2 visited waypoints are required to complete an expedition")
 	}
-	resolvedAddress, stayCommander, contextError := replay.ResolveArrivalStayContext(
+	expScope := expeditionRecord.ProfileScope()
+	stayContext, contextError := replay.ResolveArrivalStayContextScoped(
 		transaction,
 		finalRow.VisitEventUID,
 		finalRow.VisitedAt,
 		finalRow.SystemName,
 		finalRow.SystemAddress,
+		expScope,
 	)
 	if contextError != nil {
 		return contextError
 	}
 	stayUpperBound := exclusiveBoundaryBefore(finalRow.DepartedAt, finalRow.VisitedAt)
-	lastActivity, activityError := replay.QueryLastInSystemActivityTimestamp(
+	lastActivity, activityError := replay.QueryLastInSystemActivityTimestampForStay(
 		transaction,
 		finalRow.VisitedAt,
 		stayUpperBound,
 		finalRow.SystemName,
-		resolvedAddress,
-		stayCommander,
+		stayContext.SystemAddress,
+		stayContext,
+		expScope,
 	)
 	if activityError != nil {
 		return activityError

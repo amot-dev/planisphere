@@ -62,6 +62,7 @@ func TestMigrateIdempotency(t *testing.T) {
 		"source_file_index_v7",
 		"sell_organic_uid_dedup_v8",
 		"disconnect_events_v10",
+		"commander_profiles_v13",
 	}
 
 	for _, key := range expectedKeys {
