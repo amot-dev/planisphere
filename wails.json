@@ -11,7 +11,7 @@
   "info": {
     "comments": "Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal",
     "productName": "Planisphere",
-    "productVersion": "0.6.2"
+    "productVersion": "1.0.0"
   },
   "name": "planisphere",
   "outputfilename": "planisphere"
