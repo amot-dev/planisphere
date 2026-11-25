@@ -1,0 +1,111 @@
+name: Update Issue Status
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-status-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mark-in-review:
+    name: Mark Referenced Issues as In Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move referenced issues to "In review"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TARGET_STATUS: "In review"
+        run: |
+          BEFORE_SHA=$(jq -r '.before // ""' "${GITHUB_EVENT_PATH}")
+          AFTER_SHA=$(jq -r '.after // ""' "${GITHUB_EVENT_PATH}")
+          PAYLOAD_COMMIT_COUNT=$(jq '.commits | length' "${GITHUB_EVENT_PATH}")
+          ZERO_SHA="0000000000000000000000000000000000000000"
+
+          # Push webhooks truncate .commits at 20 entries; fall back to Compare API for larger pushes.
+          COMMIT_MESSAGES=""
+          if [ "${PAYLOAD_COMMIT_COUNT}" -ge 20 ] && [ -n "${BEFORE_SHA}" ] && [ "${BEFORE_SHA}" != "${ZERO_SHA}" ] && [ -n "${AFTER_SHA}" ]; then
+            COMMIT_MESSAGES=$(gh api --paginate "repos/${REPO}/compare/${BEFORE_SHA}...${AFTER_SHA}" --jq '.commits[].commit.message' 2>/dev/null || true)
+          fi
+
+          if [ -z "${COMMIT_MESSAGES}" ]; then
+            COMMIT_MESSAGES=$(jq -r '.commits[]?.message // empty' "${GITHUB_EVENT_PATH}")
+          fi
+
+          if [ -z "${COMMIT_MESSAGES}" ]; then
+            echo "No commit messages found in push event."
+            exit 0
+          fi
+
+          # Match explicit "Issue #N" references while ignoring non-issue hash references like "Waypoint #1".
+          ISSUE_NUMBERS=$(printf '%s\n' "${COMMIT_MESSAGES}" | python3 -c '
+          import re
+          import sys
+
+          commit_text = sys.stdin.read()
+          seen_numbers = set()
+          ordered_numbers = []
+          issue_reference_pattern = re.compile(
+              r"\bissues?:?\s+#[1-9]\d*(?:\s*(?:,\s*and|,|and)\s*#[1-9]\d*)*",
+              re.IGNORECASE,
+          )
+          for reference_match in issue_reference_pattern.finditer(commit_text):
+              for issue_number in re.findall(r"#([1-9]\d*)", reference_match.group(0)):
+                  if issue_number not in seen_numbers:
+                      seen_numbers.add(issue_number)
+                      ordered_numbers.append(issue_number)
+          for issue_number in ordered_numbers:
+              print(issue_number)
+          ')
+
+          if [ -z "${ISSUE_NUMBERS}" ]; then
+            echo "No issue references found in pushed commits."
+            exit 0
+          fi
+
+          FAILED=0
+          for ISSUE_NUMBER in ${ISSUE_NUMBERS}; do
+            if ! ISSUE_JSON=$(gh api "repos/${REPO}/issues/${ISSUE_NUMBER}" 2>&1); then
+              if printf '%s' "${ISSUE_JSON}" | grep -q "HTTP 404"; then
+                echo "Skipping #${ISSUE_NUMBER}: issue not found."
+              else
+                echo "::warning::Failed to fetch issue #${ISSUE_NUMBER}: ${ISSUE_JSON}"
+                FAILED=1
+              fi
+              continue
+            fi
+
+            IS_PULL_REQUEST=$(printf '%s' "${ISSUE_JSON}" | jq -r '.pull_request != null')
+            if [ "${IS_PULL_REQUEST}" = "true" ]; then
+              echo "Skipping #${ISSUE_NUMBER}: item is a pull request."
+              continue
+            fi
+
+            CURRENT_STATE=$(printf '%s' "${ISSUE_JSON}" | jq -r '.state // ""')
+            if [ "${CURRENT_STATE}" != "open" ]; then
+              echo "Skipping #${ISSUE_NUMBER}: issue state is '${CURRENT_STATE}' (will not reopen)."
+              continue
+            fi
+
+            CURRENT_STATUS=$(printf '%s' "${ISSUE_JSON}" | jq -r '.status.name // ""')
+            if [ "${CURRENT_STATUS}" = "${TARGET_STATUS}" ]; then
+              echo "Issue #${ISSUE_NUMBER} is already '${TARGET_STATUS}'."
+              continue
+            fi
+
+            echo "Moving issue #${ISSUE_NUMBER} from '${CURRENT_STATUS:-none}' to '${TARGET_STATUS}'..."
+            if ! gh api --method PATCH "repos/${REPO}/issues/${ISSUE_NUMBER}" -f status="${TARGET_STATUS}" --silent; then
+              echo "::warning::Failed to update issue #${ISSUE_NUMBER} to '${TARGET_STATUS}'."
+              FAILED=1
+            fi
+          done
+
+          exit "${FAILED}"
+
