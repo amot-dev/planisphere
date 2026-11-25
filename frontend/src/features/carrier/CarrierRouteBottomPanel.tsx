@@ -152,7 +152,7 @@ function CarrierRouterHeaderBar({
             : 'PERSONAL CARRIER ROUTER'}
         </span>
         <span className="font-mono-tabular font-bold text-ed-text-main">
-          {route.origin || '???'} <span className="text-ed-text-muted">→</span>{' '}
+          {route.origin || '???'} <span className="relative -top-0.5 text-ed-text-muted">→</span>{' '}
           <span className="text-ed-amber">{destinationDisplay}</span>
         </span>
         {!manualMode && (
