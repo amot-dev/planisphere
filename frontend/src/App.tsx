@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { CockpitTopBar } from './components/ui/CockpitTopBar'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { TerminalBootScreen } from './components/ui/TerminalBootScreen'
@@ -6,6 +6,8 @@ import { ExportExpeditionModal } from './features/export/ExportExpeditionModal'
 import { ExpeditionPlanner } from './features/planner/ExpeditionPlanner'
 import { ExpeditionManageModal } from './features/planner/lifecycle/ExpeditionManageModal'
 import { StartExpeditionModal } from './features/planner/lifecycle/StartExpeditionModal'
+import { WaypointSearchModal } from './features/planner/search/WaypointSearchModal'
+import type { PlannerScrollTarget } from './features/planner/useInitialExpeditionScroll'
 import { SettingsModal } from './features/settings/SettingsModal'
 import { SetupWizardModal } from './features/setup/SetupWizard'
 import { StatsSidebar } from './features/sidebar/StatsSidebar'
@@ -53,6 +55,9 @@ export default function App() {
 
   const [manualPlotterRequestCount, setManualPlotterRequestCount] = useState(0)
   const [carrierRouteOpen, setCarrierRouteOpen] = useState(false)
+  const [searchModalQuery, setSearchModalQuery] = useState<string | null>(null)
+  const [scrollTarget, setScrollTarget] = useState<PlannerScrollTarget | null>(null)
+  const scrollTargetNonceRef = useRef(0)
 
   const handleLogCarrierJump = useCallback(() => {
     setManualPlotterRequestCount((requestCount) => requestCount + 1)
@@ -60,6 +65,40 @@ export default function App() {
 
   const handleOpenStartModal = useCallback(() => setActiveModal('start'), [])
   const handleOpenExportModal = useCallback(() => setActiveModal('export'), [])
+  const handleOpenSearchModal = useCallback(() => setSearchModalQuery(''), [])
+  const handleCloseSearchModal = useCallback(() => setSearchModalQuery(null), [])
+  const handleScrollTargetConsumed = useCallback(() => setScrollTarget(null), [])
+
+  const handleManualSelectExpedition = useCallback(
+    (selectedExpeditionId: number, options?: { persist?: boolean }) => {
+      setScrollTarget(null)
+      return handleSelectExpedition(selectedExpeditionId, options)
+    },
+    [handleSelectExpedition],
+  )
+
+  const handleNavigateToWaypoint = useCallback(
+    (expeditionId: number, rowId: number) => {
+      setSearchModalQuery(null)
+      scrollTargetNonceRef.current += 1
+      setScrollTarget({ expeditionId, rowId, nonce: scrollTargetNonceRef.current })
+      if (expeditionId !== activeExpeditionId) {
+        void handleSelectExpedition(expeditionId)
+      }
+    },
+    [activeExpeditionId, handleSelectExpedition],
+  )
+
+  const handleSelectSearchExpedition = useCallback(
+    (expeditionId: number) => {
+      setSearchModalQuery(null)
+      setScrollTarget(null)
+      if (expeditionId !== activeExpeditionId) {
+        void handleSelectExpedition(expeditionId)
+      }
+    },
+    [activeExpeditionId, handleSelectExpedition],
+  )
 
   const handleOpenSettingsModal = useCallback(() => {
     void refreshSettings()
@@ -101,9 +140,10 @@ export default function App() {
         ingest={ingest}
         settings={settings}
         onToggleSyncPause={handleToggleSyncPause}
-        onSelectExpedition={handleSelectExpedition}
+        onSelectExpedition={handleManualSelectExpedition}
         onOpenExpeditionsModal={() => setActiveModal('expeditions')}
         onOpenSettingsModal={handleOpenSettingsModal}
+        onOpenSearchModal={handleOpenSearchModal}
       />
 
       {/* Main Split Workspace: Persistent Stats Sidebar + Expedition Planner */}
@@ -134,6 +174,9 @@ export default function App() {
             externalLinkGec={settings?.externalLinkGec}
             manualPlotterRequestCount={manualPlotterRequestCount}
             exportEnabled={exportEnabled}
+            scrollTarget={scrollTarget}
+            onScrollTargetConsumed={handleScrollTargetConsumed}
+            onSearchSystemVisits={setSearchModalQuery}
             onPlanOptimisticUpdate={setPlan}
             onOpenStartModal={handleOpenStartModal}
             onOpenExportModal={handleOpenExportModal}
@@ -186,7 +229,7 @@ export default function App() {
           expeditions={expeditions}
           activeId={activeExpeditionId}
           commanders={settings?.commanders ?? []}
-          onSelect={handleSelectExpedition}
+          onSelect={handleManualSelectExpedition}
           onClose={() => setActiveModal(null)}
         />
       )}
@@ -195,6 +238,16 @@ export default function App() {
         <ExportExpeditionModal
           expeditionId={activeExpeditionId}
           onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {searchModalQuery !== null && (
+        <WaypointSearchModal
+          initialQuery={searchModalQuery}
+          activeExpeditionId={activeExpeditionId}
+          onClose={handleCloseSearchModal}
+          onNavigateToWaypoint={handleNavigateToWaypoint}
+          onSelectExpedition={handleSelectSearchExpedition}
         />
       )}
     </div>

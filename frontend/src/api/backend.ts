@@ -45,6 +45,7 @@ export {
   RescanJournals,
   ResetCommanderOverrides,
   SaveActiveCarrierRoute,
+  SearchWaypoints,
   SetActiveExpedition,
   SetCareerBaselineScope,
   SetCommanderEnabled,

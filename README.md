@@ -33,6 +33,7 @@ Plan your route stop by stop without maintaining a spreadsheet on the side.
 - **Retroactive Start and Live Progression:** Start an expedition from a past visit to Waypoint #1 to replay your flight history, or launch fresh. As you fly, Planisphere watches your journal and advances through stops automatically.
 - **Live Route Editing:** Insert, reorder, or remove waypoints mid-expedition. Planisphere keeps your visited history intact while letting you slot in missed stops or rework the unvisited route ahead.
 - **Per-Leg Telemetry:** Expand any visited leg (or the active leg) to inspect its travel time, jumps, ships flown, scans, and estimated vs. realized earnings. Expanding Waypoint #1 shows your pre-expedition baseline.
+- **Waypoint and Visit Search:** Search star systems and POI names across all saved expeditions from the top bar, or click any green visited-system indicator to inspect its journal visit history (including non-waypoint visits) and jump straight to the matching stop.
 - **Live Sync Pause:** Pause live journal watching from the top bar anytime without losing incoming events; queued writes ingest in order when you resume.
 
 ### Flight Modes

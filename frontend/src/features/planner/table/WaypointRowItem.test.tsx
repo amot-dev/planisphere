@@ -320,6 +320,23 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(journalRowHtml).toContain('title="Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)"')
   })
 
+  it('applies search highlight styling and data attribute only when highlighted and not dragged', () => {
+    const rowView = createOriginRowView({ row: { id: 89, systemName: 'Colonia' } })
+
+    const highlightedHtml = renderRowItem({ rowView, isSearchHighlighted: true })
+    expect(highlightedHtml).toContain('data-search-highlighted="true"')
+    expect(highlightedHtml).toContain(
+      'bg-ed-amber-tint *:bg-ed-amber-tint *:shadow-[inset_0_2px_0_0_var(--color-ed-cyan),inset_0_-2px_0_0_var(--color-ed-cyan)]',
+    )
+
+    const draggedAndHighlightedHtml = renderRowItem({
+      rowView,
+      isBeingDragged: true,
+      isSearchHighlighted: true,
+    })
+    expect(draggedAndHighlightedHtml).not.toContain('data-search-highlighted="true"')
+  })
+
   it('locks star system on visited rows while keeping manipulation controls on N > 1 and locking Origin #1', () => {
     const visitedSecondHtml = renderRowItem({
       rowView: expedition.RowView.createFrom({
@@ -691,6 +708,124 @@ describe('WaypointRowItem lock transition and rollback draft recovery', () => {
 
       expect(systemInput.value).toBe('Sagittarius A*')
       expect(poiTextarea.value).toBe('Explorer Anchorage')
+    } finally {
+      act(() => root.unmount())
+      container.remove()
+    }
+  })
+
+  it('makes green journal CoordStatusIndicator clickable with two-line tooltip while leaving EDSM indicator non-clickable', () => {
+    const onInspectSystemVisits = vi.fn()
+    const handlers: WaypointRowHandlers = {
+      ...defaultRowHandlers,
+      onInspectSystemVisits,
+    }
+    const journalRowView = expedition.RowView.createFrom({
+      row: {
+        id: 72,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Sol',
+        hasCoords: true,
+        coordsSource: 'journal',
+        x: 0,
+        y: 0,
+        z: 0,
+      },
+      number: 1,
+      detectedRegion: 'Inner Orion Spur',
+      visitCount: 3,
+      visitState: 'visited',
+    })
+    const edsmRowView = expedition.RowView.createFrom({
+      row: {
+        id: 73,
+        expeditionId: 1,
+        rowType: 'waypoint',
+        systemName: 'Beagle Point',
+        hasCoords: true,
+        coordsSource: 'edsm',
+        x: -1111.6,
+        y: -134.2,
+        z: 65269.8,
+      },
+      number: 2,
+      detectedRegion: 'The Abyss',
+      visitCount: 0,
+      visitState: 'future',
+    })
+
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      act(() => {
+        root.render(
+          createElement(
+            'table',
+            null,
+            createElement(
+              'tbody',
+              null,
+              createElement(WaypointRowItem, {
+                rowView: journalRowView,
+                index: 0,
+                isPlanning: false,
+                isLocked: false,
+                isBeingDragged: false,
+                isExpanded: false,
+                isNextFcStop: false,
+                hasActiveCarrierRoute: false,
+                isSystemCopied: false,
+                insertMenuOpen: false,
+                lastVisitedIndex: 0,
+                rowStyle: {},
+                dropProps: {},
+                handlers,
+              }),
+              createElement(WaypointRowItem, {
+                rowView: edsmRowView,
+                index: 1,
+                isPlanning: false,
+                isLocked: false,
+                isBeingDragged: false,
+                isExpanded: false,
+                isNextFcStop: false,
+                hasActiveCarrierRoute: false,
+                isSystemCopied: false,
+                insertMenuOpen: false,
+                lastVisitedIndex: 0,
+                rowStyle: {},
+                dropProps: {},
+                handlers,
+              }),
+            ),
+          ),
+        )
+      })
+
+      const journalButton = container.querySelector(
+        'button[aria-label="Search visit history for Sol"]',
+      ) as HTMLButtonElement | null
+      expect(journalButton).toBeTruthy()
+      expect(journalButton?.title).toBe(
+        'Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)\nClick to search visit history',
+      )
+
+      act(() => {
+        journalButton?.click()
+      })
+      expect(onInspectSystemVisits).toHaveBeenCalledTimes(1)
+      expect(onInspectSystemVisits).toHaveBeenCalledWith('Sol')
+
+      expect(
+        container.querySelector('button[aria-label="Search visit history for Beagle Point"]'),
+      ).toBeNull()
+      const edsmIndicator = container.querySelector(
+        'span[title="The Abyss (-1111.6, -134.2, 65269.8) via EDSM (Never Visited)"]',
+      )
+      expect(edsmIndicator).toBeTruthy()
     } finally {
       act(() => root.unmount())
       container.remove()

@@ -1,7 +1,7 @@
 import { app, expedition } from '../../api/models'
 import type { SyncPauseState } from '../../domain/syncState'
 import { APP_PRODUCT_NAME, APP_TAGLINE } from '../../version'
-import { CogIcon } from './HudIcons'
+import { CogIcon, SearchIcon } from './HudIcons'
 import { SyncStatusButton } from './SyncStatusButton'
 import { VersionIndicator } from './VersionIndicator'
 
@@ -22,6 +22,7 @@ export interface CockpitTopBarProps {
   onSelectExpedition: (selectedExpeditionId: number) => void
   onOpenExpeditionsModal: () => void
   onOpenSettingsModal: () => void
+  onOpenSearchModal?: () => void
 }
 
 /**
@@ -41,6 +42,7 @@ export function CockpitTopBar({
   onSelectExpedition,
   onOpenExpeditionsModal,
   onOpenSettingsModal,
+  onOpenSearchModal,
 }: CockpitTopBarProps) {
   return (
     <header className="relative h-12 shrink-0 bg-ed-panel border-b border-ed-border border-t-2 border-t-ed-amber flex items-center">
@@ -82,7 +84,7 @@ export function CockpitTopBar({
             value={activeExpeditionId}
             onChange={(event) => onSelectExpedition(Number(event.target.value))}
             title="Select active expedition"
-            className="h-[30px] bg-ed-header border border-ed-border-strong border-l-2 border-l-ed-amber px-2.5 text-xs font-bold uppercase tracking-wider text-ed-text-main focus:border-ed-amber focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
+            className="h-[30px] min-w-0 shrink bg-ed-header border border-ed-border-strong border-l-2 border-l-ed-amber px-2.5 text-xs font-bold uppercase tracking-wider text-ed-text-main focus:border-ed-amber focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
           >
             {expeditions.map((expeditionItem) => (
               <option
@@ -94,6 +96,18 @@ export function CockpitTopBar({
               </option>
             ))}
           </select>
+          {onOpenSearchModal && (
+            <button
+              type="button"
+              onClick={onOpenSearchModal}
+              className="ed-btn shrink-0 h-[30px] px-2! xl:px-2.5!"
+              title="Search waypoints and visit history"
+              aria-label="Search waypoints and visit history"
+            >
+              <SearchIcon />
+              <span className="hidden xl:inline">SEARCH</span>
+            </button>
+          )}
         </div>
 
         {/* Right Telemetry Strip */}

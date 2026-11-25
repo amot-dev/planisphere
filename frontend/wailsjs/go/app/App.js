@@ -178,6 +178,10 @@ export function SaveActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['SaveActiveCarrierRoute'](arg1);
 }
 
+export function SearchWaypoints(arg1) {
+  return window['go']['app']['App']['SearchWaypoints'](arg1);
+}
+
 export function SetActiveExpedition(arg1) {
   return window['go']['app']['App']['SetActiveExpedition'](arg1);
 }

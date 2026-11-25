@@ -24,6 +24,7 @@ export interface WaypointRowHandlers {
     fieldValue: string,
   ) => void | boolean | Promise<void | boolean>
   onCopySystem: (id: number, name: string) => void
+  onInspectSystemVisits?: (systemName: string) => void
   onToggleFcStop: (row: expedition.Row) => void
   onOverrideFcArrived?: (rowView: expedition.RowView) => void
   onOpenCarrierRoutePrompt: (index: number, row: expedition.Row) => void
@@ -57,6 +58,7 @@ export interface WaypointRowItemProps {
   isNextWaypoint?: boolean
   playerSystem?: string
   isSystemCopied: boolean
+  isSearchHighlighted?: boolean
   insertMenuOpen: boolean
   lastVisitedIndex: number
   rowStyle: CSSProperties
@@ -88,6 +90,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   isNextWaypoint,
   playerSystem,
   isSystemCopied,
+  isSearchHighlighted = false,
   insertMenuOpen,
   lastVisitedIndex,
   rowStyle,
@@ -212,6 +215,8 @@ export const WaypointRowItem = memo(function WaypointRowItem({
     }
   }
 
+  const isHighlighted = !isBeingDragged && isSearchHighlighted
+
   return (
     <tr
       style={rowStyle}
@@ -220,13 +225,18 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       data-row-index={index}
       data-being-dragged={isBeingDragged ? 'true' : undefined}
       data-last-visited={!isPlanning && index === lastVisitedIndex ? 'true' : undefined}
+      data-search-highlighted={isHighlighted ? 'true' : undefined}
       className={`group align-top text-ed-text-main ${
-        isBeingDragged
+        isBeingDragged || isHighlighted
           ? ''
           : permissions.isVisited
             ? 'bg-ed-surface hover:bg-ed-elevated'
             : 'bg-ed-rail hover:bg-ed-control'
-      } ${permissions.rowDropHighlightClass}`}
+      } ${permissions.rowDropHighlightClass}${
+        isHighlighted
+          ? ' bg-ed-amber-tint *:bg-ed-amber-tint *:shadow-[inset_0_2px_0_0_var(--color-ed-cyan),inset_0_-2px_0_0_var(--color-ed-cyan)]'
+          : ''
+      }`}
     >
       {/* Expand Chevron */}
       {!isPlanning && (
@@ -277,7 +287,10 @@ export const WaypointRowItem = memo(function WaypointRowItem({
       {/* System Name (EDSM indicator on left + system name + copy button) */}
       <td className="px-3 py-1.5 align-top border-b border-ed-border-subtle">
         <div className="h-7 flex items-center gap-2 min-w-0">
-          <CoordStatusIndicator rowView={rowView} />
+          <CoordStatusIndicator
+            rowView={rowView}
+            onInspectVisits={handlers.onInspectSystemVisits}
+          />
           <div className="flex-1 min-w-0 flex items-center gap-1 h-7">
             {permissions.isSystemLocked ? (
               <span

@@ -3,10 +3,12 @@ import { expedition } from '../../../../api/models'
 
 /**
  * CoordStatusIndicatorProps defines the waypoint row view whose stellar
- * coordinate resolution state is displayed.
+ * coordinate resolution state is displayed and optional click handler for
+ * opening journal visit search on visited systems.
  */
 export interface CoordStatusIndicatorProps {
   rowView: expedition.RowView
+  onInspectVisits?: (systemName: string) => void
 }
 
 /**
@@ -17,6 +19,7 @@ export interface CoordStatusIndicatorProps {
  */
 export const CoordStatusIndicator = memo(function CoordStatusIndicator({
   rowView,
+  onInspectVisits,
 }: CoordStatusIndicatorProps) {
   const row = rowView.row
   if (!row.systemName) return null
@@ -28,9 +31,26 @@ export const CoordStatusIndicator = memo(function CoordStatusIndicator({
     const visitSuffix = isJournal
       ? `via Journal (${visitCount} ${visitCount === 1 ? 'Visit' : 'Visits'})`
       : 'via EDSM (Never Visited)'
+    const baseTooltip = `${regionPrefix}${coordsLabel} ${visitSuffix}`
+    if (isJournal && onInspectVisits) {
+      return (
+        <button
+          type="button"
+          title={`${baseTooltip}\nClick to search visit history`}
+          aria-label={`Search visit history for ${row.systemName}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onInspectVisits(row.systemName)
+          }}
+          className="-mx-1 px-1 py-1 inline-flex items-center justify-center shrink-0 cursor-pointer group/coord focus:outline-none focus-visible:ring-1 focus-visible:ring-ed-emerald"
+        >
+          <span className="w-1.5 h-3 bg-ed-emerald group-hover/coord:brightness-125" />
+        </button>
+      )
+    }
     return (
       <span
-        title={`${regionPrefix}${coordsLabel} ${visitSuffix}`}
+        title={baseTooltip}
         className={`w-1.5 h-3 shrink-0 ${isJournal ? 'bg-ed-emerald' : 'bg-ed-cyan'}`}
       />
     )

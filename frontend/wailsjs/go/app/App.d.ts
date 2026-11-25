@@ -95,6 +95,8 @@ export function ResetCommanderOverrides(arg1:string):Promise<app.Settings>;
 
 export function SaveActiveCarrierRoute(arg1:expedition.ActiveCarrierRouteState):Promise<void>;
 
+export function SearchWaypoints(arg1:string):Promise<expedition.SearchResponse>;
+
 export function SetActiveExpedition(arg1:number):Promise<void>;
 
 export function SetCareerBaselineScope(arg1:string):Promise<app.Settings>;

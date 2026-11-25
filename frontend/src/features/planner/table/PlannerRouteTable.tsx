@@ -80,6 +80,7 @@ export interface PlannerTableCarrierState {
  */
 export interface PlannerTableRowActions {
   copiedSystemRowId: number | null
+  highlightedRowId?: number | null
   insertMenuAfterId: number | null
   onSetInsertMenuAfterId: (rowId: number | null) => void
   onChangeRegion: (rowId: number, regionId: number) => void
@@ -93,6 +94,7 @@ export interface PlannerTableRowActions {
     fieldValue: string,
   ) => void | boolean | Promise<void | boolean>
   onCopySystem: (rowId: number, systemName: string) => void
+  onInspectSystemVisits?: (systemName: string) => void
   onToggleFcStop: (row: expedition.Row) => void
   onOverrideFcArrived?: (rowView: expedition.RowView) => void
 }
@@ -194,6 +196,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
     onOriginSystemFilledChange: rowActions.onOriginSystemFilledChange,
     onFieldBlur: rowActions.onFieldBlur,
     onCopySystem: rowActions.onCopySystem,
+    onInspectSystemVisits: rowActions.onInspectSystemVisits,
     onToggleFcStop: rowActions.onToggleFcStop,
     onOverrideFcArrived: rowActions.onOverrideFcArrived,
     onOpenCarrierRoutePrompt,
@@ -214,6 +217,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
     onOriginSystemFilledChange: rowActions.onOriginSystemFilledChange,
     onFieldBlur: rowActions.onFieldBlur,
     onCopySystem: rowActions.onCopySystem,
+    onInspectSystemVisits: rowActions.onInspectSystemVisits,
     onToggleFcStop: rowActions.onToggleFcStop,
     onOverrideFcArrived: rowActions.onOverrideFcArrived,
     onOpenCarrierRoutePrompt,
@@ -224,6 +228,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
   }
 
   const hasOverrideFcArrived = Boolean(rowActions.onOverrideFcArrived)
+  const hasInspectSystemVisits = Boolean(rowActions.onInspectSystemVisits)
 
   // Keep per-row callback identities constant so memoized rows skip unaffected re-renders.
   const stableRowHandlers = useMemo<WaypointRowHandlers>(
@@ -238,6 +243,12 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
       ) => latestCallbacksRef.current.onFieldBlur(row, fieldName, fieldValue),
       onCopySystem: (rowId: number, systemName: string) =>
         latestCallbacksRef.current.onCopySystem(rowId, systemName),
+      ...(hasInspectSystemVisits
+        ? {
+            onInspectSystemVisits: (systemName: string) =>
+              latestCallbacksRef.current.onInspectSystemVisits?.(systemName),
+          }
+        : {}),
       onToggleFcStop: (row: expedition.Row) => latestCallbacksRef.current.onToggleFcStop(row),
       ...(hasOverrideFcArrived
         ? {
@@ -264,7 +275,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
         latestCallbacksRef.current.onRowDragStart(rowIndex, rowId, event),
       onDragEnd: () => latestCallbacksRef.current.onRowDragEnd(),
     }),
-    [hasOverrideFcArrived],
+    [hasInspectSystemVisits, hasOverrideFcArrived],
   )
 
   const handleChangeRegion = useCallback(
@@ -439,6 +450,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
               playerSystem={plan.playerSystem}
               hasActiveCarrierRoute={hasActiveCarrierRoute}
               isSystemCopied={rowActions.copiedSystemRowId === row.id}
+              isSearchHighlighted={rowActions.highlightedRowId === row.id}
               insertMenuOpen={rowActions.insertMenuAfterId === row.id}
               lastVisitedIndex={lastVisitedIndex}
               rowStyle={rowStyle}

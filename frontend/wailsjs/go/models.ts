@@ -561,6 +561,62 @@ export namespace expedition {
 	        this.count = source["count"];
 	    }
 	}
+	export class NonWaypointVisit {
+	    timestamp: string;
+	    galactic: string;
+	    expeditionId?: number;
+	    expeditionName?: string;
+	    expeditionStatus?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NonWaypointVisit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timestamp = source["timestamp"];
+	        this.galactic = source["galactic"];
+	        this.expeditionId = source["expeditionId"];
+	        this.expeditionName = source["expeditionName"];
+	        this.expeditionStatus = source["expeditionStatus"];
+	    }
+	}
+	export class NonWaypointVisitSummary {
+	    systemName: string;
+	    totalCount: number;
+	    earliestGalactic: string;
+	    visits: NonWaypointVisit[];
+	
+	    static createFrom(source: any = {}) {
+	        return new NonWaypointVisitSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.systemName = source["systemName"];
+	        this.totalCount = source["totalCount"];
+	        this.earliestGalactic = source["earliestGalactic"];
+	        this.visits = this.convertValues(source["visits"], NonWaypointVisit);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class Row {
 	    id: number;
 	    expeditionId: number;
@@ -761,6 +817,102 @@ export namespace expedition {
 	    }
 	}
 	
+	export class WaypointStopMatch {
+	    rowId: number;
+	    number: number;
+	    poiName: string;
+	    visitedAt: string;
+	    visitedAtGalactic: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WaypointStopMatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rowId = source["rowId"];
+	        this.number = source["number"];
+	        this.poiName = source["poiName"];
+	        this.visitedAt = source["visitedAt"];
+	        this.visitedAtGalactic = source["visitedAtGalactic"];
+	    }
+	}
+	export class WaypointSearchResult {
+	    expeditionId: number;
+	    expeditionName: string;
+	    expeditionStatus: string;
+	    systemName: string;
+	    poiName: string;
+	    relevanceTier: number;
+	    stops: WaypointStopMatch[];
+	
+	    static createFrom(source: any = {}) {
+	        return new WaypointSearchResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.expeditionId = source["expeditionId"];
+	        this.expeditionName = source["expeditionName"];
+	        this.expeditionStatus = source["expeditionStatus"];
+	        this.systemName = source["systemName"];
+	        this.poiName = source["poiName"];
+	        this.relevanceTier = source["relevanceTier"];
+	        this.stops = this.convertValues(source["stops"], WaypointStopMatch);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SearchResponse {
+	    results: WaypointSearchResult[];
+	    totalMatches: number;
+	    nonWaypointVisits?: NonWaypointVisitSummary;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.results = this.convertValues(source["results"], WaypointSearchResult);
+	        this.totalMatches = source["totalMatches"];
+	        this.nonWaypointVisits = this.convertValues(source["nonWaypointVisits"], NonWaypointVisitSummary);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class WaypointDetails {
 	    rowId: number;
 	    kind: string;
@@ -819,6 +971,7 @@ export namespace expedition {
 		    return a;
 		}
 	}
+	
 
 }
 

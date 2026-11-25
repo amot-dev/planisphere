@@ -17,13 +17,20 @@ import { PlannerActiveLegFooter } from './PlannerActiveLegFooter'
 import { PlannerConfirmModal } from './PlannerConfirmModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
 import { PlannerRouteTable } from './table/PlannerRouteTable'
-import { useInitialExpeditionScroll } from './useInitialExpeditionScroll'
+import {
+  useInitialExpeditionScroll,
+  type PlannerScrollTarget,
+} from './useInitialExpeditionScroll'
 import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMutations'
+
+const SEARCH_HIGHLIGHT_DURATION_MS = 2000
 
 /**
  * ExpeditionPlannerProps defines the active expedition plan state, database
  * path key, journal archive revision token, external-link visibility settings,
- * optimistic update handlers, lifecycle modal triggers, and carrier router trigger count.
+ * targeted row scroll and visit-search callbacks (`scrollTarget`,
+ * `onScrollTargetConsumed`, `onSearchSystemVisits`), optimistic update
+ * handlers, lifecycle modal triggers, and carrier router trigger count.
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
@@ -36,6 +43,9 @@ export interface ExpeditionPlannerProps {
   externalLinkGec?: string
   manualPlotterRequestCount?: number
   exportEnabled?: boolean
+  scrollTarget?: PlannerScrollTarget | null
+  onScrollTargetConsumed?: () => void
+  onSearchSystemVisits?: (systemName: string) => void
   onPlanOptimisticUpdate: (next: expedition.PlanView) => void
   onOpenStartModal: () => void
   onOpenExportModal?: () => void
@@ -59,6 +69,9 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   externalLinkGec,
   manualPlotterRequestCount = 0,
   exportEnabled = false,
+  scrollTarget = null,
+  onScrollTargetConsumed,
+  onSearchSystemVisits,
   onPlanOptimisticUpdate,
   onOpenStartModal,
   onOpenExportModal,
@@ -147,6 +160,32 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     onCancelCarrierRoute: carrierRoute.handleCancelCarrierRoute,
   }
 
+  const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
+  const highlightTimeoutRef = useRef<number | null>(null)
+  const onScrollTargetConsumedRef = useRef(onScrollTargetConsumed)
+  onScrollTargetConsumedRef.current = onScrollTargetConsumed
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current !== null) {
+        window.clearTimeout(highlightTimeoutRef.current)
+        highlightTimeoutRef.current = null
+      }
+    }
+  }, [])
+
+  const handleScrollTargetApplied = useCallback((rowId: number) => {
+    if (highlightTimeoutRef.current !== null) {
+      window.clearTimeout(highlightTimeoutRef.current)
+    }
+    setHighlightedRowId(rowId)
+    highlightTimeoutRef.current = window.setTimeout(() => {
+      highlightTimeoutRef.current = null
+      setHighlightedRowId(null)
+    }, SEARCH_HIGHLIGHT_DURATION_MS)
+    onScrollTargetConsumedRef.current?.()
+  }, [])
+
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   useInitialExpeditionScroll(
     scrollContainerRef,
@@ -154,6 +193,9 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     plan?.expedition?.id,
     plan?.expedition?.status,
     frontier.lastVisitedIndex,
+    scrollTarget,
+    handleScrollTargetApplied,
+    onScrollTargetConsumed,
   )
 
   const handleCopySystem = useCallback(
@@ -267,6 +309,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   const rowActions = useMemo(
     () => ({
       copiedSystemRowId,
+      highlightedRowId,
       insertMenuAfterId: mutations.insertMenuAfterId,
       onSetInsertMenuAfterId: mutations.setInsertMenuAfterId,
       onChangeRegion: mutations.changeRegion,
@@ -276,12 +319,14 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
       onOriginSystemFilledChange: setOriginHasDraftSystem,
       onFieldBlur: mutations.commitField,
       onCopySystem: handleCopySystem,
+      onInspectSystemVisits: onSearchSystemVisits,
       onToggleFcStop: mutations.toggleFcStop,
       onOverrideFcArrived: mutations.handleRequestOverrideFcArrived,
     }),
     [
       copiedSystemRowId,
       handleCopySystem,
+      highlightedRowId,
       mutations.changeRegion,
       mutations.commitField,
       mutations.handleInsert,
@@ -291,6 +336,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
       mutations.insertMenuAfterId,
       mutations.setInsertMenuAfterId,
       mutations.toggleFcStop,
+      onSearchSystemVisits,
     ],
   )
 
