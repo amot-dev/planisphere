@@ -7,13 +7,6 @@ function formatWaypointNumber(waypointNumber: number): string {
   return String(waypointNumber).padStart(2, '0')
 }
 
-function getStatusBadgeClasses(status: string): string {
-  const normalizedStatus = status.toLowerCase()
-  if (normalizedStatus === 'active') return 'bg-ed-amber-tint border-ed-amber/70 text-ed-amber'
-  if (normalizedStatus === 'completed') return 'bg-ed-cyan-tint border-ed-cyan-border text-ed-cyan'
-  return 'bg-ed-control border-ed-border text-ed-text-muted'
-}
-
 function ResultCardHeader({
   systemName,
   poiName,
@@ -64,13 +57,11 @@ function ResultCardBadges({
   return (
     <div className={`flex items-center gap-1.5 shrink-0 ${className}`}>
       {isCurrentExpedition && (
-        <span className="text-[9px] font-mono-tabular font-extrabold uppercase px-1.5 py-0.5 bg-ed-amber/15 border border-ed-amber text-ed-amber shrink-0">
+        <span className="text-[9px] font-mono-tabular font-extrabold uppercase px-1.5 py-0.5 bg-ed-cyan-tint border border-ed-cyan text-ed-cyan shrink-0">
           CURRENT
         </span>
       )}
-      <span
-        className={`text-[9px] font-mono-tabular font-bold uppercase px-1.5 py-0.5 border shrink-0 ${getStatusBadgeClasses(statusLabel)}`}
-      >
+      <span className="text-[9px] font-mono-tabular font-bold uppercase px-1.5 py-0.5 border bg-ed-control border-ed-border text-ed-text-muted shrink-0">
         {statusLabel}
       </span>
     </div>
