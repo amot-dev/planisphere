@@ -284,6 +284,26 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class UndoActionResult {
+	    applied: boolean;
+	    label: string;
+	    carrierRouteRestored: boolean;
+	    canUndo: boolean;
+	    canRedo: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UndoActionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.applied = source["applied"];
+	        this.label = source["label"];
+	        this.carrierRouteRestored = source["carrierRouteRestored"];
+	        this.canUndo = source["canUndo"];
+	        this.canRedo = source["canRedo"];
+	    }
+	}
 	export class WaypointImportFile {
 	    fileName: string;
 	    content: string;

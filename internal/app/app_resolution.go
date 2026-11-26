@@ -263,11 +263,11 @@ func (app *App) runExpeditionResolutionWorker(targetDB *sql.DB, expeditionID int
 // sequential worker goroutine per expedition to avoid goroutine explosion and
 // excessive database re-evaluation spam.
 func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
-	if expeditionID == 0 {
-		return
-	}
-	targetDB := app.currentDB()
-	if targetDB == nil {
+	app.kickResolutionForDB(app.currentDB(), expeditionID, allowRetry)
+}
+
+func (app *App) kickResolutionForDB(targetDB *sql.DB, expeditionID int64, allowRetry bool) {
+	if expeditionID == 0 || !app.isCurrentDB(targetDB) {
 		return
 	}
 	app.resolveMu.Lock()
@@ -278,7 +278,7 @@ func (app *App) kickResolution(expeditionID int64, allowRetry bool) {
 	app.resolvingExpeditions[expeditionID] = true
 	app.resolveMu.Unlock()
 
-	if !app.spawnBackground(func() {
+	if !app.isCurrentDB(targetDB) || !app.spawnBackground(func() {
 		app.runExpeditionResolutionWorker(targetDB, expeditionID, allowRetry)
 	}) {
 		app.resolveMu.Lock()
@@ -419,7 +419,7 @@ func (app *App) applyMissingPOIFromGEC(rowID int64, systemName string, systemAdd
 	if poiName == "" {
 		return ""
 	}
-	if execError := expedition.SetRowPOIIfBlank(app.db, rowID, poiName); execError != nil {
+	if execError := expedition.SetRowPOIIfBlank(app.db, rowID, systemName, poiName); execError != nil {
 		log.Printf("update poi name for row %d: %v", rowID, execError)
 		return ""
 	}

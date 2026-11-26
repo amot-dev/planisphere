@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PlotCarrierRoute, RecordCarrierJump } from '../../api/backend'
+import {
+  CompleteCarrierRouteArrival,
+  PlotCarrierRoute,
+  RecordCarrierJumpAndSaveRoute,
+} from '../../api/backend'
 import { expedition } from '../../api/models'
 import {
   CARRIER_MAX_DEPOT_TONNES,
@@ -27,7 +31,6 @@ export interface UseCarrierRouteOptions {
   manualPlotterRequestCount?: number
   onBusyChange: (busyMessage: string | null) => void
   busyTracker?: BusyTaskTracker
-  onSetFcArrived: (rowId: number, arrived: boolean) => Promise<boolean | void>
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
 }
 
@@ -41,7 +44,6 @@ export function useCarrierRoute({
   manualPlotterRequestCount = 0,
   onBusyChange,
   busyTracker: externalBusyTracker,
-  onSetFcArrived,
   onCarrierRouteOpenChange,
 }: UseCarrierRouteOptions) {
   const [routePrompt, setRoutePrompt] = useState<CarrierRoutePromptState | null>(null)
@@ -72,9 +74,12 @@ export function useCarrierRoute({
     manualLegTritium,
     setManualLegTritium,
     cancelPendingInputPersist,
+    buildPersistedRouteState,
     persistRouteState,
     activateCarrierRoute,
+    clearLocalCarrierRoute: clearPersistedLocalCarrierRoute,
     clearPersistedCarrierRoute,
+    reloadPersistedCarrierRoute: reloadPersistedRouteState,
     handleChangeManualDistance,
     handleChangeManualTritium,
   } = persistedRoute
@@ -156,10 +161,18 @@ export function useCarrierRoute({
 
   function handleCancelCarrierRoute() {
     invalidateRouteRequests()
-    clearPersistedCarrierRoute()
-    setCarrierJumpIndex(0)
-    setManualModeOverride(false)
+    clearPersistedCarrierRoute(true)
   }
+
+  const clearLocalCarrierRoute = useCallback(() => {
+    invalidateRouteRequests()
+    clearPersistedLocalCarrierRoute()
+  }, [clearPersistedLocalCarrierRoute, invalidateRouteRequests])
+
+  const reloadPersistedCarrierRoute = useCallback(async () => {
+    invalidateRouteRequests()
+    await reloadPersistedRouteState()
+  }, [invalidateRouteRequests, reloadPersistedRouteState])
 
   function switchActiveRouteToManualMode() {
     setManualModeOverride(true)
@@ -178,11 +191,14 @@ export function useCarrierRoute({
     manualTritiumInputRef.current = initialTritiumInput
     setManualDistanceInput(initialDistanceInput)
     setManualTritiumInput(initialTritiumInput)
-    persistRouteState({
-      manualMode: true,
-      manualDistInput: initialDistanceInput,
-      manualTritInput: initialTritiumInput,
-    })
+    persistRouteState(
+      {
+        manualMode: true,
+        manualDistInput: initialDistanceInput,
+        manualTritInput: initialTritiumInput,
+      },
+      'Switch Carrier Route to Manual Mode',
+    )
   }
 
   // Opens the bottom carrier plotter directly in manual jump-logging mode.
@@ -337,39 +353,35 @@ export function useCarrierRoute({
       refillResult.nextCapacity,
     )
     setActiveCarrierRoute(updatedRoute)
-    persistRouteState({ route: updatedRoute })
+    persistRouteState({ route: updatedRoute }, 'Refill Carrier Depot')
   }
 
-  async function performCarrierArriveAtWaypoint(
-    requestExpeditionId: number | undefined,
-    requestSeq: number,
-  ): Promise<boolean> {
-    if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return false
-    const targetRowId = isManualCarrierRoute
+  function resolveArrivalTargetRowId(): number {
+    return isManualCarrierRoute
       ? (nextFcStopEntry?.row.id ?? 0)
       : activeCarrierTargetRowId || (nextFcStopEntry?.row.id ?? 0)
-    if (targetRowId > 0) {
-      try {
-        const arrivedSucceeded = await onSetFcArrived(targetRowId, true)
-        if (arrivedSucceeded === false || isStaleRouteRequest(requestExpeditionId, requestSeq)) return false
-      } catch {
-        return false
-      }
-    }
-    clearPersistedCarrierRoute()
-    return true
   }
 
-  async function handleCarrierArriveAtWaypoint() {
+  async function runCarrierJumpTask(
+    busyMessage: string,
+    task: (requestExpeditionId: number | undefined, requestSeq: number) => Promise<void>,
+  ) {
     const requestExpeditionId = currentExpeditionId
     const requestSeq = routeRequestSeqRef.current
-    if (loggingJump || loggingJumpRef.current || isStaleRouteRequest(requestExpeditionId, requestSeq)) return
+    if (loggingJump || loggingJumpRef.current || isStaleRouteRequest(requestExpeditionId, requestSeq)) {
+      return
+    }
     cancelPendingInputPersist()
     loggingJumpRef.current = true
     setLoggingJump(true)
-    const endBusyTask = busyTracker.beginTask('MARKING CARRIER ARRIVAL')
+    const endBusyTask = busyTracker.beginTask(busyMessage)
     try {
-      await performCarrierArriveAtWaypoint(requestExpeditionId, requestSeq)
+      await task(requestExpeditionId, requestSeq)
+      if (!isStaleRouteRequest(requestExpeditionId, requestSeq)) {
+        persistedRoute.invalidatePersistedRouteLoad()
+      }
+    } catch (taskError) {
+      console.error(taskError)
     } finally {
       if (expeditionIdRef.current === requestExpeditionId) {
         loggingJumpRef.current = false
@@ -379,65 +391,67 @@ export function useCarrierRoute({
     }
   }
 
+  async function handleCarrierArriveAtWaypoint() {
+    if (!plan) return
+    await runCarrierJumpTask('MARKING CARRIER ARRIVAL', async (requestExpeditionId, requestSeq) => {
+      await CompleteCarrierRouteArrival(plan.expedition.id, resolveArrivalTargetRowId(), 0, 0)
+      if (!isStaleRouteRequest(requestExpeditionId, requestSeq)) clearPersistedLocalCarrierRoute()
+    })
+  }
+
   async function handleCompleteSpanshJump() {
     const totalJumps = activeCarrierRoute?.jumps?.length ?? 0
-    if (!plan || !activeCarrierRoute || totalJumps === 0 || loggingJump || loggingJumpRef.current) return
+    if (!plan || !activeCarrierRoute || totalJumps === 0) return
     const allJumpsRecorded = carrierJumpIndex >= totalJumps
     const carrierHop = allJumpsRecorded ? null : activeCarrierRoute.jumps[carrierJumpIndex]
     const currentDepot = normalizeDepotTritium(activeCarrierRoute.depotTritium)
     if (carrierHop && currentDepot < carrierHop.tritiumUsed) return
 
-    const requestExpeditionId = currentExpeditionId
-    const requestSeq = routeRequestSeqRef.current
-    loggingJumpRef.current = true
-    setLoggingJump(true)
-    const endBusyTask = busyTracker.beginTask(
+    await runCarrierJumpTask(
       allJumpsRecorded ? 'MARKING CARRIER ARRIVAL' : 'LOGGING CARRIER JUMP',
+      async (requestExpeditionId, requestSeq) => {
+        const nextJumpIndex = carrierJumpIndex + 1
+        if (!carrierHop || nextJumpIndex >= totalJumps) {
+          await CompleteCarrierRouteArrival(
+            plan.expedition.id,
+            resolveArrivalTargetRowId(),
+            carrierHop ? carrierHop.distanceLy : 0,
+            carrierHop ? carrierHop.tritiumUsed : 0,
+          )
+          if (!isStaleRouteRequest(requestExpeditionId, requestSeq)) clearPersistedLocalCarrierRoute()
+          return
+        }
+        const nextDepot = Math.max(0, currentDepot - carrierHop.tritiumUsed)
+        const updatedRoute = recalculateCarrierRouteDepotFuel(activeCarrierRoute, nextJumpIndex, nextDepot)
+        const nextState = buildPersistedRouteState({ route: updatedRoute, jumpIdx: nextJumpIndex })
+        if (!nextState) return
+        await RecordCarrierJumpAndSaveRoute(plan.expedition.id, carrierHop.distanceLy, carrierHop.tritiumUsed, nextState)
+        if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
+        setCarrierJumpIndex(nextJumpIndex)
+        setActiveCarrierRoute(updatedRoute)
+      },
     )
-    try {
-      if (!carrierHop) {
-        await performCarrierArriveAtWaypoint(requestExpeditionId, requestSeq)
-        return
-      }
-      await RecordCarrierJump(plan.expedition.id, carrierHop.distanceLy, carrierHop.tritiumUsed)
-      if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
-      const nextJumpIndex = carrierJumpIndex + 1
-      const nextDepot = Math.max(0, currentDepot - carrierHop.tritiumUsed)
-      const updatedRoute = recalculateCarrierRouteDepotFuel(activeCarrierRoute, nextJumpIndex, nextDepot)
-      setCarrierJumpIndex(nextJumpIndex)
-      setActiveCarrierRoute(updatedRoute)
-      const shouldPersist =
-        nextJumpIndex < totalJumps ||
-        (!(await performCarrierArriveAtWaypoint(requestExpeditionId, requestSeq)) &&
-          !isStaleRouteRequest(requestExpeditionId, requestSeq))
-      if (shouldPersist) persistRouteState({ route: updatedRoute, jumpIdx: nextJumpIndex })
-    } catch (jumpError) {
-      console.error(jumpError)
-    } finally {
-      if (expeditionIdRef.current === requestExpeditionId) {
-        loggingJumpRef.current = false
-        if (mountedRef.current) setLoggingJump(false)
-      }
-      endBusyTask()
-    }
   }
 
   async function handleLogManualJump() {
-    if (!plan || !activeCarrierRoute || loggingJump) return
+    if (!plan || !activeCarrierRoute) return
     const jumpDistance = parseFloat(manualDistanceInputRef.current) || 0
     const tritiumAmount = Math.max(0, parseInt(manualTritiumInputRef.current, 10) || 0)
     if (jumpDistance <= 0 && tritiumAmount <= 0) return
-    const requestExpeditionId = currentExpeditionId
-    const requestSeq = routeRequestSeqRef.current
-    cancelPendingInputPersist()
-    setLoggingJump(true)
-    const endBusyTask = busyTracker.beginTask('LOGGING CARRIER JUMP')
-    try {
-      await RecordCarrierJump(plan.expedition.id, jumpDistance, tritiumAmount)
+    const nextJumps = manualLegJumps + 1
+    const nextTotalDistance = manualLegDistance + Math.max(0, jumpDistance)
+    const nextTotalTritium = manualLegTritium + tritiumAmount
+    const nextState = buildPersistedRouteState({
+      manualLegJumps: nextJumps,
+      manualLegDist: nextTotalDistance,
+      manualLegTrit: nextTotalTritium,
+      manualDistInput: '',
+      manualTritInput: '',
+    })
+    if (!nextState) return
+    await runCarrierJumpTask('LOGGING CARRIER JUMP', async (requestExpeditionId, requestSeq) => {
+      await RecordCarrierJumpAndSaveRoute(plan.expedition.id, jumpDistance, tritiumAmount, nextState)
       if (isStaleRouteRequest(requestExpeditionId, requestSeq)) return
-      const nextJumps = manualLegJumps + 1
-      const nextTotalDistance = manualLegDistance + Math.max(0, jumpDistance)
-      const nextTotalTritium = manualLegTritium + tritiumAmount
       manualDistanceInputRef.current = ''
       manualTritiumInputRef.current = ''
       setManualLegJumps(nextJumps)
@@ -445,21 +459,7 @@ export function useCarrierRoute({
       setManualLegTritium(nextTotalTritium)
       setManualDistanceInput('')
       setManualTritiumInput('')
-      persistRouteState({
-        manualLegJumps: nextJumps,
-        manualLegDist: nextTotalDistance,
-        manualLegTrit: nextTotalTritium,
-        manualDistInput: '',
-        manualTritInput: '',
-      })
-    } catch (jumpError) {
-      console.error(jumpError)
-    } finally {
-      if (mountedRef.current && expeditionIdRef.current === requestExpeditionId) {
-        setLoggingJump(false)
-      }
-      endBusyTask()
-    }
+    })
   }
 
   return {
@@ -484,6 +484,8 @@ export function useCarrierRoute({
     handleChangeManualTritium,
     handleCopyNextJumpSystem,
     handleCancelCarrierRoute,
+    clearLocalCarrierRoute,
+    reloadPersistedCarrierRoute,
     switchActiveRouteToManualMode,
     openCarrierRoutePrompt,
     handleStartCarrierRoute,

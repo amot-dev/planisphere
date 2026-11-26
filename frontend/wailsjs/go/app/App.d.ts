@@ -19,7 +19,11 @@ export function BrowseWaypointImportFile():Promise<app.WaypointImportFile>;
 
 export function ClearActiveCarrierRoute(arg1:number):Promise<void>;
 
+export function ClearActiveCarrierRouteWithUndo(arg1:number):Promise<void>;
+
 export function CloneExpedition(arg1:number):Promise<expedition.Expedition>;
+
+export function CompleteCarrierRouteArrival(arg1:number,arg2:number,arg3:number,arg4:number):Promise<void>;
 
 export function CompleteExpedition(arg1:number):Promise<void>;
 
@@ -85,6 +89,10 @@ export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string
 
 export function RecordCarrierJump(arg1:number,arg2:number,arg3:number):Promise<void>;
 
+export function RecordCarrierJumpAndSaveRoute(arg1:number,arg2:number,arg3:number,arg4:expedition.ActiveCarrierRouteState):Promise<void>;
+
+export function RedoExpedition(arg1:number):Promise<app.UndoActionResult>;
+
 export function RefreshGEC():Promise<number>;
 
 export function ReopenExpedition(arg1:number):Promise<void>;
@@ -94,6 +102,8 @@ export function RescanJournals():Promise<void>;
 export function ResetCommanderOverrides(arg1:string):Promise<app.Settings>;
 
 export function SaveActiveCarrierRoute(arg1:expedition.ActiveCarrierRouteState):Promise<void>;
+
+export function SaveActiveCarrierRouteWithUndo(arg1:expedition.ActiveCarrierRouteState,arg2:string):Promise<void>;
 
 export function SearchWaypoints(arg1:string):Promise<expedition.SearchResponse>;
 
@@ -128,6 +138,8 @@ export function SplitCommander(arg1:string,arg2:string):Promise<app.Settings>;
 export function StartExpedition(arg1:number,arg2:string,arg3:number):Promise<void>;
 
 export function StartExpeditionScoped(arg1:number,arg2:string,arg3:number,arg4:string,arg5:Array<number>):Promise<void>;
+
+export function UndoExpedition(arg1:number):Promise<app.UndoActionResult>;
 
 export function UnmergeCommanderAlias(arg1:string,arg2:string):Promise<app.Settings>;
 

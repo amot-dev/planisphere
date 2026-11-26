@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ClearActiveCarrierRoute,
+  ClearActiveCarrierRouteWithUndo,
   GetActiveCarrierRoute,
   SaveActiveCarrierRoute,
+  SaveActiveCarrierRouteWithUndo,
 } from '../../api/backend'
 import { expedition } from '../../api/models'
 
@@ -25,7 +27,8 @@ export interface PersistedCarrierRouteUpdates {
 
 /**
  * usePersistedCarrierRoute manages active carrier route state, SQLite route
- * restoration when switching expeditions, and debounced manual input persistence.
+ * restoration when switching expeditions, on-demand route reloads, local state
+ * clearing, debounced manual input persistence, and optional undo-labeled saves.
  */
 export function usePersistedCarrierRoute(expeditionId: number | undefined) {
   const [activeCarrierRoute, setActiveCarrierRoute] =
@@ -41,27 +44,80 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
   const [manualLegJumps, setManualLegJumps] = useState(0)
   const [manualLegDistance, setManualLegDistance] = useState(0)
   const [manualLegTritium, setManualLegTritium] = useState(0)
+  const mountedRef = useRef(true)
+  const expeditionIdRef = useRef<number | undefined>(expeditionId)
+  expeditionIdRef.current = expeditionId
+  const loadSeqRef = useRef(0)
 
-  function cancelPendingInputPersist() {
+  const cancelPendingInputPersist = useCallback(() => {
     if (persistManualInputsTimerRef.current) {
       clearTimeout(persistManualInputsTimerRef.current)
       persistManualInputsTimerRef.current = null
     }
-  }
+  }, [])
 
-  function persistRouteState(updates: PersistedCarrierRouteUpdates) {
+  const invalidatePersistedRouteLoad = useCallback(() => {
+    loadSeqRef.current += 1
+  }, [])
+
+  const resetLocalCarrierRouteState = useCallback(() => {
     cancelPendingInputPersist()
+    manualDistanceInputRef.current = ''
+    manualTritiumInputRef.current = ''
+    setActiveCarrierRoute(null)
+    setActiveCarrierTargetRowId(0)
+    setCarrierJumpIndex(0)
+    setManualModeOverride(false)
+    setManualDistanceInput('')
+    setManualTritiumInput('')
+    setManualLegJumps(0)
+    setManualLegDistance(0)
+    setManualLegTritium(0)
+  }, [cancelPendingInputPersist])
+
+  const applyLoadedCarrierRoute = useCallback(
+    (saved: expedition.ActiveCarrierRouteState | null | undefined) => {
+      cancelPendingInputPersist()
+      if (
+        saved &&
+        saved.route &&
+        (saved.targetRowId > 0 ||
+          saved.manualMode ||
+          saved.route.manualMode ||
+          (saved.route.jumps && saved.route.jumps.length > 0))
+      ) {
+        const savedDistanceInput = saved.manualDistInput || ''
+        const savedTritiumInput = saved.manualTritInput || ''
+        manualDistanceInputRef.current = savedDistanceInput
+        manualTritiumInputRef.current = savedTritiumInput
+        const maxJumpIndex = saved.route.jumps ? saved.route.jumps.length : 0
+        setActiveCarrierRoute(saved.route)
+        setActiveCarrierTargetRowId(saved.targetRowId)
+        setCarrierJumpIndex(Math.min(Math.max(0, saved.jumpIdx || 0), maxJumpIndex))
+        setManualModeOverride(Boolean(saved.manualMode))
+        setManualDistanceInput(savedDistanceInput)
+        setManualTritiumInput(savedTritiumInput)
+        setManualLegJumps(saved.manualLegJumps || 0)
+        setManualLegDistance(saved.manualLegDist || 0)
+        setManualLegTritium(saved.manualLegTrit || 0)
+      } else {
+        resetLocalCarrierRouteState()
+      }
+    },
+    [cancelPendingInputPersist, resetLocalCarrierRouteState],
+  )
+
+  function buildPersistedRouteState(
+    updates: PersistedCarrierRouteUpdates,
+  ): expedition.ActiveCarrierRouteState | null {
     const targetExpeditionId =
       updates.expeditionId !== undefined ? updates.expeditionId : expeditionId
-    if (!targetExpeditionId || targetExpeditionId <= 0) return
+    if (!targetExpeditionId || targetExpeditionId <= 0) return null
     const route = updates.route !== undefined ? updates.route : activeCarrierRoute
+    if (!route) return null
     const targetRowId =
       updates.targetRowId !== undefined ? updates.targetRowId : activeCarrierTargetRowId
-    if (!route) {
-      ClearActiveCarrierRoute(targetExpeditionId).catch(console.error)
-      return
-    }
-    const state = expedition.ActiveCarrierRouteState.createFrom({
+    return expedition.ActiveCarrierRouteState.createFrom({
       expeditionId: targetExpeditionId,
       targetRowId,
       route,
@@ -82,7 +138,28 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
       manualLegTrit:
         updates.manualLegTrit !== undefined ? updates.manualLegTrit : manualLegTritium,
     })
-    SaveActiveCarrierRoute(state).catch(console.error)
+  }
+
+  function persistRouteState(updates: PersistedCarrierRouteUpdates, undoLabel?: string) {
+    cancelPendingInputPersist()
+    const targetExpeditionId =
+      updates.expeditionId !== undefined ? updates.expeditionId : expeditionId
+    if (!targetExpeditionId || targetExpeditionId <= 0) return
+    if (targetExpeditionId === expeditionIdRef.current) {
+      invalidatePersistedRouteLoad()
+    }
+    const routeState = buildPersistedRouteState(updates)
+    if (!routeState) {
+      const clearRequest = undoLabel
+        ? ClearActiveCarrierRouteWithUndo(targetExpeditionId)
+        : ClearActiveCarrierRoute(targetExpeditionId)
+      clearRequest.catch(console.error)
+      return
+    }
+    const saveRequest = undoLabel
+      ? SaveActiveCarrierRouteWithUndo(routeState, undoLabel)
+      : SaveActiveCarrierRoute(routeState)
+    saveRequest.catch(console.error)
   }
 
   const persistRouteStateRef = useRef(persistRouteState)
@@ -99,55 +176,49 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
   }
 
   useEffect(() => {
-    manualDistanceInputRef.current = ''
-    manualTritiumInputRef.current = ''
-    setActiveCarrierRoute(null)
-    setActiveCarrierTargetRowId(0)
-    if (!expeditionId || expeditionId <= 0) return
-    let cancelled = false
-    GetActiveCarrierRoute(expeditionId)
-      .then((saved) => {
-        if (cancelled) return
-        if (
-          saved &&
-          saved.route &&
-          (saved.targetRowId > 0 ||
-            saved.manualMode ||
-            saved.route.manualMode ||
-            (saved.route.jumps && saved.route.jumps.length > 0))
-        ) {
-          const savedDistanceInput = saved.manualDistInput || ''
-          const savedTritiumInput = saved.manualTritInput || ''
-          manualDistanceInputRef.current = savedDistanceInput
-          manualTritiumInputRef.current = savedTritiumInput
-          const maxJumpIndex = saved.route.jumps ? saved.route.jumps.length : 0
-          setActiveCarrierRoute(saved.route)
-          setActiveCarrierTargetRowId(saved.targetRowId)
-          setCarrierJumpIndex(Math.min(Math.max(0, saved.jumpIdx || 0), maxJumpIndex))
-          setManualModeOverride(Boolean(saved.manualMode))
-          setManualDistanceInput(savedDistanceInput)
-          setManualTritiumInput(savedTritiumInput)
-          setManualLegJumps(saved.manualLegJumps || 0)
-          setManualLegDistance(saved.manualLegDist || 0)
-          setManualLegTritium(saved.manualLegTrit || 0)
-        } else {
-          setActiveCarrierRoute(null)
-          setActiveCarrierTargetRowId(0)
-        }
-      })
-      .catch(console.error)
-
+    mountedRef.current = true
     return () => {
-      cancelled = true
+      mountedRef.current = false
+      loadSeqRef.current += 1
+    }
+  }, [])
+
+  const reloadPersistedCarrierRoute = useCallback(async (): Promise<void> => {
+    const requestExpeditionId = expeditionIdRef.current
+    if (!requestExpeditionId || requestExpeditionId <= 0) return
+    cancelPendingInputPersist()
+    const requestSeq = ++loadSeqRef.current
+    try {
+      const savedRoute = await GetActiveCarrierRoute(requestExpeditionId)
+      if (
+        !mountedRef.current ||
+        expeditionIdRef.current !== requestExpeditionId ||
+        loadSeqRef.current !== requestSeq
+      ) {
+        return
+      }
+      applyLoadedCarrierRoute(savedRoute)
+    } catch (loadError) {
+      console.error(loadError)
+    }
+  }, [applyLoadedCarrierRoute, cancelPendingInputPersist])
+
+  useEffect(() => {
+    resetLocalCarrierRouteState()
+    if (!expeditionId || expeditionId <= 0) return
+    void reloadPersistedCarrierRoute()
+    return () => {
+      loadSeqRef.current += 1
       flushPendingManualInputs(expeditionId)
     }
-  }, [expeditionId])
+  }, [expeditionId, reloadPersistedCarrierRoute, resetLocalCarrierRouteState])
 
   function activateCarrierRoute(
     route: expedition.CarrierRouteResult,
     targetRowId: number,
     manualMode: boolean,
   ) {
+    loadSeqRef.current += 1
     manualDistanceInputRef.current = ''
     manualTritiumInputRef.current = ''
     setActiveCarrierTargetRowId(targetRowId)
@@ -159,26 +230,36 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
     setManualLegTritium(0)
     setManualDistanceInput('')
     setManualTritiumInput('')
-    persistRouteState({
-      route,
-      targetRowId,
-      jumpIdx: 0,
-      manualMode,
-      manualLegJumps: 0,
-      manualLegDist: 0,
-      manualLegTrit: 0,
-      manualDistInput: '',
-      manualTritInput: '',
-    })
+    persistRouteState(
+      {
+        route,
+        targetRowId,
+        jumpIdx: 0,
+        manualMode,
+        manualLegJumps: 0,
+        manualLegDist: 0,
+        manualLegTrit: 0,
+        manualDistInput: '',
+        manualTritInput: '',
+      },
+      manualMode ? 'Open Manual Carrier Plotter' : 'Start Carrier Route',
+    )
   }
 
-  function clearPersistedCarrierRoute() {
-    cancelPendingInputPersist()
+  const clearLocalCarrierRoute = useCallback(() => {
+    loadSeqRef.current += 1
+    resetLocalCarrierRouteState()
+  }, [resetLocalCarrierRouteState])
+
+  function clearPersistedCarrierRoute(recordUndo = false) {
+    loadSeqRef.current += 1
+    resetLocalCarrierRouteState()
     if (expeditionId) {
-      ClearActiveCarrierRoute(expeditionId).catch(console.error)
+      const clearRequest = recordUndo
+        ? ClearActiveCarrierRouteWithUndo(expeditionId)
+        : ClearActiveCarrierRoute(expeditionId)
+      clearRequest.catch(console.error)
     }
-    setActiveCarrierRoute(null)
-    setActiveCarrierTargetRowId(0)
   }
 
   function schedulePersistManualInputs() {
@@ -225,9 +306,13 @@ export function usePersistedCarrierRoute(expeditionId: number | undefined) {
     manualLegTritium,
     setManualLegTritium,
     cancelPendingInputPersist,
+    invalidatePersistedRouteLoad,
+    buildPersistedRouteState,
     persistRouteState,
     activateCarrierRoute,
+    clearLocalCarrierRoute,
     clearPersistedCarrierRoute,
+    reloadPersistedCarrierRoute,
     handleChangeManualDistance,
     handleChangeManualTritium,
   }

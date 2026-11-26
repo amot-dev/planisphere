@@ -174,6 +174,7 @@ export default function App() {
             externalLinkGec={settings?.externalLinkGec}
             manualPlotterRequestCount={manualPlotterRequestCount}
             exportEnabled={exportEnabled}
+            hasModalOpen={activeModal !== null || searchModalQuery !== null}
             scrollTarget={scrollTarget}
             onScrollTargetConsumed={handleScrollTargetConsumed}
             onSearchSystemVisits={setSearchModalQuery}

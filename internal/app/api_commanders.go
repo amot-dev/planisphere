@@ -1,6 +1,8 @@
 package app
 
 import (
+	"database/sql"
+
 	"planisphere/internal/core/events"
 	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
@@ -8,7 +10,13 @@ import (
 )
 
 func (app *App) applyCommanderOverride(mutation func() error) (Settings, error) {
-	if err := app.withExclusiveCommanderDB(mutation); err != nil {
+	if err := app.runUndoExclusive(func() error {
+		if overrideError := app.withExclusiveCommanderDB(mutation); overrideError != nil {
+			return overrideError
+		}
+		app.clearUndoHistory()
+		return nil
+	}); err != nil {
 		return Settings{}, err
 	}
 	app.clearExportSnapshot()
@@ -85,10 +93,18 @@ func (app *App) UpdateExpeditionScoped(
 	commanderProfileIDs []int64,
 ) error {
 	var scopeChanged bool
-	if updateError := app.withReadyReadLock(func() error {
-		var err error
-		scopeChanged, err = expedition.UpdateMetaAndScopeTx(app.db, id, name, description, commanderScope, commanderProfileIDs)
-		return err
+	if updateError := app.runUndoExclusive(func() error {
+		if err := app.withReadyReadLock(func() error {
+			var txError error
+			scopeChanged, txError = expedition.UpdateMetaAndScopeTx(app.db, id, name, description, commanderScope, commanderProfileIDs)
+			return txError
+		}); err != nil {
+			return err
+		}
+		if scopeChanged {
+			app.clearExpeditionUndoHistory(id)
+		}
+		return nil
 	}); updateError != nil {
 		return updateError
 	}
@@ -111,12 +127,16 @@ func (app *App) StartExpeditionScoped(
 	commanderScope string,
 	commanderProfileIDs []int64,
 ) error {
-	if startError := app.withReadyReadLock(func() error {
-		return expedition.StartScopedTx(app.db, expeditionID, timestamp, initialModeID, commanderScope, commanderProfileIDs)
-	}); startError != nil {
+	applied, startError := app.recordUndoableMutation(expeditionID, "Engage Expedition", func(targetDB *sql.DB) (bool, error) {
+		err := expedition.StartScopedTx(targetDB, expeditionID, timestamp, initialModeID, commanderScope, commanderProfileIDs)
+		return err == nil, err
+	})
+	if startError != nil {
 		return startError
 	}
-	app.clearExportSnapshot()
-	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
+	if applied {
+		app.clearExportSnapshot()
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
+	}
 	return nil
 }

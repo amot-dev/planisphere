@@ -53,12 +53,13 @@ func ListMissingPOIRows(queryer db.Queryer) ([]MissingPOIRow, error) {
 	return missingRows, databaseRows.Err()
 }
 
-// SetRowPOIIfBlank stores poiName on rowID only when its poi_name column is still empty.
-func SetRowPOIIfBlank(queryer db.Queryer, rowID int64, poiName string) error {
+// SetRowPOIIfBlank stores poiName on rowID only when system_name still matches and poi_name is empty.
+func SetRowPOIIfBlank(queryer db.Queryer, rowID int64, systemName, poiName string) error {
 	_, execError := queryer.Exec(
-		`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`,
+		`UPDATE expedition_rows SET poi_name = ? WHERE id = ? AND system_name = ? AND (poi_name IS NULL OR TRIM(poi_name) = '')`,
 		poiName,
 		rowID,
+		systemName,
 	)
 	return execError
 }

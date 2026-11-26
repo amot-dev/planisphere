@@ -26,8 +26,16 @@ export function ClearActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['ClearActiveCarrierRoute'](arg1);
 }
 
+export function ClearActiveCarrierRouteWithUndo(arg1) {
+  return window['go']['app']['App']['ClearActiveCarrierRouteWithUndo'](arg1);
+}
+
 export function CloneExpedition(arg1) {
   return window['go']['app']['App']['CloneExpedition'](arg1);
+}
+
+export function CompleteCarrierRouteArrival(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['CompleteCarrierRouteArrival'](arg1, arg2, arg3, arg4);
 }
 
 export function CompleteExpedition(arg1) {
@@ -158,6 +166,14 @@ export function RecordCarrierJump(arg1, arg2, arg3) {
   return window['go']['app']['App']['RecordCarrierJump'](arg1, arg2, arg3);
 }
 
+export function RecordCarrierJumpAndSaveRoute(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RecordCarrierJumpAndSaveRoute'](arg1, arg2, arg3, arg4);
+}
+
+export function RedoExpedition(arg1) {
+  return window['go']['app']['App']['RedoExpedition'](arg1);
+}
+
 export function RefreshGEC() {
   return window['go']['app']['App']['RefreshGEC']();
 }
@@ -176,6 +192,10 @@ export function ResetCommanderOverrides(arg1) {
 
 export function SaveActiveCarrierRoute(arg1) {
   return window['go']['app']['App']['SaveActiveCarrierRoute'](arg1);
+}
+
+export function SaveActiveCarrierRouteWithUndo(arg1, arg2) {
+  return window['go']['app']['App']['SaveActiveCarrierRouteWithUndo'](arg1, arg2);
 }
 
 export function SearchWaypoints(arg1) {
@@ -244,6 +264,10 @@ export function StartExpedition(arg1, arg2, arg3) {
 
 export function StartExpeditionScoped(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['StartExpeditionScoped'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function UndoExpedition(arg1) {
+  return window['go']['app']['App']['UndoExpedition'](arg1);
 }
 
 export function UnmergeCommanderAlias(arg1, arg2) {

@@ -1,0 +1,565 @@
+package expedition_test
+
+import (
+	"database/sql"
+	"slices"
+	"testing"
+
+	"planisphere/internal/core/events"
+	"planisphere/internal/reference"
+	"planisphere/internal/replay"
+	"planisphere/internal/store/expedition"
+	"planisphere/internal/store/modes"
+)
+
+func mustCaptureSnapshot(testingContext *testing.T, dbConn *sql.DB, expeditionID int64) expedition.Snapshot {
+	testingContext.Helper()
+	snapshot, captureError := expedition.CaptureSnapshot(dbConn, expeditionID)
+	if captureError != nil {
+		testingContext.Fatalf("CaptureSnapshot(%d): %v", expeditionID, captureError)
+	}
+	return snapshot
+}
+
+func mustGetRow(testingContext *testing.T, dbConn *sql.DB, rowID int64) expedition.Row {
+	testingContext.Helper()
+	rowItem, getError := expedition.GetRow(dbConn, rowID)
+	if getError != nil {
+		testingContext.Fatalf("GetRow(%d): %v", rowID, getError)
+	}
+	return rowItem
+}
+
+func mustGetActiveCarrierRoute(testingContext *testing.T, dbConn *sql.DB, expeditionID int64) *expedition.ActiveCarrierRouteState {
+	testingContext.Helper()
+	routeState, routeError := expedition.GetActiveCarrierRoute(dbConn, expeditionID)
+	if routeError != nil {
+		testingContext.Fatalf("GetActiveCarrierRoute(%d): %v", expeditionID, routeError)
+	}
+	return routeState
+}
+
+func TestUndoRowDeletePreservesIDCoordsCarryOverAndPOIGuard(testingContext *testing.T) {
+	dbConn := openExpeditionTestDB(testingContext)
+	ingestJournalLines(testingContext, dbConn, []string{
+		`{"timestamp":"2026-04-01T08:00:00Z","event":"LoadGame","Commander":"CMDR Undo","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-04-01T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-01T09:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[-9530,-910,19808],"JumpDist":220.0}`,
+		`{"timestamp":"2026-04-01T10:00:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":3003,"StarPos":[-9500,-900,19900],"JumpDist":40.0}`,
+	})
+
+	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Undo Coords", "Test", []expedition.SeedWaypoint{
+		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "journal"},
+		{SystemName: "Colonia", SystemAddress: 2002, EDSMID: 42, HasCoords: true, X: -9530, Y: -910, Z: 19808, CoordsSource: "edsm"},
+		{SystemName: "Sagittarius A*"},
+		{SystemName: "Beagle Point"},
+	})
+	if err != nil {
+		testingContext.Fatalf("CreateWithWaypoints: %v", err)
+	}
+	if err := expedition.StartTx(dbConn, expeditionRecord.ID, "2026-04-01T08:05:00Z", 0); err != nil {
+		testingContext.Fatalf("StartTx: %v", err)
+	}
+
+	initialRows, err := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if err != nil || len(initialRows) != 4 {
+		testingContext.Fatalf("ListRows: len=%d err=%v", len(initialRows), err)
+	}
+	coloniaRow, sagARow, beagleRow := initialRows[1], initialRows[2], initialRows[3]
+	if coloniaRow.DepartedAt != "2026-04-01T10:00:00Z" || !coloniaRow.HasCoords {
+		testingContext.Fatalf("expected Colonia visited+departed with coords, got %+v", coloniaRow)
+	}
+
+	history := expedition.NewUndoHistory(expedition.DefaultMaxUndoEntries)
+
+	// Deleting a visited waypoint and undoing must restore exact original row ID, departed_at, and coordinates.
+	beforeDelete := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	if _, err := expedition.DeleteRowTx(dbConn, coloniaRow.ID); err != nil {
+		testingContext.Fatalf("DeleteRowTx: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Delete Waypoint", Snapshot: beforeDelete})
+
+	undoDelete, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoDelete.Applied {
+		testingContext.Fatalf("Undo delete: outcome=%+v err=%v", undoDelete, err)
+	}
+	restoredColonia := mustGetRow(testingContext, dbConn, coloniaRow.ID)
+	if restoredColonia != coloniaRow {
+		testingContext.Fatalf("restored row mismatch:\ngot  %+v\nwant %+v", restoredColonia, coloniaRow)
+	}
+	if !undoDelete.ChangedEvents.Has(events.AppExpeditionModesChanged) || !undoDelete.ChangedEvents.Has(events.AppExpeditionPlanChanged) {
+		testingContext.Fatalf("expected plan and modes events on visited-row undo, got %v", undoDelete.ChangedEvents.Names())
+	}
+
+	// Redo removes Colonia again, then Undo brings it back once more.
+	redoDelete, err := history.Redo(dbConn, expeditionRecord.ID)
+	if err != nil || !redoDelete.Applied {
+		testingContext.Fatalf("Redo delete: outcome=%+v err=%v", redoDelete, err)
+	}
+	if _, err := expedition.GetRow(dbConn, coloniaRow.ID); err == nil {
+		testingContext.Fatalf("expected Colonia row %d to be deleted after Redo", coloniaRow.ID)
+	}
+	if _, err := history.Undo(dbConn, expeditionRecord.ID); err != nil {
+		testingContext.Fatalf("second Undo delete: %v", err)
+	}
+
+	// Coordinate carry-over: editing notes before async coords arrive preserves the resolved coordinates on undo.
+	beforeNotes := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	noteText := "Check supermassive black hole"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: sagARow.ID, Notes: &noteText}); err != nil {
+		testingContext.Fatalf("UpdateRowTx notes: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Edit Notes", Snapshot: beforeNotes})
+
+	sagCoords := reference.Vec3{X: 25.21875, Y: -20.90625, Z: 25899.96875}
+	if err := expedition.SetRowCoords(dbConn, sagARow.ID, "Sagittarius A*", 999999, 777, &sagCoords, "edsm"); err != nil {
+		testingContext.Fatalf("SetRowCoords: %v", err)
+	}
+
+	undoNotes, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoNotes.Applied {
+		testingContext.Fatalf("Undo notes: outcome=%+v err=%v", undoNotes, err)
+	}
+	revertedSagA := mustGetRow(testingContext, dbConn, sagARow.ID)
+	if revertedSagA.Notes != "" || !revertedSagA.HasCoords || revertedSagA.CoordsSource != "edsm" || revertedSagA.SystemAddress != 999999 {
+		testingContext.Fatalf("expected notes reverted and resolved coords carried over, got %+v", revertedSagA)
+	}
+	if !undoNotes.NeedsCoordResolution {
+		testingContext.Fatalf("expected NeedsCoordResolution=true because Beagle Point still lacks coords")
+	}
+
+	// Changing a system name and reverting to an unresolved system must NOT carry over the other system's coords.
+	beforeRename := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	replacementSystem := "Alpha Centauri"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: beagleRow.ID, SystemName: &replacementSystem}); err != nil {
+		testingContext.Fatalf("UpdateRowTx system: %v", err)
+	}
+	alphaCoords := reference.Vec3{X: 3.03125, Y: -0.09375, Z: 3.15625}
+	if err := expedition.SetRowCoords(dbConn, beagleRow.ID, replacementSystem, 5555, 88, &alphaCoords, "edsm"); err != nil {
+		testingContext.Fatalf("SetRowCoords Alpha Centauri: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Edit System", Snapshot: beforeRename})
+
+	undoRename, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoRename.Applied || !undoRename.NeedsCoordResolution {
+		testingContext.Fatalf("Undo rename: outcome=%+v err=%v", undoRename, err)
+	}
+	revertedBeagle := mustGetRow(testingContext, dbConn, beagleRow.ID)
+	if revertedBeagle.SystemName != "Beagle Point" || revertedBeagle.HasCoords || revertedBeagle.CoordsSource != "" {
+		testingContext.Fatalf("expected Beagle Point without Alpha Centauri coords, got %+v", revertedBeagle)
+	}
+
+	// SetRowPOIIfBlank rejects a stale system_name from an in-flight GEC worker after Ctrl-Z.
+	if err := expedition.SetRowPOIIfBlank(dbConn, beagleRow.ID, "Alpha Centauri", "Hutton Orbital"); err != nil {
+		testingContext.Fatalf("SetRowPOIIfBlank stale: %v", err)
+	}
+	afterStalePOI := mustGetRow(testingContext, dbConn, beagleRow.ID)
+	if afterStalePOI.POIName != "" {
+		testingContext.Fatalf("expected stale system_name POI update ignored, got poi=%q", afterStalePOI.POIName)
+	}
+	if err := expedition.SetRowPOIIfBlank(dbConn, beagleRow.ID, "Beagle Point", "Beagle Point"); err != nil {
+		testingContext.Fatalf("SetRowPOIIfBlank matching: %v", err)
+	}
+	if err := expedition.SetRowPOIIfBlank(dbConn, beagleRow.ID, "Beagle Point", "Overwrite Attempt"); err != nil {
+		testingContext.Fatalf("SetRowPOIIfBlank non-blank: %v", err)
+	}
+	afterMatchingPOI := mustGetRow(testingContext, dbConn, beagleRow.ID)
+	if afterMatchingPOI.POIName != "Beagle Point" {
+		testingContext.Fatalf("expected matching blank POI set once, got poi=%q", afterMatchingPOI.POIName)
+	}
+}
+
+func TestUndoFlightModesLegModesAndMinimalChangedEvents(testingContext *testing.T) {
+	dbConn := openExpeditionTestDB(testingContext)
+	ingestJournalLines(testingContext, dbConn, []string{
+		`{"timestamp":"2026-04-02T08:00:00Z","event":"LoadGame","Commander":"CMDR Modes","FID":"F2","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-04-02T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-02T09:00:00Z","event":"FSDJump","StarSystem":"SysA","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-04-02T10:00:00Z","event":"FSDJump","StarSystem":"SysB","SystemAddress":1003,"StarPos":[20,0,0],"JumpDist":10.0}`,
+		`{"timestamp":"2026-04-02T11:00:00Z","event":"FSDJump","StarSystem":"SysC","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
+	})
+
+	modeList, err := modes.List(dbConn)
+	if err != nil || len(modeList) < 3 {
+		testingContext.Fatalf("modes.List: len=%d err=%v", len(modeList), err)
+	}
+	modeOneID, modeTwoID, modeThreeID := modeList[0].ID, modeList[1].ID, modeList[2].ID
+
+	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Mode Undo", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysA", SystemAddress: 1002, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysB", SystemAddress: 1003, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysC", SystemAddress: 1004, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysD", HasCoords: true, CoordsSource: "edsm"},
+	})
+	if err != nil {
+		testingContext.Fatalf("CreateWithWaypoints: %v", err)
+	}
+	if err := expedition.StartTx(dbConn, expeditionRecord.ID, "2026-04-02T08:05:00Z", modeOneID); err != nil {
+		testingContext.Fatalf("StartTx: %v", err)
+	}
+	rows, err := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if err != nil || len(rows) != 5 {
+		testingContext.Fatalf("ListRows: len=%d err=%v", len(rows), err)
+	}
+	sysARow, sysBRow, sysCRow, sysDRow := rows[1], rows[2], rows[3], rows[4]
+
+	history := expedition.NewUndoHistory(expedition.DefaultMaxUndoEntries)
+
+	// Plain unvisited row note edit must emit ONLY AppExpeditionPlanChanged on undo.
+	beforeNote := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	note := "Planned fuel stop"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: sysDRow.ID, Notes: &note}); err != nil {
+		testingContext.Fatalf("UpdateRowTx note: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Edit Notes", Snapshot: beforeNote})
+
+	undoNote, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoNote.Applied {
+		testingContext.Fatalf("Undo note: outcome=%+v err=%v", undoNote, err)
+	}
+	if undoNote.ChangedEvents != events.NewAppSet(events.AppExpeditionPlanChanged) {
+		testingContext.Fatalf("expected ONLY AppExpeditionPlanChanged on plain note undo, got %v", undoNote.ChangedEvents.Names())
+	}
+
+	// SetActiveModeTx undo and redo restore active_mode_id and emit AppExpeditionModesChanged.
+	beforeActiveMode := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	if err := expedition.SetActiveModeTx(dbConn, expeditionRecord.ID, modeTwoID); err != nil {
+		testingContext.Fatalf("SetActiveModeTx: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Change Flight Mode", Snapshot: beforeActiveMode})
+
+	undoActiveMode, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoActiveMode.Applied || !undoActiveMode.ChangedEvents.Has(events.AppExpeditionModesChanged) {
+		testingContext.Fatalf("Undo SetActiveMode: outcome=%+v err=%v", undoActiveMode, err)
+	}
+	reloadedExp, err := expedition.Get(dbConn, expeditionRecord.ID)
+	if err != nil || reloadedExp.ActiveModeID != modeOneID {
+		testingContext.Fatalf("expected ActiveModeID=%d after undo, got %d (%v)", modeOneID, reloadedExp.ActiveModeID, err)
+	}
+	redoActiveMode, err := history.Redo(dbConn, expeditionRecord.ID)
+	if err != nil || !redoActiveMode.Applied || !redoActiveMode.ChangedEvents.Has(events.AppExpeditionModesChanged) {
+		testingContext.Fatalf("Redo SetActiveMode: outcome=%+v err=%v", redoActiveMode, err)
+	}
+	if reloadedExp, err = expedition.Get(dbConn, expeditionRecord.ID); err != nil || reloadedExp.ActiveModeID != modeTwoID {
+		testingContext.Fatalf("expected ActiveModeID=%d after redo, got %d (%v)", modeTwoID, reloadedExp.ActiveModeID, err)
+	}
+
+	// Single leg mode edit (cascade=false) undo and redo.
+	beforeSingleLeg := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	if _, err := expedition.SetLegModeTx(dbConn, sysBRow.ID, modeTwoID, false); err != nil {
+		testingContext.Fatalf("SetLegModeTx single: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Change Leg Mode", Snapshot: beforeSingleLeg})
+
+	undoSingleLeg, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoSingleLeg.Applied || !undoSingleLeg.ChangedEvents.Has(events.AppExpeditionModesChanged) {
+		testingContext.Fatalf("Undo single SetLegMode: outcome=%+v err=%v", undoSingleLeg, err)
+	}
+	if reloadedSysB := mustGetRow(testingContext, dbConn, sysBRow.ID); reloadedSysB.LegModeID != modeOneID {
+		testingContext.Fatalf("expected SysB LegModeID=%d after undo, got %d", modeOneID, reloadedSysB.LegModeID)
+	}
+	if _, err := history.Redo(dbConn, expeditionRecord.ID); err != nil {
+		testingContext.Fatalf("Redo single SetLegMode: %v", err)
+	}
+
+	// Cascaded leg mode edit (cascade=true) overwrites SysA, SysB, SysC; undo restores all distinct previous modes.
+	beforeCascade := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	if _, err := expedition.SetLegModeTx(dbConn, sysARow.ID, modeThreeID, true); err != nil {
+		testingContext.Fatalf("SetLegModeTx cascade: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Change Leg Mode", Snapshot: beforeCascade})
+
+	undoCascade, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoCascade.Applied || !undoCascade.ChangedEvents.Has(events.AppExpeditionModesChanged) {
+		testingContext.Fatalf("Undo cascade SetLegMode: outcome=%+v err=%v", undoCascade, err)
+	}
+	afterUndoSysA := mustGetRow(testingContext, dbConn, sysARow.ID)
+	afterUndoSysB := mustGetRow(testingContext, dbConn, sysBRow.ID)
+	afterUndoSysC := mustGetRow(testingContext, dbConn, sysCRow.ID)
+	if afterUndoSysA.LegModeID != modeOneID || afterUndoSysB.LegModeID != modeTwoID || afterUndoSysC.LegModeID != modeOneID {
+		testingContext.Fatalf("unexpected cascaded undo leg modes: A=%d B=%d C=%d",
+			afterUndoSysA.LegModeID, afterUndoSysB.LegModeID, afterUndoSysC.LegModeID)
+	}
+	redoCascade, err := history.Redo(dbConn, expeditionRecord.ID)
+	if err != nil || !redoCascade.Applied {
+		testingContext.Fatalf("Redo cascade SetLegMode: outcome=%+v err=%v", redoCascade, err)
+	}
+	afterRedoSysA := mustGetRow(testingContext, dbConn, sysARow.ID)
+	afterRedoSysB := mustGetRow(testingContext, dbConn, sysBRow.ID)
+	afterRedoSysC := mustGetRow(testingContext, dbConn, sysCRow.ID)
+	if afterRedoSysA.LegModeID != modeThreeID || afterRedoSysB.LegModeID != modeThreeID || afterRedoSysC.LegModeID != modeThreeID {
+		testingContext.Fatalf("unexpected cascaded redo leg modes: A=%d B=%d C=%d",
+			afterRedoSysA.LegModeID, afterRedoSysB.LegModeID, afterRedoSysC.LegModeID)
+	}
+}
+
+func TestRestoreSnapshotRemapsDeletedCustomModeIDs(testingContext *testing.T) {
+	dbConn := openExpeditionTestDB(testingContext)
+	ingestJournalLines(testingContext, dbConn, []string{
+		`{"timestamp":"2026-04-04T08:00:00Z","event":"LoadGame","Commander":"CMDR Custom","FID":"F4","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-04-04T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-04T09:00:00Z","event":"FSDJump","StarSystem":"SysA","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	})
+
+	customMode, err := modes.Create(dbConn, "Exobiology Survey", "Custom sampling mode", "#00CCAA")
+	if err != nil {
+		testingContext.Fatalf("modes.Create: %v", err)
+	}
+	fallbackModeID := modes.DefaultFallbackModeID(dbConn)
+	if fallbackModeID <= 0 || fallbackModeID == customMode.ID {
+		testingContext.Fatalf("expected distinct fallback mode ID, got fallback=%d custom=%d", fallbackModeID, customMode.ID)
+	}
+
+	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Deleted Mode Restore", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysA", SystemAddress: 1002, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysB", HasCoords: true, CoordsSource: "edsm"},
+	})
+	if err != nil {
+		testingContext.Fatalf("CreateWithWaypoints: %v", err)
+	}
+	if err := expedition.StartTx(dbConn, expeditionRecord.ID, "2026-04-04T08:05:00Z", customMode.ID); err != nil {
+		testingContext.Fatalf("StartTx: %v", err)
+	}
+	rows, err := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if err != nil || len(rows) != 3 {
+		testingContext.Fatalf("ListRows: len=%d err=%v", len(rows), err)
+	}
+	originRow, sysARow, sysBRow := rows[0], rows[1], rows[2]
+	if sysARow.LegModeID != customMode.ID || originRow.LegModeID != 0 || sysBRow.LegModeID != 0 {
+		testingContext.Fatalf("expected customMode on SysA and 0 on origin/unvisited, got origin=%d SysA=%d SysB=%d",
+			originRow.LegModeID, sysARow.LegModeID, sysBRow.LegModeID)
+	}
+
+	// Capture a snapshot referencing the custom mode, edit notes, then delete the custom mode before restoring.
+	snapshotWithDeletedMode := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	updatedNote := "After snapshot"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: sysBRow.ID, Notes: &updatedNote}); err != nil {
+		testingContext.Fatalf("UpdateRowTx note: %v", err)
+	}
+	if err := modes.DeleteTx(dbConn, customMode.ID); err != nil {
+		testingContext.Fatalf("modes.DeleteTx: %v", err)
+	}
+
+	if _, err := expedition.RestoreSnapshotTx(dbConn, snapshotWithDeletedMode); err != nil {
+		testingContext.Fatalf("RestoreSnapshotTx after mode delete: %v", err)
+	}
+	restoredExp, err := expedition.Get(dbConn, expeditionRecord.ID)
+	if err != nil {
+		testingContext.Fatalf("Get expedition after restore: %v", err)
+	}
+	restoredOrigin := mustGetRow(testingContext, dbConn, originRow.ID)
+	restoredSysA := mustGetRow(testingContext, dbConn, sysARow.ID)
+	restoredSysB := mustGetRow(testingContext, dbConn, sysBRow.ID)
+	if restoredExp.ActiveModeID != fallbackModeID {
+		testingContext.Fatalf("expected deleted ActiveModeID remapped to fallback %d, got %d", fallbackModeID, restoredExp.ActiveModeID)
+	}
+	if restoredSysA.LegModeID != fallbackModeID {
+		testingContext.Fatalf("expected deleted SysA LegModeID remapped to fallback %d, got %d", fallbackModeID, restoredSysA.LegModeID)
+	}
+	if restoredOrigin.LegModeID != 0 || restoredSysB.LegModeID != 0 || restoredSysB.Notes != "" {
+		testingContext.Fatalf("expected origin/unvisited LegModeID=0 and SysB notes cleared, got origin=%d SysB=%+v",
+			restoredOrigin.LegModeID, restoredSysB)
+	}
+}
+
+func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing.T) {
+	dbConn := openExpeditionTestDB(testingContext)
+	ingestJournalLines(testingContext, dbConn, []string{
+		`{"timestamp":"2026-04-03T08:00:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-04-03T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-03T09:00:00Z","event":"FSDJump","StarSystem":"SysA","SystemAddress":1002,"StarPos":[100,0,0],"JumpDist":100.0}`,
+		`{"timestamp":"2026-04-03T09:30:00Z","event":"LoadGame","Commander":"CMDR Alt","FID":"F202","Ship":"cobramkiii","Ship_Localised":"Cobra Mk III","ShipID":2,"Odyssey":true}`,
+		`{"timestamp":"2026-04-03T09:35:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+	})
+	commanders, err := replay.ListCommanders(dbConn)
+	if err != nil || len(commanders) != 2 {
+		testingContext.Fatalf("ListCommanders: len=%d err=%v", len(commanders), err)
+	}
+	mainProfileID := profileIDsByName(testingContext, commanders)["CMDR Main"]
+
+	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Scoped Carrier Live", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysA", SystemAddress: 1002, HasCoords: true, CoordsSource: "journal"},
+		{SystemName: "SysB", SystemAddress: 1003, HasCoords: true, CoordsSource: "edsm"},
+		{SystemName: "SysC", SystemAddress: 1004, HasCoords: true, CoordsSource: "edsm"},
+	})
+	if err != nil {
+		testingContext.Fatalf("CreateWithWaypoints: %v", err)
+	}
+	history := expedition.NewUndoHistory(expedition.DefaultMaxUndoEntries)
+
+	// StartScopedTx undo restores planning status, commander_scope, and expedition_commanders.
+	beforeStart := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	if err := expedition.StartScopedTx(dbConn, expeditionRecord.ID, "2026-04-03T08:05:00Z", 0, expedition.ScopeSelected, []int64{mainProfileID}); err != nil {
+		testingContext.Fatalf("StartScopedTx: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Engage Expedition", Snapshot: beforeStart})
+
+	undoStart, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoStart.Applied {
+		testingContext.Fatalf("Undo StartScopedTx: outcome=%+v err=%v", undoStart, err)
+	}
+	if !undoStart.ChangedEvents.Has(events.AppExpeditionBoundsChanged) || !undoStart.ChangedEvents.Has(events.AppExpeditionModesChanged) {
+		testingContext.Fatalf("expected bounds and modes events on StartScopedTx undo, got %v", undoStart.ChangedEvents.Names())
+	}
+	revertedExp, err := expedition.Get(dbConn, expeditionRecord.ID)
+	if err != nil || revertedExp.Status != expedition.StatusPlanning || revertedExp.CommanderScope != expedition.ScopeAllEnabled || len(revertedExp.CommanderProfileIDs) != 0 {
+		testingContext.Fatalf("expected reverted planning scope, got %+v (%v)", revertedExp, err)
+	}
+	if _, err := history.Redo(dbConn, expeditionRecord.ID); err != nil {
+		testingContext.Fatalf("Redo StartScopedTx: %v", err)
+	}
+	restartedExp, err := expedition.Get(dbConn, expeditionRecord.ID)
+	if err != nil || restartedExp.CommanderScope != expedition.ScopeSelected || !slices.Equal(restartedExp.CommanderProfileIDs, []int64{mainProfileID}) {
+		testingContext.Fatalf("expected selected scope restored on redo, got %+v (%v)", restartedExp, err)
+	}
+
+	// OverrideCarrierStopArrival undo restores cascaded fc_arrived flags and cleared active_carrier_route.
+	rows, err := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if err != nil || len(rows) != 4 {
+		testingContext.Fatalf("ListRows: len=%d err=%v", len(rows), err)
+	}
+	sysARow, sysBRow, sysCRow := rows[1], rows[2], rows[3]
+	fcStopTrue := true
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: sysARow.ID, FCStop: &fcStopTrue}); err != nil {
+		testingContext.Fatalf("enable SysA FCStop: %v", err)
+	}
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: sysBRow.ID, FCStop: &fcStopTrue}); err != nil {
+		testingContext.Fatalf("enable SysB FCStop: %v", err)
+	}
+	routeState := expedition.ActiveCarrierRouteState{
+		ExpeditionID: expeditionRecord.ID,
+		TargetRowID:  sysARow.ID,
+		Route: expedition.CarrierRouteResult{
+			Origin:      "Sol",
+			Destination: "SysA",
+			TotalJumps:  1,
+			Jumps:       []expedition.CarrierRouteJump{{SystemName: "SysA", DistanceLy: 100, TritiumUsed: 30}},
+		},
+	}
+	if err := expedition.SaveActiveCarrierRoute(dbConn, routeState); err != nil {
+		testingContext.Fatalf("SaveActiveCarrierRoute: %v", err)
+	}
+
+	beforeOverride := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	if _, err := expedition.SetCarrierArrivalOverrideTx(dbConn, sysBRow.ID, true); err != nil {
+		testingContext.Fatalf("SetCarrierArrivalOverrideTx: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Override Carrier Arrival", Snapshot: beforeOverride})
+
+	if activeRoute := mustGetActiveCarrierRoute(testingContext, dbConn, expeditionRecord.ID); activeRoute != nil {
+		testingContext.Fatalf("expected active carrier route cleared after override, got %+v", activeRoute)
+	}
+	undoOverride, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoOverride.Applied || !undoOverride.CarrierRouteRestored {
+		testingContext.Fatalf("Undo override: outcome=%+v err=%v", undoOverride, err)
+	}
+	afterUndoSysA := mustGetRow(testingContext, dbConn, sysARow.ID)
+	afterUndoSysB := mustGetRow(testingContext, dbConn, sysBRow.ID)
+	restoredRoute := mustGetActiveCarrierRoute(testingContext, dbConn, expeditionRecord.ID)
+	if afterUndoSysA.FCArrived || afterUndoSysB.FCArrived || restoredRoute == nil || restoredRoute.TargetRowID != sysARow.ID {
+		testingContext.Fatalf("expected cascaded fc_arrived and route restored, got A=%v B=%v route=%+v",
+			afterUndoSysA.FCArrived, afterUndoSysB.FCArrived, restoredRoute)
+	}
+
+	// Active expedition undo re-evaluates a live FSDJump ingested after the snapshot so live progress is never lost.
+	beforeNote := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	sysCNote := "Temporary note"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: sysCRow.ID, Notes: &sysCNote}); err != nil {
+		testingContext.Fatalf("UpdateRowTx SysC note: %v", err)
+	}
+	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Edit Notes", Snapshot: beforeNote})
+
+	ingestJournalLines(testingContext, dbConn, []string{
+		`{"timestamp":"2026-04-03T11:00:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2026-04-03T11:10:00Z","event":"FSDJump","StarSystem":"SysB","SystemAddress":1003,"StarPos":[200,0,0],"JumpDist":100.0}`,
+	})
+	if changed, err := expedition.ReevaluateTx(dbConn, expeditionRecord.ID); err != nil || !changed {
+		testingContext.Fatalf("ReevaluateTx after live FSDJump: changed=%v err=%v", changed, err)
+	}
+
+	undoLiveNote, err := history.Undo(dbConn, expeditionRecord.ID)
+	if err != nil || !undoLiveNote.Applied {
+		testingContext.Fatalf("Undo note after live FSDJump: outcome=%+v err=%v", undoLiveNote, err)
+	}
+	finalSysB := mustGetRow(testingContext, dbConn, sysBRow.ID)
+	finalSysC := mustGetRow(testingContext, dbConn, sysCRow.ID)
+	if finalSysB.VisitedAt != "2026-04-03T11:10:00Z" || finalSysC.Notes != "" {
+		testingContext.Fatalf("expected live SysB visit preserved and SysC note reverted, got SysB.VisitedAt=%q SysC.Notes=%q",
+			finalSysB.VisitedAt, finalSysC.Notes)
+	}
+	if undoLiveNote.ChangedEvents != events.NewAppSet(events.AppExpeditionPlanChanged) {
+		testingContext.Fatalf("expected ONLY AppExpeditionPlanChanged when live visit stayed identical, got %v", undoLiveNote.ChangedEvents.Names())
+	}
+}
+
+func TestUndoHistoryCapacityRedoClearIsolationAndClearAll(testingContext *testing.T) {
+	dbConn := openExpeditionTestDB(testingContext)
+	expA, rowA := createExpeditionWithOriginRow(testingContext, dbConn, "Expedition A", "")
+	expB, rowB := createExpeditionWithOriginRow(testingContext, dbConn, "Expedition B", "")
+
+	history := expedition.NewUndoHistory(3)
+
+	// Push 4 edits on expA to verify oldest entry eviction at capacity 3.
+	for step := 1; step <= 4; step++ {
+		before := mustCaptureSnapshot(testingContext, dbConn, expA.ID)
+		note := string(rune('A' + step - 1))
+		if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: rowA.ID, Notes: &note}); err != nil {
+			testingContext.Fatalf("UpdateRowTx expA step %d: %v", step, err)
+		}
+		history.Push(expA.ID, expedition.UndoEntry{Label: "Edit " + note, Snapshot: before})
+	}
+
+	// Push 1 edit on expB to verify per-expedition stack isolation.
+	beforeB := mustCaptureSnapshot(testingContext, dbConn, expB.ID)
+	noteB := "Isolated B"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: rowB.ID, Notes: &noteB}); err != nil {
+		testingContext.Fatalf("UpdateRowTx expB: %v", err)
+	}
+	history.Push(expB.ID, expedition.UndoEntry{Label: "Edit B", Snapshot: beforeB})
+
+	for expectedRemaining := 2; expectedRemaining >= 0; expectedRemaining-- {
+		outcome, err := history.Undo(dbConn, expA.ID)
+		if err != nil || !outcome.Applied {
+			testingContext.Fatalf("Undo expA (remaining %d): outcome=%+v err=%v", expectedRemaining, outcome, err)
+		}
+		if outcome.CanUndo != (expectedRemaining > 0) || !outcome.CanRedo {
+			testingContext.Fatalf("unexpected canUndo/canRedo at remaining %d: %+v", expectedRemaining, outcome)
+		}
+	}
+	fourthUndo, err := history.Undo(dbConn, expA.ID)
+	if err != nil || fourthUndo.Applied {
+		testingContext.Fatalf("expected capacity eviction after 3 undos, got outcome=%+v err=%v", fourthUndo, err)
+	}
+	reloadedA := mustGetRow(testingContext, dbConn, rowA.ID)
+	if reloadedA.Notes != "A" {
+		testingContext.Fatalf("expected expA note 'A' after capacity limit, got %q", reloadedA.Notes)
+	}
+
+	canUndoB, canRedoB := history.CanUndoRedo(expB.ID)
+	if !canUndoB || canRedoB {
+		testingContext.Fatalf("expected expB stack isolated (true, false), got (%v, %v)", canUndoB, canRedoB)
+	}
+
+	beforeBranch := mustCaptureSnapshot(testingContext, dbConn, expA.ID)
+	branchNote := "Branch"
+	if _, err := expedition.UpdateRowTx(dbConn, expedition.RowPatch{ID: rowA.ID, Notes: &branchNote}); err != nil {
+		testingContext.Fatalf("UpdateRowTx branch: %v", err)
+	}
+	history.Push(expA.ID, expedition.UndoEntry{Label: "Branch", Snapshot: beforeBranch})
+	if canUndoA, canRedoA := history.CanUndoRedo(expA.ID); !canUndoA || canRedoA {
+		testingContext.Fatalf("expected redo stack cleared on forward push, got canUndo=%v canRedo=%v", canUndoA, canRedoA)
+	}
+
+	history.ClearAll()
+	for _, expID := range []int64{expA.ID, expB.ID} {
+		if canUndo, canRedo := history.CanUndoRedo(expID); canUndo || canRedo {
+			testingContext.Fatalf("expected expedition %d cleared after ClearAll, got (%v, %v)", expID, canUndo, canRedo)
+		}
+		if outcome, err := history.Undo(dbConn, expID); err != nil || outcome.Applied {
+			testingContext.Fatalf("Undo after ClearAll(%d): outcome=%+v err=%v", expID, outcome, err)
+		}
+	}
+}

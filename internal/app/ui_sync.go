@@ -173,7 +173,10 @@ func (app *App) publishApp(expeditionID int64, appEvents ...events.AppEvent) {
 	app.emitDataChanged(expeditionID, bus.PublishApp(appEvents...))
 }
 
-func (app *App) publishAppForDB(targetDB *sql.DB, expeditionID int64, appEvents ...events.AppEvent) {
+func (app *App) publishAppSetForDB(targetDB *sql.DB, expeditionID int64, appEvents events.AppEventSet) {
+	if appEvents.IsEmpty() {
+		return
+	}
 	app.dbMu.RLock()
 	var bus *projection.Bus
 	if app.db == targetDB && targetDB != nil {
@@ -183,10 +186,14 @@ func (app *App) publishAppForDB(targetDB *sql.DB, expeditionID int64, appEvents 
 	if bus == nil {
 		return
 	}
-	targets := bus.PublishApp(appEvents...)
+	targets := bus.Publish(projection.Triggers{App: appEvents})
 	if app.isCurrentDB(targetDB) {
 		app.emitDataChanged(expeditionID, targets)
 	}
+}
+
+func (app *App) publishAppForDB(targetDB *sql.DB, expeditionID int64, appEvents ...events.AppEvent) {
+	app.publishAppSetForDB(targetDB, expeditionID, events.NewAppSet(appEvents...))
 }
 
 func (app *App) isLiveSyncPaused() bool {

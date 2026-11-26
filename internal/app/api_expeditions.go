@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"strings"
 
 	"planisphere/internal/core/events"
@@ -73,9 +74,17 @@ func (app *App) UpdateExpedition(id int64, name, description string) error {
 // UpdateExpeditionCarrierConfig updates the expedition's Fleet Carrier vessel
 // classification ("player" or "squadron") and weekly upkeep cost in credits.
 func (app *App) UpdateExpeditionCarrierConfig(id int64, carrierType string, weeklyUpkeep int64) error {
-	if updateError := app.withReadyReadLock(func() error {
-		return expedition.UpdateCarrierConfig(app.db, id, carrierType, weeklyUpkeep)
-	}); updateError != nil {
+	applied, updateError := app.recordExpeditionMetaMutation(id, "Update Carrier Config", func(targetDB *sql.DB, before expedition.Expedition) (bool, error) {
+		if execError := expedition.UpdateCarrierConfig(targetDB, id, carrierType, weeklyUpkeep); execError != nil {
+			return false, execError
+		}
+		after, getError := expedition.Get(targetDB, id)
+		if getError != nil {
+			return false, getError
+		}
+		return before.CarrierType != after.CarrierType || before.CarrierWeeklyUpkeep != after.CarrierWeeklyUpkeep, nil
+	})
+	if updateError != nil || !applied {
 		return updateError
 	}
 	app.publishApp(id, events.AppExpeditionPlanChanged, events.AppAdjustmentsChanged)
@@ -86,24 +95,27 @@ func (app *App) UpdateExpeditionCarrierConfig(id int64, carrierType string, week
 func (app *App) DeleteExpedition(id int64) error {
 	wasActive := false
 	nextActiveID := int64(0)
-	if deleteError := app.withReadyReadLock(func() error {
-		wasActive = settings.ActiveExpeditionID(app.db) == id
-		if expeditionDeleteError := expedition.Delete(app.db, id); expeditionDeleteError != nil {
-			return expeditionDeleteError
+	if deleteError := app.runUndoExclusive(func() error {
+		if err := app.withReadyReadLock(func() error {
+			wasActive = settings.ActiveExpeditionID(app.db) == id
+			if expeditionDeleteError := expedition.Delete(app.db, id); expeditionDeleteError != nil {
+				return expeditionDeleteError
+			}
+			if !wasActive {
+				return nil
+			}
+			remainingExpeditions, listError := expedition.List(app.db)
+			if listError != nil {
+				return listError
+			}
+			if len(remainingExpeditions) > 0 {
+				nextActiveID = remainingExpeditions[0].ID
+			}
+			return settings.SetActiveExpeditionID(app.db, nextActiveID)
+		}); err != nil {
+			return err
 		}
-		if !wasActive {
-			return nil
-		}
-		remainingExpeditions, listError := expedition.List(app.db)
-		if listError != nil {
-			return listError
-		}
-		if len(remainingExpeditions) > 0 {
-			nextActiveID = remainingExpeditions[0].ID
-		}
-		if setError := settings.SetActiveExpeditionID(app.db, nextActiveID); setError != nil {
-			return setError
-		}
+		app.clearExpeditionUndoHistory(id)
 		return nil
 	}); deleteError != nil {
 		return deleteError
@@ -185,16 +197,12 @@ func (app *App) gecLookup(name string, address int64) *expedition.GECRef {
 // rowType is "waypoint" or "region"; regionID is used for region headers.
 func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID int) (expedition.Row, error) {
 	var newRow expedition.Row
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
+	applied, err := app.recordUndoableMutation(expeditionID, rowActionLabel("Add", rowType), func(targetDB *sql.DB) (bool, error) {
 		var insertError error
-		newRow, insertError = expedition.InsertRowTx(app.db, expeditionID, afterRowID, rowType, regionID)
-		return insertError
-	}(); err != nil {
+		newRow, insertError = expedition.InsertRowTx(targetDB, expeditionID, afterRowID, rowType, regionID)
+		return insertError == nil, insertError
+	})
+	if err != nil || !applied {
 		return newRow, err
 	}
 	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
@@ -204,57 +212,53 @@ func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID 
 // UpdateRow applies a partial update to a row. Changing the system name
 // triggers asynchronous coordinate resolution and visit re-evaluation.
 func (app *App) UpdateRow(patch expedition.RowPatch) error {
-	var changed bool
+	var systemChanged, reevalChanged bool
 	var rowItem expedition.Row
-	targetDB := app.currentDB()
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		targetDB = app.db
+	var targetDB *sql.DB
+	applied, err := app.recordRowUndoableMutation(patch.ID, func(initialRow expedition.Row) string { return undoLabelForRowPatch(patch, initialRow) }, func(activeDB *sql.DB, initialRow expedition.Row) (bool, error) {
+		targetDB = activeDB
 		var updateError error
-		changed, updateError = expedition.UpdateRowTx(targetDB, patch)
-		if updateError != nil {
-			return updateError
+		if systemChanged, updateError = expedition.UpdateRowTx(activeDB, patch); updateError != nil {
+			return false, updateError
 		}
 		var getError error
-		rowItem, getError = expedition.GetRow(targetDB, patch.ID)
-		if getError != nil {
-			return getError
+		if rowItem, getError = expedition.GetRow(activeDB, patch.ID); getError != nil {
+			return false, getError
 		}
-		if changed && rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
+		if systemChanged && rowItem.SystemName != "" && strings.TrimSpace(rowItem.POIName) == "" {
 			if poiName := app.applyMissingPOIFromGEC(rowItem.ID, rowItem.SystemName, rowItem.SystemAddress); poiName != "" {
 				rowItem.POIName = poiName
 			}
 		}
-		return nil
-	}(); err != nil {
+		if systemChanged {
+			reevalChanged = reevaluateTxLogged(activeDB, rowItem.ExpeditionID)
+		}
+		return rowItem != initialRow || systemChanged || reevalChanged, nil
+	})
+	if err != nil || !applied {
 		return err
 	}
-	if changed {
-		reevalChanged := app.reevaluateForDB(targetDB, rowItem.ExpeditionID)
-		if rowItem.SystemName != "" {
-			app.resolveRowAsync(targetDB, rowItem, true)
-		}
-		if reevalChanged {
-			app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
-		} else {
-			app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
-		}
-		return nil
+	if systemChanged && rowItem.SystemName != "" {
+		app.resolveRowAsync(targetDB, rowItem, true)
 	}
-	app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+	if systemChanged && reevalChanged {
+		app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+	} else {
+		app.publishAppForDB(targetDB, rowItem.ExpeditionID, events.AppExpeditionPlanChanged)
+	}
 	return nil
 }
 
 // SetExpeditionFlightMode updates the per-expedition active flight mode for a
 // planning or active expedition.
 func (app *App) SetExpeditionFlightMode(expeditionID, modeID int64) error {
-	if setError := app.withReadyReadLock(func() error {
-		return expedition.SetActiveModeTx(app.db, expeditionID, modeID)
-	}); setError != nil {
+	applied, setError := app.recordExpeditionMetaMutation(expeditionID, "Change Flight Mode", func(targetDB *sql.DB, before expedition.Expedition) (bool, error) {
+		if execError := expedition.SetActiveModeTx(targetDB, expeditionID, modeID); execError != nil {
+			return false, execError
+		}
+		return before.ActiveModeID != modeID, nil
+	})
+	if setError != nil || !applied {
 		return setError
 	}
 	app.publishApp(expeditionID, events.AppExpeditionModesChanged)
@@ -265,17 +269,10 @@ func (app *App) SetExpeditionFlightMode(expeditionID, modeID int64) error {
 // on a visited leg, it also overwrites all subsequent visited legs without
 // changing the expedition's active flight mode.
 func (app *App) SetLegMode(rowID, modeID int64, cascade bool) error {
-	var expeditionID int64
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		var setModeError error
-		expeditionID, setModeError = expedition.SetLegModeTx(app.db, rowID, modeID, cascade)
-		return setModeError
-	}(); err != nil {
+	expeditionID, applied, err := app.recordRowSnapshotDiff(rowID, "Change Leg Mode", func(targetDB *sql.DB) (int64, error) {
+		return expedition.SetLegModeTx(targetDB, rowID, modeID, cascade)
+	})
+	if err != nil || !applied {
 		return err
 	}
 	app.publishApp(expeditionID, events.AppExpeditionModesChanged)
@@ -286,17 +283,10 @@ func (app *App) SetLegMode(rowID, modeID int64, cascade bool) error {
 // on rowID and cascades the status across preceding or subsequent carrier stops
 // to preserve the arrived-before-pending order invariant.
 func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
-	var expeditionID int64
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		var overrideError error
-		expeditionID, overrideError = expedition.SetCarrierArrivalOverrideTx(app.db, rowID, arrived)
-		return overrideError
-	}(); err != nil {
+	expeditionID, applied, err := app.recordRowSnapshotDiff(rowID, "Override Carrier Arrival", func(targetDB *sql.DB) (int64, error) {
+		return expedition.SetCarrierArrivalOverrideTx(targetDB, rowID, arrived)
+	})
+	if err != nil || !applied {
 		return err
 	}
 	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
@@ -306,23 +296,19 @@ func (app *App) OverrideCarrierStopArrival(rowID int64, arrived bool) error {
 // DeleteRow removes a row.
 func (app *App) DeleteRow(rowID int64) error {
 	var expeditionID int64
-	var deletedVisited bool
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		if existingRow, getError := expedition.GetRow(app.db, rowID); getError == nil {
-			deletedVisited = existingRow.IsWaypoint() && existingRow.VisitedAt != ""
-		}
+	var deletedVisited, reevalChanged bool
+	applied, err := app.recordRowUndoableMutation(rowID, func(initialRow expedition.Row) string { return rowActionLabel("Delete", initialRow.RowType) }, func(targetDB *sql.DB, initialRow expedition.Row) (bool, error) {
+		deletedVisited = initialRow.IsWaypoint() && initialRow.VisitedAt != ""
 		var deleteRowError error
-		expeditionID, deleteRowError = expedition.DeleteRowTx(app.db, rowID)
-		return deleteRowError
-	}(); err != nil {
+		if expeditionID, deleteRowError = expedition.DeleteRowTx(targetDB, rowID); deleteRowError != nil {
+			return false, deleteRowError
+		}
+		reevalChanged = reevaluateTxLogged(targetDB, expeditionID)
+		return true, nil
+	})
+	if err != nil || !applied {
 		return err
 	}
-	reevalChanged := app.reevaluate(expeditionID)
 	if deletedVisited || reevalChanged {
 		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
 	} else {
@@ -334,33 +320,31 @@ func (app *App) DeleteRow(rowID int64) error {
 // MoveRow moves a row to the zero-based index toIndex.
 func (app *App) MoveRow(rowID int64, toIndex int) error {
 	var expeditionID int64
-	var rowItem expedition.Row
-	if err := func() error {
-		app.dbMu.RLock()
-		defer app.dbMu.RUnlock()
-		if readyError := app.ready(); readyError != nil {
-			return readyError
-		}
-		var getError error
-		rowItem, getError = expedition.GetRow(app.db, rowID)
-		if getError != nil {
-			return getError
-		}
+	var isWaypoint, reevalChanged bool
+	applied, err := app.recordRowUndoableMutation(rowID, func(initialRow expedition.Row) string { return rowActionLabel("Move", initialRow.RowType) }, func(targetDB *sql.DB, initialRow expedition.Row) (bool, error) {
+		isWaypoint = initialRow.RowType == expedition.RowWaypoint
 		var moveRowError error
-		expeditionID, moveRowError = expedition.MoveRowTx(app.db, rowID, toIndex)
-		return moveRowError
-	}(); err != nil {
+		if expeditionID, moveRowError = expedition.MoveRowTx(targetDB, rowID, toIndex); moveRowError != nil {
+			return false, moveRowError
+		}
+		movedRow, getError := expedition.GetRow(targetDB, rowID)
+		if getError != nil {
+			return false, getError
+		}
+		moved := movedRow.Position != initialRow.Position || movedRow.FCArrived != initialRow.FCArrived
+		if isWaypoint && moved {
+			reevalChanged = reevaluateTxLogged(targetDB, expeditionID)
+		}
+		return moved, nil
+	})
+	if err != nil || !applied {
 		return err
 	}
-	if rowItem.RowType == expedition.RowWaypoint {
-		if app.reevaluate(expeditionID) {
-			app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
-		} else {
-			app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
-		}
-		return nil
+	if isWaypoint && reevalChanged {
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionModesChanged)
+	} else {
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	}
-	app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
 	return nil
 }
 
@@ -453,8 +437,12 @@ func (app *App) GetStartCandidates(expeditionID int64) (StartCandidates, error) 
 	return StartCandidates{SystemName: systemName, Visits: visits}, startCandidatesError
 }
 
-func (app *App) lifecycle(expeditionID int64, action func() error) error {
-	if err := app.withReadyReadLock(action); err != nil {
+func (app *App) lifecycle(expeditionID int64, label string, action func(targetDB *sql.DB) error) error {
+	applied, err := app.recordUndoableMutation(expeditionID, label, func(targetDB *sql.DB) (bool, error) {
+		err := action(targetDB)
+		return err == nil, err
+	})
+	if err != nil || !applied {
 		return err
 	}
 	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
@@ -465,9 +453,11 @@ func (app *App) lifecycle(expeditionID int64, action func() error) error {
 // (ISO-8601 UTC), applies initialModeID when positive, and retroactively
 // replays history from that moment.
 func (app *App) StartExpedition(expeditionID int64, timestamp string, initialModeID int64) error {
-	if err := app.withReadyReadLock(func() error {
-		return expedition.StartTx(app.db, expeditionID, timestamp, initialModeID)
-	}); err != nil {
+	applied, err := app.recordUndoableMutation(expeditionID, "Engage Expedition", func(targetDB *sql.DB) (bool, error) {
+		err := expedition.StartTx(targetDB, expeditionID, timestamp, initialModeID)
+		return err == nil, err
+	})
+	if err != nil || !applied {
 		return err
 	}
 	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
@@ -480,12 +470,12 @@ func (app *App) StartExpedition(expeditionID int64, timestamp string, initialMod
 // departure, falling back to the waypoint's arrival timestamp only when no
 // in-system exploration occurred.
 func (app *App) CompleteExpedition(expeditionID int64) error {
-	return app.lifecycle(expeditionID, func() error { return expedition.CompleteTx(app.db, expeditionID) })
+	return app.lifecycle(expeditionID, "Complete Expedition", func(targetDB *sql.DB) error { return expedition.CompleteTx(targetDB, expeditionID) })
 }
 
 // ReopenExpedition makes a completed expedition active again.
 func (app *App) ReopenExpedition(expeditionID int64) error {
-	return app.lifecycle(expeditionID, func() error { return expedition.ReopenTx(app.db, expeditionID) })
+	return app.lifecycle(expeditionID, "Reopen Expedition", func(targetDB *sql.DB) error { return expedition.ReopenTx(targetDB, expeditionID) })
 }
 
 // GetWaypointDetails returns the expandable drawer content for a waypoint.

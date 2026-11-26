@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
@@ -56,6 +58,31 @@ func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
 	return expedition.ClearActiveCarrierRoute(app.db, expeditionID)
 }
 
+// SaveActiveCarrierRouteWithUndo persists state for the expedition and records
+// a session undo entry when the serialized route JSON changes.
+func (app *App) SaveActiveCarrierRouteWithUndo(state ActiveCarrierRouteState, label string) error {
+	if state.ExpeditionID <= 0 {
+		return fmt.Errorf("invalid expedition ID: %d", state.ExpeditionID)
+	}
+	trimmedLabel := strings.TrimSpace(label)
+	if trimmedLabel == "" {
+		trimmedLabel = "Update Carrier Route"
+	}
+	_, saveError := app.recordUndoableMutation(state.ExpeditionID, trimmedLabel, func(targetDB *sql.DB) (bool, error) {
+		return expedition.SaveActiveCarrierRouteIfChanged(targetDB, state)
+	})
+	return saveError
+}
+
+// ClearActiveCarrierRouteWithUndo deletes any active carrier route for expeditionID
+// and records a session undo entry when a route existed.
+func (app *App) ClearActiveCarrierRouteWithUndo(expeditionID int64) error {
+	_, clearError := app.recordUndoableMutation(expeditionID, "Clear Carrier Route", func(targetDB *sql.DB) (bool, error) {
+		return expedition.ClearActiveCarrierRouteIfPresent(targetDB, expeditionID)
+	})
+	return clearError
+}
+
 // GetCarrierLastLocation returns the system name of the most recent known Fleet Carrier location.
 func (app *App) GetCarrierLastLocation() (string, error) {
 	app.dbMu.RLock()
@@ -100,12 +127,52 @@ func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
 // RecordCarrierJump logs a single completed expedition carrier jump (from Spansh hop completion or Manual Mode)
 // into the expedition's manual carrier adjustments.
 func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritium int) error {
-	if err := app.withReadyReadLock(func() error {
-		return expedition.RecordCarrierJump(app.db, expeditionID, distanceLy, tritium)
-	}); err != nil {
+	applied, err := app.recordUndoableMutation(expeditionID, "Log Carrier Jump", func(targetDB *sql.DB) (bool, error) {
+		err := expedition.RecordCarrierJump(targetDB, expeditionID, distanceLy, tritium)
+		return err == nil, err
+	})
+	if err != nil {
 		return err
 	}
-	app.publishApp(expeditionID, events.AppAdjustmentsChanged)
+	if applied {
+		app.publishApp(expeditionID, events.AppAdjustmentsChanged)
+	}
+	return nil
+}
+
+// RecordCarrierJumpAndSaveRoute atomically records a carrier jump and persists
+// the updated active carrier route state under a single session undo entry.
+func (app *App) RecordCarrierJumpAndSaveRoute(expeditionID int64, distanceLy float64, tritium int, state ActiveCarrierRouteState) error {
+	applied, err := app.recordUndoableMutation(expeditionID, "Log Carrier Jump", func(targetDB *sql.DB) (bool, error) {
+		err := expedition.RecordCarrierJumpAndSaveRouteTx(targetDB, expeditionID, distanceLy, tritium, state)
+		return err == nil, err
+	})
+	if err != nil {
+		return err
+	}
+	if applied {
+		app.publishApp(expeditionID, events.AppAdjustmentsChanged)
+	}
+	return nil
+}
+
+// CompleteCarrierRouteArrival atomically logs any final carrier jump, clears the
+// active carrier route, and marks targetRowID arrived when positive under one undo entry.
+func (app *App) CompleteCarrierRouteArrival(expeditionID int64, targetRowID int64, distanceLy float64, tritium int) error {
+	applied, err := app.recordUndoableSnapshotDiff(expeditionID, "Complete Carrier Arrival", func(targetDB *sql.DB) error {
+		return expedition.CompleteCarrierRouteArrivalTx(targetDB, expeditionID, targetRowID, distanceLy, tritium)
+	})
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return nil
+	}
+	if distanceLy > 0 || tritium > 0 {
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppAdjustmentsChanged)
+	} else {
+		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
+	}
 	return nil
 }
 

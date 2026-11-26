@@ -22,15 +22,17 @@ import {
   type PlannerScrollTarget,
 } from './useInitialExpeditionScroll'
 import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMutations'
+import { usePlannerUndo } from './usePlannerUndo'
 
 const SEARCH_HIGHLIGHT_DURATION_MS = 2000
 
 /**
  * ExpeditionPlannerProps defines the active expedition plan state, database
  * path key, journal archive revision token, external-link visibility settings,
- * targeted row scroll and visit-search callbacks (`scrollTarget`,
- * `onScrollTargetConsumed`, `onSearchSystemVisits`), optimistic update
- * handlers, lifecycle modal triggers, and carrier router trigger count.
+ * modal-open undo shortcut suppression (`hasModalOpen`), targeted row scroll
+ * and visit-search callbacks (`scrollTarget`, `onScrollTargetConsumed`,
+ * `onSearchSystemVisits`), optimistic update handlers, lifecycle modal
+ * triggers, and carrier router trigger count.
  */
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
@@ -43,6 +45,7 @@ export interface ExpeditionPlannerProps {
   externalLinkGec?: string
   manualPlotterRequestCount?: number
   exportEnabled?: boolean
+  hasModalOpen?: boolean
   scrollTarget?: PlannerScrollTarget | null
   onScrollTargetConsumed?: () => void
   onSearchSystemVisits?: (systemName: string) => void
@@ -69,6 +72,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   externalLinkGec,
   manualPlotterRequestCount = 0,
   exportEnabled = false,
+  hasModalOpen = false,
   scrollTarget = null,
   onScrollTargetConsumed,
   onSearchSystemVisits,
@@ -149,7 +153,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     manualPlotterRequestCount,
     onBusyChange,
     busyTracker: sharedBusyTracker,
-    onSetFcArrived: mutations.setFcArrived,
     onCarrierRouteOpenChange,
   })
 
@@ -157,7 +160,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     activeCarrierRoute: carrierRoute.activeCarrierRoute,
     isManualCarrierRoute: carrierRoute.isManualCarrierRoute,
     routedCarrierStopIndex: carrierRoute.routedCarrierStopIndex,
-    onCancelCarrierRoute: carrierRoute.handleCancelCarrierRoute,
+    onCancelCarrierRoute: carrierRoute.clearLocalCarrierRoute,
   }
 
   const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
@@ -226,6 +229,17 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     expandedRowIds: drawerState.expandedRowIds,
     scrollContainerRef,
     onMoveRow: mutations.handleMoveRow,
+  })
+
+  const { undoStatusToast, dismissUndoStatusToast } = usePlannerUndo({
+    expeditionId: plan?.expedition?.id ?? 0,
+    disabled:
+      hasModalOpen ||
+      mutations.confirmState !== null ||
+      carrierRoute.routePrompt !== null ||
+      rowDrag.draggedIndex !== null,
+    busyTracker: sharedBusyTracker,
+    onReloadCarrierRoute: carrierRoute.reloadPersistedCarrierRoute,
   })
 
   const tableColumns = useMemo(
@@ -455,6 +469,19 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
           onConfirm={() => void mutations.handleConfirmModalAction()}
           onCancel={() => mutations.setConfirmState(null)}
         />
+      )}
+
+      {undoStatusToast && (
+        <button
+          type="button"
+          role="status"
+          aria-live="polite"
+          onClick={dismissUndoStatusToast}
+          title="Click to dismiss"
+          className="fixed bottom-4 right-5 z-40 px-3 py-1.5 border border-ed-amber/80 border-l-3 border-l-ed-amber bg-ed-card/95 shadow-xl font-mono-tabular text-[11px] font-bold uppercase tracking-wider text-ed-text-main cursor-pointer select-none"
+        >
+          {undoStatusToast}
+        </button>
       )}
     </div>
   )

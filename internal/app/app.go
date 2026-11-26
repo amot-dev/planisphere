@@ -26,6 +26,7 @@ import (
 	"planisphere/internal/sources/edsm"
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
 	"planisphere/internal/version"
 )
@@ -112,6 +113,7 @@ type App struct {
 
 	exportSnapshotMu   sync.Mutex
 	lastExportSnapshot *exporter.ExpeditionExport
+	undoHistory        *expedition.UndoHistory
 
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
@@ -329,6 +331,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	app.watcher.SetPaused(app.isLiveSyncPaused())
 	app.clearDeferredTargets()
 	app.clearExportSnapshot()
+	app.clearUndoHistoryLocked()
 	app.resolver = app.newCoordinateResolver(dbConn)
 	app.gec = gec.NewCatalog(dbConn)
 	app.wireProjections(dbConn)
