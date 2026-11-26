@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
 import { expedition, modes } from '../../../api/models'
-import type { NextCarrierStopEntry } from '../../../domain/carrierRouting'
 import type { ExternalLinkVisibilityConfig } from '../../../domain/externalLinks'
+import type { NextCarrierStopEntry } from '../../carrier/useCarrierRoute'
 import {
   computeRegionBorderColors,
   type PlannerFrontierIndices,

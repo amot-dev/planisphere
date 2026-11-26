@@ -22,8 +22,8 @@ export function BrowseWaypointImportFile() {
   return window['go']['app']['App']['BrowseWaypointImportFile']();
 }
 
-export function ClearActiveCarrierRoute(arg1) {
-  return window['go']['app']['App']['ClearActiveCarrierRoute'](arg1);
+export function CancelCarrierRoutePlot() {
+  return window['go']['app']['App']['CancelCarrierRoutePlot']();
 }
 
 export function ClearActiveCarrierRouteWithUndo(arg1) {
@@ -44,6 +44,10 @@ export function CompleteExpedition(arg1) {
 
 export function CompleteSetup() {
   return window['go']['app']['App']['CompleteSetup']();
+}
+
+export function CompleteSpanshCarrierJump(arg1) {
+  return window['go']['app']['App']['CompleteSpanshCarrierJump'](arg1);
 }
 
 export function CreateExpedition(arg1, arg2) {
@@ -68,14 +72,6 @@ export function DeleteMode(arg1) {
 
 export function DeleteRow(arg1) {
   return window['go']['app']['App']['DeleteRow'](arg1);
-}
-
-export function GetActiveCarrierRoute(arg1) {
-  return window['go']['app']['App']['GetActiveCarrierRoute'](arg1);
-}
-
-export function GetCarrierDepotInfo() {
-  return window['go']['app']['App']['GetCarrierDepotInfo']();
 }
 
 export function GetCarrierLastLocation() {
@@ -138,12 +134,20 @@ export function ListExpeditions() {
   return window['go']['app']['App']['ListExpeditions']();
 }
 
+export function LogManualCarrierJump(arg1, arg2, arg3) {
+  return window['go']['app']['App']['LogManualCarrierJump'](arg1, arg2, arg3);
+}
+
 export function MergeCommanders(arg1, arg2) {
   return window['go']['app']['App']['MergeCommanders'](arg1, arg2);
 }
 
 export function MoveRow(arg1, arg2) {
   return window['go']['app']['App']['MoveRow'](arg1, arg2);
+}
+
+export function OpenManualCarrierRoute(arg1) {
+  return window['go']['app']['App']['OpenManualCarrierRoute'](arg1);
 }
 
 export function OpenURL(arg1) {
@@ -162,16 +166,20 @@ export function PlotCarrierRoute(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['PlotCarrierRoute'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function PrepareCarrierRoutePrompt(arg1, arg2) {
+  return window['go']['app']['App']['PrepareCarrierRoutePrompt'](arg1, arg2);
+}
+
 export function RecordCarrierJump(arg1, arg2, arg3) {
   return window['go']['app']['App']['RecordCarrierJump'](arg1, arg2, arg3);
 }
 
-export function RecordCarrierJumpAndSaveRoute(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['RecordCarrierJumpAndSaveRoute'](arg1, arg2, arg3, arg4);
-}
-
 export function RedoExpedition(arg1) {
   return window['go']['app']['App']['RedoExpedition'](arg1);
+}
+
+export function RefillCarrierDepot(arg1) {
+  return window['go']['app']['App']['RefillCarrierDepot'](arg1);
 }
 
 export function RefreshGEC() {
@@ -190,12 +198,8 @@ export function ResetCommanderOverrides(arg1) {
   return window['go']['app']['App']['ResetCommanderOverrides'](arg1);
 }
 
-export function SaveActiveCarrierRoute(arg1) {
-  return window['go']['app']['App']['SaveActiveCarrierRoute'](arg1);
-}
-
-export function SaveActiveCarrierRouteWithUndo(arg1, arg2) {
-  return window['go']['app']['App']['SaveActiveCarrierRouteWithUndo'](arg1, arg2);
+export function SaveCarrierManualDraftInputs(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SaveCarrierManualDraftInputs'](arg1, arg2, arg3);
 }
 
 export function SearchWaypoints(arg1) {
@@ -258,12 +262,20 @@ export function SplitCommander(arg1, arg2) {
   return window['go']['app']['App']['SplitCommander'](arg1, arg2);
 }
 
+export function StartCarrierRoute(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['app']['App']['StartCarrierRoute'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function StartExpedition(arg1, arg2, arg3) {
   return window['go']['app']['App']['StartExpedition'](arg1, arg2, arg3);
 }
 
 export function StartExpeditionScoped(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['StartExpeditionScoped'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SwitchCarrierRouteToManual(arg1) {
+  return window['go']['app']['App']['SwitchCarrierRouteToManual'](arg1);
 }
 
 export function UndoExpedition(arg1) {

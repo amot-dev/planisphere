@@ -3,9 +3,9 @@
 import {expedition} from '../models';
 import {app} from '../models';
 import {modes} from '../models';
-import {replay} from '../models';
 import {exporter} from '../models';
 import {stats} from '../models';
+import {replay} from '../models';
 
 export function AddRow(arg1:number,arg2:number,arg3:string,arg4:number):Promise<expedition.Row>;
 
@@ -17,7 +17,7 @@ export function BrowseJournalDir():Promise<string>;
 
 export function BrowseWaypointImportFile():Promise<app.WaypointImportFile>;
 
-export function ClearActiveCarrierRoute(arg1:number):Promise<void>;
+export function CancelCarrierRoutePlot():Promise<void>;
 
 export function ClearActiveCarrierRouteWithUndo(arg1:number):Promise<void>;
 
@@ -28,6 +28,8 @@ export function CompleteCarrierRouteArrival(arg1:number,arg2:number,arg3:number,
 export function CompleteExpedition(arg1:number):Promise<void>;
 
 export function CompleteSetup():Promise<app.Settings>;
+
+export function CompleteSpanshCarrierJump(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
 export function CreateExpedition(arg1:string,arg2:string):Promise<expedition.Expedition>;
 
@@ -40,10 +42,6 @@ export function DeleteExpedition(arg1:number):Promise<void>;
 export function DeleteMode(arg1:number):Promise<void>;
 
 export function DeleteRow(arg1:number):Promise<void>;
-
-export function GetActiveCarrierRoute(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
-
-export function GetCarrierDepotInfo():Promise<replay.CarrierDepotInfo>;
 
 export function GetCarrierLastLocation():Promise<string>;
 
@@ -75,9 +73,13 @@ export function ListCommanderLoadGamesOnDate(arg1:string,arg2:string):Promise<Ar
 
 export function ListExpeditions():Promise<Array<expedition.Expedition>>;
 
+export function LogManualCarrierJump(arg1:number,arg2:number,arg3:number):Promise<expedition.ActiveCarrierRouteState>;
+
 export function MergeCommanders(arg1:string,arg2:string):Promise<app.Settings>;
 
 export function MoveRow(arg1:number,arg2:number):Promise<void>;
+
+export function OpenManualCarrierRoute(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
@@ -87,11 +89,13 @@ export function PickExportSavePath(arg1:string,arg2:string):Promise<string>;
 
 export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string,arg5:number):Promise<expedition.CarrierRouteResult>;
 
+export function PrepareCarrierRoutePrompt(arg1:number,arg2:number):Promise<expedition.CarrierRoutePromptDefaults>;
+
 export function RecordCarrierJump(arg1:number,arg2:number,arg3:number):Promise<void>;
 
-export function RecordCarrierJumpAndSaveRoute(arg1:number,arg2:number,arg3:number,arg4:expedition.ActiveCarrierRouteState):Promise<void>;
-
 export function RedoExpedition(arg1:number):Promise<app.UndoActionResult>;
+
+export function RefillCarrierDepot(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
 export function RefreshGEC():Promise<number>;
 
@@ -101,9 +105,7 @@ export function RescanJournals():Promise<void>;
 
 export function ResetCommanderOverrides(arg1:string):Promise<app.Settings>;
 
-export function SaveActiveCarrierRoute(arg1:expedition.ActiveCarrierRouteState):Promise<void>;
-
-export function SaveActiveCarrierRouteWithUndo(arg1:expedition.ActiveCarrierRouteState,arg2:string):Promise<void>;
+export function SaveCarrierManualDraftInputs(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function SearchWaypoints(arg1:string):Promise<expedition.SearchResponse>;
 
@@ -135,9 +137,13 @@ export function SetupConfigureJournals(arg1:string):Promise<app.IngestStatus>;
 
 export function SplitCommander(arg1:string,arg2:string):Promise<app.Settings>;
 
+export function StartCarrierRoute(arg1:number,arg2:number,arg3:string,arg4:string,arg5:number,arg6:string,arg7:number):Promise<expedition.ActiveCarrierRouteState>;
+
 export function StartExpedition(arg1:number,arg2:string,arg3:number):Promise<void>;
 
 export function StartExpeditionScoped(arg1:number,arg2:string,arg3:number,arg4:string,arg5:Array<number>):Promise<void>;
+
+export function SwitchCarrierRouteToManual(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
 export function UndoExpedition(arg1:number):Promise<app.UndoActionResult>;
 

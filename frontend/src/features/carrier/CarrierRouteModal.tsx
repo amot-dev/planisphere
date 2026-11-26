@@ -42,13 +42,11 @@ export function CarrierRouteModal({
       accent="cyan"
       maxWidth="max-w-md"
       onClose={onClose}
-      closeDisabled={prompt.loading}
       bodyClassName="p-4 space-y-3.5 text-xs overflow-y-auto"
       footer={
         <div className="px-4 py-3 bg-ed-header border-t border-ed-border flex items-center justify-end gap-2 text-xs">
           <button
             type="button"
-            disabled={prompt.loading}
             onClick={onClose}
             className="px-3 py-1.5 text-ed-text-muted hover:text-ed-text-main uppercase font-bold tracking-wider cursor-pointer whitespace-nowrap"
           >

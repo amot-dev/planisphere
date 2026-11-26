@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"planisphere/internal/sources/spansh"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
 	"planisphere/internal/store/settings"
@@ -22,15 +24,6 @@ func mustGetPlan(testingContext *testing.T, testApp *App, expeditionID int64) ex
 		testingContext.Fatalf("GetPlan(%d): %v", expeditionID, planError)
 	}
 	return planView
-}
-
-func mustGetActiveCarrierRoute(testingContext *testing.T, testApp *App, expeditionID int64) *ActiveCarrierRouteState {
-	testingContext.Helper()
-	routeState, routeError := testApp.GetActiveCarrierRoute(expeditionID)
-	if routeError != nil {
-		testingContext.Fatalf("GetActiveCarrierRoute(%d): %v", expeditionID, routeError)
-	}
-	return routeState
 }
 
 func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
@@ -220,10 +213,28 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 
 func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
+	originalSpanshQuery := querySpanshCarrierRoute
+	testingContext.Cleanup(func() { querySpanshCarrierRoute = originalSpanshQuery })
+	querySpanshCarrierRoute = func(_ context.Context, _, _ string, _, depotTritium int) ([]spansh.RouteJump, error) {
+		return []spansh.RouteJump{
+			{SystemName: "Midway", DistanceLy: 480, TritiumUsed: 90, FuelInTank: depotTritium},
+			{SystemName: "Colonia", DistanceLy: 420, TritiumUsed: 80, FuelInTank: depotTritium},
+		}, nil
+	}
+
 	createdExp, err := testApp.CreateExpedition("Carrier Undo", "")
 	if err != nil {
 		testingContext.Fatalf("CreateExpedition: %v", err)
 	}
+
+	// Clearing a non-existent active carrier route or completing an empty no-op arrival pushes nothing.
+	if err := testApp.ClearActiveCarrierRouteWithUndo(createdExp.ID); err != nil {
+		testingContext.Fatalf("ClearActiveCarrierRouteWithUndo absent: %v", err)
+	}
+	if err := testApp.CompleteCarrierRouteArrival(createdExp.ID, 0, 0, 0); err != nil {
+		testingContext.Fatalf("CompleteCarrierRouteArrival no-op: %v", err)
+	}
+
 	plan := mustGetPlan(testingContext, testApp, createdExp.ID)
 	stopRow, err := testApp.AddRow(createdExp.ID, plan.Rows[0].Row.ID, expedition.RowWaypoint, 0)
 	if err != nil {
@@ -235,84 +246,68 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 		testingContext.Fatalf("UpdateRow stop: %v", err)
 	}
 
-	// Clearing a non-existent active carrier route or completing an empty no-op arrival pushes nothing.
-	if err := testApp.ClearActiveCarrierRouteWithUndo(createdExp.ID); err != nil {
-		testingContext.Fatalf("ClearActiveCarrierRouteWithUndo absent: %v", err)
+	plottedState, err := testApp.StartCarrierRoute(createdExp.ID, stopRow.ID, "Sol", "Colonia", 5000, "player", 500)
+	if err != nil || plottedState == nil || plottedState.Route.TotalJumps != 2 {
+		testingContext.Fatalf("StartCarrierRoute: state=%+v err=%v", plottedState, err)
 	}
-	if err := testApp.CompleteCarrierRouteArrival(createdExp.ID, 0, 0, 0); err != nil {
-		testingContext.Fatalf("CompleteCarrierRouteArrival no-op: %v", err)
-	}
-
-	routeHop0 := ActiveCarrierRouteState{
-		ExpeditionID: createdExp.ID,
-		TargetRowID:  stopRow.ID,
-		JumpIndex:    0,
-		Route: CarrierRouteResult{
-			Origin:      "Sol",
-			Destination: "Colonia",
-			TotalJumps:  2,
-			Jumps: []CarrierRouteJump{
-				{SystemName: "Midway", DistanceLy: 480, TritiumUsed: 90},
-				{SystemName: "Colonia", DistanceLy: 420, TritiumUsed: 80},
-			},
-		},
-	}
-	if err := testApp.SaveActiveCarrierRouteWithUndo(routeHop0, "Plot Carrier Route"); err != nil {
-		testingContext.Fatalf("SaveActiveCarrierRouteWithUndo: %v", err)
-	}
-	if err := testApp.SaveActiveCarrierRouteWithUndo(routeHop0, "Plot Carrier Route"); err != nil {
-		testingContext.Fatalf("SaveActiveCarrierRouteWithUndo no-op: %v", err)
+	if _, err := testApp.StartCarrierRoute(createdExp.ID, stopRow.ID, "Sol", "Colonia", 5000, "player", 500); err != nil {
+		testingContext.Fatalf("StartCarrierRoute no-op: %v", err)
 	}
 
-	routeHop1 := routeHop0
-	routeHop1.JumpIndex = 1
-	if err := testApp.RecordCarrierJumpAndSaveRoute(createdExp.ID, 480, 90, routeHop1); err != nil {
-		testingContext.Fatalf("RecordCarrierJumpAndSaveRoute: %v", err)
+	refilledState, err := testApp.RefillCarrierDepot(createdExp.ID)
+	if err != nil || refilledState == nil || refilledState.Route.DepotTritium != 1000 {
+		testingContext.Fatalf("RefillCarrierDepot: state=%+v err=%v", refilledState, err)
 	}
-	if err := testApp.CompleteCarrierRouteArrival(createdExp.ID, stopRow.ID, 420, 80); err != nil {
-		testingContext.Fatalf("CompleteCarrierRouteArrival: %v", err)
+	if undoRefill, undoErr := testApp.UndoExpedition(createdExp.ID); undoErr != nil || !undoRefill.Applied || undoRefill.Label != "Refill Carrier Depot" {
+		testingContext.Fatalf("Undo RefillCarrierDepot: res=%+v err=%v", undoRefill, undoErr)
+	}
+
+	hopState, err := testApp.CompleteSpanshCarrierJump(createdExp.ID)
+	if err != nil || hopState == nil || hopState.JumpIndex != 1 {
+		testingContext.Fatalf("CompleteSpanshCarrierJump hop 1: state=%+v err=%v", hopState, err)
+	}
+	hop1Tritium := hopState.Route.Jumps[1].TritiumUsed
+	finalState, err := testApp.CompleteSpanshCarrierJump(createdExp.ID)
+	if err != nil || finalState != nil {
+		testingContext.Fatalf("CompleteSpanshCarrierJump final arrival: state=%+v err=%v", finalState, err)
 	}
 
 	arrivedPlan := mustGetPlan(testingContext, testApp, createdExp.ID)
 	if arrivedPlan.Expedition.Adjustments.CarrierJumps != 2 || arrivedPlan.Expedition.Adjustments.CarrierDistanceLy != 900 ||
-		arrivedPlan.Expedition.Adjustments.TritiumUsed == nil || *arrivedPlan.Expedition.Adjustments.TritiumUsed != 170 ||
-		!arrivedPlan.Rows[1].Row.FCArrived {
-		testingContext.Fatalf("unexpected arrived state: adj=%+v arrived=%v", arrivedPlan.Expedition.Adjustments, arrivedPlan.Rows[1].Row.FCArrived)
-	}
-	if activeRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID); activeRoute != nil {
-		testingContext.Fatalf("expected active route cleared on arrival, got %+v", activeRoute)
+		arrivedPlan.Expedition.Adjustments.TritiumUsed == nil || *arrivedPlan.Expedition.Adjustments.TritiumUsed != 90+hop1Tritium ||
+		!arrivedPlan.Rows[1].Row.FCArrived || arrivedPlan.ActiveCarrierRoute != nil {
+		testingContext.Fatalf("unexpected arrived state: adj=%+v arrived=%v route=%+v",
+			arrivedPlan.Expedition.Adjustments, arrivedPlan.Rows[1].Row.FCArrived, arrivedPlan.ActiveCarrierRoute)
 	}
 
 	undoArrival, err := testApp.UndoExpedition(createdExp.ID)
-	if err != nil || !undoArrival.Applied || !undoArrival.CarrierRouteRestored || undoArrival.Label != "Complete Carrier Arrival" {
+	if err != nil || !undoArrival.Applied || undoArrival.Label != "Complete Carrier Arrival" {
 		testingContext.Fatalf("Undo arrival: res=%+v err=%v", undoArrival, err)
 	}
 	afterUndoArrivalPlan := mustGetPlan(testingContext, testApp, createdExp.ID)
-	afterUndoArrivalRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID)
 	if afterUndoArrivalPlan.Expedition.Adjustments.CarrierJumps != 1 || afterUndoArrivalPlan.Rows[1].Row.FCArrived ||
-		afterUndoArrivalRoute == nil || afterUndoArrivalRoute.JumpIndex != 1 {
+		afterUndoArrivalPlan.ActiveCarrierRoute == nil || afterUndoArrivalPlan.ActiveCarrierRoute.JumpIndex != 1 {
 		testingContext.Fatalf("unexpected state after undoing arrival: jumps=%d arrived=%v route=%+v",
-			afterUndoArrivalPlan.Expedition.Adjustments.CarrierJumps, afterUndoArrivalPlan.Rows[1].Row.FCArrived, afterUndoArrivalRoute)
+			afterUndoArrivalPlan.Expedition.Adjustments.CarrierJumps, afterUndoArrivalPlan.Rows[1].Row.FCArrived, afterUndoArrivalPlan.ActiveCarrierRoute)
 	}
 
 	undoHop, err := testApp.UndoExpedition(createdExp.ID)
-	if err != nil || !undoHop.Applied || !undoHop.CarrierRouteRestored || undoHop.Label != "Log Carrier Jump" {
+	if err != nil || !undoHop.Applied || undoHop.Label != "Log Carrier Jump" {
 		testingContext.Fatalf("Undo hop: res=%+v err=%v", undoHop, err)
 	}
 	afterUndoHopPlan := mustGetPlan(testingContext, testApp, createdExp.ID)
-	afterUndoHopRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID)
 	if afterUndoHopPlan.Expedition.Adjustments.CarrierJumps != 0 || afterUndoHopPlan.Expedition.Adjustments.TritiumUsed != nil ||
-		afterUndoHopRoute == nil || afterUndoHopRoute.JumpIndex != 0 {
+		afterUndoHopPlan.ActiveCarrierRoute == nil || afterUndoHopPlan.ActiveCarrierRoute.JumpIndex != 0 {
 		testingContext.Fatalf("unexpected state after undoing hop: adj=%+v route=%+v",
-			afterUndoHopPlan.Expedition.Adjustments, afterUndoHopRoute)
+			afterUndoHopPlan.Expedition.Adjustments, afterUndoHopPlan.ActiveCarrierRoute)
 	}
 
 	undoPlot, err := testApp.UndoExpedition(createdExp.ID)
-	if err != nil || !undoPlot.Applied || !undoPlot.CarrierRouteRestored || undoPlot.Label != "Plot Carrier Route" {
+	if err != nil || !undoPlot.Applied || undoPlot.Label != "Start Carrier Route" {
 		testingContext.Fatalf("Undo plot: res=%+v err=%v", undoPlot, err)
 	}
-	if activeRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID); activeRoute != nil {
-		testingContext.Fatalf("expected active route cleared after undoing plot, got %+v", activeRoute)
+	if planAfterUndoPlot := mustGetPlan(testingContext, testApp, createdExp.ID); planAfterUndoPlot.ActiveCarrierRoute != nil {
+		testingContext.Fatalf("expected active route cleared after undoing plot, got %+v", planAfterUndoPlot.ActiveCarrierRoute)
 	}
 
 	// Next undo must revert the row edit (not the no-op CompleteCarrierRouteArrival).
@@ -326,7 +321,7 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 
 	for step := 0; step < 3; step++ {
 		redoRes, redoErr := testApp.RedoExpedition(createdExp.ID)
-		if redoErr != nil || !redoRes.Applied || !redoRes.CarrierRouteRestored {
+		if redoErr != nil || !redoRes.Applied {
 			testingContext.Fatalf("Redo carrier step %d: res=%+v err=%v", step, redoRes, redoErr)
 		}
 	}
@@ -336,18 +331,23 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 			reArrivedPlan.Expedition.Adjustments.CarrierJumps, reArrivedPlan.Rows[1].Row.FCArrived)
 	}
 
-	if err := testApp.SaveActiveCarrierRouteWithUndo(routeHop0, "Plot Carrier Route"); err != nil {
-		testingContext.Fatalf("SaveActiveCarrierRouteWithUndo before clear: %v", err)
+	// Verify OpenManualCarrierRoute, LogManualCarrierJump, and ClearActiveCarrierRouteWithUndo undo/redo cycle.
+	manualRoute, err := testApp.OpenManualCarrierRoute(createdExp.ID)
+	if err != nil || manualRoute == nil || !manualRoute.ManualMode {
+		testingContext.Fatalf("OpenManualCarrierRoute: state=%+v err=%v", manualRoute, err)
+	}
+	if _, err := testApp.LogManualCarrierJump(createdExp.ID, 350.5, 55); err != nil {
+		testingContext.Fatalf("LogManualCarrierJump: %v", err)
 	}
 	if err := testApp.ClearActiveCarrierRouteWithUndo(createdExp.ID); err != nil {
 		testingContext.Fatalf("ClearActiveCarrierRouteWithUndo present: %v", err)
 	}
 	undoClear, err := testApp.UndoExpedition(createdExp.ID)
-	if err != nil || !undoClear.Applied || !undoClear.CarrierRouteRestored || undoClear.Label != "Clear Carrier Route" {
+	if err != nil || !undoClear.Applied || undoClear.Label != "Clear Carrier Route" {
 		testingContext.Fatalf("Undo clear route: res=%+v err=%v", undoClear, err)
 	}
-	if restoredRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID); restoredRoute == nil || restoredRoute.TargetRowID != stopRow.ID {
-		testingContext.Fatalf("expected route restored after undoing ClearActiveCarrierRouteWithUndo, got %+v", restoredRoute)
+	if restoredPlan := mustGetPlan(testingContext, testApp, createdExp.ID); restoredPlan.ActiveCarrierRoute == nil || restoredPlan.ActiveCarrierRoute.ManualLegJumps != 1 {
+		testingContext.Fatalf("expected manual route restored with 1 jump after undoing clear, got %+v", restoredPlan.ActiveCarrierRoute)
 	}
 }
 

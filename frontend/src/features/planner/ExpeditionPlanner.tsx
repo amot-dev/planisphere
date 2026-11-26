@@ -127,7 +127,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     activeCarrierRoute: null,
     isManualCarrierRoute: false,
     routedCarrierStopIndex: -1,
-    onCancelCarrierRoute: () => {},
   })
 
   const onBusyChangeRef = useRef(onBusyChange)
@@ -149,10 +148,12 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
 
   const carrierRoute = useCarrierRoute({
     plan,
-    lastVisitedIndex: frontier.lastVisitedIndex,
+    dbPath,
     manualPlotterRequestCount,
     onBusyChange,
     busyTracker: sharedBusyTracker,
+    onPlanOptimisticUpdate,
+    onRefreshPlan,
     onCarrierRouteOpenChange,
   })
 
@@ -160,7 +161,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     activeCarrierRoute: carrierRoute.activeCarrierRoute,
     isManualCarrierRoute: carrierRoute.isManualCarrierRoute,
     routedCarrierStopIndex: carrierRoute.routedCarrierStopIndex,
-    onCancelCarrierRoute: carrierRoute.clearLocalCarrierRoute,
   }
 
   const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
@@ -239,7 +239,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
       carrierRoute.routePrompt !== null ||
       rowDrag.draggedIndex !== null,
     busyTracker: sharedBusyTracker,
-    onReloadCarrierRoute: carrierRoute.reloadPersistedCarrierRoute,
   })
 
   const tableColumns = useMemo(

@@ -196,24 +196,18 @@ type RowPatch struct {
 }
 
 func validateFCStopAgainstActiveRoute(rows []Row, currentRowIndex int, activeRoute *ActiveCarrierRouteState) error {
-	isManualMode := activeRoute.ManualMode || activeRoute.Route.ManualMode || len(activeRoute.Route.Jumps) == 0
-	if !isManualMode {
-		targetIndex := -1
-		if activeRoute.TargetRowID > 0 {
-			targetIndex = indexOf(rows, activeRoute.TargetRowID)
-		}
-		if targetIndex >= 0 && currentRowIndex <= targetIndex {
-			return errors.New("fleet carrier stop cannot be changed at or before an active routed stop")
+	routedStopIndex := ResolveRoutedCarrierStopIndex(rows, 0, activeRoute)
+	if routedStopIndex < 0 {
+		return nil
+	}
+	if activeRoute.IsManualMode() {
+		if currentRowIndex < routedStopIndex {
+			return errors.New("fleet carrier stop cannot be changed before the active manual carrier stop")
 		}
 		return nil
 	}
-	for i, rowItem := range rows {
-		if rowItem.IsWaypoint() && rowItem.FCStop && !rowItem.FCArrived {
-			if currentRowIndex < i {
-				return errors.New("fleet carrier stop cannot be changed before the active manual carrier stop")
-			}
-			break
-		}
+	if currentRowIndex <= routedStopIndex {
+		return errors.New("fleet carrier stop cannot be changed at or before an active routed stop")
 	}
 	return nil
 }

@@ -146,6 +146,7 @@ func (app *App) SetActiveExpedition(id int64) error {
 	}(); err != nil {
 		return err
 	}
+	app.CancelCarrierRoutePlot()
 	app.kickResolution(id, false)
 	return nil
 }

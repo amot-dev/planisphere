@@ -3,11 +3,10 @@ package app
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 
-	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
 	"planisphere/internal/sources/edsm"
@@ -25,62 +24,51 @@ type CarrierRouteResult = expedition.CarrierRouteResult
 // for an expedition, persisting across application restarts and sessions.
 type ActiveCarrierRouteState = expedition.ActiveCarrierRouteState
 
-// CarrierDepotInfo contains carrier mass and tritium depot telemetry from journal events.
-type CarrierDepotInfo = replay.CarrierDepotInfo
+// CarrierRoutePromptDefaults holds pre-resolved default form values for
+// initiating a Spansh or manual Fleet Carrier route.
+type CarrierRoutePromptDefaults = expedition.CarrierRoutePromptDefaults
 
-// GetActiveCarrierRoute retrieves the persisted active carrier route for an expedition.
-func (app *App) GetActiveCarrierRoute(expeditionID int64) (*ActiveCarrierRouteState, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return nil, readyError
+var querySpanshCarrierRoute = spansh.QueryCarrierRoute
+
+func (app *App) beginCarrierRoutePlot(parentCtx context.Context) (context.Context, uint64, context.CancelFunc) {
+	cancelCtx, cancelPlot := context.WithCancel(parentCtx)
+	app.carrierPlotMu.Lock()
+	previousCancel := app.carrierPlotCancel
+	app.carrierPlotSeq++
+	plotSeq := app.carrierPlotSeq
+	app.carrierPlotCancel = cancelPlot
+	app.carrierPlotMu.Unlock()
+	if previousCancel != nil {
+		previousCancel()
 	}
-	return expedition.GetActiveCarrierRoute(app.db, expeditionID)
+	return cancelCtx, plotSeq, cancelPlot
 }
 
-// SaveActiveCarrierRoute persists the active carrier route state for an expedition.
-func (app *App) SaveActiveCarrierRoute(state ActiveCarrierRouteState) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
+func (app *App) finishCarrierRoutePlot(plotSeq uint64, cancelPlot context.CancelFunc) {
+	app.carrierPlotMu.Lock()
+	if app.carrierPlotSeq == plotSeq {
+		app.carrierPlotCancel = nil
 	}
-	return expedition.SaveActiveCarrierRoute(app.db, state)
+	app.carrierPlotMu.Unlock()
+	cancelPlot()
 }
 
-// ClearActiveCarrierRoute deletes the active carrier route for an expedition.
-func (app *App) ClearActiveCarrierRoute(expeditionID int64) error {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return readyError
-	}
-	return expedition.ClearActiveCarrierRoute(app.db, expeditionID)
+func (app *App) isCurrentCarrierRoutePlot(plotSeq uint64) bool {
+	app.carrierPlotMu.Lock()
+	defer app.carrierPlotMu.Unlock()
+	return app.carrierPlotSeq == plotSeq
 }
 
-// SaveActiveCarrierRouteWithUndo persists state for the expedition and records
-// a session undo entry when the serialized route JSON changes.
-func (app *App) SaveActiveCarrierRouteWithUndo(state ActiveCarrierRouteState, label string) error {
-	if state.ExpeditionID <= 0 {
-		return fmt.Errorf("invalid expedition ID: %d", state.ExpeditionID)
+// CancelCarrierRoutePlot aborts any in-flight Spansh Fleet Carrier route plot request.
+func (app *App) CancelCarrierRoutePlot() {
+	app.carrierPlotMu.Lock()
+	previousCancel := app.carrierPlotCancel
+	app.carrierPlotCancel = nil
+	app.carrierPlotSeq++
+	app.carrierPlotMu.Unlock()
+	if previousCancel != nil {
+		previousCancel()
 	}
-	trimmedLabel := strings.TrimSpace(label)
-	if trimmedLabel == "" {
-		trimmedLabel = "Update Carrier Route"
-	}
-	_, saveError := app.recordUndoableMutation(state.ExpeditionID, trimmedLabel, func(targetDB *sql.DB) (bool, error) {
-		return expedition.SaveActiveCarrierRouteIfChanged(targetDB, state)
-	})
-	return saveError
-}
-
-// ClearActiveCarrierRouteWithUndo deletes any active carrier route for expeditionID
-// and records a session undo entry when a route existed.
-func (app *App) ClearActiveCarrierRouteWithUndo(expeditionID int64) error {
-	_, clearError := app.recordUndoableMutation(expeditionID, "Clear Carrier Route", func(targetDB *sql.DB) (bool, error) {
-		return expedition.ClearActiveCarrierRouteIfPresent(targetDB, expeditionID)
-	})
-	return clearError
 }
 
 // GetCarrierLastLocation returns the system name of the most recent known Fleet Carrier location.
@@ -100,80 +88,75 @@ func (app *App) GetCarrierLastLocation() (string, error) {
 	return replay.QueryCarrierLastLocation(app.db, snapshot)
 }
 
-// GetCarrierDepotInfo returns the latest Fleet Carrier capacity, depot tritium level, and cargo storage.
-// It retrieves the actual in-game values from CarrierStats or CarrierDepositFuel journal events,
-// defaulting DepotTritium to 1000 (full depot tank) and UsedCapacity to 5000 if not recorded.
-func (app *App) GetCarrierDepotInfo() (CarrierDepotInfo, error) {
-	defaultInfo := CarrierDepotInfo{
-		UsedCapacity: 5000,
-		DepotTritium: reference.CarrierFuelTankTonnes,
-		Cargo:        0,
+func (app *App) prepareCarrierRoutePromptLocked(targetDB *sql.DB, expeditionID, targetRowID int64) (CarrierRoutePromptDefaults, error) {
+	expeditionRecord, getError := expedition.Get(targetDB, expeditionID)
+	if getError != nil {
+		return CarrierRoutePromptDefaults{}, getError
 	}
+	rows, rowsError := expedition.ListRows(targetDB, expeditionID)
+	if rowsError != nil {
+		return CarrierRoutePromptDefaults{}, rowsError
+	}
+	selection, selectionError := expedition.ResolveCarrierRoutePromptSelection(expeditionRecord, rows, targetRowID)
+	if selectionError != nil {
+		return CarrierRoutePromptDefaults{}, selectionError
+	}
+
+	carrierType := "player"
+	if expeditionRecord.CarrierType == "squadron" {
+		carrierType = "squadron"
+	}
+
+	capacityUsed := 5000
+	depotTritium := reference.CarrierFuelTankTonnes
+	var lastCarrierLocation string
+	if app.carrierState != nil {
+		if snapshot, snapshotError := app.carrierState.LatestStats(); snapshotError == nil {
+			if location, locationError := replay.QueryCarrierLastLocation(targetDB, snapshot); locationError == nil {
+				lastCarrierLocation = location
+			}
+			if depotInfo, depotError := replay.QueryCarrierDepotInfo(targetDB, snapshot); depotError == nil {
+				if depotInfo.UsedCapacity > 0 {
+					capacityUsed = depotInfo.UsedCapacity
+				}
+				if depotInfo.DepotTritium > 0 {
+					depotTritium = depotInfo.DepotTritium
+				}
+			}
+		}
+	}
+
+	origin := expedition.ResolveCarrierStartSystem(rows, selection.UpToIndex, lastCarrierLocation, "")
+	if origin == "" {
+		playerPosition, playerSystem, playerLocationError := replay.QueryLatestPlayerLocationScoped(targetDB, expeditionRecord.ProfileScope())
+		if playerLocationError != nil && !errors.Is(playerLocationError, sql.ErrNoRows) {
+			return CarrierRoutePromptDefaults{}, playerLocationError
+		}
+		if playerPosition == nil && selection.FallbackVisitedSystem != "" {
+			playerSystem = selection.FallbackVisitedSystem
+		}
+		origin = strings.TrimSpace(playerSystem)
+	}
+
+	return CarrierRoutePromptDefaults{
+		TargetRowID:  selection.TargetRowID,
+		Origin:       origin,
+		Destination:  selection.Destination,
+		CarrierType:  carrierType,
+		CapacityUsed: capacityUsed,
+		DepotTritium: depotTritium,
+	}, nil
+}
+
+// PrepareCarrierRoutePrompt resolves default origin, destination, carrier type,
+// capacity, and depot tritium values for launching a Spansh or manual carrier route.
+func (app *App) PrepareCarrierRoutePrompt(expeditionID, targetRowID int64) (CarrierRoutePromptDefaults, error) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
-		return defaultInfo, readyError
+		return CarrierRoutePromptDefaults{}, readyError
 	}
-	if app.carrierState == nil {
-		return defaultInfo, nil
-	}
-	snapshot, snapshotError := app.carrierState.LatestStats()
-	if snapshotError != nil {
-		return defaultInfo, snapshotError
-	}
-	return replay.QueryCarrierDepotInfo(app.db, snapshot)
-}
-
-// RecordCarrierJump logs a single completed expedition carrier jump (from Spansh hop completion or Manual Mode)
-// into the expedition's manual carrier adjustments.
-func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritium int) error {
-	applied, err := app.recordUndoableMutation(expeditionID, "Log Carrier Jump", func(targetDB *sql.DB) (bool, error) {
-		err := expedition.RecordCarrierJump(targetDB, expeditionID, distanceLy, tritium)
-		return err == nil, err
-	})
-	if err != nil {
-		return err
-	}
-	if applied {
-		app.publishApp(expeditionID, events.AppAdjustmentsChanged)
-	}
-	return nil
-}
-
-// RecordCarrierJumpAndSaveRoute atomically records a carrier jump and persists
-// the updated active carrier route state under a single session undo entry.
-func (app *App) RecordCarrierJumpAndSaveRoute(expeditionID int64, distanceLy float64, tritium int, state ActiveCarrierRouteState) error {
-	applied, err := app.recordUndoableMutation(expeditionID, "Log Carrier Jump", func(targetDB *sql.DB) (bool, error) {
-		err := expedition.RecordCarrierJumpAndSaveRouteTx(targetDB, expeditionID, distanceLy, tritium, state)
-		return err == nil, err
-	})
-	if err != nil {
-		return err
-	}
-	if applied {
-		app.publishApp(expeditionID, events.AppAdjustmentsChanged)
-	}
-	return nil
-}
-
-// CompleteCarrierRouteArrival atomically logs any final carrier jump, clears the
-// active carrier route, and marks targetRowID arrived when positive under one undo entry.
-func (app *App) CompleteCarrierRouteArrival(expeditionID int64, targetRowID int64, distanceLy float64, tritium int) error {
-	applied, err := app.recordUndoableSnapshotDiff(expeditionID, "Complete Carrier Arrival", func(targetDB *sql.DB) error {
-		return expedition.CompleteCarrierRouteArrivalTx(targetDB, expeditionID, targetRowID, distanceLy, tritium)
-	})
-	if err != nil {
-		return err
-	}
-	if !applied {
-		return nil
-	}
-	if distanceLy > 0 || tritium > 0 {
-		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppAdjustmentsChanged)
-	} else {
-		app.publishApp(expeditionID, events.AppExpeditionPlanChanged)
-	}
-	return nil
+	return app.prepareCarrierRoutePromptLocked(app.db, expeditionID, targetRowID)
 }
 
 func normalizeCarrierPlotParameters(carrierType string, capacityUsed int, depotTritium int) (string, int, int) {
@@ -184,22 +167,14 @@ func normalizeCarrierPlotParameters(carrierType string, capacityUsed int, depotT
 	if carrierType == "squadron" {
 		maxCapacity = reference.SquadronCarrierMaxCapacity
 	}
-	if capacityUsed < 0 {
-		capacityUsed = 0
-	}
-	if capacityUsed > maxCapacity {
-		capacityUsed = maxCapacity
-	}
+	capacityUsed = max(0, min(maxCapacity, capacityUsed))
 	if depotTritium <= 0 || depotTritium > reference.CarrierFuelTankTonnes {
 		depotTritium = reference.CarrierFuelTankTonnes
 	}
 	return carrierType, capacityUsed, depotTritium
 }
 
-func (app *App) resolveCarrierPlotInputs(source, destination string, depotTritium int) (string, string, int, context.Context) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	app.waitStartupLocked()
+func (app *App) resolveCarrierPlotInputsLocked(source, destination string, depotTritium int) (string, string, int, context.Context) {
 	resolvedDepot := depotTritium
 	if app.db == nil {
 		return strings.TrimSpace(source), strings.TrimSpace(destination), resolvedDepot, app.contextLocked()
@@ -219,10 +194,7 @@ func (app *App) resolveCarrierPlotInputs(source, destination string, depotTritiu
 	return canonicalSource, canonicalDest, resolvedDepot, app.contextLocked()
 }
 
-// PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination,
-// falling back cleanly to manual mode on unknown systems, offline mode, or API timeouts.
-func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string, depotTritium int) (CarrierRouteResult, error) {
-	canonicalSource, canonicalDest, resolvedDepot, parentCtx := app.resolveCarrierPlotInputs(source, destination, depotTritium)
+func executeCarrierRoutePlot(parentCtx context.Context, canonicalSource, canonicalDest string, capacityUsed int, carrierType string, resolvedDepot int) CarrierRouteResult {
 	carrierType, capacityUsed, resolvedDepot = normalizeCarrierPlotParameters(carrierType, capacityUsed, resolvedDepot)
 	routeResult := CarrierRouteResult{
 		Origin:       canonicalSource,
@@ -235,18 +207,18 @@ func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, c
 	if canonicalSource == "" || canonicalDest == "" {
 		routeResult.ManualMode = true
 		routeResult.Error = "Origin or destination system name is empty — switched to Manual Mode."
-		return routeResult, nil
+		return routeResult
 	}
 	if strings.EqualFold(canonicalSource, canonicalDest) {
 		routeResult.ManualMode = true
 		routeResult.Error = "Origin and destination are the same system — switched to Manual Mode."
-		return routeResult, nil
+		return routeResult
 	}
 
-	requestCtx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
-	defer cancel()
+	requestCtx, cancelTimeout := context.WithTimeout(parentCtx, 60*time.Second)
+	defer cancelTimeout()
 
-	spanshJumps, queryError := spansh.QueryCarrierRoute(requestCtx, canonicalSource, canonicalDest, capacityUsed, resolvedDepot)
+	spanshJumps, queryError := querySpanshCarrierRoute(requestCtx, canonicalSource, canonicalDest, capacityUsed, resolvedDepot)
 	if queryError != nil || len(spanshJumps) == 0 {
 		routeResult.ManualMode = true
 		if queryError != nil {
@@ -254,7 +226,7 @@ func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, c
 		} else {
 			routeResult.Error = "Spansh returned no jumps for this route — switched to Manual Mode."
 		}
-		return routeResult, nil
+		return routeResult
 	}
 
 	mappedJumps := make([]CarrierRouteJump, 0, len(spanshJumps))
@@ -272,5 +244,15 @@ func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, c
 	}
 	routeResult.Jumps = mappedJumps
 	routeResult.TotalJumps = len(mappedJumps)
-	return routeResult, nil
+	return routeResult
+}
+
+// PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination,
+// falling back cleanly to manual mode on unknown systems, offline mode, or API timeouts.
+func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string, depotTritium int) (CarrierRouteResult, error) {
+	app.dbMu.RLock()
+	app.waitStartupLocked()
+	canonicalSource, canonicalDest, resolvedDepot, parentCtx := app.resolveCarrierPlotInputsLocked(source, destination, depotTritium)
+	app.dbMu.RUnlock()
+	return executeCarrierRoutePlot(parentCtx, canonicalSource, canonicalDest, capacityUsed, carrierType, resolvedDepot), nil
 }

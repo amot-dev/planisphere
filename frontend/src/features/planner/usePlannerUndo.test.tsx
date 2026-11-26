@@ -77,11 +77,9 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
   function mountHookHarness(initialProps: {
     expeditionId: number
     disabled?: boolean
-    onReloadCarrierRoute?: () => Promise<void>
   }) {
     const busyMessages: Array<string | null> = []
     const busyTracker = createBusyTaskTracker((message) => busyMessages.push(message))
-    const onReloadCarrierRoute = initialProps.onReloadCarrierRoute ?? vi.fn(async () => {})
     let latestResult!: UsePlannerUndoResult
 
     function Harness({
@@ -95,7 +93,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         expeditionId,
         disabled,
         busyTracker,
-        onReloadCarrierRoute,
       })
       return null
     }
@@ -114,7 +111,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
 
     return {
       busyMessages,
-      onReloadCarrierRoute,
       getResult: () => latestResult,
       rerender: (nextProps: { expeditionId: number; disabled?: boolean }) => {
         act(() => {
@@ -128,14 +124,13 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
     }
   }
 
-  it('handles Ctrl+Z/Cmd+Z undo, carrier reload, auto-dismiss after 4500ms, manual dismiss, and redo shortcuts', async () => {
+  it('handles Ctrl+Z/Cmd+Z undo, auto-dismiss after 4500ms, manual dismiss, and redo shortcuts', async () => {
     vi.useFakeTimers()
     mockUndoExpedition
       .mockResolvedValueOnce(
         app.UndoActionResult.createFrom({
           applied: true,
           label: 'Delete Waypoint',
-          carrierRouteRestored: true,
           canUndo: false,
           canRedo: true,
         }),
@@ -144,7 +139,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         app.UndoActionResult.createFrom({
           applied: true,
           label: '',
-          carrierRouteRestored: false,
           canUndo: false,
           canRedo: true,
         }),
@@ -154,7 +148,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         app.UndoActionResult.createFrom({
           applied: true,
           label: 'Delete Waypoint',
-          carrierRouteRestored: false,
           canUndo: true,
           canRedo: false,
         }),
@@ -163,7 +156,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         app.UndoActionResult.createFrom({
           applied: true,
           label: 'Move Waypoint',
-          carrierRouteRestored: false,
           canUndo: true,
           canRedo: false,
         }),
@@ -179,7 +171,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
       })
       expect(undoEvent.defaultPrevented).toBe(true)
       expect(mockUndoExpedition).toHaveBeenCalledWith(7)
-      expect(harness.onReloadCarrierRoute).toHaveBeenCalledTimes(1)
       expect(harness.busyMessages).toEqual(['UNDOING CHANGE', null])
       expect(harness.getResult().undoStatusToast).toBe('UNDONE: DELETE WAYPOINT · CTRL-Y TO REDO')
 
@@ -305,7 +296,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         app.UndoActionResult.createFrom({
           applied: true,
           label: 'Edit Notes',
-          carrierRouteRestored: false,
           canUndo: false,
           canRedo: true,
         }),
@@ -322,14 +312,13 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
       expect(mockUndoExpedition).toHaveBeenCalledTimes(1)
       expect(harness.busyMessages).toEqual(['UNDOING CHANGE'])
 
-      // Switch expeditions before the first undo finishes: stale result must not trigger reload or toast.
+      // Switch expeditions before the first undo finishes: stale result must not trigger toast.
       harness.rerender({ expeditionId: 2 })
       await act(async () => {
         resolveFirstUndo(
           app.UndoActionResult.createFrom({
             applied: true,
             label: 'Start Carrier Route',
-            carrierRouteRestored: true,
             canUndo: false,
             canRedo: true,
           }),
@@ -337,7 +326,6 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         await Promise.resolve()
       })
       expect(harness.busyMessages).toEqual(['UNDOING CHANGE', null])
-      expect(harness.onReloadCarrierRoute).not.toHaveBeenCalled()
       expect(harness.getResult().undoStatusToast).toBeNull()
 
       // Undo on expedition 2 shows toast, then switching to expedition 3 clears it immediately.

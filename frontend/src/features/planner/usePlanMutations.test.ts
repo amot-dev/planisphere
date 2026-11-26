@@ -124,7 +124,6 @@ describe('usePlanMutations overlapping busy coordination', () => {
       activeCarrierRoute: null,
       isManualCarrierRoute: false,
       routedCarrierStopIndex: -1,
-      onCancelCarrierRoute: () => {},
     }
 
     let latestMutations!: ReturnType<typeof usePlanMutations>

@@ -3,6 +3,7 @@ package expedition
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 
 	"planisphere/internal/core/db"
@@ -29,54 +30,56 @@ type GECRef struct {
 
 // RowView is a row enriched for display.
 type RowView struct {
-	Row               Row          `json:"row"`
-	Number            int          `json:"number"` // waypoint # (0 for region headers)
-	RegionName        string       `json:"regionName"`
-	DetectedRegionID  int          `json:"detectedRegionId"` // region containing the coordinates
-	DetectedRegion    string       `json:"detectedRegion"`
-	VisitCount         int          `json:"visitCount"`
-	VisitState         string       `json:"visitState"`
-	VisitedAtGalactic  string       `json:"visitedAtGalactic"`
-	DepartedAtGalactic string       `json:"departedAtGalactic,omitempty"`
-	DrawerFrom         string       `json:"drawerFrom,omitempty"`
-	DrawerTo           string       `json:"drawerTo,omitempty"`
-	DistFromPrevLy     *float64     `json:"distFromPrevLy,omitempty"`
-	DistFromCurrentLy *float64 `json:"distFromCurrentLy,omitempty"`
-	IsNextWaypoint    bool     `json:"isNextWaypoint,omitempty"`
-	LegModeID         int64    `json:"legModeId"`
-	LegModeName       string       `json:"legModeName"`
-	LegModeColor      string       `json:"legModeColor"`
-	GEC               *GECRef      `json:"gec,omitempty"`
+	Row                Row      `json:"row"`
+	Number             int      `json:"number"` // waypoint # (0 for region headers)
+	RegionName         string   `json:"regionName"`
+	DetectedRegionID   int      `json:"detectedRegionId"` // region containing the coordinates
+	DetectedRegion     string   `json:"detectedRegion"`
+	VisitCount         int      `json:"visitCount"`
+	VisitState         string   `json:"visitState"`
+	VisitedAtGalactic  string   `json:"visitedAtGalactic"`
+	DepartedAtGalactic string   `json:"departedAtGalactic,omitempty"`
+	DrawerFrom         string   `json:"drawerFrom,omitempty"`
+	DrawerTo           string   `json:"drawerTo,omitempty"`
+	DistFromPrevLy     *float64 `json:"distFromPrevLy,omitempty"`
+	DistFromCurrentLy  *float64 `json:"distFromCurrentLy,omitempty"`
+	IsNextWaypoint     bool     `json:"isNextWaypoint,omitempty"`
+	LegModeID          int64    `json:"legModeId"`
+	LegModeName        string   `json:"legModeName"`
+	LegModeColor       string   `json:"legModeColor"`
+	GEC                *GECRef  `json:"gec,omitempty"`
 }
 
 // PlanView is the full planner sheet.
 type PlanView struct {
-	Expedition           Expedition   `json:"expedition"`
-	StartGalactic        string       `json:"startGalactic"`
-	EndGalactic          string       `json:"endGalactic"`
-	Rows                 []RowView    `json:"rows"`
-	CurrentRowID         int64        `json:"currentRowId"`
-	NextWaypointRowID    int64        `json:"nextWaypointRowId,omitempty"`
-	NextFCStopRowID      int64        `json:"nextFcStopRowId"`
-	PlayerSystem         string       `json:"playerSystem,omitempty"`
-	WaypointCount        int          `json:"waypointCount"`
-	VisitedWaypointCount int          `json:"visitedWaypointCount"`
-	PlannedLy            float64      `json:"plannedLy"`   // sum of straight-line distances across all planned waypoint legs
-	CoveredLy            float64      `json:"coveredLy"`   // sum of straight-line distances across visited waypoint legs
-	RemainingLy          float64      `json:"remainingLy"` // straight-line distance from current player position to next waypoint plus remaining unvisited legs
-	Modes                []modes.Mode `json:"modes"`
+	Expedition             Expedition               `json:"expedition"`
+	StartGalactic          string                   `json:"startGalactic"`
+	EndGalactic            string                   `json:"endGalactic"`
+	Rows                   []RowView                `json:"rows"`
+	CurrentRowID           int64                    `json:"currentRowId"`
+	NextWaypointRowID      int64                    `json:"nextWaypointRowId,omitempty"`
+	NextFCStopRowID        int64                    `json:"nextFcStopRowId"`
+	RoutedCarrierStopRowID int64                    `json:"routedCarrierStopRowId,omitempty"`
+	ActiveCarrierRoute     *ActiveCarrierRouteState `json:"activeCarrierRoute,omitempty"`
+	PlayerSystem           string                   `json:"playerSystem,omitempty"`
+	WaypointCount          int                      `json:"waypointCount"`
+	VisitedWaypointCount   int                      `json:"visitedWaypointCount"`
+	PlannedLy              float64                  `json:"plannedLy"`   // sum of straight-line distances across all planned waypoint legs
+	CoveredLy              float64                  `json:"coveredLy"`   // sum of straight-line distances across visited waypoint legs
+	RemainingLy            float64                  `json:"remainingLy"` // straight-line distance from current player position to next waypoint plus remaining unvisited legs
+	Modes                  []modes.Mode             `json:"modes"`
 }
 
 // GECLookup resolves GEC entries for a system.
 type GECLookup func(systemName string, systemAddress int64) *GECRef
 
 type planBuildContext struct {
-	expeditionRecord   Expedition
-	currentWaypoint    *Row
-	playerPosition     *reference.Vec3
-	nextWaypointRowID  int64
-	modeList           []modes.Mode
-	modeByID           map[int64]modes.Mode
+	expeditionRecord     Expedition
+	currentWaypoint      *Row
+	playerPosition       *reference.Vec3
+	nextWaypointRowID    int64
+	modeList             []modes.Mode
+	modeByID             map[int64]modes.Mode
 	defaultModeID        int64
 	activeModeID         int64
 	previousVisitByID    map[int64]string
@@ -378,5 +381,11 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expe
 	if planView.Rows == nil {
 		planView.Rows = []RowView{}
 	}
+	rawRoute, routeError := GetActiveCarrierRoute(queryer, expeditionID)
+	if routeError != nil {
+		return planView, fmt.Errorf("load active carrier route: %w", routeError)
+	}
+	planView.ActiveCarrierRoute = NormalizeActiveCarrierRoute(rawRoute)
+	planView.RoutedCarrierStopRowID = ResolveRoutedCarrierStopRowID(rows, planView.NextFCStopRowID, planView.ActiveCarrierRoute)
 	return planView, nil
 }

@@ -17,12 +17,11 @@ export interface PlannerUndoKeyEvent {
   target?: EventTarget | null
 }
 
-/** UsePlannerUndoOptions configures scope, suppression, busy tracking, and route reload. */
+/** UsePlannerUndoOptions configures scope, suppression, and busy tracking. */
 export interface UsePlannerUndoOptions {
   expeditionId: number
   disabled: boolean
   busyTracker: BusyTaskTracker
-  onReloadCarrierRoute: () => Promise<void>
 }
 
 /** UsePlannerUndoResult exposes the active undo status toast and its dismiss callback. */
@@ -78,8 +77,8 @@ export function resolvePlannerUndoAction(
 
 /**
  * usePlannerUndo registers global keyboard-only undo and redo listeners for
- * the active expedition, serializes in-flight requests, reloads restored Fleet
- * Carrier routes, and manages the ephemeral bottom-right confirmation toast.
+ * the active expedition, serializes in-flight requests, and manages the
+ * ephemeral bottom-right confirmation toast.
  */
 export function usePlannerUndo(options: UsePlannerUndoOptions): UsePlannerUndoResult {
   const { expeditionId } = options
@@ -139,10 +138,6 @@ export function usePlannerUndo(options: UsePlannerUndoOptions): UsePlannerUndoRe
           : await UndoExpedition(requestExpeditionId)
         if (!mountedRef.current || optionsRef.current.expeditionId !== requestExpeditionId) return
         if (!actionResult?.applied) return
-        if (actionResult.carrierRouteRestored) {
-          await optionsRef.current.onReloadCarrierRoute()
-          if (!mountedRef.current || optionsRef.current.expeditionId !== requestExpeditionId) return
-        }
         const actionLabel = (actionResult.label || 'Change').toUpperCase()
         showUndoStatusToast(
           isRedo

@@ -306,7 +306,7 @@ export function installWailsProfileMocks(visitedDetails: expedition.WaypointDeta
   globalTarget.go = {
     app: {
       App: {
-        GetActiveCarrierRoute: () => Promise.resolve(null),
+        CancelCarrierRoutePlot: () => Promise.resolve(),
         GetWaypointDetails: (rowId: unknown) => {
           const numericId = typeof rowId === 'number' ? rowId : 0
           return Promise.resolve(

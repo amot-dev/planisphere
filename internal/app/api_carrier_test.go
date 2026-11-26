@@ -1,11 +1,15 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
 
 	stats "planisphere/internal/replay/stats"
+	"planisphere/internal/sources/spansh"
 	"planisphere/internal/store/expedition"
 )
 
@@ -295,5 +299,154 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 	}
 	if cost.TritiumCost != 7_800_000 || cost.JumpCost != 200_000 || cost.UpkeepCost != 14_000_000 || cost.TotalCost != 22_000_000 || !cost.TotalEstimated {
 		testingContext.Fatalf("unexpected carrier cost breakdown: %+v", cost)
+	}
+}
+
+func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.T) {
+	testingContext.Setenv("XDG_CONFIG_HOME", testingContext.TempDir())
+	testApp := setupTestApp(testingContext)
+	originalSpanshQuery := querySpanshCarrierRoute
+	testingContext.Cleanup(func() { querySpanshCarrierRoute = originalSpanshQuery })
+
+	insertTestJournalEvent(testingContext, testApp, "2026-02-01T09:00:00Z", "CarrierStats", "cs-1",
+		`{"event":"CarrierStats","CarrierID":444001,"Callsign":"K1A-99Z","FuelLevel":720,"SpaceUsage":{"TotalCapacity":25000,"FreeSpace":18000,"Cargo":1200}}`)
+	insertTestJournalEvent(testingContext, testApp, "2026-02-01T09:05:00Z", "Location", "loc-player",
+		`{"timestamp":"2026-02-01T09:05:00Z","event":"Location","StarSystem":"Shinrarta Dezhra","SystemAddress":3932277478106,"StarPos":[55.7,17.6,27.1]}`)
+
+	expOne, err := testApp.CreateExpeditionWithWaypoints("Carrier Prompt One", "", []string{"Sol", "Rohini", "Colonia"})
+	if err != nil {
+		testingContext.Fatalf("CreateExpeditionWithWaypoints: %v", err)
+	}
+	if err := testApp.UpdateExpeditionCarrierConfig(expOne.ID, "squadron", 0); err != nil {
+		testingContext.Fatalf("UpdateExpeditionCarrierConfig: %v", err)
+	}
+	planOne, err := testApp.GetPlan(expOne.ID)
+	if err != nil {
+		testingContext.Fatalf("GetPlan: %v", err)
+	}
+	fcStop := true
+	stopRowID := planOne.Rows[2].Row.ID
+	if err := testApp.UpdateRow(expedition.RowPatch{ID: stopRowID, FCStop: &fcStop}); err != nil {
+		testingContext.Fatalf("UpdateRow FCStop: %v", err)
+	}
+
+	// PrepareCarrierRoutePrompt resolves preceding waypoint, squadron type, and journal depot/capacity defaults.
+	promptDefaults, err := testApp.PrepareCarrierRoutePrompt(expOne.ID, stopRowID)
+	if err != nil {
+		testingContext.Fatalf("PrepareCarrierRoutePrompt target: %v", err)
+	}
+	if promptDefaults.TargetRowID != stopRowID || promptDefaults.Origin != "Rohini" || promptDefaults.Destination != "Colonia" ||
+		promptDefaults.CarrierType != "squadron" || promptDefaults.CapacityUsed != 7000 || promptDefaults.DepotTritium != 720 {
+		testingContext.Fatalf("unexpected PrepareCarrierRoutePrompt defaults: %+v", promptDefaults)
+	}
+	manualDefaults, err := testApp.PrepareCarrierRoutePrompt(expOne.ID, 0)
+	if err != nil || manualDefaults.TargetRowID != stopRowID || manualDefaults.Origin != "Rohini" || manualDefaults.Destination != "Colonia" {
+		testingContext.Fatalf("unexpected manual PrepareCarrierRoutePrompt defaults: %+v err=%v", manualDefaults, err)
+	}
+
+	// Verify CancelCarrierRoutePlot, SetActiveExpedition, and SetDatabasePath each abort an in-flight Spansh poll and return nil, nil without saving.
+	expTwo, err := testApp.CreateExpedition("Carrier Prompt Two", "")
+	if err != nil {
+		testingContext.Fatalf("CreateExpedition two: %v", err)
+	}
+	cancellationTriggers := []struct {
+		name   string
+		cancel func()
+	}{
+		{name: "CancelCarrierRoutePlot", cancel: testApp.CancelCarrierRoutePlot},
+		{name: "SetActiveExpedition", cancel: func() { _ = testApp.SetActiveExpedition(expTwo.ID) }},
+		{name: "SetDatabasePath", cancel: func() { _, _ = testApp.SetDatabasePath(filepath.Join(testingContext.TempDir(), "switched.db")) }},
+	}
+	for _, trigger := range cancellationTriggers {
+		enteredPoll := make(chan struct{})
+		querySpanshCarrierRoute = func(ctx context.Context, _, _ string, _, _ int) ([]spansh.RouteJump, error) {
+			close(enteredPoll)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		targetExpID := expOne.ID
+		if currentList, _ := testApp.ListExpeditions(); len(currentList) > 0 {
+			targetExpID = currentList[0].ID
+		} else {
+			seeded, seedErr := testApp.CreateExpedition("Switched Exp", "")
+			if seedErr != nil {
+				testingContext.Fatalf("seed expedition: %v", seedErr)
+			}
+			targetExpID = seeded.ID
+		}
+		type plotOutcome struct {
+			state *ActiveCarrierRouteState
+			err   error
+		}
+		outcomeCh := make(chan plotOutcome, 1)
+		go func() {
+			state, startErr := testApp.StartCarrierRoute(targetExpID, 0, "Sol", "Colonia", 5000, "player", 1000)
+			outcomeCh <- plotOutcome{state: state, err: startErr}
+		}()
+		<-enteredPoll
+		trigger.cancel()
+		outcome := <-outcomeCh
+		if outcome.err != nil || outcome.state != nil {
+			testingContext.Fatalf("%s: expected cancelled StartCarrierRoute to return (nil, nil), got (%+v, %v)", trigger.name, outcome.state, outcome.err)
+		}
+		if currentList, _ := testApp.ListExpeditions(); len(currentList) > 0 {
+			checkPlan, _ := testApp.GetPlan(currentList[0].ID)
+			if checkPlan.ActiveCarrierRoute != nil {
+				testingContext.Fatalf("%s: expected cancelled plot not to persist route, got %+v", trigger.name, checkPlan.ActiveCarrierRoute)
+			}
+		}
+	}
+
+	// Non-cancellation Spansh errors fall back to ManualMode: true, ClearActiveCarrierRouteWithUndo emits plan domain,
+	// and CompleteCarrierRouteArrival with targetRowID=0 resolves the next unarrived FC stop inside the tx.
+	activeExp, err := testApp.CreateExpeditionWithWaypoints("Arrival Zero Target", "", []string{"Sol", "Beagle Point"})
+	if err != nil {
+		testingContext.Fatalf("CreateExpeditionWithWaypoints activeExp: %v", err)
+	}
+	activePlan, _ := testApp.GetPlan(activeExp.ID)
+	beagleStopID := activePlan.Rows[1].Row.ID
+	if err := testApp.UpdateRow(expedition.RowPatch{ID: beagleStopID, FCStop: &fcStop}); err != nil {
+		testingContext.Fatalf("UpdateRow beagleStopID: %v", err)
+	}
+
+	querySpanshCarrierRoute = func(_ context.Context, _, _ string, _, _ int) ([]spansh.RouteJump, error) {
+		return nil, errors.New("Spansh upstream error")
+	}
+	fallbackState, err := testApp.StartCarrierRoute(activeExp.ID, beagleStopID, "Sol", "Beagle Point", 5000, "player", 1000)
+	if err != nil || fallbackState == nil || !fallbackState.ManualMode || fallbackState.Route.Error == "" {
+		testingContext.Fatalf("expected non-cancellation Spansh error to persist manual fallback, got state=%+v err=%v", fallbackState, err)
+	}
+
+	var emittedDomains [][]string
+	var emitMu sync.Mutex
+	testApp.emit = func(event string, payload ...any) {
+		if event == EventDataChanged && len(payload) > 0 {
+			if changed, ok := payload[0].(DataChanged); ok {
+				emitMu.Lock()
+				emittedDomains = append(emittedDomains, changed.Domains)
+				emitMu.Unlock()
+			}
+		}
+	}
+	if err := testApp.ClearActiveCarrierRouteWithUndo(activeExp.ID); err != nil {
+		testingContext.Fatalf("ClearActiveCarrierRouteWithUndo: %v", err)
+	}
+	emitMu.Lock()
+	sawPlanOnClear := len(emittedDomains) == 1 && slices.Contains(emittedDomains[0], "plan")
+	emitMu.Unlock()
+	if !sawPlanOnClear {
+		testingContext.Fatalf("expected ClearActiveCarrierRouteWithUndo to emit plan domain, got %+v", emittedDomains)
+	}
+
+	if _, err := testApp.OpenManualCarrierRoute(activeExp.ID); err != nil {
+		testingContext.Fatalf("OpenManualCarrierRoute: %v", err)
+	}
+	if err := testApp.CompleteCarrierRouteArrival(activeExp.ID, 0, 0, 0); err != nil {
+		testingContext.Fatalf("CompleteCarrierRouteArrival(0): %v", err)
+	}
+	resolvedArrivalPlan, _ := testApp.GetPlan(activeExp.ID)
+	if !resolvedArrivalPlan.Rows[1].Row.FCArrived || resolvedArrivalPlan.ActiveCarrierRoute != nil {
+		testingContext.Fatalf("expected targetRowID=0 arrival to mark Beagle Point arrived and clear route, got row=%+v route=%+v",
+			resolvedArrivalPlan.Rows[1].Row, resolvedArrivalPlan.ActiveCarrierRoute)
 	}
 }

@@ -1,34 +1,35 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act, createElement, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../api/models'
 
-const mockPlotCarrierRoute = vi.fn()
-const mockRecordCarrierJumpAndSaveRoute = vi.fn()
+const mockPrepareCarrierRoutePrompt = vi.fn()
+const mockStartCarrierRoute = vi.fn()
+const mockCancelCarrierRoutePlot = vi.fn()
+const mockOpenManualCarrierRoute = vi.fn()
+const mockRefillCarrierDepot = vi.fn()
+const mockSwitchCarrierRouteToManual = vi.fn()
+const mockCompleteSpanshCarrierJump = vi.fn()
+const mockLogManualCarrierJump = vi.fn()
+const mockSaveCarrierManualDraftInputs = vi.fn()
 const mockCompleteCarrierRouteArrival = vi.fn()
-const mockGetActiveCarrierRoute = vi.fn()
-const mockSaveActiveCarrierRoute = vi.fn()
-const mockSaveActiveCarrierRouteWithUndo = vi.fn()
-const mockClearActiveCarrierRoute = vi.fn()
 const mockClearActiveCarrierRouteWithUndo = vi.fn()
-const mockGetCarrierLastLocation = vi.fn()
-const mockGetCarrierDepotInfo = vi.fn()
 
 vi.mock('../../api/backend', () => ({
-  PlotCarrierRoute: (...args: unknown[]) => mockPlotCarrierRoute(...args),
-  RecordCarrierJumpAndSaveRoute: (...args: unknown[]) => mockRecordCarrierJumpAndSaveRoute(...args),
+  PrepareCarrierRoutePrompt: (...args: unknown[]) => mockPrepareCarrierRoutePrompt(...args),
+  StartCarrierRoute: (...args: unknown[]) => mockStartCarrierRoute(...args),
+  CancelCarrierRoutePlot: (...args: unknown[]) => mockCancelCarrierRoutePlot(...args),
+  OpenManualCarrierRoute: (...args: unknown[]) => mockOpenManualCarrierRoute(...args),
+  RefillCarrierDepot: (...args: unknown[]) => mockRefillCarrierDepot(...args),
+  SwitchCarrierRouteToManual: (...args: unknown[]) => mockSwitchCarrierRouteToManual(...args),
+  CompleteSpanshCarrierJump: (...args: unknown[]) => mockCompleteSpanshCarrierJump(...args),
+  LogManualCarrierJump: (...args: unknown[]) => mockLogManualCarrierJump(...args),
+  SaveCarrierManualDraftInputs: (...args: unknown[]) => mockSaveCarrierManualDraftInputs(...args),
   CompleteCarrierRouteArrival: (...args: unknown[]) => mockCompleteCarrierRouteArrival(...args),
-  GetActiveCarrierRoute: (...args: unknown[]) => mockGetActiveCarrierRoute(...args),
-  SaveActiveCarrierRoute: (...args: unknown[]) => mockSaveActiveCarrierRoute(...args),
-  SaveActiveCarrierRouteWithUndo: (...args: unknown[]) =>
-    mockSaveActiveCarrierRouteWithUndo(...args),
-  ClearActiveCarrierRoute: (...args: unknown[]) => mockClearActiveCarrierRoute(...args),
   ClearActiveCarrierRouteWithUndo: (...args: unknown[]) =>
     mockClearActiveCarrierRouteWithUndo(...args),
-  GetCarrierLastLocation: (...args: unknown[]) => mockGetCarrierLastLocation(...args),
-  GetCarrierDepotInfo: (...args: unknown[]) => mockGetCarrierDepotInfo(...args),
 }))
 
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
@@ -68,6 +69,9 @@ describe('CarrierRoute UI Components', () => {
     const loadingHtml = renderCarrierModal({ loading: true })
     expect(loadingHtml).toContain('QUERYING SPANSH...')
     expect(loadingHtml).toContain('whitespace-nowrap')
+    expect(loadingHtml.match(/<button[^>]*disabled=""/g)).toHaveLength(1)
+    expect(loadingHtml).not.toMatch(/disabled=""[^>]*>CANCEL<\/button>/)
+    expect(loadingHtml).toMatch(/disabled=""[^>]*>QUERYING SPANSH\.\.\.<\/button>/)
   })
 
   it('CarrierRouteBottomPanel renders Close button with tooltip, start/end indicator with ??? fallback, and Mark FC Stop Arrival button', () => {
@@ -218,7 +222,13 @@ describe('CarrierRoute UI Components', () => {
     expect(spanshAllRecordedHtml).not.toMatch(/disabled=""[^>]*>MARK FC STOP ARRIVAL/)
 
     const manualArrivalBusyHtml = renderCarrierPanel({
-      route: expedition.CarrierRouteResult.createFrom({ origin: 'Sol', destination: 'Colonia', carrierType: 'player', manualMode: true, jumps: [] }),
+      route: expedition.CarrierRouteResult.createFrom({
+        origin: 'Sol',
+        destination: 'Colonia',
+        carrierType: 'player',
+        manualMode: true,
+        jumps: [],
+      }),
       hasNextFcStop: true,
       nextFcStopSystem: 'Colonia',
       loggingJump: true,
@@ -227,9 +237,17 @@ describe('CarrierRoute UI Components', () => {
   })
 })
 
-function buildCarrierPlan(expeditionId: number, stopRowId: number, stopSystem: string) {
+function buildCarrierPlan(
+  expeditionId: number,
+  stopRowId: number,
+  stopSystem: string,
+  activeCarrierRoute?: expedition.ActiveCarrierRouteState,
+) {
   return expedition.PlanView.createFrom({
     expedition: { id: expeditionId, name: `Expedition ${expeditionId}`, status: 'active' },
+    nextFcStopRowId: stopRowId,
+    routedCarrierStopRowId: activeCarrierRoute ? stopRowId : undefined,
+    activeCarrierRoute,
     rows: [
       {
         row: {
@@ -258,24 +276,30 @@ function buildCarrierPlan(expeditionId: number, stopRowId: number, stopSystem: s
   })
 }
 
-describe('useCarrierRoute async race and arrival persistence guards', () => {
+describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
   afterEach(() => {
     vi.clearAllMocks()
+    vi.useRealTimers()
   })
 
-  it('discards late PlotCarrierRoute and reload results after switching expeditions or closing the modal and flushes pending manual inputs silently to the outgoing expedition', async () => {
-    mockGetActiveCarrierRoute.mockResolvedValue(null)
-    mockSaveActiveCarrierRoute.mockResolvedValue(undefined)
-    mockSaveActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-    mockClearActiveCarrierRoute.mockResolvedValue(undefined)
-    mockClearActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-    mockGetCarrierLastLocation.mockResolvedValue('Sol')
-    mockGetCarrierDepotInfo.mockResolvedValue({ usedCapacity: 4000, depotTritium: 900 })
+  it('cancels in-flight Spansh plots on modal close or expedition switch and prevents cross-database manual draft leaks', async () => {
+    mockCancelCarrierRoutePlot.mockResolvedValue(undefined)
+    mockSaveCarrierManualDraftInputs.mockResolvedValue(undefined)
+    mockPrepareCarrierRoutePrompt.mockImplementation(async (_expId: number, targetRowId: number) =>
+      expedition.CarrierRoutePromptDefaults.createFrom({
+        targetRowId,
+        origin: 'Sol',
+        destination: targetRowId === 11 ? 'Colonia' : 'Beagle Point',
+        carrierType: 'player',
+        capacityUsed: 4000,
+        depotTritium: 900,
+      }),
+    )
 
-    let resolveFirstPlot!: (route: expedition.CarrierRouteResult) => void
-    mockPlotCarrierRoute.mockImplementationOnce(
+    let resolveFirstPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
+    mockStartCarrierRoute.mockImplementationOnce(
       () =>
-        new Promise<expedition.CarrierRouteResult>((resolve) => {
+        new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
           resolveFirstPlot = resolve
         }),
     )
@@ -286,17 +310,24 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
     let latestHook!: ReturnType<typeof useCarrierRoute>
 
     function HookHarness({
-      activePlan,
+      externalPlan,
+      dbPath = '/db/alpha.sqlite',
       manualRequestCount = 0,
     }: {
-      activePlan: expedition.PlanView
+      externalPlan: expedition.PlanView
+      dbPath?: string
       manualRequestCount?: number
     }) {
+      const [currentPlan, setCurrentPlan] = useState(externalPlan)
+      useEffect(() => {
+        setCurrentPlan(externalPlan)
+      }, [externalPlan])
       latestHook = useCarrierRoute({
-        plan: activePlan,
-        lastVisitedIndex: 0,
+        plan: currentPlan,
+        dbPath,
         manualPlotterRequestCount: manualRequestCount,
         onBusyChange: (message) => busyMessages.push(message),
+        onPlanOptimisticUpdate: setCurrentPlan,
       })
       return null
     }
@@ -307,7 +338,7 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
 
     try {
       await act(async () => {
-        root.render(createElement(HookHarness, { activePlan: planOne }))
+        root.render(createElement(HookHarness, { externalPlan: planOne }))
         await Promise.resolve()
       })
 
@@ -322,40 +353,35 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
       })
       expect(busyMessages.at(-1)).toBe('PLOTTING SPANSH CARRIER ROUTE')
 
-      // Switch to expedition 2 while expedition 1's Spansh plot is still pending.
+      // Switching expeditions cancels the backend plot immediately and discards late resolution.
       await act(async () => {
-        root.render(createElement(HookHarness, { activePlan: planTwo }))
+        root.render(createElement(HookHarness, { externalPlan: planTwo }))
         await Promise.resolve()
       })
+      expect(mockCancelCarrierRoutePlot).toHaveBeenCalledTimes(1)
       expect(busyMessages.at(-1)).toBe(null)
       expect(latestHook.routePrompt).toBeNull()
 
       await act(async () => {
         resolveFirstPlot(
-          expedition.CarrierRouteResult.createFrom({
-            origin: 'Sol',
-            destination: 'Colonia',
-            carrierType: 'player',
-            manualMode: false,
-            jumps: [{ systemName: 'Colonia', distanceLy: 400, tritiumUsed: 60, fuelInTank: 840 }],
+          expedition.ActiveCarrierRouteState.createFrom({
+            expeditionId: 1,
+            targetRowId: 11,
+            route: { origin: 'Sol', destination: 'Colonia', jumps: [] },
           }),
         )
         await pendingPlotPromise
       })
-
       expect(latestHook.activeCarrierRoute).toBeNull()
-      expect(mockSaveActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockSaveActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
 
-      // Closing the modal mid-plot on expedition 2 also discards late settlement.
-      let rejectSecondPlot!: (reason: Error) => void
-      mockPlotCarrierRoute.mockImplementationOnce(
+      // Closing the modal mid-plot also calls CancelCarrierRoutePlot.
+      let resolveSecondPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
+      mockStartCarrierRoute.mockImplementationOnce(
         () =>
-          new Promise<expedition.CarrierRouteResult>((_, reject) => {
-            rejectSecondPlot = reject
+          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
+            resolveSecondPlot = resolve
           }),
       )
-
       await act(async () => {
         await latestHook.openCarrierRoutePrompt(1, planTwo.rows[1].row)
       })
@@ -365,111 +391,170 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
       act(() => {
         latestHook.handleCloseRoutePrompt()
       })
-      expect(latestHook.routePrompt).toBeNull()
-      expect(busyMessages.at(-1)).toBe(null)
-
+      expect(mockCancelCarrierRoutePlot).toHaveBeenCalledTimes(2)
       await act(async () => {
-        rejectSecondPlot(new Error('Spansh timeout'))
+        resolveSecondPlot(null)
         await pendingPlotPromise
       })
-
       expect(latestHook.activeCarrierRoute).toBeNull()
-      expect(mockSaveActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockSaveActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
 
-      // Activate manual plotter on expedition 2 (undoable), queue a debounced manual distance edit,
-      // and switch back to expedition 1: cleanup flushes silently without polluting the undo stack.
+      // External backend cancellation returning null resets prompt loading to false without leaving modal stuck.
+      let resolveExternallyCancelledPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
+      mockStartCarrierRoute.mockImplementationOnce(
+        () =>
+          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
+            resolveExternallyCancelledPlot = resolve
+          }),
+      )
       await act(async () => {
-        root.render(createElement(HookHarness, { activePlan: planTwo, manualRequestCount: 1 }))
+        await latestHook.openCarrierRoutePrompt(1, planTwo.rows[1].row)
+      })
+      act(() => {
+        pendingPlotPromise = latestHook.handleStartCarrierRoute()
+      })
+      expect(latestHook.routePrompt?.loading).toBe(true)
+      await act(async () => {
+        resolveExternallyCancelledPlot(null)
+        await pendingPlotPromise
+      })
+      expect(latestHook.routePrompt).not.toBeNull()
+      expect(latestHook.routePrompt?.loading).toBe(false)
+      act(() => {
+        latestHook.handleCloseRoutePrompt()
+      })
+
+      // Open manual plotter on expedition 2, queue a draft edit, and switch to expedition 1 on the SAME dbPath: flushes draft.
+      mockOpenManualCarrierRoute.mockResolvedValueOnce(
+        expedition.ActiveCarrierRouteState.createFrom({
+          expeditionId: 2,
+          targetRowId: 21,
+          manualMode: true,
+          route: { origin: 'Sol', destination: 'Beagle Point', manualMode: true, jumps: [] },
+        }),
+      )
+      await act(async () => {
+        root.render(
+          createElement(HookHarness, { externalPlan: planTwo, manualRequestCount: 1 }),
+        )
         await Promise.resolve()
       })
       expect(latestHook.activeCarrierRoute).not.toBeNull()
-      expect(mockSaveActiveCarrierRouteWithUndo).toHaveBeenCalledWith(
-        expect.objectContaining({ expeditionId: 2, manualMode: true }),
-        'Open Manual Carrier Plotter',
-      )
-      mockSaveActiveCarrierRouteWithUndo.mockClear()
-      mockSaveActiveCarrierRoute.mockClear()
 
       act(() => {
         latestHook.handleChangeManualDistance('325.5')
       })
-      expect(mockSaveActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockSaveActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
+      expect(mockSaveCarrierManualDraftInputs).not.toHaveBeenCalled()
 
-      await act(async () => {
-        root.render(createElement(HookHarness, { activePlan: planOne, manualRequestCount: 1 }))
-        await Promise.resolve()
-      })
-      expect(mockSaveActiveCarrierRoute).toHaveBeenCalledTimes(1)
-      expect(mockSaveActiveCarrierRoute).toHaveBeenCalledWith(
-        expect.objectContaining({ expeditionId: 2, manualDistInput: '325.5' }),
-      )
-      expect(mockSaveActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
-
-      // Slow reloadPersistedCarrierRoute from expedition 1 must never overwrite expedition 2.
-      let resolveStaleReload!: (state: expedition.ActiveCarrierRouteState | null) => void
-      mockGetActiveCarrierRoute.mockImplementationOnce(
-        () =>
-          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
-            resolveStaleReload = resolve
-          }),
-      )
-      let pendingReload!: Promise<void>
-      act(() => {
-        pendingReload = latestHook.reloadPersistedCarrierRoute()
+      const manualStateOne = expedition.ActiveCarrierRouteState.createFrom({
+        expeditionId: 1,
+        targetRowId: 11,
+        manualMode: true,
+        route: { origin: 'Sol', destination: 'Colonia', manualMode: true, jumps: [] },
       })
       await act(async () => {
-        root.render(createElement(HookHarness, { activePlan: planTwo, manualRequestCount: 1 }))
-        await Promise.resolve()
-      })
-      await act(async () => {
-        resolveStaleReload(
-          expedition.ActiveCarrierRouteState.createFrom({
-            expeditionId: 1,
-            targetRowId: 11,
-            manualMode: true,
-            route: expedition.CarrierRouteResult.createFrom({
-              origin: 'Sol',
-              destination: 'Colonia',
-              carrierType: 'player',
-              manualMode: true,
-              jumps: [],
-            }),
+        root.render(
+          createElement(HookHarness, {
+            externalPlan: buildCarrierPlan(1, 11, 'Colonia', manualStateOne),
+            dbPath: '/db/alpha.sqlite',
+            manualRequestCount: 1,
           }),
         )
-        await pendingReload
+        await Promise.resolve()
       })
-      expect(latestHook.activeCarrierRoute).toBeNull()
+      expect(mockSaveCarrierManualDraftInputs).toHaveBeenCalledTimes(1)
+      expect(mockSaveCarrierManualDraftInputs).toHaveBeenCalledWith(2, '325.5', '')
+      mockSaveCarrierManualDraftInputs.mockClear()
+
+      // Queue another draft edit on DB alpha (expeditionId === 1), then switch dbPath to DB beta (also expeditionId === 1): MUST NOT flush!
+      act(() => {
+        latestHook.handleChangeManualDistance('999.9')
+      })
+      await act(async () => {
+        root.render(
+          createElement(HookHarness, {
+            externalPlan: buildCarrierPlan(1, 11, 'Colonia'),
+            dbPath: '/db/beta.sqlite',
+            manualRequestCount: 1,
+          }),
+        )
+        await Promise.resolve()
+      })
+      expect(mockSaveCarrierManualDraftInputs).not.toHaveBeenCalled()
+      expect(latestHook.manualDistanceInput).toBe('')
     } finally {
       act(() => root.unmount())
       container.remove()
     }
   })
 
-  it('cancels pending manual-input timers, blocks concurrent arrival clicks, preserves activeCarrierRoute on arrival failure, and records undoable cancel and manual jumps atomically', async () => {
+  it('coordinates Spansh hop completion, depot refill, manual switch, manual jump logging, arrival error recovery, and route cancel', async () => {
     vi.useFakeTimers()
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const savedRoute = expedition.CarrierRouteResult.createFrom({
-      origin: 'Sol',
-      destination: 'Colonia',
-      carrierType: 'player',
-      manualMode: true,
-      jumps: [],
+
+    const initialSpanshState = expedition.ActiveCarrierRouteState.createFrom({
+      expeditionId: 1,
+      targetRowId: 12,
+      jumpIdx: 0,
+      manualMode: false,
+      route: {
+        origin: 'Sol',
+        destination: 'Colonia',
+        carrierType: 'player',
+        capacityUsed: 5000,
+        depotTritium: 500,
+        manualMode: false,
+        jumps: [
+          { systemName: 'Rohini', distanceLy: 420, tritiumUsed: 60, fuelInTank: 440 },
+          { systemName: 'Colonia', distanceLy: 400, tritiumUsed: 44, fuelInTank: 396 },
+        ],
+      },
     })
-    mockGetActiveCarrierRoute.mockResolvedValue(
+    const initialPlan = expedition.PlanView.createFrom({
+      expedition: { id: 1, name: 'Expedition 1', status: 'active' },
+      nextFcStopRowId: 11,
+      routedCarrierStopRowId: 12,
+      activeCarrierRoute: initialSpanshState,
+      rows: [
+        { row: { id: 10, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol', visitedAt: '3312-01-01T00:00:00Z' }, number: 1, visitState: 'visited' },
+        { row: { id: 11, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini', fcStop: true, fcArrived: false }, number: 2, visitState: 'future' },
+        { row: { id: 12, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia', fcStop: true, fcArrived: false }, number: 3, visitState: 'future' },
+      ],
+    })
+
+    mockRefillCarrierDepot.mockResolvedValueOnce(
       expedition.ActiveCarrierRouteState.createFrom({
-        expeditionId: 1,
-        targetRowId: 11,
-        route: savedRoute,
-        manualMode: true,
+        ...initialSpanshState,
+        route: { ...initialSpanshState.route, depotTritium: 1000, capacityUsed: 4500 },
       }),
     )
-    mockSaveActiveCarrierRoute.mockResolvedValue(undefined)
-    mockSaveActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-    mockClearActiveCarrierRoute.mockResolvedValue(undefined)
+    mockCompleteSpanshCarrierJump.mockResolvedValueOnce(
+      expedition.ActiveCarrierRouteState.createFrom({
+        ...initialSpanshState,
+        jumpIdx: 1,
+        route: { ...initialSpanshState.route, depotTritium: 940 },
+      }),
+    )
+    mockSwitchCarrierRouteToManual.mockResolvedValueOnce(
+      expedition.ActiveCarrierRouteState.createFrom({
+        ...initialSpanshState,
+        jumpIdx: 1,
+        manualMode: true,
+        manualDistInput: '400',
+        manualTritInput: '44',
+      }),
+    )
+    mockLogManualCarrierJump.mockResolvedValueOnce(
+      expedition.ActiveCarrierRouteState.createFrom({
+        ...initialSpanshState,
+        jumpIdx: 1,
+        manualMode: true,
+        manualLegJumps: 1,
+        manualLegDist: 400,
+        manualLegTrit: 44,
+      }),
+    )
+    mockSaveCarrierManualDraftInputs.mockResolvedValue(undefined)
     mockClearActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-    mockRecordCarrierJumpAndSaveRoute.mockResolvedValue(undefined)
 
     let rejectFirstArrival!: (reason: Error) => void
     mockCompleteCarrierRouteArrival
@@ -481,14 +566,19 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
       )
       .mockResolvedValueOnce(undefined)
 
-    const planOne = buildCarrierPlan(1, 11, 'Colonia')
+    let refreshPlanCalls = 0
     let latestHook!: ReturnType<typeof useCarrierRoute>
-
+    let replaceExternalPlan!: (nextPlan: expedition.PlanView) => void
     function HookHarness() {
+      const [currentPlan, setCurrentPlan] = useState(initialPlan)
+      replaceExternalPlan = setCurrentPlan
       latestHook = useCarrierRoute({
-        plan: planOne,
-        lastVisitedIndex: 0,
+        plan: currentPlan,
         onBusyChange: () => {},
+        onPlanOptimisticUpdate: setCurrentPlan,
+        onRefreshPlan: () => {
+          refreshPlanCalls += 1
+        },
       })
       return null
     }
@@ -497,385 +587,150 @@ describe('useCarrierRoute async race and arrival persistence guards', () => {
     document.body.appendChild(container)
     const root = createRoot(container)
 
-    try {
-      await act(async () => {
-        root.render(createElement(HookHarness))
-        await Promise.resolve()
-      })
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-
-      // Manual jump logging uses atomic RecordCarrierJumpAndSaveRoute and updates local counters.
-      act(() => {
-        latestHook.handleChangeManualDistance('245.5')
-        latestHook.handleChangeManualTritium('42')
-      })
-      await act(async () => {
-        await latestHook.handleLogManualJump()
-      })
-      expect(mockRecordCarrierJumpAndSaveRoute).toHaveBeenCalledWith(
-        1,
-        245.5,
-        42,
-        expect.objectContaining({
-          expeditionId: 1,
-          manualLegJumps: 1,
-          manualLegDist: 245.5,
-          manualLegTrit: 42,
-          manualDistInput: '',
-          manualTritInput: '',
-        }),
-      )
-      expect(latestHook.manualLegJumps).toBe(1)
-      expect(latestHook.manualLegDistance).toBe(245.5)
-      expect(latestHook.manualLegTritium).toBe(42)
-
-      act(() => {
-        latestHook.handleChangeManualDistance('180.0')
-      })
-
-      let firstArrivalPromise!: Promise<void>
-      act(() => {
-        firstArrivalPromise = latestHook.handleCarrierArriveAtWaypoint()
-      })
-      expect(latestHook.loggingJump).toBe(true)
-
-      // Concurrent click while loggingJump is true and 250 ms timer window elapsing must both no-op.
-      await act(async () => {
-        await latestHook.handleCarrierArriveAtWaypoint()
-        vi.advanceTimersByTime(300)
-      })
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledTimes(1)
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledWith(1, 11, 0, 0)
-      expect(mockSaveActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockSaveActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
-
-      await act(async () => {
-        rejectFirstArrival(new Error('sqlite busy'))
-        await firstArrivalPromise
-      })
-      expect(latestHook.loggingJump).toBe(false)
-      expect(mockClearActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockClearActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-
-      await act(async () => {
-        await latestHook.handleCarrierArriveAtWaypoint()
-      })
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledTimes(2)
-      expect(mockClearActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockClearActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
-      expect(latestHook.activeCarrierRoute).toBeNull()
-
-      // Reload restored route and verify user cancel calls ClearActiveCarrierRouteWithUndo.
-      await act(async () => {
-        await latestHook.reloadPersistedCarrierRoute()
-      })
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-      act(() => {
-        latestHook.handleCancelCarrierRoute()
-      })
-      expect(mockClearActiveCarrierRouteWithUndo).toHaveBeenCalledWith(1)
-      expect(latestHook.activeCarrierRoute).toBeNull()
-    } finally {
-      errorSpy.mockRestore()
-      vi.useRealTimers()
-      act(() => root.unmount())
-      container.remove()
-    }
-  })
-
-  it('uses atomic RPCs for intermediate Spansh hops, final arrival, already-recorded arrival, depot refill, and manual mode switch', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const twoHopSpanshRoute = expedition.CarrierRouteResult.createFrom({
-      origin: 'Sol',
-      destination: 'Colonia',
-      carrierType: 'player',
-      capacityUsed: 5000,
-      depotTritium: 500,
-      manualMode: false,
-      jumps: [
-        { systemName: 'Rohini', distanceLy: 420, tritiumUsed: 60, fuelInTank: 440 },
-        { systemName: 'Colonia', distanceLy: 400, tritiumUsed: 44, fuelInTank: 396 },
-      ],
-    })
-    mockGetActiveCarrierRoute.mockResolvedValueOnce(
-      expedition.ActiveCarrierRouteState.createFrom({
-        expeditionId: 1,
-        targetRowId: 12,
-        route: twoHopSpanshRoute,
-        jumpIdx: 0,
-        manualMode: false,
-      }),
-    )
-    mockRecordCarrierJumpAndSaveRoute.mockResolvedValue(undefined)
-    mockSaveActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-    mockCompleteCarrierRouteArrival
-      .mockRejectedValueOnce(new Error('arrival failed'))
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-
-    const multiStopPlan = expedition.PlanView.createFrom({
-      expedition: { id: 1, name: 'Expedition 1', status: 'active' },
-      nextFcStopRowId: 11,
-      rows: [
-        { row: { id: 10, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol', visitedAt: '3312-01-01T00:00:00Z' }, number: 1, visitState: 'visited' },
-        { row: { id: 11, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini', fcStop: true, fcArrived: false }, number: 2, visitState: 'future' },
-        { row: { id: 12, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia', fcStop: true, fcArrived: false }, number: 3, visitState: 'future' },
-      ],
-    })
-
-    let latestHook!: ReturnType<typeof useCarrierRoute>
-    const HookHarness = () => {
-      latestHook = useCarrierRoute({ plan: multiStopPlan, lastVisitedIndex: 0, onBusyChange: () => {} })
-      return null
-    }
-
-    const container = document.createElement('div')
-    const root = createRoot(container)
     try {
       await act(async () => {
         root.render(createElement(HookHarness))
         await Promise.resolve()
       })
       expect(latestHook.nextFcStopEntry?.row.id).toBe(11)
-      expect(latestHook.activeCarrierTargetRowId).toBe(12)
+      expect(latestHook.routedCarrierStopIndex).toBe(2)
 
-      // Depot refill records an undoable route save.
+      await act(async () => {
+        latestHook.handleRefillDepot()
+        await Promise.resolve()
+      })
+      expect(mockRefillCarrierDepot).toHaveBeenCalledWith(1)
+      expect(latestHook.activeCarrierRoute?.depotTritium).toBe(1000)
+
+      await act(async () => {
+        await latestHook.handleCompleteSpanshJump()
+      })
+      expect(mockCompleteSpanshCarrierJump).toHaveBeenCalledWith(1)
+      expect(latestHook.carrierJumpIndex).toBe(1)
+
+      await act(async () => {
+        latestHook.switchActiveRouteToManualMode()
+        await Promise.resolve()
+      })
+      expect(mockSwitchCarrierRouteToManual).toHaveBeenCalledWith(1)
+      expect(latestHook.isManualCarrierRoute).toBe(true)
+      expect(latestHook.manualDistanceInput).toBe('400')
+      expect(latestHook.manualTritiumInput).toBe('44')
+      expect(latestHook.routedCarrierStopIndex).toBe(1)
+
+      await act(async () => {
+        await latestHook.handleLogManualJump()
+      })
+      expect(mockLogManualCarrierJump).toHaveBeenCalledWith(1, 400, 44)
+      expect(latestHook.manualLegJumps).toBe(1)
+      expect(latestHook.manualDistanceInput).toBe('')
+
+      // Queue debounced draft input, start arrival (cancels pending timer and blocks concurrent clicks), reject, then succeed.
+      act(() => {
+        latestHook.handleChangeManualDistance('180')
+      })
+      let firstArrivalPromise!: Promise<void>
+      act(() => {
+        firstArrivalPromise = latestHook.handleCarrierArriveAtWaypoint()
+      })
+      expect(latestHook.loggingJump).toBe(true)
+      await act(async () => {
+        await latestHook.handleCarrierArriveAtWaypoint()
+        vi.advanceTimersByTime(300)
+      })
+      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledTimes(1)
+      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledWith(1, 0, 0, 0)
+      expect(mockSaveCarrierManualDraftInputs).not.toHaveBeenCalled()
+
+      await act(async () => {
+        rejectFirstArrival(new Error('sqlite busy'))
+        await firstArrivalPromise
+      })
+      expect(latestHook.loggingJump).toBe(false)
+      expect(latestHook.activeCarrierRoute).not.toBeNull()
+
+      // In-flight SaveCarrierManualDraftInputs protects newer user edits from stale backend plan updates.
+      let resolveDraftSave!: () => void
+      mockSaveCarrierManualDraftInputs.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveDraftSave = resolve
+          }),
+      )
+      act(() => {
+        latestHook.handleChangeManualDistance('275')
+      })
+      act(() => {
+        vi.advanceTimersByTime(250)
+      })
+      expect(mockSaveCarrierManualDraftInputs).toHaveBeenCalledWith(1, '275', '')
+      act(() => {
+        replaceExternalPlan(
+          expedition.PlanView.createFrom({
+            ...initialPlan,
+            activeCarrierRoute: {
+              ...initialSpanshState,
+              manualMode: true,
+              manualDistInput: 'stale-old',
+              manualTritInput: '',
+            },
+          }),
+        )
+      })
+      expect(latestHook.manualDistanceInput).toBe('275')
+      await act(async () => {
+        resolveDraftSave()
+        await Promise.resolve()
+      })
+
+      // If GetPlan settles a newer PlanView while RefillCarrierDepot is in flight, stale optimistic clone is skipped.
+      let resolveLateRefill!: (state: expedition.ActiveCarrierRouteState | null) => void
+      mockRefillCarrierDepot.mockImplementationOnce(
+        () =>
+          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
+            resolveLateRefill = resolve
+          }),
+      )
       act(() => {
         latestHook.handleRefillDepot()
       })
-      expect(mockSaveActiveCarrierRouteWithUndo).toHaveBeenCalledWith(
-        expect.objectContaining({
-          expeditionId: 1,
-          route: expect.objectContaining({ depotTritium: 1000 }),
-        }),
-        'Refill Carrier Depot',
-      )
-
-      // Intermediate Spansh hop persists jump and updated route atomically.
-      await act(async () => {
-        await latestHook.handleCompleteSpanshJump()
+      const authoritativeBackendPlan = expedition.PlanView.createFrom({
+        ...initialPlan,
+        waypointCount: 99,
+        activeCarrierRoute: {
+          ...initialSpanshState,
+          manualMode: true,
+          route: { ...initialSpanshState.route, depotTritium: 1000, capacityUsed: 4200 },
+        },
       })
-      expect(mockRecordCarrierJumpAndSaveRoute).toHaveBeenCalledTimes(1)
-      expect(mockRecordCarrierJumpAndSaveRoute).toHaveBeenCalledWith(
-        1,
-        420,
-        expect.any(Number),
-        expect.objectContaining({ expeditionId: 1, targetRowId: 12, jumpIdx: 1 }),
-      )
-      expect(latestHook.carrierJumpIndex).toBe(1)
-
-      // Final Spansh hop calls CompleteCarrierRouteArrival atomically; on error local state stays untouched.
-      await act(async () => {
-        await latestHook.handleCompleteSpanshJump()
-      })
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenNthCalledWith(
-        1,
-        1,
-        12,
-        400,
-        expect.any(Number),
-      )
-      expect(latestHook.carrierJumpIndex).toBe(1)
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-
-      // Retry final Spansh hop succeeds and clears local state without redundant backend clear.
-      await act(async () => {
-        await latestHook.handleCompleteSpanshJump()
-      })
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenNthCalledWith(
-        2,
-        1,
-        12,
-        400,
-        expect.any(Number),
-      )
-      expect(latestHook.activeCarrierRoute).toBeNull()
-      expect(mockClearActiveCarrierRoute).not.toHaveBeenCalled()
-      expect(mockClearActiveCarrierRouteWithUndo).not.toHaveBeenCalled()
-
-      // Already-recorded Spansh route (jumpIdx >= totalJumps) completes arrival with zero distance and tritium.
-      mockGetActiveCarrierRoute.mockResolvedValueOnce(
-        expedition.ActiveCarrierRouteState.createFrom({
-          expeditionId: 1,
-          targetRowId: 12,
-          route: twoHopSpanshRoute,
-          jumpIdx: 2,
-          manualMode: false,
-        }),
-      )
-      await act(async () => {
-        await latestHook.reloadPersistedCarrierRoute()
-      })
-      expect(latestHook.carrierJumpIndex).toBe(2)
-
-      await act(async () => {
-        await latestHook.handleCompleteSpanshJump()
-      })
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenNthCalledWith(3, 1, 12, 0, 0)
-      expect(latestHook.activeCarrierRoute).toBeNull()
-
-      // Switching an active Spansh route to manual mode records an undoable route save.
-      mockGetActiveCarrierRoute.mockResolvedValueOnce(
-        expedition.ActiveCarrierRouteState.createFrom({
-          expeditionId: 1,
-          targetRowId: 12,
-          route: twoHopSpanshRoute,
-          jumpIdx: 0,
-          manualMode: false,
-        }),
-      )
-      await act(async () => {
-        await latestHook.reloadPersistedCarrierRoute()
-      })
-      mockSaveActiveCarrierRouteWithUndo.mockClear()
       act(() => {
-        latestHook.switchActiveRouteToManualMode()
+        replaceExternalPlan(authoritativeBackendPlan)
       })
-      expect(mockSaveActiveCarrierRouteWithUndo).toHaveBeenCalledWith(
-        expect.objectContaining({ expeditionId: 1, manualMode: true }),
-        'Switch Carrier Route to Manual Mode',
-      )
-    } finally {
-      errorSpy.mockRestore()
-      act(() => root.unmount())
-    }
-  })
-
-  it('ignores in-flight jump or arrival settlement after clearLocalCarrierRoute or reloadPersistedCarrierRoute and invalidates stale route loads on completed jumps', async () => {
-    const twoHopRoute = expedition.CarrierRouteResult.createFrom({
-      origin: 'Sol',
-      destination: 'Colonia',
-      carrierType: 'player',
-      capacityUsed: 5000,
-      depotTritium: 500,
-      manualMode: false,
-      jumps: [
-        { systemName: 'Rohini', distanceLy: 420, tritiumUsed: 60, fuelInTank: 440 },
-        { systemName: 'Colonia', distanceLy: 400, tritiumUsed: 44, fuelInTank: 396 },
-      ],
-    })
-    const initialRouteState = expedition.ActiveCarrierRouteState.createFrom({
-      expeditionId: 1,
-      targetRowId: 11,
-      route: twoHopRoute,
-      jumpIdx: 0,
-      manualMode: false,
-    })
-    const restoredRouteState = expedition.ActiveCarrierRouteState.createFrom({
-      expeditionId: 1,
-      targetRowId: 11,
-      route: twoHopRoute,
-      jumpIdx: 1,
-      manualMode: false,
-    })
-
-    mockGetActiveCarrierRoute.mockResolvedValueOnce(initialRouteState)
-    mockSaveActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-
-    const planOne = buildCarrierPlan(1, 11, 'Colonia')
-    let latestHook!: ReturnType<typeof useCarrierRoute>
-    const HookHarness = () => {
-      latestHook = useCarrierRoute({ plan: planOne, lastVisitedIndex: 0, onBusyChange: () => {} })
-      return null
-    }
-
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
       await act(async () => {
-        root.render(createElement(HookHarness))
+        resolveLateRefill(
+          expedition.ActiveCarrierRouteState.createFrom({
+            ...initialSpanshState,
+            manualMode: true,
+            route: { ...initialSpanshState.route, depotTritium: 777 },
+          }),
+        )
         await Promise.resolve()
       })
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-      expect(latestHook.carrierJumpIndex).toBe(0)
+      expect(latestHook.activeCarrierRoute?.depotTritium).toBe(1000)
 
-      // In-flight RecordCarrierJumpAndSaveRoute settling after clearLocalCarrierRoute must not restore route.
-      let resolveInFlightJump!: () => void
-      mockRecordCarrierJumpAndSaveRoute.mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveInFlightJump = resolve
-          }),
-      )
-      let pendingJumpPromise!: Promise<void>
-      act(() => {
-        pendingJumpPromise = latestHook.handleCompleteSpanshJump()
+      // Cancel route calls ClearActiveCarrierRouteWithUndo, clears optimistic route immediately, and rolls back via onRefreshPlan on rejection.
+      mockClearActiveCarrierRouteWithUndo.mockRejectedValueOnce(new Error('cancel failed'))
+      await act(async () => {
+        latestHook.handleCancelCarrierRoute()
+        await Promise.resolve()
       })
-      act(() => {
-        latestHook.clearLocalCarrierRoute()
-      })
+      expect(mockClearActiveCarrierRouteWithUndo).toHaveBeenCalledWith(1)
       expect(latestHook.activeCarrierRoute).toBeNull()
-
-      await act(async () => {
-        resolveInFlightJump()
-        await pendingJumpPromise
-      })
-      expect(latestHook.activeCarrierRoute).toBeNull()
-      expect(latestHook.carrierJumpIndex).toBe(0)
-
-      // Load route at hop 1, start CompleteCarrierRouteArrival, then reloadPersistedCarrierRoute (undo) before settlement.
-      mockGetActiveCarrierRoute.mockResolvedValueOnce(restoredRouteState)
-      await act(async () => {
-        await latestHook.reloadPersistedCarrierRoute()
-      })
-      expect(latestHook.carrierJumpIndex).toBe(1)
-
-      let resolveInFlightArrival!: () => void
-      mockCompleteCarrierRouteArrival.mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveInFlightArrival = resolve
-          }),
-      )
-      let pendingArrivalPromise!: Promise<void>
-      act(() => {
-        pendingArrivalPromise = latestHook.handleCompleteSpanshJump()
-      })
-
-      mockGetActiveCarrierRoute.mockResolvedValueOnce(initialRouteState)
-      await act(async () => {
-        await latestHook.reloadPersistedCarrierRoute()
-      })
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-      expect(latestHook.carrierJumpIndex).toBe(0)
-
-      // Late arrival settlement must not clear the reloaded route.
-      await act(async () => {
-        resolveInFlightArrival()
-        await pendingArrivalPromise
-      })
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
-      expect(latestHook.carrierJumpIndex).toBe(0)
-
-      // Slow GetActiveCarrierRoute started before a completed jump must not overwrite jumpIdx 1 with stale jumpIdx 0.
-      let resolveSlowLoad!: (state: expedition.ActiveCarrierRouteState | null) => void
-      mockGetActiveCarrierRoute.mockImplementationOnce(
-        () =>
-          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
-            resolveSlowLoad = resolve
-          }),
-      )
-      let slowReloadPromise!: Promise<void>
-      act(() => {
-        slowReloadPromise = latestHook.reloadPersistedCarrierRoute()
-      })
-      mockRecordCarrierJumpAndSaveRoute.mockResolvedValueOnce(undefined)
-      await act(async () => {
-        await latestHook.handleCompleteSpanshJump()
-      })
-      expect(latestHook.carrierJumpIndex).toBe(1)
-
-      await act(async () => {
-        resolveSlowLoad(initialRouteState)
-        await slowReloadPromise
-      })
-      expect(latestHook.carrierJumpIndex).toBe(1)
+      expect(refreshPlanCalls).toBe(1)
     } finally {
+      errorSpy.mockRestore()
       act(() => root.unmount())
       container.remove()
     }
   })
 })
-

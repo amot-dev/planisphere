@@ -287,7 +287,6 @@ export namespace app {
 	export class UndoActionResult {
 	    applied: boolean;
 	    label: string;
-	    carrierRouteRestored: boolean;
 	    canUndo: boolean;
 	    canRedo: boolean;
 	
@@ -299,7 +298,6 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.applied = source["applied"];
 	        this.label = source["label"];
-	        this.carrierRouteRestored = source["carrierRouteRestored"];
 	        this.canUndo = source["canUndo"];
 	        this.canRedo = source["canRedo"];
 	    }
@@ -470,6 +468,28 @@ export namespace expedition {
 	    }
 	}
 	
+	export class CarrierRoutePromptDefaults {
+	    targetRowId: number;
+	    origin: string;
+	    destination: string;
+	    carrierType: string;
+	    capacityUsed: number;
+	    depotTritium: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CarrierRoutePromptDefaults(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.targetRowId = source["targetRowId"];
+	        this.origin = source["origin"];
+	        this.destination = source["destination"];
+	        this.carrierType = source["carrierType"];
+	        this.capacityUsed = source["capacityUsed"];
+	        this.depotTritium = source["depotTritium"];
+	    }
+	}
 	
 	export class CarrierStats {
 	    carrierJumps: number;
@@ -761,6 +781,8 @@ export namespace expedition {
 	    currentRowId: number;
 	    nextWaypointRowId?: number;
 	    nextFcStopRowId: number;
+	    routedCarrierStopRowId?: number;
+	    activeCarrierRoute?: ActiveCarrierRouteState;
 	    playerSystem?: string;
 	    waypointCount: number;
 	    visitedWaypointCount: number;
@@ -782,6 +804,8 @@ export namespace expedition {
 	        this.currentRowId = source["currentRowId"];
 	        this.nextWaypointRowId = source["nextWaypointRowId"];
 	        this.nextFcStopRowId = source["nextFcStopRowId"];
+	        this.routedCarrierStopRowId = source["routedCarrierStopRowId"];
+	        this.activeCarrierRoute = this.convertValues(source["activeCarrierRoute"], ActiveCarrierRouteState);
 	        this.playerSystem = source["playerSystem"];
 	        this.waypointCount = source["waypointCount"];
 	        this.visitedWaypointCount = source["visitedWaypointCount"];
@@ -1364,22 +1388,6 @@ export namespace replay {
 	        this.systemAddress = source["systemAddress"];
 	        this.profileId = source["profileId"];
 	        this.commander = source["commander"];
-	    }
-	}
-	export class CarrierDepotInfo {
-	    usedCapacity: number;
-	    depotTritium: number;
-	    cargo: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new CarrierDepotInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.usedCapacity = source["usedCapacity"];
-	        this.depotTritium = source["depotTritium"];
-	        this.cargo = source["cargo"];
 	    }
 	}
 	export class CommanderAlias {

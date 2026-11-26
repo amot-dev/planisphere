@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/reference"
 	"planisphere/internal/store/settings"
 )
 
@@ -135,31 +136,96 @@ func RecordCarrierJumpAndSaveRouteTx(dbConn *sql.DB, expeditionID int64, distanc
 	})
 }
 
+// IsManualMode reports whether the active carrier route is operating in manual
+// jump-logging mode (either explicitly toggled or holding zero plotted hops).
+func (state ActiveCarrierRouteState) IsManualMode() bool {
+	return state.ManualMode || state.Route.ManualMode || len(state.Route.Jumps) == 0
+}
+
+// NormalizeActiveCarrierRoute validates and clamps a persisted carrier route
+// state, returning nil when state is nil or holds no target, manual flag, or hops.
+func NormalizeActiveCarrierRoute(state *ActiveCarrierRouteState) *ActiveCarrierRouteState {
+	if state == nil || !(state.TargetRowID > 0 || state.ManualMode || state.Route.ManualMode || len(state.Route.Jumps) > 0) {
+		return nil
+	}
+	normalized := *state
+	if normalized.JumpIndex < 0 {
+		normalized.JumpIndex = 0
+	} else if normalized.JumpIndex > len(normalized.Route.Jumps) {
+		normalized.JumpIndex = len(normalized.Route.Jumps)
+	}
+	if normalized.Route.DepotTritium < 0 {
+		normalized.Route.DepotTritium = 0
+	} else if normalized.Route.DepotTritium > reference.CarrierFuelTankTonnes {
+		normalized.Route.DepotTritium = reference.CarrierFuelTankTonnes
+	}
+	if normalized.Route.Jumps == nil {
+		normalized.Route.Jumps = []CarrierRouteJump{}
+	}
+	return &normalized
+}
+
+// SaveCarrierManualDraftInputs updates only the draft manual distance and
+// tritium input strings on an existing active carrier route without recording undo.
+func SaveCarrierManualDraftInputs(queryer db.Queryer, expeditionID int64, distanceInput, tritiumInput string) error {
+	if expeditionID <= 0 {
+		return nil
+	}
+	routeState, getError := GetActiveCarrierRoute(queryer, expeditionID)
+	if getError != nil {
+		return getError
+	}
+	if routeState == nil {
+		return nil
+	}
+	routeState.ExpeditionID = expeditionID
+	routeState.ManualDistanceInput = distanceInput
+	routeState.ManualTritiumInput = tritiumInput
+	_, saveError := SaveActiveCarrierRouteIfChanged(queryer, *routeState)
+	return saveError
+}
+
+func applyCarrierRouteArrival(transaction *sql.Tx, expeditionID int64, targetRowID int64, distanceLy float64, tritium int) error {
+	if distanceLy > 0 || tritium > 0 {
+		if jumpError := RecordCarrierJump(transaction, expeditionID, distanceLy, tritium); jumpError != nil {
+			return jumpError
+		}
+	}
+	if clearError := ClearActiveCarrierRoute(transaction, expeditionID); clearError != nil {
+		return clearError
+	}
+	if targetRowID > 0 {
+		targetRow, getError := GetRow(transaction, targetRowID)
+		if getError != nil {
+			return getError
+		}
+		if targetRow.ExpeditionID != expeditionID {
+			return fmt.Errorf("row %d does not belong to expedition %d", targetRowID, expeditionID)
+		}
+		arrived := true
+		if _, updateError := UpdateRow(transaction, RowPatch{ID: targetRowID, FCArrived: &arrived}); updateError != nil {
+			return updateError
+		}
+	}
+	return nil
+}
+
 // CompleteCarrierRouteArrivalTx atomically records an optional final carrier jump,
-// clears the active carrier route, and marks targetRowID arrived when positive.
+// clears the active carrier route, and marks targetRowID (or the resolved arrival
+// target row when targetRowID is non-positive) arrived.
 func CompleteCarrierRouteArrivalTx(dbConn *sql.DB, expeditionID int64, targetRowID int64, distanceLy float64, tritium int) error {
 	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		if distanceLy > 0 || tritium > 0 {
-			if jumpError := RecordCarrierJump(transaction, expeditionID, distanceLy, tritium); jumpError != nil {
-				return jumpError
+		if targetRowID <= 0 {
+			rows, listError := ListRows(transaction, expeditionID)
+			if listError != nil {
+				return listError
 			}
+			activeRoute, routeError := GetActiveCarrierRoute(transaction, expeditionID)
+			if routeError != nil {
+				return routeError
+			}
+			targetRowID = ResolveArrivalTargetRowID(rows, NormalizeActiveCarrierRoute(activeRoute))
 		}
-		if clearError := ClearActiveCarrierRoute(transaction, expeditionID); clearError != nil {
-			return clearError
-		}
-		if targetRowID > 0 {
-			targetRow, getError := GetRow(transaction, targetRowID)
-			if getError != nil {
-				return getError
-			}
-			if targetRow.ExpeditionID != expeditionID {
-				return fmt.Errorf("row %d does not belong to expedition %d", targetRowID, expeditionID)
-			}
-			arrived := true
-			if _, updateError := UpdateRow(transaction, RowPatch{ID: targetRowID, FCArrived: &arrived}); updateError != nil {
-				return updateError
-			}
-		}
-		return nil
+		return applyCarrierRouteArrival(transaction, expeditionID, targetRowID, distanceLy, tritium)
 	})
 }

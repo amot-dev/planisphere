@@ -9,11 +9,10 @@ import (
 
 // UndoActionResult reports the outcome of a session-scoped expedition undo or redo request.
 type UndoActionResult struct {
-	Applied              bool   `json:"applied"`
-	Label                string `json:"label"`
-	CarrierRouteRestored bool   `json:"carrierRouteRestored"`
-	CanUndo              bool   `json:"canUndo"`
-	CanRedo              bool   `json:"canRedo"`
+	Applied bool   `json:"applied"`
+	Label   string `json:"label"`
+	CanUndo bool   `json:"canUndo"`
+	CanRedo bool   `json:"canRedo"`
 }
 
 func (app *App) ensureUndoHistory() *expedition.UndoHistory {
@@ -212,11 +211,10 @@ func (app *App) runExpeditionUndoStep(expeditionID int64, isRedo bool) (UndoActi
 		return UndoActionResult{}, stepError
 	}
 	actionResult := UndoActionResult{
-		Applied:              stepOutcome.Applied,
-		Label:                stepOutcome.Label,
-		CarrierRouteRestored: stepOutcome.CarrierRouteRestored,
-		CanUndo:              stepOutcome.CanUndo,
-		CanRedo:              stepOutcome.CanRedo,
+		Applied: stepOutcome.Applied,
+		Label:   stepOutcome.Label,
+		CanUndo: stepOutcome.CanUndo,
+		CanRedo: stepOutcome.CanRedo,
 	}
 	if !stepOutcome.Applied {
 		return actionResult, nil

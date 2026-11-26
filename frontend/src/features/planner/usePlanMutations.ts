@@ -86,13 +86,12 @@ export async function executePlanMutation(
 
 /**
  * CarrierMutationLockContext exposes active carrier router bounds checked when
- * toggling carrier stops or overriding arrival state.
+ * toggling carrier stops.
  */
 export interface CarrierMutationLockContext {
   activeCarrierRoute: expedition.CarrierRouteResult | null
   isManualCarrierRoute: boolean
   routedCarrierStopIndex: number
-  onCancelCarrierRoute: () => void
 }
 
 /**
@@ -377,32 +376,14 @@ export function usePlanMutations({
     } else if (activeConfirm.kind === 'move_reset_fc') {
       await executeMoveRow(activeConfirm.rowId, activeConfirm.fromIndex, activeConfirm.toIndex)
     } else if (activeConfirm.kind === 'override_fc_arrival') {
-      const carrierContext = carrierContextRef.current
-      const shouldCloseSpanshRoute =
-        activeConfirm.targetArrived &&
-        Boolean(
-          plan &&
-            carrierContext.activeCarrierRoute &&
-            !carrierContext.isManualCarrierRoute &&
-            carrierContext.routedCarrierStopIndex >= 0 &&
-            plan.rows.findIndex((item) => item?.row?.id === activeConfirm.rowId) >=
-              carrierContext.routedCarrierStopIndex,
-        )
       await runPlanMutation(
         'UPDATING CARRIER ARRIVAL',
         'Failed to override carrier arrival',
         () => OverrideCarrierStopArrival(activeConfirm.rowId, activeConfirm.targetArrived),
-        {
-          onSuccess: () => {
-            if (shouldCloseSpanshRoute) {
-              carrierContext.onCancelCarrierRoute()
-            }
-          },
-          rollbackOnError: true,
-        },
+        { rollbackOnError: true },
       )
     }
-  }, [carrierContextRef, confirmState, executeDeleteRow, executeMoveRow, plan, runPlanMutation])
+  }, [confirmState, executeDeleteRow, executeMoveRow, runPlanMutation])
 
   const handleLifecycleAction = useCallback(
     async (label: string, actionFunction: () => Promise<void>) => {

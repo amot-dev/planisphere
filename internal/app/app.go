@@ -114,6 +114,9 @@ type App struct {
 	exportSnapshotMu   sync.Mutex
 	lastExportSnapshot *exporter.ExpeditionExport
 	undoHistory        *expedition.UndoHistory
+	carrierPlotMu      sync.Mutex
+	carrierPlotCancel  context.CancelFunc
+	carrierPlotSeq     uint64
 
 	// emit is runtime.EventsEmit, replaceable for tests.
 	emit func(event string, data ...any)
@@ -322,6 +325,7 @@ func (app *App) openAndWireDB(dbPath string) error {
 	remainingWatcher := app.watcher
 	previousDB := app.db
 	app.db, app.dbPath = dbConn, dbPath
+	app.CancelCarrierRoutePlot()
 	app.ingester = journal.NewIngester(dbConn)
 	app.watcher = journal.NewWatcher(app.ingester, app.onJournalBatch)
 	app.watcher.SetDebounceDelay(time.Duration(settings.JournalDebounceMs(app.db)) * time.Millisecond)
@@ -367,6 +371,7 @@ func (app *App) shutdown(ctx context.Context) {
 	if cancelFunc != nil {
 		cancelFunc()
 	}
+	app.CancelCarrierRoutePlot()
 	if activeWatcher != nil {
 		activeWatcher.Stop()
 	}
