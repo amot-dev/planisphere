@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": [
+    "src/main.tsx!",
+    "src/profile/live_frontend_profile.test.ts!"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}!"
+  ],
+  "ignore": [
+    "src/version.ts",
+    "src/test/**",
+    "src/features/export/exportTestFixtures.ts",
+    "wailsjs/**"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "vite": {
+    "entry": [
+      "src/**/!(live_frontend_profile).test.{ts,tsx}"
+    ]
+  },
+  "vitest": {
+    "entry": [
+      "src/**/!(live_frontend_profile).test.{ts,tsx}"
+    ]
+  }
+}

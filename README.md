@@ -298,6 +298,12 @@ make test-frontend
 # Run frontend TypeScript typecheck
 make typecheck
 
+# Generate backend and frontend test coverage reports in coverage/
+make coverage
+
+# Run static dead-code analysis across backend and frontend
+make deadcode
+
 # Create an isolated, WAL-merged snapshot of the active database
 # Optional: OUT=<path> SRC=<path> (or ED_PLANNER_DB=<path>)
 make snapshot-db

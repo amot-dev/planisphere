@@ -1,4 +1,6 @@
-.PHONY: all build dev run test test-backend test-frontend typecheck profile snapshot-db sync-metadata clean install-frontend \
+.PHONY: all build dev run test test-backend test-frontend typecheck \
+        coverage coverage-backend coverage-frontend deadcode deadcode-backend deadcode-frontend \
+        profile snapshot-db sync-metadata clean install-frontend \
         package-tarball package-appimage package-windows package-deb package-rpm package-arch
 
 VERSION := $(shell grep -o '"version": *"[^"]*"' app.config.json 2>/dev/null | cut -d'"' -f4)
@@ -44,8 +46,9 @@ else
 endif
 
 # Source file dependencies for incremental compilation
-GO_SOURCES := $(shell find internal -name "*.go" 2>/dev/null) main.go go.mod go.sum
+GO_SOURCES := $(shell find internal -name "*.go" ! -name "*_test.go" ! -path "internal/testutil/*" 2>/dev/null) main.go go.mod go.sum
 FRONTEND_SOURCES := $(shell find frontend/src -type f 2>/dev/null) frontend/index.html frontend/vite.config.ts
+COVERAGE_GO_PKGS = $$(go list ./internal/... | grep -Ev '/internal/(profile|version|testutil)(/|$$)')
 
 # Synchronize metadata only when app.config.json or the generator script changes
 internal/version/version.go: app.config.json scripts/main.go scripts/sync_metadata.go
@@ -113,6 +116,40 @@ test-frontend: typecheck
 typecheck: install-frontend
 	@echo "==> Running frontend type check..."
 	(cd frontend && npm run typecheck)
+
+# Generate backend and frontend test coverage reports
+coverage: coverage-backend coverage-frontend
+	@echo "==> Backend and frontend coverage reports generated in coverage/"
+
+coverage-backend:
+	@echo "==> Running Go backend coverage..."
+	@mkdir -p frontend/dist coverage/backend && touch frontend/dist/index.html
+	@set -e; \
+	pkgs="$(COVERAGE_GO_PKGS)"; \
+	coverpkg=$$(echo $$pkgs | tr ' ' ','); \
+	go test -count=1 -coverprofile=coverage/backend/direct.cover $$pkgs; \
+	go tool cover -func=coverage/backend/direct.cover -o coverage/backend/direct.txt; \
+	go test -count=1 -coverpkg="$$coverpkg" -coverprofile=coverage/backend/integrated.cover $$pkgs; \
+	go tool cover -func=coverage/backend/integrated.cover -o coverage/backend/integrated.txt; \
+	go tool cover -html=coverage/backend/integrated.cover -o coverage/backend/index.html; \
+	echo "==> Backend Direct statement coverage:     $$(tail -n 1 coverage/backend/direct.txt | awk '{print $$NF}')"; \
+	echo "==> Backend Integrated statement coverage: $$(tail -n 1 coverage/backend/integrated.txt | awk '{print $$NF}')"
+
+coverage-frontend: typecheck
+	@echo "==> Running frontend test coverage..."
+	(cd frontend && npm run test:coverage)
+
+# Run static dead-code analysis across backend and frontend
+deadcode: deadcode-backend deadcode-frontend
+
+deadcode-backend:
+	@echo "==> Running Go backend dead-code analysis..."
+	@mkdir -p frontend/dist && touch frontend/dist/index.html
+	go tool deadcode -filter='^planisphere/' . ./scripts
+
+deadcode-frontend: install-frontend
+	@echo "==> Running frontend dead-code analysis..."
+	(cd frontend && npm run deadcode)
 
 # Create an isolated, WAL-merged snapshot of the active database
 # Optional variables: OUT=<path> SRC=<path> (or ED_PLANNER_DB=<path>)
@@ -198,4 +235,4 @@ package-windows: sync-metadata install-frontend
 
 clean:
 	@echo "==> Cleaning build and distribution directories..."
-	rm -rf build/bin/ frontend/dist/ dist/
+	rm -rf build/bin/ frontend/dist/ dist/ coverage/

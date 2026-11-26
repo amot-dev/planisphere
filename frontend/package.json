@@ -10,7 +10,9 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "happy-dom": "^21.0.4",
+    "knip": "^6.48.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
@@ -20,9 +22,11 @@
   "private": true,
   "scripts": {
     "build": "tsc -b \u0026\u0026 vite build",
+    "deadcode": "knip --production",
     "dev": "vite",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage --exclude \"src/profile/**\"",
     "typecheck": "tsc -b --noEmit"
   },
   "type": "module",

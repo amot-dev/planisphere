@@ -1,6 +1,7 @@
 # Binaries and build outputs
 build/bin/
 dist/
+coverage/
 *.AppImage
 *.exe
 *.exe~
@@ -9,6 +10,7 @@ dist/
 *.dylib
 *.test
 *.out
+*.cover
 
 # Node / Frontend
 frontend/node_modules/
