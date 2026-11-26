@@ -249,6 +249,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
           row: { id: 10, expeditionId: 1, position: 1, rowType: 'region', regionId: 18 },
           number: 0,
           regionName: 'Inner Orion Spur',
+          allowInsertWaypoint: false,
         },
         {
           row: {
@@ -272,6 +273,8 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
           visitState: 'visited',
           visitedAtGalactic: '01 JAN 3312 10:05',
           departedAtGalactic: '01 JAN 3312 10:08',
+          allowInsertWaypoint: false,
+          permissions: { systemLocked: true, allowInsertWaypoint: false, canReorder: false, deleteDisabledReason: 'Origin waypoint cannot be deleted', reorderDisabledReason: 'Origin waypoint cannot be reordered', canAddFcStop: true, canRemoveFcStop: true, canOverrideFcBadge: true, canCascadeLegMode: true, hasDrawer: true },
         },
         {
           row: {
@@ -300,10 +303,15 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
           legModeId: 1,
           legModeName: 'Exploration',
           legModeColor: '#FF7100',
+          allowInsertWaypoint: true,
+          permissions: { systemLocked: true, allowInsertWaypoint: true, canReorder: true, canAddFcStop: true, canRemoveFcStop: true, canOverrideFcBadge: true, hasDrawer: true, isNextFcStop: true },
         },
       ],
       currentRowId: 12,
       nextFcStopRowId: 12,
+      lastVisitedIndex: 2,
+      lastFcArrivedIndex: -1,
+      defaultModeId: 1,
       playerSystem: 'Alpha Centauri',
       waypointCount: 2,
       visitedWaypointCount: 2,
@@ -330,6 +338,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
       expedition: {
         jumps: 1,
         distanceLy: 4.24,
+        shipDistanceLy: 4.24,
         carrierJumps: 1,
         carrierDistanceLy: 498.5,
         scanValueTotal: 1200000,
@@ -337,6 +346,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
       allJournals: {
         jumps: 500,
         distanceLy: 25000,
+        shipDistanceLy: 25000,
         carrierJumps: 12,
         carrierDistanceLy: 5800,
         scanValueTotal: 90000000,
@@ -353,6 +363,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
     },
     modesState: {
       modes: [{ id: 1, name: 'Exploration', color: '#FF7100', isDefault: true, sortOrder: 1 }],
+      defaultModeId: 1,
     },
     visitedDetails: [
       {
@@ -377,7 +388,7 @@ export function buildSmokeFrontendFixture(): LiveFrontendFixture {
         inSystem: true,
         prevSystem: 'Sol',
         shipsUsed: ['Mandalay'],
-        metrics: { jumps: 1, distanceLy: 4.24 },
+        metrics: { jumps: 1, distanceLy: 4.24, shipDistanceLy: 4.24 },
         realization: {},
       },
     ],

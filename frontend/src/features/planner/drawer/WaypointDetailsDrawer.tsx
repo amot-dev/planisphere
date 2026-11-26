@@ -4,7 +4,6 @@ import { CartographicsValueBreakdown } from '../../../components/ui/Cartographic
 import { ExobiologyValueBreakdown } from '../../../components/ui/ExobiologyValueBreakdown'
 import { RealizationLossBreakdown } from '../../../components/ui/RealizationLossBreakdown'
 import {
-  computeShipDistanceLy,
   formatCredits,
   formatElapsedDuration,
   formatInt,
@@ -149,7 +148,7 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
         <MetricMiniCard
           label="Distance Travelled"
           value={formatLy(metrics.distanceLy)}
-          sub={`Ship: ${formatLy(computeShipDistanceLy(metrics), 1)} · Carrier: ${formatLy(
+          sub={`Ship: ${formatLy(metrics.shipDistanceLy ?? 0, 1)} · Carrier: ${formatLy(
             metrics.carrierPassengerLy || 0,
             1,
           )}`}

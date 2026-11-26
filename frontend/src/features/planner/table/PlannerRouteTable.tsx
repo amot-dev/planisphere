@@ -1,10 +1,8 @@
 import { memo, useCallback, useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
 import { expedition, modes } from '../../../api/models'
 import type { ExternalLinkVisibilityConfig } from '../../../domain/externalLinks'
-import type { NextCarrierStopEntry } from '../../carrier/useCarrierRoute'
 import {
   computeRegionBorderColors,
-  type PlannerFrontierIndices,
   type PlannerTableItem,
 } from '../../../domain/planTableItems'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from '../drag/PlannerDragPreviewRows'
@@ -34,8 +32,8 @@ export interface PlannerColumnLayout {
 }
 
 /**
- * PlannerTableDragState bundles flattened table items, active drag/drop indices,
- * and drag-and-drop row/slot prop builders.
+ * PlannerTableDragState bundles flattened table items, active drag and drop indices,
+ * and drag-and-drop row and slot prop builders.
  */
 export interface PlannerTableDragState {
   tableItems: PlannerTableItem[]
@@ -63,19 +61,6 @@ export interface PlannerTableDragState {
 }
 
 /**
- * PlannerTableCarrierState bundles active Fleet Carrier routing state and the
- * Spansh prompt launch callback for planner rows.
- */
-export interface PlannerTableCarrierState {
-  activeCarrierRoute: expedition.CarrierRouteResult | null
-  activeCarrierTargetRowId: number
-  isManualCarrierRoute: boolean
-  nextFcStopEntry: NextCarrierStopEntry | null
-  routedCarrierStopIndex: number
-  onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) => void
-}
-
-/**
  * PlannerTableRowActions bundles per-row UI transient flags and mutation handlers.
  */
 export interface PlannerTableRowActions {
@@ -97,6 +82,7 @@ export interface PlannerTableRowActions {
   onInspectSystemVisits?: (systemName: string) => void
   onToggleFcStop: (row: expedition.Row) => void
   onOverrideFcArrived?: (rowView: expedition.RowView) => void
+  onOpenCarrierRoutePrompt: (rowIndex: number, targetRow: expedition.Row) => void
 }
 
 /**
@@ -108,12 +94,10 @@ export interface PlannerRouteTableProps {
   isPlanning: boolean
   isCompleted: boolean
   clockSuspended?: boolean
-  frontier: PlannerFrontierIndices
   columns: PlannerColumnLayout
   externalLinks: ExternalLinkVisibilityConfig
   drawerState: WaypointDetailsState
   dragState: PlannerTableDragState
-  carrierState: PlannerTableCarrierState
   rowActions: PlannerTableRowActions
 }
 
@@ -127,15 +111,13 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
   isPlanning,
   isCompleted,
   clockSuspended = false,
-  frontier,
   columns,
   externalLinks,
   drawerState,
   dragState,
-  carrierState,
   rowActions,
 }: PlannerRouteTableProps) {
-  const { lastVisitedIndex, lastFcArrivedIndex } = frontier
+  const lastVisitedIndex = plan.lastVisitedIndex ?? -1
   const {
     visibleColumnCount,
     tableMinWidthPixels,
@@ -159,14 +141,6 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
     onRowDragStart,
     onRowDragEnd,
   } = dragState
-  const {
-    activeCarrierRoute,
-    activeCarrierTargetRowId,
-    isManualCarrierRoute,
-    nextFcStopEntry,
-    routedCarrierStopIndex,
-    onOpenCarrierRoutePrompt,
-  } = carrierState
   const modesList = plan.modes ?? EMPTY_MODES
 
   const rowViewById = useMemo(() => {
@@ -199,7 +173,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
     onInspectSystemVisits: rowActions.onInspectSystemVisits,
     onToggleFcStop: rowActions.onToggleFcStop,
     onOverrideFcArrived: rowActions.onOverrideFcArrived,
-    onOpenCarrierRoutePrompt,
+    onOpenCarrierRoutePrompt: rowActions.onOpenCarrierRoutePrompt,
     onRowHoldStart,
     onRowHoldEnd,
     onRowDragStart,
@@ -220,7 +194,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
     onInspectSystemVisits: rowActions.onInspectSystemVisits,
     onToggleFcStop: rowActions.onToggleFcStop,
     onOverrideFcArrived: rowActions.onOverrideFcArrived,
-    onOpenCarrierRoutePrompt,
+    onOpenCarrierRoutePrompt: rowActions.onOpenCarrierRoutePrompt,
     onRowHoldStart,
     onRowHoldEnd,
     onRowDragStart,
@@ -365,13 +339,11 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
                 rowView={rowView}
                 index={index}
                 visibleColumnCount={visibleColumnCount}
-                isPlanning={isPlanning}
                 isLocked={isLocked}
                 isBeingDragged={isBeingDragged}
                 topGapHighlight={topGapHighlight}
                 bottomGapHighlight={bottomGapHighlight}
                 leftBorderColor={regionBorderColorByRowId.get(row.id)}
-                lastVisitedIndex={lastVisitedIndex}
                 insertMenuOpen={rowActions.insertMenuAfterId === row.id}
                 rowStyle={rowStyle}
                 dropProps={getRowDropProps(index)}
@@ -398,7 +370,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
                     modeId={rowView.legModeId}
                     modeColor={rowView.legModeColor}
                     modesList={modesList}
-                    canCascade={rowView.visitState === 'visited' && index < lastVisitedIndex}
+                    canCascade={Boolean(rowView.permissions?.canCascadeLegMode)}
                     clockSuspended={clockSuspended}
                     onChangeLegMode={handleChangeLegMode}
                   />
@@ -408,27 +380,8 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
           }
 
           const isExpanded = Boolean(expandedRowIds[row.id])
-          const isNextFcStop = Boolean(
-            row.fcStop && !row.fcArrived && nextFcStopEntry && row.id === nextFcStopEntry.row.id,
-          )
           const isNextWaypoint = Boolean(
             rowView.isNextWaypoint || (plan.nextWaypointRowId && row.id === plan.nextWaypointRowId),
-          )
-          const hasActiveCarrierRoute = Boolean(
-            activeCarrierRoute &&
-              (isManualCarrierRoute ? isNextFcStop : activeCarrierTargetRowId === row.id),
-          )
-          // Manual logging leaves the target stop editable until arrival is logged;
-          // an active Spansh route locks the target stop and all preceding carrier stops.
-          const isSpanshRoutedFcStop = Boolean(
-            activeCarrierRoute && !isManualCarrierRoute && activeCarrierTargetRowId === row.id,
-          )
-          const isFcStopLocked = Boolean(
-            activeCarrierRoute &&
-              routedCarrierStopIndex >= 0 &&
-              (isManualCarrierRoute
-                ? index < routedCarrierStopIndex
-                : index <= routedCarrierStopIndex),
           )
 
           return (
@@ -438,17 +391,12 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
               index={index}
               isPlanning={isPlanning}
               isLocked={isLocked}
-              isFcStopLocked={isFcStopLocked}
-              isActivelyRoutedFcStop={isSpanshRoutedFcStop}
-              lastFcArrivedIndex={lastFcArrivedIndex}
               isBeingDragged={isBeingDragged}
               topGapHighlight={topGapHighlight}
               bottomGapHighlight={bottomGapHighlight}
               isExpanded={isExpanded}
-              isNextFcStop={isNextFcStop && !activeCarrierRoute}
               isNextWaypoint={isNextWaypoint}
               playerSystem={plan.playerSystem}
-              hasActiveCarrierRoute={hasActiveCarrierRoute}
               isSystemCopied={rowActions.copiedSystemRowId === row.id}
               isSearchHighlighted={rowActions.highlightedRowId === row.id}
               insertMenuOpen={rowActions.insertMenuAfterId === row.id}
@@ -466,4 +414,3 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
     </table>
   )
 })
-

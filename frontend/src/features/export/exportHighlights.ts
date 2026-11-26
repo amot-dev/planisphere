@@ -1,6 +1,5 @@
 import { exporter } from '../../api/models'
 import {
-  computeShipDistanceLy,
   formatCredits,
   formatElapsedDuration,
   formatInt,
@@ -262,7 +261,9 @@ function buildDistanceLeaderboard(
     shortest,
     maxDepth,
     (leg) =>
-      distanceMetric === 'ship' ? computeShipDistanceLy(leg.details.metrics) : leg.details.metrics.distanceLy,
+      distanceMetric === 'ship'
+        ? (leg.details.metrics.shipDistanceLy ?? 0)
+        : leg.details.metrics.distanceLy,
     (leg, distanceLy) => ({
       formattedPrimary: formatLy(distanceLy, 1),
       secondaryLabel: `${formatInt(leg.details.metrics.jumps)} jumps${leg.details.elapsed ? ` · ${leg.details.elapsed}` : ''}`,
@@ -278,7 +279,7 @@ function buildMostJumpsLeaderboard(legs: VisitedLegRecord[], maxDepth: number | 
     maxDepth,
     (leg) => leg.details.metrics.jumps,
     (leg, jumps) => {
-      const shipLy = computeShipDistanceLy(leg.details.metrics)
+      const shipLy = leg.details.metrics.shipDistanceLy ?? 0
       return {
         formattedPrimary: `${formatInt(jumps)} jumps`,
         secondaryLabel: `${formatLy(shipLy, 1)} · ${formatLy(shipLy / jumps, 1)} avg`,

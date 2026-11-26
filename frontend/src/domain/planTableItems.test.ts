@@ -53,6 +53,16 @@ describe('planOptimisticReducers structural sharing', () => {
           number: 2,
           legModeId: 1,
           visitState: 'current',
+          permissions: {
+            systemLocked: false,
+            allowInsertWaypoint: true,
+            canReorder: true,
+            canAddFcStop: true,
+            canRemoveFcStop: true,
+            canOverrideFcBadge: true,
+            hasDrawer: true,
+            isNextFcStop: true,
+          },
         },
         {
           row: {
@@ -65,6 +75,15 @@ describe('planOptimisticReducers structural sharing', () => {
           number: 3,
           legModeId: 1,
           visitState: 'future',
+          permissions: {
+            systemLocked: false,
+            allowInsertWaypoint: true,
+            canReorder: true,
+            canAddFcStop: true,
+            canRemoveFcStop: true,
+            canOverrideFcBadge: true,
+            hasDrawer: false,
+          },
         },
       ],
       modes: [{ id: 2, name: 'Exobiology', color: '#00E5A3', description: '', isDefault: false, sortOrder: 2 }],
@@ -78,6 +97,8 @@ describe('planOptimisticReducers structural sharing', () => {
     expect(reorderedPlan.rows.map((rowView) => rowView.row.id)).toEqual([10, 12, 11, 13])
     expect(reorderedPlan.rows.map((rowView) => rowView.row.position)).toEqual([1, 2, 3, 4])
     expect(reorderedPlan.rows.map((rowView) => rowView.number)).toEqual([0, 1, 2, 3])
+    expect(reorderedPlan.lastVisitedIndex).toBe(2)
+    expect(reorderedPlan.lastFcArrivedIndex).toBe(-1)
     expect(reorderedPlan.rows[0]).toBe(initialPlan.rows[0])
     expect(reorderedPlan.rows[3]).toBe(initialPlan.rows[3])
     expect(reorderedPlan.rows[2].gec).toBe(initialPlan.rows[1].gec)
@@ -85,17 +106,39 @@ describe('planOptimisticReducers structural sharing', () => {
       expect('sortOrder' in (rowView.row as unknown as Record<string, unknown>)).toBe(false)
     }
 
-    // FC stop toggle, FC arrival, and leg mode updates clone only the targeted row.
+    // FC stop toggle, FC arrival, and leg mode updates clone only the targeted row and sync permissions.
     const fcToggledPlan = buildOptimisticFcStopTogglePlan(initialPlan, initialPlan.rows[3].row, true)
     expect(fcToggledPlan.rows[0]).toBe(initialPlan.rows[0])
     expect(fcToggledPlan.rows[1]).toBe(initialPlan.rows[1])
     expect(fcToggledPlan.rows[2]).toBe(initialPlan.rows[2])
     expect(fcToggledPlan.rows[3].row.fcStop).toBe(true)
+    expect(fcToggledPlan.rows[3].permissions?.canRemoveFcStop).toBe(true)
+    expect(fcToggledPlan.rows[3].permissions?.isNextFcStop).toBe(false)
+
+    const fcArrivedBeaglePlan = buildOptimisticFcArrivedPlan(fcToggledPlan, 13, true)
+    expect(fcArrivedBeaglePlan.lastFcArrivedIndex).toBe(3)
+    expect(fcArrivedBeaglePlan.rows[3].permissions?.systemLocked).toBe(true)
+    expect(fcArrivedBeaglePlan.rows[3].permissions?.canRemoveFcStop).toBe(false)
+    expect(fcArrivedBeaglePlan.rows[3].permissions?.isNextFcStop).toBe(false)
 
     const fcArrivedPlan = buildOptimisticFcArrivedPlan(fcToggledPlan, 12, true)
     expect(fcArrivedPlan.rows[1]).toBe(initialPlan.rows[1])
     expect(fcArrivedPlan.rows[3]).toBe(fcToggledPlan.rows[3])
     expect(fcArrivedPlan.nextFcStopRowId).toBe(13)
+    expect(fcArrivedPlan.lastFcArrivedIndex).toBe(2)
+    expect(fcArrivedPlan.rows[2].permissions?.isNextFcStop).toBe(false)
+
+    const removedStopPlan = buildOptimisticFcStopTogglePlan(fcArrivedPlan, fcArrivedPlan.rows[3].row, false)
+    expect(removedStopPlan.nextFcStopRowId).toBe(0)
+    expect(removedStopPlan.rows[3].permissions?.isNextFcStop).toBe(false)
+
+    const firstPendingStopPlan = buildOptimisticFcStopTogglePlan(
+      removedStopPlan,
+      removedStopPlan.rows[3].row,
+      true,
+    )
+    expect(firstPendingStopPlan.nextFcStopRowId).toBe(13)
+    expect(firstPendingStopPlan.rows[3].permissions?.isNextFcStop).toBe(true)
 
     const legModePlan = buildOptimisticLegModePlan(initialPlan, 11, 2)
     expect(legModePlan.rows[0]).toBe(initialPlan.rows[0])

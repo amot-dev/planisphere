@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, createRef } from 'react'
+import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../api/models'
@@ -16,11 +16,7 @@ vi.mock('../../api/backend', () => ({
   UpdateRow: (...args: unknown[]) => mockUpdateRow(...args),
 }))
 
-import {
-  executePlanMutation,
-  usePlanMutations,
-  type CarrierMutationLockContext,
-} from './usePlanMutations'
+import { executePlanMutation, usePlanMutations } from './usePlanMutations'
 
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -41,10 +37,37 @@ function buildSamplePlan(): expedition.PlanView {
           rowType: 'waypoint',
           systemName: 'Sol',
           visitedAt: '3312-01-01T01:00:00Z',
+          fcStop: false,
         },
         number: 1,
         legModeId: 1,
         visitState: 'visited',
+        permissions: {
+          systemLocked: true,
+          canAddFcStop: false,
+          canRemoveFcStop: false,
+        },
+      },
+      {
+        row: {
+          id: 12,
+          expeditionId: 7,
+          position: 2,
+          rowType: 'waypoint',
+          systemName: 'Colonia',
+          fcStop: true,
+          fcArrived: false,
+        },
+        number: 2,
+        legModeId: 1,
+        visitState: 'future',
+        permissions: {
+          systemLocked: false,
+          canAddFcStop: true,
+          canRemoveFcStop: true,
+          canOverrideFcBadge: true,
+          overrideFcCascadeCount: 3,
+        },
       },
     ],
     modes: [],
@@ -109,22 +132,14 @@ function createDeferredPromise() {
   return { promise, resolve: resolvePromise }
 }
 
-describe('usePlanMutations overlapping busy coordination', () => {
+describe('usePlanMutations overlapping busy coordination and Go permission guards', () => {
   afterEach(() => {
     vi.clearAllMocks()
   })
 
-  it('preserves remaining mutation busy message regardless of settlement order', async () => {
+  it('preserves remaining mutation busy message regardless of settlement order and enforces Go carrier permissions', async () => {
     const samplePlan = buildSamplePlan()
     const busyStates: Array<string | null> = []
-    const carrierContextRef = createRef<CarrierMutationLockContext>() as {
-      current: CarrierMutationLockContext
-    }
-    carrierContextRef.current = {
-      activeCarrierRoute: null,
-      isManualCarrierRoute: false,
-      routedCarrierStopIndex: -1,
-    }
 
     let latestMutations!: ReturnType<typeof usePlanMutations>
     function HookProbe() {
@@ -134,7 +149,6 @@ describe('usePlanMutations overlapping busy coordination', () => {
         onBusyChange: (busyMessage) => busyStates.push(busyMessage),
         applyOptimisticPlan: () => {},
         onRefreshPlan: () => {},
-        carrierContextRef,
       })
       return null
     }
@@ -200,6 +214,34 @@ describe('usePlanMutations overlapping busy coordination', () => {
       await fourthPromise
       expect(busyStates).toEqual(['REORDERING ROUTE', 'UPDATING REGION', 'UPDATING REGION', null])
 
+      // Verify toggleFcStop respects Go permissions (canAddFcStop=false on row 11, canRemoveFcStop=true on row 12).
+      mockUpdateRow.mockResolvedValueOnce(undefined)
+      await act(async () => {
+        await latestMutations.toggleFcStop(samplePlan.rows[0].row)
+      })
+      expect(mockUpdateRow).not.toHaveBeenCalled()
+
+      await act(async () => {
+        await latestMutations.toggleFcStop(samplePlan.rows[1].row)
+      })
+      expect(mockUpdateRow).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 12, fcStop: false }),
+      )
+      mockUpdateRow.mockClear()
+
+      // Verify handleRequestOverrideFcArrived reads overrideFcCascadeCount directly from rowView.permissions.
+      act(() => {
+        latestMutations.handleRequestOverrideFcArrived(samplePlan.rows[1])
+      })
+      expect(latestMutations.confirmState).toEqual({
+        kind: 'override_fc_arrival',
+        rowId: 12,
+        waypointNumber: 2,
+        systemName: 'Colonia',
+        targetArrived: true,
+        cascadedCount: 3,
+      })
+
       // Verify setFcArrived and commitField propagate boolean resolution outcomes.
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       mockUpdateRow.mockRejectedValueOnce(new Error('locked')).mockResolvedValueOnce(undefined)
@@ -221,4 +263,3 @@ describe('usePlanMutations overlapping busy coordination', () => {
     }
   })
 })
-

@@ -47,6 +47,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           },
           number: 1,
           visitState: 'visited',
+          permissions: { systemLocked: true, hasDrawer: true },
         },
         {
           row: {
@@ -61,6 +62,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           legModeId: 1,
           legModeName: 'Travel',
           legModeColor: '#FF7100',
+          permissions: { systemLocked: true, hasDrawer: true },
         },
         {
           row: {
@@ -72,6 +74,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           },
           number: 3,
           visitState: 'current',
+          permissions: { hasDrawer: true },
         },
         {
           row: {
@@ -85,8 +88,12 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           },
           number: 4,
           visitState: 'future',
+          permissions: { hasDrawer: false },
         },
       ],
+      lastVisitedIndex: 1,
+      lastFcArrivedIndex: -1,
+      defaultModeId: 1,
       modes: [{ id: 1, name: 'Travel', color: '#FF7100' } as any],
       visitedWaypointCount: 2,
       waypointCount: 4,
@@ -348,6 +355,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           number: 1,
           visitState: 'visited',
           visitedAtGalactic: '3310-01-01 10:00:00',
+          permissions: { systemLocked: true, hasDrawer: true },
         },
         {
           row: { id: 2, expeditionId: 7, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2 },
@@ -356,6 +364,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           isNextWaypoint: true,
           distFromPrevLy: 4.3,
           distFromCurrentLy: 2.1,
+          permissions: { hasDrawer: true },
         },
         {
           row: { id: 3, expeditionId: 7, rowType: 'waypoint', systemName: "Barnard's Star", seq: 3 },
@@ -363,8 +372,11 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           visitState: 'future',
           isNextWaypoint: false,
           distFromPrevLy: 6.0,
+          permissions: { hasDrawer: false },
         },
       ],
+      lastVisitedIndex: 0,
+      lastFcArrivedIndex: -1,
       nextWaypointRowId: 2,
       playerSystem: 'Interim Sol System',
       modes: [],
@@ -403,6 +415,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       rows: activePlan.rows.map((rowView) =>
         rowView.row.id === 2 ? { ...rowView, visitState: 'visited', isNextWaypoint: false } : rowView,
       ),
+      lastVisitedIndex: 1,
       visitedWaypointCount: 2,
       coveredLy: 4.3,
       remainingLy: 5.0,

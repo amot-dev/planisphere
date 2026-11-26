@@ -40,6 +40,7 @@ export namespace app {
 	}
 	export class ModesState {
 	    modes: modes.Mode[];
+	    defaultModeId: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ModesState(source);
@@ -48,6 +49,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.modes = this.convertValues(source["modes"], modes.Mode);
+	        this.defaultModeId = source["defaultModeId"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -657,6 +659,48 @@ export namespace expedition {
 		    return a;
 		}
 	}
+	export class WaypointPermissions {
+	    systemLocked: boolean;
+	    systemLockReason?: string;
+	    allowInsertWaypoint: boolean;
+	    canReorder: boolean;
+	    deleteDisabledReason?: string;
+	    reorderDisabledReason?: string;
+	    canAddFcStop: boolean;
+	    canRemoveFcStop: boolean;
+	    canOverrideFcBadge: boolean;
+	    overrideFcCascadeCount?: number;
+	    canCascadeLegMode?: boolean;
+	    hasDrawer: boolean;
+	    isNextFcStop?: boolean;
+	    isFcStopLocked?: boolean;
+	    hasActiveCarrierRoute?: boolean;
+	    isSpanshRoutedFcStop?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new WaypointPermissions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.systemLocked = source["systemLocked"];
+	        this.systemLockReason = source["systemLockReason"];
+	        this.allowInsertWaypoint = source["allowInsertWaypoint"];
+	        this.canReorder = source["canReorder"];
+	        this.deleteDisabledReason = source["deleteDisabledReason"];
+	        this.reorderDisabledReason = source["reorderDisabledReason"];
+	        this.canAddFcStop = source["canAddFcStop"];
+	        this.canRemoveFcStop = source["canRemoveFcStop"];
+	        this.canOverrideFcBadge = source["canOverrideFcBadge"];
+	        this.overrideFcCascadeCount = source["overrideFcCascadeCount"];
+	        this.canCascadeLegMode = source["canCascadeLegMode"];
+	        this.hasDrawer = source["hasDrawer"];
+	        this.isNextFcStop = source["isNextFcStop"];
+	        this.isFcStopLocked = source["isFcStopLocked"];
+	        this.hasActiveCarrierRoute = source["hasActiveCarrierRoute"];
+	        this.isSpanshRoutedFcStop = source["isSpanshRoutedFcStop"];
+	    }
+	}
 	export class Row {
 	    id: number;
 	    expeditionId: number;
@@ -728,6 +772,8 @@ export namespace expedition {
 	    legModeName: string;
 	    legModeColor: string;
 	    gec?: GECRef;
+	    allowInsertWaypoint: boolean;
+	    permissions?: WaypointPermissions;
 	
 	    static createFrom(source: any = {}) {
 	        return new RowView(source);
@@ -753,6 +799,8 @@ export namespace expedition {
 	        this.legModeName = source["legModeName"];
 	        this.legModeColor = source["legModeColor"];
 	        this.gec = this.convertValues(source["gec"], GECRef);
+	        this.allowInsertWaypoint = source["allowInsertWaypoint"];
+	        this.permissions = this.convertValues(source["permissions"], WaypointPermissions);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -783,6 +831,9 @@ export namespace expedition {
 	    nextFcStopRowId: number;
 	    routedCarrierStopRowId?: number;
 	    activeCarrierRoute?: ActiveCarrierRouteState;
+	    lastVisitedIndex: number;
+	    lastFcArrivedIndex: number;
+	    defaultModeId: number;
 	    playerSystem?: string;
 	    waypointCount: number;
 	    visitedWaypointCount: number;
@@ -806,6 +857,9 @@ export namespace expedition {
 	        this.nextFcStopRowId = source["nextFcStopRowId"];
 	        this.routedCarrierStopRowId = source["routedCarrierStopRowId"];
 	        this.activeCarrierRoute = this.convertValues(source["activeCarrierRoute"], ActiveCarrierRouteState);
+	        this.lastVisitedIndex = source["lastVisitedIndex"];
+	        this.lastFcArrivedIndex = source["lastFcArrivedIndex"];
+	        this.defaultModeId = source["defaultModeId"];
 	        this.playerSystem = source["playerSystem"];
 	        this.waypointCount = source["waypointCount"];
 	        this.visitedWaypointCount = source["visitedWaypointCount"];
@@ -1015,6 +1069,7 @@ export namespace expedition {
 		    return a;
 		}
 	}
+	
 	
 
 }

@@ -2,12 +2,11 @@ import { expedition } from '../../../api/models'
 import { getWaypointLegBorderColor } from '../../../domain/planTableItems'
 
 /**
- * WaypointRowPermissions encapsulates computed edit/drag/carrier permissions,
- * tooltip reasons, leg border styling, and row highlight classes for a waypoint row.
+ * WaypointRowPermissions encapsulates presentation styling, tooltip titles,
+ * and backend-resolved row action flags for a waypoint row.
  */
 export interface WaypointRowPermissions {
   isVisited: boolean
-  isOriginRow: boolean
   legBorderColor: string | undefined
   hasLegBorder: boolean
   isSystemLocked: boolean
@@ -21,22 +20,19 @@ export interface WaypointRowPermissions {
   canOverrideFcBadge: boolean
   hasDrawer: boolean
   isNext: boolean
+  isNextFcStop: boolean
+  isFcStopLocked: boolean
+  hasActiveCarrierRoute: boolean
   rowDropHighlightClass: string
 }
 
 /**
- * DeriveWaypointRowPermissionsOptions supplies raw row flags, expedition phase,
- * and active carrier router state needed to compute waypoint row permissions.
+ * DeriveWaypointRowPermissionsOptions supplies row view state and transient
+ * drag and hover flags needed to format waypoint row presentation.
  */
 export interface DeriveWaypointRowPermissionsOptions {
   rowView: expedition.RowView
-  index: number
   isPlanning: boolean
-  isLocked: boolean
-  isFcStopLocked: boolean
-  isActivelyRoutedFcStop: boolean
-  lastFcArrivedIndex: number
-  lastVisitedIndex: number
   isBeingDragged: boolean
   topGapHighlight: boolean
   bottomGapHighlight: boolean
@@ -45,18 +41,12 @@ export interface DeriveWaypointRowPermissionsOptions {
 }
 
 /**
- * deriveWaypointRowPermissions computes all chronological edit locks, carrier
- * stop permissions, tooltip explanations, and drop highlight classes for a waypoint row.
+ * deriveWaypointRowPermissions maps Go-computed WaypointPermissions and
+ * transient drag highlight flags into render props for WaypointRowItem.
  */
 export function deriveWaypointRowPermissions({
   rowView,
-  index,
   isPlanning,
-  isLocked,
-  isFcStopLocked,
-  isActivelyRoutedFcStop,
-  lastFcArrivedIndex,
-  lastVisitedIndex,
   isBeingDragged,
   topGapHighlight,
   bottomGapHighlight,
@@ -64,34 +54,11 @@ export function deriveWaypointRowPermissions({
   hasOverrideFcArrived,
 }: DeriveWaypointRowPermissionsOptions): WaypointRowPermissions {
   const row = rowView.row
+  const waypointPermissions = rowView.permissions
   const isVisited = rowView.visitState === 'visited'
-  const isOriginRow = !isPlanning && rowView.number === 1
   const legBorderColor = getWaypointLegBorderColor(rowView, isPlanning)
   const hasLegBorder = Boolean(legBorderColor)
-  const isFcArrivedStop = !isPlanning && Boolean(row.fcStop && row.fcArrived)
-  const isSystemLocked =
-    isLocked || isVisited || isOriginRow || isActivelyRoutedFcStop || isFcArrivedStop
-  const allowInsertWaypoint = isPlanning || index >= lastVisitedIndex
-  const canReorder = !isLocked && !isOriginRow && !isActivelyRoutedFcStop
-  const activeRouteLockReason = isActivelyRoutedFcStop
-    ? 'Locked while Fleet Carrier route to this waypoint is active'
-    : undefined
-  const deleteDisabledReason = isOriginRow
-    ? 'Origin waypoint cannot be deleted'
-    : activeRouteLockReason
-  const reorderDisabledReason = isOriginRow
-    ? 'Origin waypoint cannot be reordered'
-    : activeRouteLockReason
-  const systemLockTitle =
-    activeRouteLockReason ||
-    (isFcArrivedStop && !isVisited && !isOriginRow
-      ? 'Locked while Fleet Carrier is marked arrived at this waypoint'
-      : row.systemName)
-  const canAddFcStop = !isLocked && !isFcStopLocked && (isPlanning || index > lastFcArrivedIndex)
-  const canRemoveFcStop = !isLocked && !isFcStopLocked && (isPlanning || !row.fcArrived)
-  const canOverrideFcBadge = !isPlanning && !isLocked && !isFcStopLocked && hasOverrideFcArrived
-
-  const hasDrawer = !isPlanning && rowView.visitState !== 'future'
+  const systemLockTitle = waypointPermissions?.systemLockReason || row.systemName
   const isNext =
     Boolean(isNextWaypoint ?? (rowView.visitState === 'current' || rowView.isNextWaypoint)) &&
     !isPlanning
@@ -106,21 +73,24 @@ export function deriveWaypointRowPermissions({
 
   return {
     isVisited,
-    isOriginRow,
     legBorderColor,
     hasLegBorder,
-    isSystemLocked,
-    allowInsertWaypoint,
-    canReorder,
-    deleteDisabledReason,
-    reorderDisabledReason,
+    isSystemLocked: Boolean(waypointPermissions?.systemLocked),
+    allowInsertWaypoint: Boolean(
+      waypointPermissions?.allowInsertWaypoint ?? rowView.allowInsertWaypoint,
+    ),
+    canReorder: Boolean(waypointPermissions?.canReorder),
+    deleteDisabledReason: waypointPermissions?.deleteDisabledReason || undefined,
+    reorderDisabledReason: waypointPermissions?.reorderDisabledReason || undefined,
     systemLockTitle,
-    canAddFcStop,
-    canRemoveFcStop,
-    canOverrideFcBadge,
-    hasDrawer,
+    canAddFcStop: Boolean(waypointPermissions?.canAddFcStop),
+    canRemoveFcStop: Boolean(waypointPermissions?.canRemoveFcStop),
+    canOverrideFcBadge: Boolean(waypointPermissions?.canOverrideFcBadge && hasOverrideFcArrived),
+    hasDrawer: Boolean(waypointPermissions?.hasDrawer),
     isNext,
+    isNextFcStop: Boolean(waypointPermissions?.isNextFcStop),
+    isFcStopLocked: Boolean(waypointPermissions?.isFcStopLocked),
+    hasActiveCarrierRoute: Boolean(waypointPermissions?.hasActiveCarrierRoute),
     rowDropHighlightClass,
   }
 }
-

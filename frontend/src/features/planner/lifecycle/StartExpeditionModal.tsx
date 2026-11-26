@@ -13,18 +13,26 @@ export interface StartExpeditionModalProps {
   expeditionId: number
   modesList?: modes.Mode[]
   initialModeId?: number
+  defaultModeId?: number
   commanders?: replay.Commander[]
   initialCommanderScope?: string
   initialCommanderProfileIds?: number[]
   onClose: () => void
 }
 
-function resolveDefaultModeId(modesList: modes.Mode[], initialModeId: number): number {
+function resolveDefaultModeId(
+  modesList: modes.Mode[],
+  initialModeId: number,
+  defaultModeId: number,
+): number {
   if (initialModeId > 0 && modesList.some((modeItem) => modeItem.id === initialModeId)) {
     return initialModeId
   }
-  const travelMode = modesList.find((modeItem) => modeItem.name.toLowerCase() === 'travel')
-  return travelMode?.id ?? modesList[0]?.id ?? 0
+  if (defaultModeId > 0 && modesList.some((modeItem) => modeItem.id === defaultModeId)) {
+    return defaultModeId
+  }
+  const defaultMode = modesList.find((modeItem) => modeItem.isDefault)
+  return defaultMode?.id ?? modesList[0]?.id ?? 0
 }
 
 function resolveMatchingVisitTimestamp(visits: replay.Arrival[] | undefined, currentTs: string, profileIds: number[]): string {
@@ -46,6 +54,7 @@ export function StartExpeditionModal({
   expeditionId,
   modesList = [],
   initialModeId = 0,
+  defaultModeId = 0,
   commanders = [],
   initialCommanderScope,
   initialCommanderProfileIds,
@@ -56,7 +65,7 @@ export function StartExpeditionModal({
   const [candidates, setCandidates] = useState<app.StartCandidates | null>(null)
   const [selectedTimestamp, setSelectedTimestamp] = useState<string>('')
   const [selectedModeId, setSelectedModeId] = useState<number>(() =>
-    resolveDefaultModeId(modesList, initialModeId),
+    resolveDefaultModeId(modesList, initialModeId, defaultModeId),
   )
   const [scopeMode, setScopeMode] = useState<CommanderScopeMode>(() => (hasExplicitSelected ? 'selected' : 'all_enabled'))
   const [selectedProfileIds, setSelectedProfileIds] = useState<number[]>(() => (hasExplicitSelected ? [...(initialCommanderProfileIds ?? [])] : []))
@@ -77,8 +86,8 @@ export function StartExpeditionModal({
   }, [])
 
   useEffect(() => {
-    setSelectedModeId(resolveDefaultModeId(modesList, initialModeId))
-  }, [initialModeId, modesList])
+    setSelectedModeId(resolveDefaultModeId(modesList, initialModeId, defaultModeId))
+  }, [defaultModeId, initialModeId, modesList])
 
   function applySelectedProfileScope(nextIds: number[]) {
     scopeModeRef.current = 'selected'

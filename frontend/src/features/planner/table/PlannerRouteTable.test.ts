@@ -5,111 +5,149 @@ import { expedition } from '../../../api/models'
 import { PlannerRouteTable } from './PlannerRouteTable'
 
 describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
-  it('enforces manual vs Spansh carrier route locking behavior on routed waypoints', () => {
-    const routePlan = expedition.PlanView.createFrom({
-      expedition: { id: 1, status: 'active' },
-      rows: [
-        {
-          row: {
-            id: 10,
-            rowType: 'waypoint',
-            systemName: 'Sol',
-            visitedAt: '3312-01-01T00:00:00Z',
+  it('renders manual vs Spansh carrier route locks, drawer cascade flag, and region insert flag from Go permissions', () => {
+    const buildPlanWithTargetPermissions = (
+      targetPermissions: Partial<expedition.WaypointPermissions>,
+    ) =>
+      expedition.PlanView.createFrom({
+        expedition: { id: 1, status: 'active' },
+        lastVisitedIndex: 1,
+        lastFcArrivedIndex: -1,
+        rows: [
+          {
+            row: { id: 9, rowType: 'region', regionId: 18 },
+            number: 0,
+            regionName: 'Inner Orion Spur',
+            allowInsertWaypoint: false,
           },
-          number: 1,
-          visitState: 'visited',
-        },
-        {
-          row: {
-            id: 11,
-            rowType: 'waypoint',
-            systemName: 'Colonia',
-            fcStop: true,
-            fcArrived: false,
+          {
+            row: {
+              id: 10,
+              rowType: 'waypoint',
+              systemName: 'Sol',
+              visitedAt: '3312-01-01T00:00:00Z',
+            },
+            number: 1,
+            visitState: 'visited',
+            allowInsertWaypoint: true,
+            permissions: {
+              systemLocked: true,
+              allowInsertWaypoint: true,
+              canReorder: false,
+              deleteDisabledReason: 'Origin waypoint cannot be deleted',
+              reorderDisabledReason: 'Origin waypoint cannot be reordered',
+              canAddFcStop: false,
+              canRemoveFcStop: false,
+              canOverrideFcBadge: false,
+              canCascadeLegMode: false,
+              hasDrawer: true,
+              isFcStopLocked: true,
+            },
           },
-          number: 2,
-          visitState: 'future',
-        },
-      ],
-    })
-    const tableItems = routePlan.rows.map((rowView, index) => ({
-      kind: 'waypoint' as const,
-      rowView,
-      index,
-      key: `row-${rowView.row.id}`,
-    }))
-    const baseCarrierState = {
-      activeCarrierRoute: expedition.CarrierRouteResult.createFrom({
-        origin: 'Sol',
-        destination: 'Colonia',
-        jumps: [],
-      }),
-      activeCarrierTargetRowId: 11,
-      nextFcStopEntry: { row: routePlan.rows[1].row, index: 1 },
-      routedCarrierStopIndex: 1,
-      onOpenCarrierRoutePrompt: () => {},
+          {
+            row: {
+              id: 11,
+              rowType: 'waypoint',
+              systemName: 'Colonia',
+              fcStop: true,
+              fcArrived: false,
+            },
+            number: 2,
+            visitState: 'future',
+            allowInsertWaypoint: true,
+            permissions: {
+              systemLocked: false,
+              allowInsertWaypoint: true,
+              canReorder: true,
+              canAddFcStop: true,
+              canRemoveFcStop: true,
+              canOverrideFcBadge: true,
+              hasDrawer: false,
+              hasActiveCarrierRoute: true,
+              ...targetPermissions,
+            },
+          },
+        ],
+      })
+
+    const renderTable = (plan: expedition.PlanView) => {
+      const tableItems = plan.rows.map((rowView, index) => ({
+        kind: (rowView.row.rowType === 'region' ? 'region' : 'waypoint') as 'region' | 'waypoint',
+        rowView,
+        index,
+        key: `${rowView.row.rowType}-${rowView.row.id}`,
+      }))
+      return renderToString(
+        createElement(PlannerRouteTable, {
+          plan,
+          isPlanning: false,
+          isCompleted: false,
+          columns: {
+            visibleColumnCount: 8,
+            tableMinWidthPixels: 1200,
+            showNotes: true,
+            showCarrierStop: true,
+            onToggleShowNotes: () => {},
+            onToggleShowCarrierStop: () => {},
+          },
+          externalLinks: {},
+          drawerState: {
+            expandedRowIds: {},
+            detailsById: {},
+            loadingDetails: {},
+            toggleExpand: () => {},
+          },
+          dragState: {
+            tableItems,
+            dropSlotGaps: new Set<number>(),
+            heldOrDraggedIndex: null,
+            draggedIndex: null,
+            dragOverGapIndex: null,
+            getRowDropProps: () => ({}),
+            getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
+            onClearDragOverGap: () => {},
+            onRowHoldStart: () => {},
+            onRowHoldEnd: () => {},
+            onRowDragStart: () => {},
+            onRowDragEnd: () => {},
+          },
+          rowActions: {
+            copiedSystemRowId: null,
+            insertMenuAfterId: 9,
+            onSetInsertMenuAfterId: () => {},
+            onChangeRegion: () => {},
+            onInsert: () => {},
+            onDeleteRow: () => {},
+            onLegModeChange: () => {},
+            onFieldBlur: () => {},
+            onCopySystem: () => {},
+            onToggleFcStop: () => {},
+            onOverrideFcArrived: () => {},
+            onOpenCarrierRoutePrompt: () => {},
+          },
+        }),
+      )
     }
-    const baseTableProps = {
-      plan: routePlan,
-      isPlanning: false,
-      isCompleted: false,
-      frontier: { lastVisitedIndex: 0, lastFcArrivedIndex: -1 },
-      columns: {
-        visibleColumnCount: 8,
-        tableMinWidthPixels: 1200,
-        showNotes: true,
-        showCarrierStop: true,
-        onToggleShowNotes: () => {},
-        onToggleShowCarrierStop: () => {},
-      },
-      externalLinks: {},
-      drawerState: {
-        expandedRowIds: {},
-        detailsById: {},
-        loadingDetails: {},
-        toggleExpand: () => {},
-      },
-      dragState: {
-        tableItems,
-        dropSlotGaps: new Set<number>(),
-        heldOrDraggedIndex: null,
-        draggedIndex: null,
-        dragOverGapIndex: null,
-        getRowDropProps: () => ({}),
-        getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
-        onClearDragOverGap: () => {},
-        onRowHoldStart: () => {},
-        onRowHoldEnd: () => {},
-        onRowDragStart: () => {},
-        onRowDragEnd: () => {},
-      },
-      rowActions: {
-        copiedSystemRowId: null,
-        insertMenuAfterId: null,
-        onSetInsertMenuAfterId: () => {},
-        onChangeRegion: () => {},
-        onInsert: () => {},
-        onDeleteRow: () => {},
-        onLegModeChange: () => {},
-        onFieldBlur: () => {},
-        onCopySystem: () => {},
-        onToggleFcStop: () => {},
-        onOverrideFcArrived: () => {},
-      },
-    }
-    const manualTableHtml = renderToString(
-      createElement(PlannerRouteTable, {
-        ...baseTableProps,
-        carrierState: { ...baseCarrierState, isManualCarrierRoute: true },
-      }),
-    )
+
+    const manualTableHtml = renderTable(buildPlanWithTargetPermissions({ isFcStopLocked: false }))
     expect(manualTableHtml).toContain('placeholder="Star System"')
+    expect(manualTableHtml).toContain('ROUTING')
+    expect(manualTableHtml).toContain(
+      'Add new waypoints in the unvisited section and drag them into valid past slots.',
+    )
     expect(manualTableHtml).not.toContain('Locked while Fleet Carrier route to this waypoint is active')
 
-    const spanshTableHtml = renderToString(
-      createElement(PlannerRouteTable, {
-        ...baseTableProps,
-        carrierState: { ...baseCarrierState, isManualCarrierRoute: false },
+    const spanshTableHtml = renderTable(
+      buildPlanWithTargetPermissions({
+        systemLocked: true,
+        systemLockReason: 'Locked while Fleet Carrier route to this waypoint is active',
+        canReorder: false,
+        deleteDisabledReason: 'Locked while Fleet Carrier route to this waypoint is active',
+        reorderDisabledReason: 'Locked while Fleet Carrier route to this waypoint is active',
+        canRemoveFcStop: false,
+        canOverrideFcBadge: false,
+        isFcStopLocked: true,
+        isSpanshRoutedFcStop: true,
       }),
     )
     expect(spanshTableHtml).toContain('Locked while Fleet Carrier route to this waypoint is active')
@@ -125,6 +163,8 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
         createdAt: '3310-01-01T00:00:00Z',
         startTimestamp: '3310-01-01T00:00:00Z',
       },
+      lastVisitedIndex: 4,
+      lastFcArrivedIndex: -1,
       rows: [
         {
           row: { id: 901, expeditionId: 21, position: 1000, rowType: 'region', regionId: 18 },
@@ -217,7 +257,6 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
         plan: regionBorderPlan,
         isPlanning: false,
         isCompleted: false,
-        frontier: { lastVisitedIndex: 4, lastFcArrivedIndex: -1 },
         columns: {
           visibleColumnCount: 8,
           tableMinWidthPixels: 1200,
@@ -247,14 +286,6 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
           onRowDragStart: () => {},
           onRowDragEnd: () => {},
         },
-        carrierState: {
-          activeCarrierRoute: null,
-          activeCarrierTargetRowId: 0,
-          isManualCarrierRoute: false,
-          nextFcStopEntry: null,
-          routedCarrierStopIndex: -1,
-          onOpenCarrierRoutePrompt: () => {},
-        },
         rowActions: {
           copiedSystemRowId: null,
           insertMenuAfterId: null,
@@ -267,6 +298,7 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
           onCopySystem: () => {},
           onToggleFcStop: () => {},
           onOverrideFcArrived: () => {},
+          onOpenCarrierRoutePrompt: () => {},
         },
       }),
     )
@@ -292,4 +324,3 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
     expect(rowHtml(910)).not.toContain('border-l-2')
   })
 })
-

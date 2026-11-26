@@ -37,7 +37,6 @@ export interface HydratedFrontendFixture {
   heldRowIndex: number
   dropPreviews: expedition.DropSlotPreview[]
   lastVisitedIndex: number
-  lastFcArrivedIndex: number
   exportData?: exporter.ExpeditionExport
 }
 
@@ -232,7 +231,7 @@ export function buildProbeRun(
 
 /**
  * hydrateFrontendFixture hydrates raw fixture JSON into Wails TypeScript model instances
- * and computes true row-array frontier indices matching ExpeditionPlanner.
+ * and reads the Go-computed lastVisitedIndex from PlanView.
  */
 export function hydrateFrontendFixture(parsedFixture: LiveFrontendFixture): HydratedFrontendFixture {
   const plan = expedition.PlanView.createFrom(parsedFixture.plan)
@@ -253,18 +252,7 @@ export function hydrateFrontendFixture(parsedFixture: LiveFrontendFixture): Hydr
   const dropPreviews = rawPreviews.map((item) => expedition.DropSlotPreview.createFrom(item))
   const heldRowIndex = typeof parsedFixture.heldRowIndex === 'number' ? parsedFixture.heldRowIndex : -1
 
-  let lastVisitedIndex = -1
-  let lastFcArrivedIndex = -1
-  if (plan.expedition.status !== 'planning') {
-    ;(plan.rows ?? []).forEach((rowView, rowIndex) => {
-      if (rowView.visitState === 'visited') {
-        lastVisitedIndex = rowIndex
-      }
-      if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && rowView.row.fcArrived) {
-        lastFcArrivedIndex = rowIndex
-      }
-    })
-  }
+  const lastVisitedIndex = plan.lastVisitedIndex ?? -1
 
   const exportData = parsedFixture.exportData
     ? exporter.ExpeditionExport.createFrom(parsedFixture.exportData)
@@ -279,7 +267,6 @@ export function hydrateFrontendFixture(parsedFixture: LiveFrontendFixture): Hydr
     heldRowIndex,
     dropPreviews,
     lastVisitedIndex,
-    lastFcArrivedIndex,
     exportData,
   }
 }

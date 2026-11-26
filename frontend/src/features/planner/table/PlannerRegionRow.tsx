@@ -12,14 +12,12 @@ export interface PlannerRegionRowProps {
   rowView: expedition.RowView
   index: number
   visibleColumnCount: number
-  isPlanning: boolean
   isLocked: boolean
   isBeingDragged: boolean
   topGapHighlight?: boolean
   bottomGapHighlight?: boolean
   /** Inherited leg accent border color rendered on the left edge when active (omitted while dragging). */
   leftBorderColor?: string
-  lastVisitedIndex: number
   insertMenuOpen: boolean
   rowStyle: CSSProperties
   dropProps: HTMLAttributes<HTMLTableRowElement>
@@ -42,13 +40,11 @@ export const PlannerRegionRow = memo(function PlannerRegionRow({
   rowView,
   index,
   visibleColumnCount,
-  isPlanning,
   isLocked,
   isBeingDragged,
   topGapHighlight = false,
   bottomGapHighlight = false,
   leftBorderColor,
-  lastVisitedIndex,
   insertMenuOpen,
   rowStyle,
   dropProps,
@@ -66,7 +62,7 @@ export const PlannerRegionRow = memo(function PlannerRegionRow({
     (selectedRegionId: number) => onChangeRegion(row.id, selectedRegionId),
     [onChangeRegion, row.id],
   )
-  const allowInsertWaypoint = isPlanning || index >= lastVisitedIndex
+  const allowInsertWaypoint = Boolean(rowView.allowInsertWaypoint)
   const gapHighlightClass = isBeingDragged
     ? 'bg-ed-amber-drag *:bg-ed-amber-drag *:shadow-[inset_0_2px_0_0_var(--color-ed-amber),inset_0_-2px_0_0_var(--color-ed-amber)]'
     : topGapHighlight

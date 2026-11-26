@@ -30,24 +30,26 @@ type GECRef struct {
 
 // RowView is a row enriched for display.
 type RowView struct {
-	Row                Row      `json:"row"`
-	Number             int      `json:"number"` // waypoint # (0 for region headers)
-	RegionName         string   `json:"regionName"`
-	DetectedRegionID   int      `json:"detectedRegionId"` // region containing the coordinates
-	DetectedRegion     string   `json:"detectedRegion"`
-	VisitCount         int      `json:"visitCount"`
-	VisitState         string   `json:"visitState"`
-	VisitedAtGalactic  string   `json:"visitedAtGalactic"`
-	DepartedAtGalactic string   `json:"departedAtGalactic,omitempty"`
-	DrawerFrom         string   `json:"drawerFrom,omitempty"`
-	DrawerTo           string   `json:"drawerTo,omitempty"`
-	DistFromPrevLy     *float64 `json:"distFromPrevLy,omitempty"`
-	DistFromCurrentLy  *float64 `json:"distFromCurrentLy,omitempty"`
-	IsNextWaypoint     bool     `json:"isNextWaypoint,omitempty"`
-	LegModeID          int64    `json:"legModeId"`
-	LegModeName        string   `json:"legModeName"`
-	LegModeColor       string   `json:"legModeColor"`
-	GEC                *GECRef  `json:"gec,omitempty"`
+	Row                 Row                  `json:"row"`
+	Number              int                  `json:"number"` // waypoint # (0 for region headers)
+	RegionName          string               `json:"regionName"`
+	DetectedRegionID    int                  `json:"detectedRegionId"` // region containing the coordinates
+	DetectedRegion      string               `json:"detectedRegion"`
+	VisitCount          int                  `json:"visitCount"`
+	VisitState          string               `json:"visitState"`
+	VisitedAtGalactic   string               `json:"visitedAtGalactic"`
+	DepartedAtGalactic  string               `json:"departedAtGalactic,omitempty"`
+	DrawerFrom          string               `json:"drawerFrom,omitempty"`
+	DrawerTo            string               `json:"drawerTo,omitempty"`
+	DistFromPrevLy      *float64             `json:"distFromPrevLy,omitempty"`
+	DistFromCurrentLy   *float64             `json:"distFromCurrentLy,omitempty"`
+	IsNextWaypoint      bool                 `json:"isNextWaypoint,omitempty"`
+	LegModeID           int64                `json:"legModeId"`
+	LegModeName         string               `json:"legModeName"`
+	LegModeColor        string               `json:"legModeColor"`
+	GEC                 *GECRef              `json:"gec,omitempty"`
+	AllowInsertWaypoint bool                 `json:"allowInsertWaypoint"`
+	Permissions         *WaypointPermissions `json:"permissions,omitempty"`
 }
 
 // PlanView is the full planner sheet.
@@ -61,6 +63,9 @@ type PlanView struct {
 	NextFCStopRowID        int64                    `json:"nextFcStopRowId"`
 	RoutedCarrierStopRowID int64                    `json:"routedCarrierStopRowId,omitempty"`
 	ActiveCarrierRoute     *ActiveCarrierRouteState `json:"activeCarrierRoute,omitempty"`
+	LastVisitedIndex       int                      `json:"lastVisitedIndex"`
+	LastFCArrivedIndex     int                      `json:"lastFcArrivedIndex"`
+	DefaultModeID          int64                    `json:"defaultModeId"`
 	PlayerSystem           string                   `json:"playerSystem,omitempty"`
 	WaypointCount          int                      `json:"waypointCount"`
 	VisitedWaypointCount   int                      `json:"visitedWaypointCount"`
@@ -194,6 +199,7 @@ func loadPlanBuildContext(queryer db.Queryer, expeditionRecord Expedition, rows 
 		buildContext.modeByID[modeItem.ID] = modeItem
 	}
 	buildContext.defaultModeID = modes.DefaultFallbackModeID(queryer)
+	planView.DefaultModeID = buildContext.defaultModeID
 	resolvedActiveModeID, _, _ := buildContext.resolveMode(expeditionRecord.ActiveModeID)
 	buildContext.activeModeID = resolvedActiveModeID
 	planView.Expedition.ActiveModeID = resolvedActiveModeID
@@ -387,5 +393,6 @@ func BuildPlan(queryer db.Queryer, expeditionID int64, gecLookup GECLookup, expe
 	}
 	planView.ActiveCarrierRoute = NormalizeActiveCarrierRoute(rawRoute)
 	planView.RoutedCarrierStopRowID = ResolveRoutedCarrierStopRowID(rows, planView.NextFCStopRowID, planView.ActiveCarrierRoute)
+	PopulatePlanFrontiersAndPermissions(&planView)
 	return planView, nil
 }

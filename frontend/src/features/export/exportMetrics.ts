@@ -1,5 +1,5 @@
 import { realization, stats } from '../../api/models'
-import { computeShipDistanceLy, formatElapsedDuration } from '../../domain/galacticTime'
+import { formatElapsedDuration } from '../../domain/galacticTime'
 import { DEFAULT_MODE_COLOR } from '../../domain/theme'
 import { ActiveModeTag, collectUniqueShips, getExportDataIndex, getVisitedLegs, getVisitedRegions, VisitedLegRecord } from './exportDataIndex'
 import {
@@ -147,7 +147,7 @@ export function computeDerivedMetrics(
   carrierCost: ExportCarrierCost | null,
   elapsedDays: number | null,
 ): DerivedMetrics {
-  const shipDistanceLy = computeShipDistanceLy(metrics)
+  const shipDistanceLy = metrics.shipDistanceLy ?? 0
   const totalBoosts =
     metrics.jetConeBoosts + metrics.premiumBoosts + metrics.standardBoosts + metrics.basicBoosts
   const combinedEstimatedCredits = metrics.scanValueTotal + metrics.organicValueTotal

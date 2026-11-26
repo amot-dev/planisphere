@@ -31,40 +31,6 @@ export type PlannerTableItem =
     }
 
 /**
- * PlannerFrontierIndices records the latest visited waypoint and arrived
- * Fleet Carrier stop indices inside plan.rows for chronological edit guards.
- */
-export interface PlannerFrontierIndices {
-  lastVisitedIndex: number
-  lastFcArrivedIndex: number
-}
-
-/**
- * computePlanFrontierIndices scans plan.rows for the furthest visited row and
- * arrived Fleet Carrier stop when the expedition is no longer in planning mode.
- */
-export function computePlanFrontierIndices(
-  plan: expedition.PlanView | null,
-  isPlanning: boolean,
-): PlannerFrontierIndices {
-  if (!plan?.rows || isPlanning) {
-    return { lastVisitedIndex: -1, lastFcArrivedIndex: -1 }
-  }
-  let maxVisitedIndex = -1
-  let maxFcArrivedIndex = -1
-  plan.rows.forEach((rowView, rowIndex) => {
-    if (!rowView) return
-    if (rowView.visitState === 'visited') {
-      maxVisitedIndex = rowIndex
-    }
-    if (rowView.row?.rowType === 'waypoint' && rowView.row.fcStop && rowView.row.fcArrived) {
-      maxFcArrivedIndex = rowIndex
-    }
-  })
-  return { lastVisitedIndex: maxVisitedIndex, lastFcArrivedIndex: maxFcArrivedIndex }
-}
-
-/**
  * gapToTargetIndex converts a gap position (0..rows.length, where gap g sits
  * immediately before row g) into the 0-based target index expected by MoveRow
  * after removing the source row at fromIndex. Returns null if dropping into

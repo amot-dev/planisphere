@@ -4,8 +4,6 @@
 // ("2026-01-18T19:42:10Z"). Every timestamp shown in the UI is rendered in
 // Galactic Standard Time rounded to the nearest minute ("3312-01-18 19:42 UTC").
 
-import { stats } from '../api/models'
-
 export const GALACTIC_YEAR_OFFSET = 1286
 
 function pad2(value: number): string {
@@ -35,36 +33,6 @@ export function toGalacticTime(isoTimestamp: string | null | undefined): string 
   const hours = pad2(roundedDate.getUTCHours())
   const minutes = pad2(roundedDate.getUTCMinutes())
   return `${pad4(year)}-${month}-${day} ${hours}:${minutes} UTC`
-}
-
-/**
- * Converts a Galactic Standard Time string ("3312-01-18 19:42 UTC")
- * back into a canonical real-world ISO-8601 UTC string ("2026-01-18T19:42:00Z").
- */
-export function fromGalacticTime(galacticTimeString: string): string {
-  const cleanedString = galacticTimeString
-    .trim()
-    .replace(/\s*UTC$/i, '')
-    .replace(/Z$/i, '')
-    .trim()
-  const matchResult = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
-    cleanedString,
-  )
-  if (!matchResult) {
-    throw new Error(
-      `Invalid Galactic timestamp "${galacticTimeString}" (expected 33XX-MM-DD HH:mm UTC)`,
-    )
-  }
-  const realYear = Number(matchResult[1]) - GALACTIC_YEAR_OFFSET
-  if (realYear < 1) {
-    throw new Error(`Galactic year ${matchResult[1]} out of range`)
-  }
-  const month = matchResult[2]
-  const day = matchResult[3]
-  const hours = matchResult[4] ?? '00'
-  const minutes = matchResult[5] ?? '00'
-  const seconds = matchResult[6] ?? '00'
-  return `${pad4(realYear)}-${month}-${day}T${hours}:${minutes}:${seconds}Z`
 }
 
 /**
@@ -106,17 +74,6 @@ export function formatElapsedDuration(
     return `${totalDays}d ${pad2(hours)}h ${pad2(minutes)}m`
   }
   return `${hours}h ${pad2(minutes)}m`
-}
-
-/**
- * computeShipDistanceLy returns the ship FSD jump distance in light-years,
- * falling back to total distance minus carrier passenger distance when unset.
- */
-export function computeShipDistanceLy(metrics: stats.Metrics): number {
-  return (
-    metrics.shipDistanceLy ||
-    Math.max(0, (metrics.distanceLy || 0) - (metrics.carrierPassengerLy || 0))
-  )
 }
 
 /**

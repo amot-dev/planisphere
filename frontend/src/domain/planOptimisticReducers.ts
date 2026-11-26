@@ -20,51 +20,126 @@ function findNextUnarrivedCarrierStopRowId(rows: expedition.RowView[]): number {
   return 0
 }
 
+function computeOptimisticFrontiers(
+  expeditionStatus: string | undefined,
+  rows: expedition.RowView[],
+): { lastVisitedIndex: number; lastFcArrivedIndex: number } {
+  if (expeditionStatus === 'planning') {
+    return { lastVisitedIndex: -1, lastFcArrivedIndex: -1 }
+  }
+  let lastVisitedIndex = -1
+  let lastFcArrivedIndex = -1
+  rows.forEach((rowView, rowIndex) => {
+    if (rowView.visitState === 'visited') lastVisitedIndex = rowIndex
+    if (rowView.row.rowType === 'waypoint' && rowView.row.fcStop && rowView.row.fcArrived) {
+      lastFcArrivedIndex = rowIndex
+    }
+  })
+  return { lastVisitedIndex, lastFcArrivedIndex }
+}
+
+function applyOptimisticFcRowUpdate(
+  plan: expedition.PlanView,
+  targetRowId: number,
+  resolveFlags: (row: expedition.Row) => { fcStop: boolean; fcArrived: boolean },
+): expedition.PlanView {
+  const status = plan.expedition.status
+  const isPlanning = status === 'planning'
+  const isCompleted = status === 'completed'
+  let lastFcArrivedIndex = -1
+  let nextFcStopRowId = 0
+  let resolvedTargetFlags: { fcStop: boolean; fcArrived: boolean } | null = null
+
+  plan.rows.forEach((rowView, rowIndex) => {
+    if (rowView.row.rowType !== 'waypoint') return
+    let fcStop = Boolean(rowView.row.fcStop)
+    let fcArrived = Boolean(rowView.row.fcArrived)
+    if (rowView.row.id === targetRowId) {
+      resolvedTargetFlags = resolveFlags(rowView.row)
+      fcStop = resolvedTargetFlags.fcStop
+      fcArrived = resolvedTargetFlags.fcArrived
+    }
+    if (!isPlanning && fcStop && fcArrived) {
+      lastFcArrivedIndex = rowIndex
+    }
+    if (fcStop && !fcArrived && nextFcStopRowId === 0) {
+      nextFcStopRowId = rowView.row.id
+    }
+  })
+
+  if (!resolvedTargetFlags) {
+    return plan
+  }
+  const { fcStop, fcArrived } = resolvedTargetFlags
+  const optimisticRows = plan.rows.map((rowView, rowIndex) => {
+    if (rowView.row.id !== targetRowId) return rowView
+    const nextRow = cloneWailsInstance(rowView.row, { fcStop, fcArrived })
+    if (!rowView.permissions) {
+      return cloneWailsInstance(rowView, { row: nextRow })
+    }
+    const isVisited = rowView.visitState === 'visited'
+    const isOriginRow = !isPlanning && rowView.number === 1
+    const isSpanshRouted = Boolean(rowView.permissions.isSpanshRoutedFcStop)
+    const isFcStopLocked = Boolean(rowView.permissions.isFcStopLocked)
+    const isFcArrivedStop = !isPlanning && fcStop && fcArrived
+    const systemLocked =
+      isCompleted || isVisited || isOriginRow || isSpanshRouted || isFcArrivedStop
+    const systemLockReason = isSpanshRouted
+      ? 'Locked while Fleet Carrier route to this waypoint is active'
+      : isFcArrivedStop && !isVisited && !isOriginRow
+        ? 'Locked while Fleet Carrier is marked arrived at this waypoint'
+        : undefined
+    return cloneWailsInstance(rowView, {
+      row: nextRow,
+      permissions: cloneWailsInstance(rowView.permissions, {
+        systemLocked,
+        systemLockReason,
+        canAddFcStop: !isCompleted && !isFcStopLocked && (isPlanning || rowIndex > lastFcArrivedIndex),
+        canRemoveFcStop: !isCompleted && !isFcStopLocked && (isPlanning || !fcArrived),
+        canOverrideFcBadge: !isPlanning && !isCompleted && !isFcStopLocked,
+        isNextFcStop: Boolean(
+          fcStop && !fcArrived && !plan.activeCarrierRoute && nextFcStopRowId === targetRowId,
+        ),
+      }),
+    })
+  })
+  return cloneWailsInstance(plan, {
+    rows: optimisticRows,
+    nextFcStopRowId,
+    lastFcArrivedIndex,
+  })
+}
+
 /**
  * buildOptimisticFcArrivedPlan returns an optimistic PlanView updating a
- * waypoint's Fleet Carrier arrival state and recomputing nextFcStopRowId
- * while preserving reference identity on all unaffected rows.
+ * waypoint's Fleet Carrier arrival state, carrier permissions, and frontier
+ * indices while preserving reference identity on all unaffected rows.
  */
 export function buildOptimisticFcArrivedPlan(
   plan: expedition.PlanView,
   rowId: number,
   arrived: boolean,
 ): expedition.PlanView {
-  const optimisticRows = plan.rows.map((rowView) => {
-    if (rowView.row.id !== rowId) return rowView
-    return cloneWailsInstance(rowView, {
-      row: cloneWailsInstance(rowView.row, { fcArrived: arrived }),
-    })
-  })
-  return cloneWailsInstance(plan, {
-    rows: optimisticRows,
-    nextFcStopRowId: findNextUnarrivedCarrierStopRowId(optimisticRows),
-  })
+  return applyOptimisticFcRowUpdate(plan, rowId, (currentRow) => ({
+    fcStop: Boolean(currentRow.fcStop),
+    fcArrived: arrived,
+  }))
 }
 
 /**
  * buildOptimisticFcStopTogglePlan returns an optimistic PlanView toggling a
- * waypoint's Fleet Carrier stop flag and recomputing nextFcStopRowId while
- * preserving reference identity on all unaffected rows.
+ * waypoint's Fleet Carrier stop flag, carrier permissions, and frontier indices
+ * while preserving reference identity on all unaffected rows.
  */
 export function buildOptimisticFcStopTogglePlan(
   plan: expedition.PlanView,
   row: expedition.Row,
   nextFcStop: boolean,
 ): expedition.PlanView {
-  const optimisticRows = plan.rows.map((rowView) => {
-    if (rowView.row.id !== row.id) return rowView
-    return cloneWailsInstance(rowView, {
-      row: cloneWailsInstance(rowView.row, {
-        fcStop: nextFcStop,
-        fcArrived: nextFcStop ? rowView.row.fcArrived : false,
-      }),
-    })
-  })
-  return cloneWailsInstance(plan, {
-    rows: optimisticRows,
-    nextFcStopRowId: findNextUnarrivedCarrierStopRowId(optimisticRows),
-  })
+  return applyOptimisticFcRowUpdate(plan, row.id, (currentRow) => ({
+    fcStop: nextFcStop,
+    fcArrived: nextFcStop ? Boolean(currentRow.fcArrived) : false,
+  }))
 }
 
 /**
@@ -166,6 +241,7 @@ export function buildOptimisticDeletedRowPlan(
     rows: renumberedRows,
     waypointCount,
     nextFcStopRowId: findNextUnarrivedCarrierStopRowId(renumberedRows),
+    ...computeOptimisticFrontiers(plan.expedition.status, renumberedRows),
   })
 }
 
@@ -204,5 +280,6 @@ export function buildOptimisticMovedRowPlan(
   return cloneWailsInstance(plan, {
     rows: renumberedRows,
     nextFcStopRowId: findNextUnarrivedCarrierStopRowId(renumberedRows),
+    ...computeOptimisticFrontiers(plan.expedition.status, renumberedRows),
   })
 }

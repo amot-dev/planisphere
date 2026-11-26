@@ -4,7 +4,6 @@ import { CollapsibleSectionCard } from '../../components/ui/CollapsibleSectionCa
 import { ExpandableMetricRow } from '../../components/ui/ExpandableMetricRow'
 import { CogIcon } from '../../components/ui/HudIcons'
 import {
-  computeShipDistanceLy,
   formatCredits,
   formatInt,
   formatLy,
@@ -185,7 +184,7 @@ export function NavigationTelemetrySection({
             <div className="flex items-center justify-between text-ed-text-muted">
               <span>By Ship (FSD)</span>
               <span className="font-mono-tabular text-ed-text-main">
-                {formatLy(computeShipDistanceLy(displayedMetrics))}
+                {formatLy(displayedMetrics.shipDistanceLy ?? 0)}
               </span>
             </div>
             <div className="flex items-center justify-between text-ed-text-muted">

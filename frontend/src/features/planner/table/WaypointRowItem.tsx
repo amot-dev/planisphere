@@ -46,21 +46,16 @@ export interface WaypointRowItemProps {
   index: number
   isPlanning: boolean
   isLocked: boolean
-  isFcStopLocked?: boolean
-  isActivelyRoutedFcStop?: boolean
-  lastFcArrivedIndex?: number
   isBeingDragged: boolean
   topGapHighlight?: boolean
   bottomGapHighlight?: boolean
   isExpanded: boolean
-  isNextFcStop: boolean
-  hasActiveCarrierRoute: boolean
   isNextWaypoint?: boolean
   playerSystem?: string
   isSystemCopied: boolean
   isSearchHighlighted?: boolean
   insertMenuOpen: boolean
-  lastVisitedIndex: number
+  lastVisitedIndex?: number
   rowStyle: CSSProperties
   dropProps: React.HTMLAttributes<HTMLTableRowElement>
   showNotes?: boolean
@@ -78,21 +73,16 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   index,
   isPlanning,
   isLocked,
-  isFcStopLocked = false,
-  isActivelyRoutedFcStop = false,
-  lastFcArrivedIndex = -1,
   isBeingDragged,
   topGapHighlight = false,
   bottomGapHighlight = false,
   isExpanded,
-  isNextFcStop,
-  hasActiveCarrierRoute,
   isNextWaypoint,
   playerSystem,
   isSystemCopied,
   isSearchHighlighted = false,
   insertMenuOpen,
-  lastVisitedIndex,
+  lastVisitedIndex = -1,
   rowStyle,
   dropProps,
   showNotes = true,
@@ -103,13 +93,7 @@ export const WaypointRowItem = memo(function WaypointRowItem({
   const row = rowView.row
   const permissions = deriveWaypointRowPermissions({
     rowView,
-    index,
     isPlanning,
-    isLocked,
-    isFcStopLocked,
-    isActivelyRoutedFcStop,
-    lastFcArrivedIndex,
-    lastVisitedIndex,
     isBeingDragged,
     topGapHighlight,
     bottomGapHighlight,
@@ -395,9 +379,9 @@ export const WaypointRowItem = memo(function WaypointRowItem({
           index={index}
           draftSystemName={draft.systemName}
           isPlanning={isPlanning}
-          isNextFcStop={isNextFcStop}
-          isFcStopLocked={isFcStopLocked}
-          hasActiveCarrierRoute={hasActiveCarrierRoute}
+          isNextFcStop={permissions.isNextFcStop}
+          isFcStopLocked={permissions.isFcStopLocked}
+          hasActiveCarrierRoute={permissions.hasActiveCarrierRoute}
           canAddFcStop={permissions.canAddFcStop}
           canRemoveFcStop={permissions.canRemoveFcStop}
           canOverrideFcBadge={permissions.canOverrideFcBadge}

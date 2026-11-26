@@ -8,17 +8,15 @@ import {
   formatElapsedDuration,
   formatLoss,
   formatLy,
-  fromGalacticTime,
   inaraSystemUrl,
   toGalacticTime,
 } from './galacticTime'
 
 describe('Galactic Standard Time (+1286 years)', () => {
-  it('converts real ISO-8601 UTC to minute-rounded 33XX-MM-DD HH:mm UTC and back', () => {
+  it('converts real ISO-8601 UTC to minute-rounded 33XX-MM-DD HH:mm UTC', () => {
     const iso = '2026-01-18T19:42:10Z'
     const gst = toGalacticTime(iso)
     expect(gst).toBe('3312-01-18 19:42 UTC')
-    expect(fromGalacticTime(gst)).toBe('2026-01-18T19:42:00Z')
     expect(toGalacticTime('2026-01-18T19:42:45Z')).toBe('3312-01-18 19:43 UTC')
   })
 
@@ -26,7 +24,6 @@ describe('Galactic Standard Time (+1286 years)', () => {
     const iso = '2028-02-29T08:15:00Z'
     const gst = toGalacticTime(iso)
     expect(gst).toBe('3314-02-29 08:15 UTC')
-    expect(fromGalacticTime(gst)).toBe(iso)
   })
 
   it('builds external system URLs for Inara, EDSM, and EDAstro GEC', () => {

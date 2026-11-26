@@ -590,8 +590,8 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 			testingContext.Errorf("GetModesState during startup returned error: %v", err)
 			return
 		}
-		if len(modesState.Modes) == 0 {
-			testingContext.Errorf("expected seeded modes from GetModesState after startup")
+		if len(modesState.Modes) == 0 || modesState.DefaultModeID <= 0 {
+			testingContext.Errorf("expected seeded modes and positive DefaultModeID from GetModesState after startup, got %+v", modesState)
 		}
 	}()
 

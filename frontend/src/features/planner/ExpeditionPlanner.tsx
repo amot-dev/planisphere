@@ -1,10 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expedition } from '../../api/models'
 import type { ExternalLinkVisibilityConfig } from '../../domain/externalLinks'
-import {
-  computePlanFrontierIndices,
-  computePlannerTableDimensions,
-} from '../../domain/planTableItems'
+import { computePlannerTableDimensions } from '../../domain/planTableItems'
 import { createBusyTaskTracker } from '../../hooks/useBusyTasks'
 import { useCopyFeedback } from '../../hooks/useCopyFeedback'
 import { useLocalStorageBoolean } from '../../hooks/useLocalStorageBoolean'
@@ -21,7 +18,7 @@ import {
   useInitialExpeditionScroll,
   type PlannerScrollTarget,
 } from './useInitialExpeditionScroll'
-import { usePlanMutations, type CarrierMutationLockContext } from './usePlanMutations'
+import { usePlanMutations } from './usePlanMutations'
 import { usePlannerUndo } from './usePlannerUndo'
 
 const SEARCH_HIGHLIGHT_DURATION_MS = 2000
@@ -110,10 +107,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     setOriginHasDraftSystem(null)
   }, [firstWaypoint?.row.id, firstWaypoint?.row.systemName])
 
-  const frontier = useMemo(
-    () => computePlanFrontierIndices(plan, Boolean(isPlanning)),
-    [isPlanning, plan],
-  )
+  const lastVisitedIndex = plan?.lastVisitedIndex ?? -1
 
   const applyOptimisticPlan = useCallback(
     (nextPlan: expedition.PlanView) => {
@@ -122,12 +116,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     },
     [onPlanOptimisticUpdate],
   )
-
-  const carrierContextRef = useRef<CarrierMutationLockContext>({
-    activeCarrierRoute: null,
-    isManualCarrierRoute: false,
-    routedCarrierStopIndex: -1,
-  })
 
   const onBusyChangeRef = useRef(onBusyChange)
   onBusyChangeRef.current = onBusyChange
@@ -143,7 +131,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     busyTracker: sharedBusyTracker,
     applyOptimisticPlan,
     onRefreshPlan,
-    carrierContextRef,
   })
 
   const carrierRoute = useCarrierRoute({
@@ -156,12 +143,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     onRefreshPlan,
     onCarrierRouteOpenChange,
   })
-
-  carrierContextRef.current = {
-    activeCarrierRoute: carrierRoute.activeCarrierRoute,
-    isManualCarrierRoute: carrierRoute.isManualCarrierRoute,
-    routedCarrierStopIndex: carrierRoute.routedCarrierStopIndex,
-  }
 
   const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
   const highlightTimeoutRef = useRef<number | null>(null)
@@ -195,7 +176,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     Boolean(plan?.expedition),
     plan?.expedition?.id,
     plan?.expedition?.status,
-    frontier.lastVisitedIndex,
+    lastVisitedIndex,
     scrollTarget,
     handleScrollTargetApplied,
     onScrollTargetConsumed,
@@ -224,7 +205,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     plan,
     isPlanning: Boolean(isPlanning),
     isCompleted: Boolean(isCompleted),
-    lastVisitedIndex: frontier.lastVisitedIndex,
+    lastVisitedIndex,
     lockedSpanshTargetRowId,
     expandedRowIds: drawerState.expandedRowIds,
     scrollContainerRef,
@@ -300,25 +281,6 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     ],
   )
 
-  const carrierState = useMemo(
-    () => ({
-      activeCarrierRoute: carrierRoute.activeCarrierRoute,
-      activeCarrierTargetRowId: carrierRoute.activeCarrierTargetRowId,
-      isManualCarrierRoute: carrierRoute.isManualCarrierRoute,
-      nextFcStopEntry: carrierRoute.nextFcStopEntry,
-      routedCarrierStopIndex: carrierRoute.routedCarrierStopIndex,
-      onOpenCarrierRoutePrompt: carrierRoute.openCarrierRoutePrompt,
-    }),
-    [
-      carrierRoute.activeCarrierRoute,
-      carrierRoute.activeCarrierTargetRowId,
-      carrierRoute.isManualCarrierRoute,
-      carrierRoute.nextFcStopEntry,
-      carrierRoute.openCarrierRoutePrompt,
-      carrierRoute.routedCarrierStopIndex,
-    ],
-  )
-
   const rowActions = useMemo(
     () => ({
       copiedSystemRowId,
@@ -335,8 +297,10 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
       onInspectSystemVisits: onSearchSystemVisits,
       onToggleFcStop: mutations.toggleFcStop,
       onOverrideFcArrived: mutations.handleRequestOverrideFcArrived,
+      onOpenCarrierRoutePrompt: carrierRoute.openCarrierRoutePrompt,
     }),
     [
+      carrierRoute.openCarrierRoutePrompt,
       copiedSystemRowId,
       handleCopySystem,
       highlightedRowId,
@@ -402,12 +366,10 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}
           clockSuspended={clockSuspended}
-          frontier={frontier}
           columns={tableColumns}
           externalLinks={externalLinks}
           drawerState={drawerState}
           dragState={dragState}
-          carrierState={carrierState}
           rowActions={rowActions}
         />
 

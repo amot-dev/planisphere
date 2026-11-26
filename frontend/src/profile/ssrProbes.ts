@@ -87,7 +87,7 @@ export function executeHydrationPass(parsedFixture: LiveFrontendFixture): {
 }
 
 function renderDragPreviewTableHTML(hydrated: HydratedFrontendFixture): string {
-  const { plan, heldRowIndex, dropPreviews, lastVisitedIndex, lastFcArrivedIndex } = hydrated
+  const { plan, heldRowIndex, dropPreviews, lastVisitedIndex } = hydrated
   if (heldRowIndex < 0 || dropPreviews.length === 0) {
     return ''
   }
@@ -120,7 +120,6 @@ function renderDragPreviewTableHTML(hydrated: HydratedFrontendFixture): string {
       plan,
       isPlanning,
       isCompleted,
-      frontier: { lastVisitedIndex, lastFcArrivedIndex },
       columns: {
         visibleColumnCount,
         tableMinWidthPixels,
@@ -150,14 +149,6 @@ function renderDragPreviewTableHTML(hydrated: HydratedFrontendFixture): string {
         onRowDragStart: noop,
         onRowDragEnd: noop,
       },
-      carrierState: {
-        activeCarrierRoute: null,
-        activeCarrierTargetRowId: 0,
-        isManualCarrierRoute: false,
-        nextFcStopEntry: null,
-        routedCarrierStopIndex: -1,
-        onOpenCarrierRoutePrompt: noop,
-      },
       rowActions: {
         copiedSystemRowId: null,
         insertMenuAfterId: null,
@@ -170,6 +161,7 @@ function renderDragPreviewTableHTML(hydrated: HydratedFrontendFixture): string {
         onCopySystem: noop,
         onToggleFcStop: noop,
         onOverrideFcArrived: noop,
+        onOpenCarrierRoutePrompt: noop,
       },
     }),
   )
@@ -225,7 +217,7 @@ function renderWaypointRowsBatchHTML(hydrated: HydratedFrontendFixture): {
   htmlLength: number
   waypointCount: number
 } {
-  const { plan, lastVisitedIndex, lastFcArrivedIndex } = hydrated
+  const { plan, lastVisitedIndex } = hydrated
   const isPlanning = plan.expedition.status === 'planning'
   const isCompleted = plan.expedition.status === 'completed'
   const probeExternalLinks = {
@@ -264,16 +256,13 @@ function renderWaypointRowsBatchHTML(hydrated: HydratedFrontendFixture): {
             index: rowIndex,
             isPlanning,
             isLocked: isCompleted,
-            lastFcArrivedIndex,
             isBeingDragged: false,
             isExpanded: false,
-            isNextFcStop: plan.nextFcStopRowId > 0 && rowView.row.id === plan.nextFcStopRowId,
             isNextWaypoint: Boolean(
               rowView.isNextWaypoint ||
                 (plan.nextWaypointRowId && rowView.row.id === plan.nextWaypointRowId),
             ),
             playerSystem: plan.playerSystem,
-            hasActiveCarrierRoute: false,
             isSystemCopied: false,
             insertMenuOpen: false,
             lastVisitedIndex,

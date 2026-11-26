@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   AddRow,
   DeleteRow,
@@ -85,18 +85,8 @@ export async function executePlanMutation(
 }
 
 /**
- * CarrierMutationLockContext exposes active carrier router bounds checked when
- * toggling carrier stops.
- */
-export interface CarrierMutationLockContext {
-  activeCarrierRoute: expedition.CarrierRouteResult | null
-  isManualCarrierRoute: boolean
-  routedCarrierStopIndex: number
-}
-
-/**
- * UsePlanMutationsOptions configures plan state, optimistic update callbacks,
- * and carrier lock state for expedition planner mutations.
+ * UsePlanMutationsOptions configures plan state and optimistic update callbacks
+ * for expedition planner mutations.
  */
 export interface UsePlanMutationsOptions {
   plan: expedition.PlanView | null
@@ -105,7 +95,6 @@ export interface UsePlanMutationsOptions {
   busyTracker?: BusyTaskTracker
   applyOptimisticPlan: (nextPlan: expedition.PlanView) => void
   onRefreshPlan: () => void
-  carrierContextRef: MutableRefObject<CarrierMutationLockContext>
 }
 
 /**
@@ -119,7 +108,6 @@ export function usePlanMutations({
   busyTracker: externalBusyTracker,
   applyOptimisticPlan,
   onRefreshPlan,
-  carrierContextRef,
 }: UsePlanMutationsOptions) {
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
   const [confirmState, setConfirmState] = useState<PlannerConfirmState | null>(null)
@@ -187,17 +175,14 @@ export function usePlanMutations({
   const toggleFcStop = useCallback(
     async (row: expedition.Row) => {
       if (!plan) return
-      const carrierContext = carrierContextRef.current
-      if (carrierContext.activeCarrierRoute && carrierContext.routedCarrierStopIndex >= 0) {
-        const rowIndex = plan.rows.findIndex((rowView) => rowView?.row?.id === row.id)
-        if (
-          rowIndex >= 0 &&
-          (carrierContext.isManualCarrierRoute
-            ? rowIndex < carrierContext.routedCarrierStopIndex
-            : rowIndex <= carrierContext.routedCarrierStopIndex)
-        ) {
-          return
-        }
+      const targetRowView = plan.rows?.find((rowView) => rowView?.row?.id === row.id)
+      if (
+        targetRowView?.permissions &&
+        !(row.fcStop
+          ? targetRowView.permissions.canRemoveFcStop
+          : targetRowView.permissions.canAddFcStop)
+      ) {
+        return
       }
       const nextFcStop = !row.fcStop
       await runPlanMutation(
@@ -207,21 +192,14 @@ export function usePlanMutations({
         { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop) },
       )
     },
-    [carrierContextRef, plan, runPlanMutation],
+    [plan, runPlanMutation],
   )
 
   const handleRequestOverrideFcArrived = useCallback(
     (rowView: expedition.RowView) => {
       if (!plan) return
       const targetArrived = !rowView.row.fcArrived
-      const rowIndex = plan.rows.findIndex((item) => item?.row?.id === rowView.row.id)
-      let cascadedCount = 0
-      ;(plan.rows ?? []).forEach((candidateView, candidateRowIndex) => {
-        const candidateRow = candidateView?.row
-        if (!candidateRow || candidateRow.rowType !== 'waypoint' || !candidateRow.fcStop) return
-        if (targetArrived && candidateRowIndex < rowIndex && !candidateRow.fcArrived) cascadedCount++
-        if (!targetArrived && candidateRowIndex > rowIndex && candidateRow.fcArrived) cascadedCount++
-      })
+      const cascadedCount = rowView.permissions?.overrideFcCascadeCount ?? 0
       setConfirmState({
         kind: 'override_fc_arrival',
         rowId: rowView.row.id,

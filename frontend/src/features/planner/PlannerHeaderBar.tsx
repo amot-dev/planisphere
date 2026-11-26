@@ -43,19 +43,10 @@ export function PlannerHeaderBar({
   const completeDisabled = !canComplete || Boolean(carrierRouteOpen)
 
   const modesList = plan.modes ?? []
-  const travelMode = modesList.find((modeItem) => modeItem.name.toLowerCase() === 'travel')
-  const activeModeId = currentExpedition.activeModeId || travelMode?.id || modesList[0]?.id || 0
+  const activeModeId = currentExpedition.activeModeId || plan.defaultModeId || modesList[0]?.id || 0
   const activeMode = modesList.find((modeItem) => modeItem.id === activeModeId) ?? modesList[0]
 
-  const coveredLy =
-    plan.coveredLy ??
-    plan.rows?.reduce((sum, rowView) => {
-      if (rowView.row?.rowType === 'waypoint' && rowView.row?.visitedAt && rowView.distFromPrevLy) {
-        return sum + rowView.distFromPrevLy
-      }
-      return sum
-    }, 0) ??
-    0
+  const coveredLy = plan.coveredLy ?? 0
   const completedLy = coveredLy > 0 ? coveredLy : plan.plannedLy
 
   const waypointCount = plan.waypointCount ?? 0

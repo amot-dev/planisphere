@@ -281,7 +281,7 @@ func buildFixtureModesState(database *sql.DB) (app.ModesState, error) {
 	if modesList == nil {
 		modesList = []modes.Mode{}
 	}
-	return app.ModesState{Modes: modesList}, nil
+	return app.ModesState{Modes: modesList, DefaultModeID: modes.DefaultFallbackModeID(database)}, nil
 }
 
 func loadFixtureVisitedDetails(

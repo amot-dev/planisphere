@@ -26,8 +26,6 @@ function renderRowItem(
     isLocked: false,
     isBeingDragged: false,
     isExpanded: false,
-    isNextFcStop: false,
-    hasActiveCarrierRoute: false,
     isSystemCopied: false,
     insertMenuOpen: false,
     lastVisitedIndex: 0,
@@ -59,6 +57,12 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
       },
       number: 20,
       visitState: 'visited',
+      permissions: {
+        systemLocked: true,
+        canAddFcStop: false,
+        canRemoveFcStop: false,
+        canOverrideFcBadge: false,
+      },
     })
 
     const html = renderRowItem({
@@ -84,10 +88,16 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
         },
         number: 2,
         visitState: 'future',
+        permissions: {
+          systemLocked: false,
+          canAddFcStop: false,
+          canRemoveFcStop: false,
+          canOverrideFcBadge: false,
+          isFcStopLocked: true,
+          hasActiveCarrierRoute: true,
+        },
       }),
       index: 1,
-      isFcStopLocked: true,
-      hasActiveCarrierRoute: true,
       lastVisitedIndex: 0,
     })
 
@@ -109,9 +119,13 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
         },
         number: 3,
         visitState: 'visited',
+        permissions: {
+          systemLocked: true,
+          canAddFcStop: true,
+          canRemoveFcStop: true,
+        },
       }),
       index: 2,
-      lastFcArrivedIndex: 1,
       lastVisitedIndex: 2,
     })
     expect(visitedAfterFcFrontierHtml).toContain('+ FC STOP')
@@ -128,9 +142,13 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
         },
         number: 2,
         visitState: 'visited',
+        permissions: {
+          systemLocked: true,
+          canAddFcStop: false,
+          canRemoveFcStop: true,
+        },
       }),
       index: 1,
-      lastFcArrivedIndex: 2,
       lastVisitedIndex: 2,
     })
     expect(visitedBeforeFcFrontierHtml).not.toContain('+ FC STOP')
@@ -147,9 +165,15 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
         },
         number: 4,
         visitState: 'future',
+        permissions: {
+          systemLocked: true,
+          systemLockReason: 'Locked while Fleet Carrier is marked arrived at this waypoint',
+          canAddFcStop: false,
+          canRemoveFcStop: false,
+          canOverrideFcBadge: true,
+        },
       }),
       index: 3,
-      lastFcArrivedIndex: 3,
       lastVisitedIndex: 2,
       handlers: { ...defaultRowHandlers, onOverrideFcArrived: () => {} },
     })
@@ -171,12 +195,19 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
         },
         number: 5,
         visitState: 'future',
+        permissions: {
+          systemLocked: false,
+          canAddFcStop: true,
+          canRemoveFcStop: true,
+          canOverrideFcBadge: true,
+          isNextFcStop: true,
+        },
       }),
       index: 4,
-      lastFcArrivedIndex: 3,
       lastVisitedIndex: 3,
     })
     expect(pendingStopHtml).toContain('PENDING')
+    expect(pendingStopHtml).toContain('ROUTE')
     expect(pendingStopHtml).toContain('Remove Fleet Carrier stop designation')
 
     const activelyRoutedStopHtml = renderRowItem({
@@ -191,12 +222,18 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
         },
         number: 6,
         visitState: 'future',
+        permissions: {
+          systemLocked: true,
+          systemLockReason: 'Locked while Fleet Carrier route to this waypoint is active',
+          canAddFcStop: false,
+          canRemoveFcStop: false,
+          canOverrideFcBadge: false,
+          isFcStopLocked: true,
+          hasActiveCarrierRoute: true,
+          isSpanshRoutedFcStop: true,
+        },
       }),
       index: 5,
-      isNextFcStop: true,
-      hasActiveCarrierRoute: true,
-      isActivelyRoutedFcStop: true,
-      lastFcArrivedIndex: 3,
       lastVisitedIndex: 3,
     })
     expect(activelyRoutedStopHtml).toContain('ROUTING')
@@ -205,4 +242,3 @@ describe('WaypointCarrierStopCell Rules and Badges', () => {
     )
   })
 })
-

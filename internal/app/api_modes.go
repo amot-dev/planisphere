@@ -5,9 +5,10 @@ import (
 	"planisphere/internal/store/modes"
 )
 
-// ModesState holds the configured flight modes list for the UI.
+// ModesState holds the configured flight modes list and default fallback mode ID for the UI.
 type ModesState struct {
-	Modes []modes.Mode `json:"modes"`
+	Modes         []modes.Mode `json:"modes"`
+	DefaultModeID int64        `json:"defaultModeId"`
 }
 
 // GetModesState returns all configured flight modes in display order.
@@ -24,7 +25,7 @@ func (app *App) GetModesState() (ModesState, error) {
 	if modesList == nil {
 		modesList = []modes.Mode{}
 	}
-	return ModesState{Modes: modesList}, nil
+	return ModesState{Modes: modesList, DefaultModeID: modes.DefaultFallbackModeID(app.db)}, nil
 }
 
 // GetModeUsage returns every expedition that currently references id on visited

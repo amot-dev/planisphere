@@ -42,8 +42,11 @@ describe('StartExpeditionModal', () => {
         root.render(
           createElement(StartExpeditionModal, {
             expeditionId: 5,
-            modesList: [modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#FF7100' })],
-            initialModeId: 1,
+            modesList: [
+              modes.Mode.createFrom({ id: 9, name: 'Custom Cruise', color: '#00D2FF', isDefault: false }),
+              modes.Mode.createFrom({ id: 2, name: 'Standard Transit', color: '#FF7100', isDefault: true }),
+            ],
+            defaultModeId: 2,
             commanders: [replay.Commander.createFrom({ id: 1, profileKey: 'live:f1:era:0', name: 'Solo', enabled: true })],
             onClose,
           }),
@@ -57,7 +60,7 @@ describe('StartExpeditionModal', () => {
         buttons().find((button) => button.textContent?.includes(label)) as HTMLButtonElement
 
       act(() => findButton('CONFIRM AND ENGAGE').click())
-      expect(mockStartExpedition).toHaveBeenCalledWith(5, '2026-01-10T10:00:00Z', 1)
+      expect(mockStartExpedition).toHaveBeenCalledWith(5, '2026-01-10T10:00:00Z', 2)
       expect(mockStartExpeditionScoped).not.toHaveBeenCalled()
       expect(findButton('ENGAGING...').disabled).toBe(true)
       expect(findButton('CANCEL').disabled).toBe(true)
