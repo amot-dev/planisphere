@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   computeAvailableDetailsMetricIds,
-  computeDerivedMetrics,
-  createEmptyMetrics,
-  createEmptyRealization,
   createQuickShareCart,
   describeScope,
   expandConfigToCartItems,
@@ -22,20 +19,7 @@ import { CartBlockItem, defaultMetricsForSection } from './exportTypes'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('exportMetrics', () => {
-  it('guards division by zero, sub-24h daily rates, and non-positive settled retention estimates', () => {
-    const emptyDerived = computeDerivedMetrics(
-      createEmptyMetrics(),
-      createEmptyRealization(),
-      null,
-      0.5,
-    )
-    expect(emptyDerived.avgJumpRangeLy).toBeNull()
-    expect(emptyDerived.boostRatePercent).toBeNull()
-    expect(emptyDerived.avgDistancePerDayLy).toBeNull()
-    expect(emptyDerived.avgCombinedCreditsPerDay).toBeNull()
-    expect(emptyDerived.realizationRetentionPercent).toBeNull()
-    expect(emptyDerived.netProfitAfterCarrierCost).toBeNull()
-
+  it('resolves Go-computed derived metrics, baseline fallbacks, and region buckets across scopes', () => {
     const data = buildSampleExportData()
     const fullContext = resolveTelemetryContext(data, { kind: 'full' })
     expect(fullContext.derived.avgJumpRangeLy).toBeCloseTo(4600 / 80, 4)
@@ -47,6 +31,35 @@ describe('exportMetrics', () => {
       4,
     )
     expect(fullContext.derived.avgDistancePerDayLy).not.toBeNull()
+
+    const baselineContext = resolveTelemetryContext(data, { kind: 'baseline' })
+    expect(baselineContext.derived.avgJumpRangeLy).toBeCloseTo(50, 4)
+    expect(baselineContext.derived.netProfitAfterCarrierCost).toBeNull()
+
+    const missingBaselineData = buildSampleExportData({ originBaseline: null })
+    const emptyBaselineContext = resolveTelemetryContext(missingBaselineData, { kind: 'baseline' })
+    expect(emptyBaselineContext.elapsedDays).toBeNull()
+    expect(emptyBaselineContext.derived.avgJumpRangeLy).toBeNull()
+    expect(emptyBaselineContext.derived.realizationRetentionPercent).toBeNull()
+
+    const regionCombined = resolveTelemetryContext(data, {
+      kind: 'region',
+      regionName: 'Inner Orion Spur',
+    })
+    expect(regionCombined.visitedWaypoints).toBe(2)
+    expect(regionCombined.coveredLy).toBe(4000)
+    expect(regionCombined.shipsFlown).toEqual(['Mandalay', 'Anaconda'])
+    expect(regionCombined.derived.netProfitAfterCarrierCost).toBeNull()
+
+    const regionExploration = resolveTelemetryContext(
+      data,
+      { kind: 'region', regionName: 'Inner Orion Spur' },
+      1,
+    )
+    expect(regionExploration.modeBadge?.modeName).toBe('Exploration')
+    expect(regionExploration.visitedWaypoints).toBe(1)
+    expect(regionExploration.coveredLy).toBe(1000)
+    expect(regionExploration.shipsFlown).toEqual(['Mandalay'])
   })
 
   it('shows Combined/Separate mode split strictly for scopes spanning 2+ modes and never for legs or carrier', () => {
@@ -73,6 +86,7 @@ describe('exportMetrics', () => {
     expect(separateMode.careerDiff).toBeNull()
     expect(separateMode.carrierCost).toBeNull()
     expect(separateMode.modeBadge?.modeName).toBe('Exploration')
+    expect(separateMode.shipsFlown).toEqual(['Mandalay'])
 
     const fixedNowMs = Date.parse('2026-04-05T12:00:00Z')
     const parkedLeg = resolveTelemetryContext(data, { kind: 'leg', rowId: 4 }, undefined, fixedNowMs)

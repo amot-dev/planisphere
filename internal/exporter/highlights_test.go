@@ -292,4 +292,38 @@ func TestComputeHighlightLeaderboardsParityAndTieBreaking(testingContext *testin
 	if len(roundTrip.HighlightsFullOrder) != 9 {
 		testingContext.Fatalf("expected 9 round-tripped leaderboards, got %d", len(roundTrip.HighlightsFullOrder))
 	}
+
+	// Populate differential realized payouts and pure carrier-passenger travel to verify ComputeHighlightVariants.
+	rowDetails[0].Realization = replaystats.RealizationBreakdown{TotalRealized: 48_000_000}
+	rowDetails[1].Realization = replaystats.RealizationBreakdown{TotalRealized: 15_000_000}
+	rowDetails[2].Realization = replaystats.RealizationBreakdown{PendingValue: 105_000_000}
+	rowDetails[1].Metrics.ShipDistanceLy = 0
+	rowDetails[1].Metrics.CarrierPassengerLy = 3000.0
+
+	variants := exporter.ComputeHighlightVariants(planView, rowDetails)
+	expectedVariants := []string{"mostLucrativeRealized", "longestShipDistance", "shortestShipDistance"}
+	if len(variants) != len(expectedVariants) {
+		testingContext.Fatalf("expected %d variant boards, got %d", len(expectedVariants), len(variants))
+	}
+	for index, variantBoard := range variants {
+		if variantBoard.CardID != expectedVariants[index] {
+			testingContext.Fatalf("variant[%d] cardId=%q, want %q", index, variantBoard.CardID, expectedVariants[index])
+		}
+	}
+	// Leg #4 has highest estimated (105M) with 0 realized; Leg #2 (48M realized) wins mostLucrativeRealized while keeping Carto/Exo secondary label.
+	if len(variants[0].Entries) != 2 || variants[0].Title != "Most Lucrative Leg" ||
+		variants[0].Entries[0].WaypointNumber != 2 ||
+		variants[0].Entries[0].FormattedPrimary != "48,000,000 Cr" ||
+		variants[0].Entries[0].SecondaryLabel != "Carto 12,000,000 Cr · Exo 40,000,000 Cr" {
+		testingContext.Fatalf("unexpected mostLucrativeRealized entries: %+v", variants[0].Entries)
+	}
+	// Leg #3 is 3,000 Ly pure carrier passenger (0 ship Ly, excluded); Leg #2 (1,000 Ly ship) wins longestShipDistance and Leg #4 (600 Ly) wins shortestShipDistance.
+	if len(variants[1].Entries) != 2 || variants[1].Title != "Longest Leg (Distance)" ||
+		variants[1].Entries[0].WaypointNumber != 2 || variants[1].Entries[0].FormattedPrimary != "1,000.0 Ly" {
+		testingContext.Fatalf("unexpected longestShipDistance entries: %+v", variants[1].Entries)
+	}
+	if len(variants[2].Entries) != 2 || variants[2].Title != "Shortest Leg (Distance)" ||
+		variants[2].Entries[0].WaypointNumber != 4 || variants[2].Entries[0].FormattedPrimary != "600.0 Ly" {
+		testingContext.Fatalf("unexpected shortestShipDistance entries: %+v", variants[2].Entries)
+	}
 }

@@ -2,12 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expedition, realization, stats } from '../api/models'
 import { ExportBlockRenderer } from '../features/export/blocks/ExportBlockRenderer'
-import { buildCanonicalJsonSnapshot } from '../features/export/exportHighlights'
 import {
-  addMetrics,
-  addRealization,
-  createEmptyMetrics,
-  createEmptyRealization,
   createQuickShareCart,
   expandConfigToCartItems,
 } from '../features/export/exportMetrics'
@@ -15,6 +10,7 @@ import {
   CartBlockItem,
   defaultMetricsForSection,
   ExpeditionExportData,
+  ExportDerivedMetrics,
   ExportModeBucket,
   HIGHLIGHT_CARDS,
   WAYPOINTS_COLUMNS,
@@ -31,51 +27,39 @@ const PINNED_EXPORT_NOW_ISO = '2026-08-01T00:00:00Z'
 const PINNED_EXPORT_NOW_GALACTIC = '3312-08-01 00:00 UTC'
 const PINNED_EXPORT_NOW_MS = Date.parse(PINNED_EXPORT_NOW_ISO)
 
+const EMPTY_METRICS: stats.Metrics = {
+  distanceLy: 0, shipDistanceLy: 0, carrierPassengerLy: 0, jumps: 0,
+  carrierJumps: 0, carrierDistanceLy: 0, tritiumUsed: undefined,
+  jetConeBoosts: 0, premiumBoosts: 0, standardBoosts: 0, basicBoosts: 0,
+  bodiesScanned: 0, bodiesMapped: 0, efficientMappings: 0,
+  scanValueTotal: 0, scanValueBase: 0, scanValueBonus: 0, scanValueEfficiencyBonus: 0,
+  firstDiscoveries: 0, firstMapped: 0, organicSamples: 0,
+  organicValueTotal: 0, organicValueBase: 0, organicValueBonus: 0, firstLogged: 0,
+}
+
+const EMPTY_REALIZATION: realization.Breakdown = {
+  totalRealized: 0, cartoLostDeath: 0, organicLostDeath: 0, cartoStolen: 0,
+  organicStolen: 0, carrierTariffLoss: 0, npcCrewLoss: 0, pendingValue: 0,
+}
+
+const EMPTY_DERIVED: ExportDerivedMetrics = {
+  shipDistanceLy: 0, totalBoosts: 0, avgJumpRangeLy: null, boostRatePercent: null,
+  avgDistancePerDayLy: null, avgCarrierJumpRangeLy: null, avgTritiumPerJump: null,
+  combinedEstimatedCredits: 0, dssEfficiencyPercent: null, firstDiscoveryRatePercent: null,
+  firstLoggedRatePercent: null, avgCreditsPerSample: null, avgCombinedCreditsPerJump: null,
+  avgCombinedCreditsPer1000Ly: null, avgCombinedCreditsPerDay: null,
+  avgCartoCreditsPerJump: null, avgCartoCreditsPer1000Ly: null,
+  avgExoCreditsPerJump: null, avgExoCreditsPer1000Ly: null, totalLossesCredits: 0,
+  realizationRetentionPercent: null, netProfitAfterCarrierCost: null,
+  avgRealizedCreditsPerJump: null, avgRealizedCreditsPer1000Ly: null,
+}
+
 function normalizeMetrics(source?: stats.Metrics): stats.Metrics {
-  const empty = createEmptyMetrics()
-  if (!source) return empty
-  return {
-    distanceLy: source.distanceLy ?? empty.distanceLy,
-    shipDistanceLy: source.shipDistanceLy ?? empty.shipDistanceLy,
-    carrierPassengerLy: source.carrierPassengerLy ?? empty.carrierPassengerLy,
-    jumps: source.jumps ?? empty.jumps,
-    carrierJumps: source.carrierJumps ?? empty.carrierJumps,
-    carrierDistanceLy: source.carrierDistanceLy ?? empty.carrierDistanceLy,
-    tritiumUsed: source.tritiumUsed ?? empty.tritiumUsed,
-    jetConeBoosts: source.jetConeBoosts ?? empty.jetConeBoosts,
-    premiumBoosts: source.premiumBoosts ?? empty.premiumBoosts,
-    standardBoosts: source.standardBoosts ?? empty.standardBoosts,
-    basicBoosts: source.basicBoosts ?? empty.basicBoosts,
-    bodiesScanned: source.bodiesScanned ?? empty.bodiesScanned,
-    bodiesMapped: source.bodiesMapped ?? empty.bodiesMapped,
-    efficientMappings: source.efficientMappings ?? empty.efficientMappings,
-    scanValueTotal: source.scanValueTotal ?? empty.scanValueTotal,
-    scanValueBase: source.scanValueBase ?? empty.scanValueBase,
-    scanValueBonus: source.scanValueBonus ?? empty.scanValueBonus,
-    scanValueEfficiencyBonus: source.scanValueEfficiencyBonus ?? empty.scanValueEfficiencyBonus,
-    firstDiscoveries: source.firstDiscoveries ?? empty.firstDiscoveries,
-    firstMapped: source.firstMapped ?? empty.firstMapped,
-    organicSamples: source.organicSamples ?? empty.organicSamples,
-    organicValueTotal: source.organicValueTotal ?? empty.organicValueTotal,
-    organicValueBase: source.organicValueBase ?? empty.organicValueBase,
-    organicValueBonus: source.organicValueBonus ?? empty.organicValueBonus,
-    firstLogged: source.firstLogged ?? empty.firstLogged,
-  }
+  return source ? { ...EMPTY_METRICS, ...source } : { ...EMPTY_METRICS }
 }
 
 function normalizeRealization(source?: realization.Breakdown): realization.Breakdown {
-  const empty = createEmptyRealization()
-  if (!source) return empty
-  return {
-    totalRealized: source.totalRealized ?? empty.totalRealized,
-    cartoLostDeath: source.cartoLostDeath ?? empty.cartoLostDeath,
-    organicLostDeath: source.organicLostDeath ?? empty.organicLostDeath,
-    cartoStolen: source.cartoStolen ?? empty.cartoStolen,
-    organicStolen: source.organicStolen ?? empty.organicStolen,
-    carrierTariffLoss: source.carrierTariffLoss ?? empty.carrierTariffLoss,
-    npcCrewLoss: source.npcCrewLoss ?? empty.npcCrewLoss,
-    pendingValue: source.pendingValue ?? empty.pendingValue,
-  }
+  return source ? { ...EMPTY_REALIZATION, ...source } : { ...EMPTY_REALIZATION }
 }
 
 function synthesizeExportData(hydrated: HydratedFrontendFixture): ExpeditionExportData {
@@ -89,29 +73,16 @@ function synthesizeExportData(hydrated: HydratedFrontendFixture): ExpeditionExpo
   )
   const originBaseline = normalizedDetails.find((detail) => detail.kind === 'origin')
   const rowDetails = normalizedDetails.filter((detail) => detail.kind !== 'origin')
-  const detailsByRowId = new Map(rowDetails.map((detail) => [detail.rowId, detail]))
-
-  const bucketByModeId = new Map<number, ExportModeBucket>()
-  for (const modeItem of modesList) {
-    bucketByModeId.set(modeItem.id, {
-      modeId: modeItem.id,
-      modeName: modeItem.name,
-      modeColor: modeItem.color,
-      metrics: createEmptyMetrics(),
-      realization: createEmptyRealization(),
-    })
-  }
-  for (const rowView of plan.rows ?? []) {
-    const detail = detailsByRowId.get(rowView.row.id)
-    const bucket = detail ? bucketByModeId.get(rowView.legModeId) : undefined
-    if (detail && bucket) {
-      bucket.metrics = addMetrics(bucket.metrics, detail.metrics)
-      bucket.realization = addRealization(bucket.realization, detail.realization)
-    }
-  }
-  const activeModeBuckets = Array.from(bucketByModeId.values()).filter(
-    (bucket) => bucket.metrics.jumps > 0 || bucket.metrics.distanceLy > 0 || bucket.realization.totalRealized > 0,
-  )
+  const activeModeBuckets: ExportModeBucket[] = modesList.map((modeItem) => ({
+    modeId: modeItem.id,
+    modeName: modeItem.name,
+    modeColor: modeItem.color,
+    elapsedDays: null,
+    shipsFlown: [],
+    metrics: normalizeMetrics(),
+    realization: normalizeRealization(),
+    derived: EMPTY_DERIVED,
+  }))
 
   return {
     schemaVersion: 1,
@@ -133,6 +104,9 @@ function synthesizeExportData(hydrated: HydratedFrontendFixture): ExpeditionExpo
     expedition: {
       metrics: normalizeMetrics(sidebar.expedition),
       realization: normalizeRealization(sidebar.realization),
+      elapsedDays: null,
+      shipsFlown: [],
+      derived: EMPTY_DERIVED,
     },
     live: normalizeMetrics(sidebar.live),
     adjustments: normalizeMetrics(sidebar.adjustments),
@@ -147,8 +121,14 @@ function synthesizeExportData(hydrated: HydratedFrontendFixture): ExpeditionExpo
       totalEstimated: false,
     },
     originBaseline,
+    originBaselineElapsedDays: null,
+    originBaselineDerived: originBaseline ? EMPTY_DERIVED : undefined,
     modeBuckets: activeModeBuckets,
     rowDetails,
+    legTelemetry: [],
+    regionBuckets: [],
+    highlightsFullOrder: [],
+    highlightsVariants: [],
   }
 }
 
@@ -213,8 +193,8 @@ function buildProbeExportCart(exportData: ExpeditionExportData): CartBlockItem[]
 
 /**
  * executeExportStudioPass benchmarks Export Studio cart expansion, SSR card
- * rendering via ExportBlockRenderer, self-contained HTML report assembly, and
- * canonical JSON snapshot serialization under a deterministic pinned clock.
+ * rendering via ExportBlockRenderer, and self-contained HTML report assembly
+ * under a deterministic pinned clock.
  */
 export function executeExportStudioPass(hydrated: HydratedFrontendFixture): {
   summary: string
@@ -272,22 +252,9 @@ export function executeExportStudioPass(hydrated: HydratedFrontendFixture): {
       ),
     )
 
-    const tJson = performance.now()
-    const canonicalJson = buildCanonicalJsonSnapshot(exportData)
-    children.push(
-      makeRenderSpan(
-        'buildCanonicalJsonSnapshot',
-        'frontend/src/features/export/exportHighlights.ts:89',
-        1,
-        exportData.rowDetails.length,
-        'legs',
-        msToNs(performance.now() - tJson),
-      ),
-    )
-
     return {
-      summary: `Blocks=${cartItems.length} BlockBytes=${blockMarkup.length} HtmlBytes=${htmlReport.length} JsonBytes=${canonicalJson.length}`,
-      hashInput: `${blockMarkup}\n${htmlReport}\n${canonicalJson}`,
+      summary: `Blocks=${cartItems.length} BlockBytes=${blockMarkup.length} HtmlBytes=${htmlReport.length}`,
+      hashInput: `${blockMarkup}\n${htmlReport}`,
       children,
     }
   } finally {

@@ -6,34 +6,64 @@ import { expedition, exporter } from '../../api/models'
  */
 export type PlainWailsDto<T> = Omit<T, 'convertValues'>
 
-/**
- * ExportTelemetrySnapshot derives directly from Wails exporter.TelemetrySnapshot.
- */
-export type ExportTelemetrySnapshot = PlainWailsDto<exporter.TelemetrySnapshot>
+type NullableOptional<T> = {
+  [K in keyof PlainWailsDto<T>]: undefined extends PlainWailsDto<T>[K]
+    ? PlainWailsDto<T>[K] | null
+    : PlainWailsDto<T>[K]
+}
 
-/**
- * ExportCarrierCost derives directly from Wails expedition.CarrierCost.
- */
+/** Derived metrics DTO compatible with both Wails instances and nullable plain fixtures. */
+export type ExportDerivedMetrics = NullableOptional<exporter.DerivedMetrics>
+
+/** Career diff item DTO compatible with both Wails instances and nullable plain fixtures. */
+export type ExportCareerDiffItem = NullableOptional<exporter.CareerDiffItem>
+
+/** ExportTelemetrySnapshot derives directly from Wails exporter.TelemetrySnapshot. */
+export type ExportTelemetrySnapshot = Omit<NullableOptional<exporter.TelemetrySnapshot>, 'derived'> & {
+  derived: ExportDerivedMetrics
+}
+
+/** ExportCarrierCost derives directly from Wails expedition.CarrierCost. */
 export type ExportCarrierCost = PlainWailsDto<expedition.CarrierCost>
 
-/**
- * ExportModeBucket derives directly from Wails exporter.ModeBucket.
- */
-export type ExportModeBucket = PlainWailsDto<exporter.ModeBucket>
+/** ExportModeBucket derives directly from Wails exporter.ModeBucket. */
+export type ExportModeBucket = Omit<NullableOptional<exporter.ModeBucket>, 'derived'> & {
+  derived: ExportDerivedMetrics
+}
+
+/** Per-leg export telemetry DTO derived from Wails exporter.ExportLegTelemetry. */
+export type ExportLegTelemetry = Omit<NullableOptional<exporter.ExportLegTelemetry>, 'derived'> & {
+  derived: ExportDerivedMetrics
+}
+
+/** Per-mode Galactic Region bucket DTO derived from Wails exporter.RegionModeBucket. */
+export type ExportRegionModeBucket = Omit<NullableOptional<exporter.RegionModeBucket>, 'derived'> & {
+  derived: ExportDerivedMetrics
+}
+
+/** Galactic Region bucket DTO derived from Wails exporter.RegionBucket. */
+export type ExportRegionBucket = Omit<NullableOptional<exporter.RegionBucket>, 'derived' | 'modeBuckets'> & {
+  derived: ExportDerivedMetrics
+  modeBuckets: ExportRegionModeBucket[]
+}
 
 /**
  * ExpeditionExportData derives directly from Wails exporter.ExpeditionExport,
  * mapping nested DTO fields so both Wails instances and plain fixtures type-check.
  */
 export type ExpeditionExportData = Omit<
-  PlainWailsDto<exporter.ExpeditionExport>,
-  'expedition' | 'carrierCost' | 'originBaseline' | 'modeBuckets' | 'highlightsFullOrder'
+  NullableOptional<exporter.ExpeditionExport>,
+  'expedition' | 'carrierCost' | 'originBaselineDerived' | 'careerDiff' | 'modeBuckets' | 'legTelemetry' | 'regionBuckets' | 'highlightsFullOrder' | 'highlightsVariants'
 > & {
   expedition: ExportTelemetrySnapshot
   carrierCost: ExportCarrierCost
-  originBaseline?: expedition.WaypointDetails | null
+  originBaselineDerived?: ExportDerivedMetrics | null
+  careerDiff?: ExportCareerDiffItem[] | null
   modeBuckets: ExportModeBucket[]
+  legTelemetry: ExportLegTelemetry[]
+  regionBuckets: ExportRegionBucket[]
   highlightsFullOrder?: Array<PlainWailsDto<exporter.HighlightLeaderboard>>
+  highlightsVariants?: Array<PlainWailsDto<exporter.HighlightLeaderboard>>
 }
 
 /**

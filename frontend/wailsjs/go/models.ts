@@ -1096,6 +1096,82 @@ export namespace exporter {
 	        this.canonicalJsonExportedAt = source["canonicalJsonExportedAt"];
 	    }
 	}
+	export class CareerDiffItem {
+	    id: string;
+	    baseline: number;
+	    growthPercent?: number;
+	    isNewBaseline: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CareerDiffItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.baseline = source["baseline"];
+	        this.growthPercent = source["growthPercent"];
+	        this.isNewBaseline = source["isNewBaseline"];
+	    }
+	}
+	export class DerivedMetrics {
+	    shipDistanceLy: number;
+	    totalBoosts: number;
+	    avgJumpRangeLy?: number;
+	    boostRatePercent?: number;
+	    avgDistancePerDayLy?: number;
+	    avgCarrierJumpRangeLy?: number;
+	    avgTritiumPerJump?: number;
+	    combinedEstimatedCredits: number;
+	    dssEfficiencyPercent?: number;
+	    firstDiscoveryRatePercent?: number;
+	    firstLoggedRatePercent?: number;
+	    avgCreditsPerSample?: number;
+	    avgCombinedCreditsPerJump?: number;
+	    avgCombinedCreditsPer1000Ly?: number;
+	    avgCombinedCreditsPerDay?: number;
+	    avgCartoCreditsPerJump?: number;
+	    avgCartoCreditsPer1000Ly?: number;
+	    avgExoCreditsPerJump?: number;
+	    avgExoCreditsPer1000Ly?: number;
+	    totalLossesCredits: number;
+	    realizationRetentionPercent?: number;
+	    netProfitAfterCarrierCost?: number;
+	    avgRealizedCreditsPerJump?: number;
+	    avgRealizedCreditsPer1000Ly?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DerivedMetrics(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.shipDistanceLy = source["shipDistanceLy"];
+	        this.totalBoosts = source["totalBoosts"];
+	        this.avgJumpRangeLy = source["avgJumpRangeLy"];
+	        this.boostRatePercent = source["boostRatePercent"];
+	        this.avgDistancePerDayLy = source["avgDistancePerDayLy"];
+	        this.avgCarrierJumpRangeLy = source["avgCarrierJumpRangeLy"];
+	        this.avgTritiumPerJump = source["avgTritiumPerJump"];
+	        this.combinedEstimatedCredits = source["combinedEstimatedCredits"];
+	        this.dssEfficiencyPercent = source["dssEfficiencyPercent"];
+	        this.firstDiscoveryRatePercent = source["firstDiscoveryRatePercent"];
+	        this.firstLoggedRatePercent = source["firstLoggedRatePercent"];
+	        this.avgCreditsPerSample = source["avgCreditsPerSample"];
+	        this.avgCombinedCreditsPerJump = source["avgCombinedCreditsPerJump"];
+	        this.avgCombinedCreditsPer1000Ly = source["avgCombinedCreditsPer1000Ly"];
+	        this.avgCombinedCreditsPerDay = source["avgCombinedCreditsPerDay"];
+	        this.avgCartoCreditsPerJump = source["avgCartoCreditsPerJump"];
+	        this.avgCartoCreditsPer1000Ly = source["avgCartoCreditsPer1000Ly"];
+	        this.avgExoCreditsPerJump = source["avgExoCreditsPerJump"];
+	        this.avgExoCreditsPer1000Ly = source["avgExoCreditsPer1000Ly"];
+	        this.totalLossesCredits = source["totalLossesCredits"];
+	        this.realizationRetentionPercent = source["realizationRetentionPercent"];
+	        this.netProfitAfterCarrierCost = source["netProfitAfterCarrierCost"];
+	        this.avgRealizedCreditsPerJump = source["avgRealizedCreditsPerJump"];
+	        this.avgRealizedCreditsPer1000Ly = source["avgRealizedCreditsPer1000Ly"];
+	    }
+	}
 	export class HighlightRankingEntry {
 	    rank: number;
 	    label: string;
@@ -1164,12 +1240,165 @@ export namespace exporter {
 		    return a;
 		}
 	}
+	export class RegionModeBucket {
+	    modeId: number;
+	    modeName: string;
+	    modeColor: string;
+	    legCount: number;
+	    fromGalactic: string;
+	    toGalactic: string;
+	    inSystem: boolean;
+	    duration: string;
+	    elapsedDays?: number;
+	    coveredLy: number;
+	    shipsFlown: string[];
+	    metrics: stats.Metrics;
+	    realization: realization.Breakdown;
+	    derived: DerivedMetrics;
+	
+	    static createFrom(source: any = {}) {
+	        return new RegionModeBucket(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.modeId = source["modeId"];
+	        this.modeName = source["modeName"];
+	        this.modeColor = source["modeColor"];
+	        this.legCount = source["legCount"];
+	        this.fromGalactic = source["fromGalactic"];
+	        this.toGalactic = source["toGalactic"];
+	        this.inSystem = source["inSystem"];
+	        this.duration = source["duration"];
+	        this.elapsedDays = source["elapsedDays"];
+	        this.coveredLy = source["coveredLy"];
+	        this.shipsFlown = source["shipsFlown"];
+	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
+	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RegionBucket {
+	    regionName: string;
+	    legRowIds: number[];
+	    legCount: number;
+	    fromGalactic: string;
+	    toGalactic: string;
+	    inSystem: boolean;
+	    duration: string;
+	    elapsedDays?: number;
+	    coveredLy: number;
+	    shipsFlown: string[];
+	    metrics: stats.Metrics;
+	    realization: realization.Breakdown;
+	    derived: DerivedMetrics;
+	    modeBuckets: RegionModeBucket[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RegionBucket(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.regionName = source["regionName"];
+	        this.legRowIds = source["legRowIds"];
+	        this.legCount = source["legCount"];
+	        this.fromGalactic = source["fromGalactic"];
+	        this.toGalactic = source["toGalactic"];
+	        this.inSystem = source["inSystem"];
+	        this.duration = source["duration"];
+	        this.elapsedDays = source["elapsedDays"];
+	        this.coveredLy = source["coveredLy"];
+	        this.shipsFlown = source["shipsFlown"];
+	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
+	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
+	        this.modeBuckets = this.convertValues(source["modeBuckets"], RegionModeBucket);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExportLegTelemetry {
+	    rowId: number;
+	    regionName: string;
+	    elapsedDays?: number;
+	    shipsFlown: string[];
+	    derived: DerivedMetrics;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportLegTelemetry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rowId = source["rowId"];
+	        this.regionName = source["regionName"];
+	        this.elapsedDays = source["elapsedDays"];
+	        this.shipsFlown = source["shipsFlown"];
+	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ModeBucket {
 	    modeId: number;
 	    modeName: string;
 	    modeColor: string;
+	    elapsedDays?: number;
+	    shipsFlown: string[];
 	    metrics: stats.Metrics;
 	    realization: realization.Breakdown;
+	    derived: DerivedMetrics;
 	
 	    static createFrom(source: any = {}) {
 	        return new ModeBucket(source);
@@ -1180,8 +1409,11 @@ export namespace exporter {
 	        this.modeId = source["modeId"];
 	        this.modeName = source["modeName"];
 	        this.modeColor = source["modeColor"];
+	        this.elapsedDays = source["elapsedDays"];
+	        this.shipsFlown = source["shipsFlown"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1205,6 +1437,9 @@ export namespace exporter {
 	export class TelemetrySnapshot {
 	    metrics: stats.Metrics;
 	    realization: realization.Breakdown;
+	    elapsedDays?: number;
+	    shipsFlown: string[];
+	    derived: DerivedMetrics;
 	
 	    static createFrom(source: any = {}) {
 	        return new TelemetrySnapshot(source);
@@ -1214,6 +1449,9 @@ export namespace exporter {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
+	        this.elapsedDays = source["elapsedDays"];
+	        this.shipsFlown = source["shipsFlown"];
+	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1256,9 +1494,15 @@ export namespace exporter {
 	    adjustments: stats.Metrics;
 	    carrierCost: expedition.CarrierCost;
 	    originBaseline?: expedition.WaypointDetails;
+	    originBaselineElapsedDays?: number;
+	    originBaselineDerived?: DerivedMetrics;
+	    careerDiff?: CareerDiffItem[];
 	    modeBuckets: ModeBucket[];
 	    rowDetails: expedition.WaypointDetails[];
+	    legTelemetry: ExportLegTelemetry[];
+	    regionBuckets: RegionBucket[];
 	    highlightsFullOrder: HighlightLeaderboard[];
+	    highlightsVariants: HighlightLeaderboard[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ExpeditionExport(source);
@@ -1287,9 +1531,15 @@ export namespace exporter {
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
 	        this.carrierCost = this.convertValues(source["carrierCost"], expedition.CarrierCost);
 	        this.originBaseline = this.convertValues(source["originBaseline"], expedition.WaypointDetails);
+	        this.originBaselineElapsedDays = source["originBaselineElapsedDays"];
+	        this.originBaselineDerived = this.convertValues(source["originBaselineDerived"], DerivedMetrics);
+	        this.careerDiff = this.convertValues(source["careerDiff"], CareerDiffItem);
 	        this.modeBuckets = this.convertValues(source["modeBuckets"], ModeBucket);
 	        this.rowDetails = this.convertValues(source["rowDetails"], expedition.WaypointDetails);
+	        this.legTelemetry = this.convertValues(source["legTelemetry"], ExportLegTelemetry);
+	        this.regionBuckets = this.convertValues(source["regionBuckets"], RegionBucket);
 	        this.highlightsFullOrder = this.convertValues(source["highlightsFullOrder"], HighlightLeaderboard);
+	        this.highlightsVariants = this.convertValues(source["highlightsVariants"], HighlightLeaderboard);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1310,6 +1560,9 @@ export namespace exporter {
 		    return a;
 		}
 	}
+	
+	
+	
 	
 	
 	

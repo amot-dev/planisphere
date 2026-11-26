@@ -1,17 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { exporter } from '../../api/models'
 import {
-  buildCanonicalJsonSnapshot,
   computeAllHighlightLeaderboards,
   selectHighlightCards,
 } from './exportHighlights'
 import { buildSampleExportData } from './exportTestFixtures'
 
 describe('exportHighlights', () => {
-  it('ranks visited legs including IN SYSTEM while excluding unvisited in-progress legs', () => {
+  it('selects canonical Go leaderboards including IN SYSTEM while excluding unvisited legs', () => {
     const data = buildSampleExportData()
-    const fixedNowMs = Date.parse('2026-04-05T12:00:00Z')
-    const leaderboards = computeAllHighlightLeaderboards(data, { nowMs: fixedNowMs })
+    const leaderboards = computeAllHighlightLeaderboards(data)
+    expect(leaderboards).toHaveLength(9)
 
     const mostLucrative = leaderboards.find((board) => board.cardId === 'mostLucrative')!
     expect(mostLucrative.entries.map((entry) => entry.waypointNumber)).toEqual([4, 2, 3])
@@ -33,12 +32,19 @@ describe('exportHighlights', () => {
   })
 
   it('slices selected highlight leaderboards to Top 1 / Top 3 / Top 5 and omits empty cards', () => {
-    const data = buildSampleExportData()
-    // Zero out all death losses to confirm costliestMistake hides itself cleanly.
-    data.rowDetails[1].realization.cartoLostDeath = 0
-    data.rowDetails[1].realization.organicLostDeath = 0
+    const baseData = buildSampleExportData()
+    const dataWithoutLosses = buildSampleExportData({
+      rowDetails: baseData.rowDetails.map((detail, index) =>
+        index === 1
+          ? ({
+              ...detail,
+              realization: { ...detail.realization, cartoLostDeath: 0, organicLostDeath: 0 },
+            } as typeof detail)
+          : detail,
+      ),
+    })
 
-    const boards = computeAllHighlightLeaderboards(data)
+    const boards = computeAllHighlightLeaderboards(dataWithoutLosses)
     const top1 = selectHighlightCards(boards, ['mostLucrative', 'costliestMistake'], 1)
     expect(top1).toHaveLength(1)
     expect(top1[0].entries).toHaveLength(1)
@@ -47,50 +53,11 @@ describe('exportHighlights', () => {
     expect(top3[0].entries).toHaveLength(3)
   })
 
-  it('always embeds full ordered highlight rankings in canonical JSON snapshots', () => {
-    const data = buildSampleExportData()
-    const parsed = JSON.parse(buildCanonicalJsonSnapshot(data))
-    expect(parsed.schemaVersion).toBe(1)
-    expect(Array.isArray(parsed.highlightsFullOrder)).toBe(true)
-    const longest = parsed.highlightsFullOrder.find(
-      (board: { cardId: string }) => board.cardId === 'longestDistance',
-    )
-    expect(longest.entries).toHaveLength(3)
-  })
-
-  it('filters by cardIds and slices to maxDepth before formatting, and reuses Go highlightsFullOrder when toggles use defaults', () => {
+  it('routes variant toggles to highlightsVariants while preserving canonical cardId values on hydrated Wails snapshots', () => {
     const baseData = buildSampleExportData()
-    const fixedNowMs = Date.parse('2026-04-05T12:00:00Z')
-
-    const toLocaleSpy = vi.spyOn(Number.prototype, 'toLocaleString')
-    let scopedCalls = 0
-    let fullCalls = 0
-    try {
-      const scopedBoards = computeAllHighlightLeaderboards(baseData, {
-        nowMs: fixedNowMs,
-        cardIds: ['mostLucrative'],
-        maxDepth: 1,
-      })
-      scopedCalls = toLocaleSpy.mock.calls.length
-      expect(scopedBoards).toHaveLength(1)
-      expect(scopedBoards[0].cardId).toBe('mostLucrative')
-      expect(scopedBoards[0].entries).toHaveLength(1)
-      // Only winner row (1 primary + 2 secondary credit values = 3 format calls) should be formatted.
-      expect(scopedCalls).toBe(3)
-
-      toLocaleSpy.mockClear()
-      computeAllHighlightLeaderboards(baseData, { nowMs: fixedNowMs })
-      fullCalls = toLocaleSpy.mock.calls.length
-      expect(fullCalls).toBeGreaterThan(scopedCalls * 5)
-    } finally {
-      toLocaleSpy.mockRestore()
-    }
-
-    // Hydrate through Wails exporter.ExpeditionExport with Go-populated highlightsFullOrder.
-    const fullPrecomputed = computeAllHighlightLeaderboards(baseData, { nowMs: fixedNowMs })
     const hydratedPayload = exporter.ExpeditionExport.createFrom({
       ...baseData,
-      highlightsFullOrder: fullPrecomputed.map((board) =>
+      highlightsFullOrder: (baseData.highlightsFullOrder ?? []).map((board) =>
         board.cardId === 'mostLucrative'
           ? {
               ...board,
@@ -102,7 +69,8 @@ describe('exportHighlights', () => {
       ),
     })
 
-    // Default 'estimated' toggle reuses Go highlightsFullOrder directly and slices to maxDepth=1.
+    expect(computeAllHighlightLeaderboards(hydratedPayload, { cardIds: [] })).toEqual([])
+
     const reusedDefault = computeAllHighlightLeaderboards(hydratedPayload, {
       lucrativeMetric: 'estimated',
       distanceMetric: 'total',
@@ -110,25 +78,33 @@ describe('exportHighlights', () => {
       maxDepth: 1,
     })
     expect(reusedDefault).toHaveLength(2)
+    expect(reusedDefault[0].cardId).toBe('mostLucrative')
     expect(reusedDefault[0].entries).toHaveLength(1)
     expect(reusedDefault[0].entries[0].formattedPrimary).toBe('105,000,000 Cr [GO]')
 
-    // Switching lucrativeMetric to 'realized' recomputes mostLucrative in TS (95,000,000 Cr) while reusing mostJumps.
-    const recomputedRealized = computeAllHighlightLeaderboards(hydratedPayload, {
+    // Switching lucrativeMetric to 'realized' selects Go variant 'mostLucrativeRealized' under canonical cardId 'mostLucrative'.
+    const realizedBoards = computeAllHighlightLeaderboards(hydratedPayload, {
       lucrativeMetric: 'realized',
       distanceMetric: 'total',
       cardIds: ['mostLucrative', 'mostJumps'],
       maxDepth: 1,
     })
-    expect(recomputedRealized[0].entries[0].formattedPrimary).toBe('95,000,000 Cr')
-    expect(recomputedRealized[1].entries[0].formattedPrimary).toBe('50 jumps')
+    expect(realizedBoards[0].cardId).toBe('mostLucrative')
+    expect(realizedBoards[0].title).toBe('Most Lucrative Leg')
+    expect(realizedBoards[0].entries[0].formattedPrimary).toBe('95,000,000 Cr')
+    expect(realizedBoards[1].entries[0].formattedPrimary).toBe('50 jumps')
 
-    // Switching distanceMetric to 'ship' recomputes longestDistance using ship distance (Leg #2 has 1,000 Ly ship vs 1,200 Ly total).
+    // Switching distanceMetric to 'ship' selects Go variants 'longestShipDistance' and 'shortestShipDistance'.
     const shipDistanceBoards = computeAllHighlightLeaderboards(hydratedPayload, {
       distanceMetric: 'ship',
-      cardIds: ['longestDistance'],
+      cardIds: ['longestDistance', 'shortestDistance'],
       maxDepth: 2,
     })
+    expect(shipDistanceBoards.map((board) => board.cardId)).toEqual([
+      'longestDistance',
+      'shortestDistance',
+    ])
     expect(shipDistanceBoards[0].entries[1].primaryValue).toBe(1000)
+    expect(shipDistanceBoards[1].entries[0].primaryValue).toBe(600)
   })
 })

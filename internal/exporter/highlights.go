@@ -28,15 +28,29 @@ func ComputeHighlightLeaderboards(
 ) []HighlightLeaderboard {
 	visitedLegs := collectVisitedLegs(planView, rowDetails)
 	return []HighlightLeaderboard{
-		buildMostLucrativeBoard(visitedLegs),
-		buildDistanceBoard(visitedLegs, false),
+		buildMostLucrativeBoard(visitedLegs, false),
+		buildDistanceBoard(visitedLegs, false, false),
 		buildMostJumpsBoard(visitedLegs),
 		buildLongestDurationBoard(visitedLegs, currentTime),
-		buildDistanceBoard(visitedLegs, true),
+		buildDistanceBoard(visitedLegs, true, false),
 		buildMostBodiesScannedBoard(visitedLegs),
 		buildMostOrganicSamplesBoard(visitedLegs),
 		buildFurthestFromSolBoard(planView),
 		buildCostliestMistakeBoard(visitedLegs),
+	}
+}
+
+// ComputeHighlightVariants computes the three non-default toggle variant Highlight leaderboards
+// (realized valuation and ship-only FSD distance) across visited legs in stable plan order.
+func ComputeHighlightVariants(
+	planView expedition.PlanView,
+	rowDetails []expedition.WaypointDetails,
+) []HighlightLeaderboard {
+	visitedLegs := collectVisitedLegs(planView, rowDetails)
+	return []HighlightLeaderboard{
+		buildMostLucrativeBoard(visitedLegs, true),
+		buildDistanceBoard(visitedLegs, false, true),
+		buildDistanceBoard(visitedLegs, true, true),
 	}
 }
 
@@ -114,31 +128,48 @@ func makeLegEntry(
 	}
 }
 
-func buildMostLucrativeBoard(legs []visitedLeg) HighlightLeaderboard {
+func buildMostLucrativeBoard(legs []visitedLeg, realized bool) HighlightLeaderboard {
+	cardID := "mostLucrative"
+	if realized {
+		cardID = "mostLucrativeRealized"
+	}
 	return rankLegBoard(
-		"mostLucrative", "Most Lucrative Leg", "amber", legs, false,
+		cardID, "Most Lucrative Leg", "amber", legs, false,
 		func(leg visitedLeg) (int64, float64, bool) {
-			estimated := leg.details.Metrics.ScanValueTotal + leg.details.Metrics.OrganicValueTotal
-			return estimated, float64(estimated), estimated > 0
+			credits := leg.details.Metrics.ScanValueTotal + leg.details.Metrics.OrganicValueTotal
+			if realized {
+				credits = leg.details.Realization.TotalRealized
+			}
+			return credits, float64(credits), credits > 0
 		},
-		func(leg visitedLeg, estimated int64) (string, string) {
+		func(leg visitedLeg, credits int64) (string, string) {
 			secondary := fmt.Sprintf("Carto %s · Exo %s",
 				formatCredits(leg.details.Metrics.ScanValueTotal),
 				formatCredits(leg.details.Metrics.OrganicValueTotal))
-			return formatCredits(estimated), secondary
+			return formatCredits(credits), secondary
 		},
 	)
 }
 
-func buildDistanceBoard(legs []visitedLeg, shortest bool) HighlightLeaderboard {
+func buildDistanceBoard(legs []visitedLeg, shortest bool, shipOnly bool) HighlightLeaderboard {
 	cardID, title := "longestDistance", "Longest Leg (Distance)"
 	if shortest {
 		cardID, title = "shortestDistance", "Shortest Leg (Distance)"
+	}
+	if shipOnly {
+		if shortest {
+			cardID = "shortestShipDistance"
+		} else {
+			cardID = "longestShipDistance"
+		}
 	}
 	return rankLegBoard(
 		cardID, title, "amber", legs, shortest,
 		func(leg visitedLeg) (float64, float64, bool) {
 			distanceLy := leg.details.Metrics.DistanceLy
+			if shipOnly {
+				distanceLy = computeShipDistanceLy(leg.details.Metrics)
+			}
 			return distanceLy, distanceLy, distanceLy > 0
 		},
 		func(leg visitedLeg, distanceLy float64) (string, string) {
@@ -250,7 +281,7 @@ func buildFurthestFromSolBoard(planView expedition.PlanView) HighlightLeaderboar
 	for _, rowView := range planView.Rows {
 		row := rowView.Row
 		if row.RowType == expedition.RowWaypoint && row.VisitedAt != "" && row.HasCoords {
-			distanceFromSolLy := math.Sqrt(row.X*row.X + row.Y*row.Y + row.Z*row.Z)
+			distanceFromSolLy := reference.Distance(reference.Vec3{}, reference.Vec3{X: row.X, Y: row.Y, Z: row.Z})
 			scored = append(scored, scoredWaypoint{rowView: rowView, distanceFromSolLy: distanceFromSolLy})
 		}
 	}

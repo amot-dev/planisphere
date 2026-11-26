@@ -227,6 +227,27 @@ func TestBuildCompletedExpeditionBoundariesAndModeBuckets(testingContext *testin
 	if math.Abs(bucketSum.DistanceLy-snapshot.Live.DistanceLy) > 0.001 || bucketSum.Jumps != snapshot.Live.Jumps || bucketSum.BodiesScanned != snapshot.Live.BodiesScanned {
 		testingContext.Fatalf("mode buckets sum %+v != live %+v", bucketSum, snapshot.Live)
 	}
+	if snapshot.Expedition.ElapsedDays == nil || *snapshot.Expedition.ElapsedDays < 1.0 ||
+		!reflect.DeepEqual(snapshot.Expedition.ShipsFlown, []string{"Mandalay"}) ||
+		snapshot.Expedition.Derived.AvgDistancePerDayLy == nil ||
+		snapshot.Expedition.Derived.NetProfitAfterCarrierCost == nil {
+		testingContext.Fatalf("unexpected Expedition aggregated telemetry: %+v", snapshot.Expedition)
+	}
+	if snapshot.OriginBaselineElapsedDays == nil || snapshot.OriginBaselineDerived == nil || len(snapshot.CareerDiff) != 7 {
+		testingContext.Fatalf("expected OriginBaseline elapsed/derived and 7 CareerDiff items, got elapsed=%v derived=%v diff=%d",
+			snapshot.OriginBaselineElapsedDays, snapshot.OriginBaselineDerived, len(snapshot.CareerDiff))
+	}
+	if len(snapshot.LegTelemetry) != 2 || len(snapshot.RegionBuckets) != 1 ||
+		len(snapshot.RegionBuckets[0].ModeBuckets) != 2 ||
+		len(snapshot.HighlightsFullOrder) != 9 || len(snapshot.HighlightsVariants) != 3 {
+		testingContext.Fatalf("unexpected leg/region/highlight aggregations: legs=%d regions=%d full=%d variants=%d",
+			len(snapshot.LegTelemetry), len(snapshot.RegionBuckets), len(snapshot.HighlightsFullOrder), len(snapshot.HighlightsVariants))
+	}
+	for _, bucket := range snapshot.ModeBuckets {
+		if bucket.ElapsedDays == nil || bucket.Derived.NetProfitAfterCarrierCost != nil || !reflect.DeepEqual(bucket.ShipsFlown, []string{"Mandalay"}) {
+			testingContext.Fatalf("unexpected ModeBucket derived/ships fields: %+v", bucket)
+		}
+	}
 }
 
 func TestBuildPropagatesCommanderQueryError(testingContext *testing.T) {

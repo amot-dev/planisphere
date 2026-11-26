@@ -117,12 +117,18 @@ func runExpeditionProbes(
 	}
 
 	if matchesFilter("Export/Build", options.FilterPattern) {
-		exportProbe, ok, exportError := profileExportBuild(database, proj, recorder, dataset, gecLookup, options.Iterations)
-		if exportError != nil {
+		if exportProbe, ok, exportError := profileExportBuild(database, proj, recorder, dataset, gecLookup, options.Iterations); exportError != nil {
 			return nil, exportError
-		}
-		if ok {
+		} else if ok {
 			results = append(results, exportProbe)
+		}
+	}
+
+	if matchesFilter("Export/MarshalCanonicalJSON", options.FilterPattern) {
+		if marshalProbe, ok, marshalError := profileExportMarshalCanonicalJSON(database, proj, recorder, dataset, gecLookup, options.Iterations); marshalError != nil {
+			return nil, marshalError
+		} else if ok {
+			results = append(results, marshalProbe)
 		}
 	}
 
@@ -433,33 +439,26 @@ type exportBuildProbeValue struct {
 	CarrierCostTotal  int64                      `json:"carrierCostTotal"`
 }
 
-func profileExportNow() time.Time {
-	return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-}
+func profileExportNow() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 
-func profileExportBuild(
-	database *sql.DB,
-	proj *profileProjections,
-	recorder *treeRecorder,
-	dataset DatasetSummary,
-	gecLookup expedition.GECLookup,
-	iterations int,
-) (ProbeResult, bool, error) {
+func profileExportBuild(database *sql.DB, proj *profileProjections, recorder *treeRecorder, dataset DatasetSummary, gecLookup expedition.GECLookup, iterations int) (ProbeResult, bool, error) {
+	deps := exporter.BuilderDeps{Projections: proj.expeditionProjections(), GECLookup: gecLookup, AppVersion: "profile", Now: profileExportNow}
 	probe, probeError := runColdWarmProbe(
 		database, recorder, "Export/Build", "Export",
 		fmt.Sprintf("Assemble canonical export snapshot for expedition #%d (%s)", dataset.PrimaryExpeditionID, dataset.PrimaryExpeditionName),
 		"exporter.Build", "rows", "legs", iterations, proj.invalidate,
 		func() (singleExecOutcome, error) {
-			snapshot, buildError := exporter.Build(database, dataset.PrimaryExpeditionID, exporter.BuilderDeps{
-				Projections: proj.expeditionProjections(),
-				GECLookup:   gecLookup,
-				AppVersion:  "profile",
-				Now:         profileExportNow,
-			})
+			snapshot, buildError := exporter.Build(database, dataset.PrimaryExpeditionID, deps)
 			if buildError != nil {
 				return singleExecOutcome{}, buildError
 			}
-			return buildExportProbeOutcome(snapshot), nil
+			value := exportBuildProbeValue{
+				EffectiveStart: snapshot.EffectiveStart, EffectiveEnd: snapshot.EffectiveEnd, ExportedAt: snapshot.ExportedAt, Commanders: snapshot.Commanders,
+				Departed: snapshot.Departed, EndIsNow: snapshot.EndIsNow, RowDetailsCount: len(snapshot.RowDetails), ModeBucketsCount: len(snapshot.ModeBuckets),
+				HasOriginBaseline: snapshot.OriginBaseline != nil, Live: snapshot.Live, Expedition: snapshot.Expedition, CarrierCostTotal: snapshot.CarrierCost.TotalCost,
+			}
+			summary := fmt.Sprintf("Rows=%d RowDetails=%d ModeBuckets=%d Jumps=%d Realized=%d", len(snapshot.Plan.Rows), len(snapshot.RowDetails), len(snapshot.ModeBuckets), snapshot.Live.Jumps, snapshot.Expedition.Realization.TotalRealized)
+			return singleExecOutcome{value: value, summary: summary, items: max(len(snapshot.Plan.Rows), 1), secondary: len(snapshot.RowDetails)}, nil
 		},
 	)
 	if errors.Is(probeError, exporter.ErrNotExportable) {
@@ -468,24 +467,32 @@ func profileExportBuild(
 	return probe, probeError == nil, probeError
 }
 
-func buildExportProbeOutcome(snapshot exporter.ExpeditionExport) singleExecOutcome {
-	digestValue := exportBuildProbeValue{
-		EffectiveStart:    snapshot.EffectiveStart,
-		EffectiveEnd:      snapshot.EffectiveEnd,
-		ExportedAt:        snapshot.ExportedAt,
-		Commanders:        snapshot.Commanders,
-		Departed:          snapshot.Departed,
-		EndIsNow:          snapshot.EndIsNow,
-		RowDetailsCount:   len(snapshot.RowDetails),
-		ModeBucketsCount:  len(snapshot.ModeBuckets),
-		HasOriginBaseline: snapshot.OriginBaseline != nil,
-		Live:              snapshot.Live,
-		Expedition:        snapshot.Expedition,
-		CarrierCostTotal:  snapshot.CarrierCost.TotalCost,
+func profileExportMarshalCanonicalJSON(database *sql.DB, proj *profileProjections, recorder *treeRecorder, dataset DatasetSummary, gecLookup expedition.GECLookup, iterations int) (ProbeResult, bool, error) {
+	deps := exporter.BuilderDeps{Projections: proj.expeditionProjections(), GECLookup: gecLookup, AppVersion: "profile", Now: profileExportNow}
+	snapshot, buildError := exporter.Build(database, dataset.PrimaryExpeditionID, deps)
+	if buildError != nil {
+		if errors.Is(buildError, exporter.ErrNotExportable) {
+			return ProbeResult{}, false, nil
+		}
+		return ProbeResult{}, false, buildError
 	}
-	summary := fmt.Sprintf("Rows=%d RowDetails=%d ModeBuckets=%d Jumps=%d Realized=%d",
-		len(snapshot.Plan.Rows), len(snapshot.RowDetails), len(snapshot.ModeBuckets),
-		snapshot.Live.Jumps, snapshot.Expedition.Realization.TotalRealized,
+	itemCount := max(len(snapshot.Plan.Rows), 1)
+	probe, probeError := runSingleModeProbe(
+		database, recorder, "Export/MarshalCanonicalJSON", "Export",
+		fmt.Sprintf("Serialize canonical JSON snapshot for expedition #%d (%s)", dataset.PrimaryExpeditionID, dataset.PrimaryExpeditionName),
+		"exporter.MarshalCanonicalJSON", "rows", "legs", iterations, nil,
+		func() (singleExecOutcome, error) {
+			var encoded []byte
+			if spanError := recorder.withSubSpan("exporter.MarshalCanonicalJSON", "internal/exporter/model.go", itemCount, "rows", func() error {
+				var marshalError error
+				encoded, marshalError = exporter.MarshalCanonicalJSON(snapshot)
+				return marshalError
+			}); spanError != nil {
+				return singleExecOutcome{}, spanError
+			}
+			summary := fmt.Sprintf("Bytes=%d Rows=%d Legs=%d Regions=%d", len(encoded), len(snapshot.Plan.Rows), len(snapshot.LegTelemetry), len(snapshot.RegionBuckets))
+			return singleExecOutcome{value: string(encoded), summary: summary, items: itemCount, secondary: len(snapshot.RowDetails)}, nil
+		},
 	)
-	return singleExecOutcome{value: digestValue, summary: summary, items: max(len(snapshot.Plan.Rows), 1), secondary: len(snapshot.RowDetails)}
+	return probe, probeError == nil, probeError
 }

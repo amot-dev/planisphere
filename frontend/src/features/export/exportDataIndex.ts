@@ -1,23 +1,26 @@
 import { expedition } from '../../api/models'
-import { DEFAULT_MODE_COLOR } from '../../domain/theme'
 import {
   DetailsSectionSelection,
   ExpeditionExportData,
+  ExportLegTelemetry,
+  ExportRegionBucket,
   ExportScopeSpec,
 } from './exportTypes'
 
-/** Visited non-origin leg enriched with its drawer details and attributed Galactic Region. */
+/** Visited non-origin leg enriched with its drawer details, Go leg telemetry, and attributed Galactic Region. */
 export interface VisitedLegRecord {
   rowView: expedition.RowView
   details: expedition.WaypointDetails
   regionName: string
+  telemetry: ExportLegTelemetry
 }
 
-/** Distinct visited Galactic Region grouping its attributed visited legs and active flight modes. */
+/** Distinct visited Galactic Region grouping its attributed visited legs, active flight modes, and Go bucket. */
 export interface VisitedRegionSummary {
   regionName: string
   legs: VisitedLegRecord[]
   distinctModes: ActiveModeTag[]
+  bucket: ExportRegionBucket
 }
 
 /** Lightweight flight mode identifier paired with display name and cockpit color. */
@@ -115,22 +118,12 @@ export function scopeSupportsModeSplit(
   return getDistinctModesForScope(exportData, scope).length >= 2
 }
 
-/** Collects distinct non-empty ship hull names across ordered visited legs. */
-export function collectUniqueShips(legs: ReadonlyArray<VisitedLegRecord>): string[] {
-  const uniqueShips = new Set<string>()
-  for (const leg of legs) {
-    for (const shipName of leg.details.shipsUsed ?? []) {
-      const trimmed = shipName.trim()
-      if (trimmed) uniqueShips.add(trimmed)
-    }
-  }
-  return Array.from(uniqueShips)
-}
-
 function buildExportDataIndex(exportData: ExpeditionExportData): ExportDataIndex {
   const { visitedLegs, visitedLegByRowId } = indexVisitedLegs(exportData)
-  const { visitedRegions, visitedRegionByName, allRegionsDistinctModes } =
-    indexVisitedRegions(visitedLegs)
+  const { visitedRegions, visitedRegionByName, allRegionsDistinctModes } = indexVisitedRegions(
+    exportData,
+    visitedLegByRowId,
+  )
   const fullDistinctModes = (exportData.modeBuckets ?? []).map((bucket) => ({
     modeId: bucket.modeId,
     modeName: bucket.modeName,
@@ -150,56 +143,64 @@ function indexVisitedLegs(exportData: ExpeditionExportData): {
   visitedLegs: VisitedLegRecord[]
   visitedLegByRowId: Map<number, VisitedLegRecord>
 } {
+  const rowViewById = new Map<number, expedition.RowView>()
+  for (const rowView of exportData.plan.rows ?? []) {
+    rowViewById.set(rowView.row.id, rowView)
+  }
   const detailsByRowId = new Map<number, expedition.WaypointDetails>()
   for (const detailEntry of exportData.rowDetails ?? []) {
     detailsByRowId.set(detailEntry.rowId, detailEntry)
   }
 
-  let activeManualRegion = ''
   const visitedLegs: VisitedLegRecord[] = []
   const visitedLegByRowId = new Map<number, VisitedLegRecord>()
-  for (const rowView of exportData.plan.rows ?? []) {
-    if (rowView.row.rowType === 'region') {
-      activeManualRegion = rowView.regionName || activeManualRegion
-      continue
+  for (const legTelemetry of exportData.legTelemetry ?? []) {
+    const rowView = rowViewById.get(legTelemetry.rowId)
+    const details = detailsByRowId.get(legTelemetry.rowId)
+    if (!rowView || !details) continue
+    const legRecord: VisitedLegRecord = {
+      rowView,
+      details,
+      regionName: legTelemetry.regionName,
+      telemetry: legTelemetry,
     }
-    if (rowView.number <= 1 || !rowView.row.visitedAt) {
-      continue
-    }
-    const details = detailsByRowId.get(rowView.row.id)
-    if (!details) {
-      continue
-    }
-    const attributedRegion = rowView.detectedRegion || activeManualRegion || 'Unknown Region'
-    const legRecord: VisitedLegRecord = { rowView, details, regionName: attributedRegion }
     visitedLegs.push(legRecord)
-    visitedLegByRowId.set(rowView.row.id, legRecord)
+    visitedLegByRowId.set(legTelemetry.rowId, legRecord)
   }
   return { visitedLegs, visitedLegByRowId }
 }
 
-function indexVisitedRegions(legs: VisitedLegRecord[]): {
+function indexVisitedRegions(
+  exportData: ExpeditionExportData,
+  visitedLegByRowId: ReadonlyMap<number, VisitedLegRecord>,
+): {
   visitedRegions: VisitedRegionSummary[]
   visitedRegionByName: Map<string, VisitedRegionSummary>
   allRegionsDistinctModes: ActiveModeTag[]
 } {
-  const regionLegsByName = new Map<string, VisitedLegRecord[]>()
-  for (const leg of legs) {
-    const existingLegs = regionLegsByName.get(leg.regionName)
-    if (existingLegs) {
-      existingLegs.push(leg)
-    } else {
-      regionLegsByName.set(leg.regionName, [leg])
-    }
-  }
   const visitedRegions: VisitedRegionSummary[] = []
   const visitedRegionByName = new Map<string, VisitedRegionSummary>()
   const allRegionModesById = new Map<number, ActiveModeTag>()
-  for (const [regionName, regionLegs] of regionLegsByName.entries()) {
-    const distinctModes = extractDistinctModesFromLegs(regionLegs)
-    const regionSummary: VisitedRegionSummary = { regionName, legs: regionLegs, distinctModes }
+
+  for (const bucket of exportData.regionBuckets ?? []) {
+    const legs: VisitedLegRecord[] = []
+    for (const rowId of bucket.legRowIds ?? []) {
+      const legRecord = visitedLegByRowId.get(rowId)
+      if (legRecord) legs.push(legRecord)
+    }
+    const distinctModes: ActiveModeTag[] = (bucket.modeBuckets ?? []).map((modeBucket) => ({
+      modeId: modeBucket.modeId,
+      modeName: modeBucket.modeName,
+      modeColor: modeBucket.modeColor,
+    }))
+    const regionSummary: VisitedRegionSummary = {
+      regionName: bucket.regionName,
+      legs,
+      distinctModes,
+      bucket,
+    }
     visitedRegions.push(regionSummary)
-    visitedRegionByName.set(regionName, regionSummary)
+    visitedRegionByName.set(bucket.regionName, regionSummary)
     for (const modeTag of distinctModes) {
       allRegionModesById.set(modeTag.modeId, modeTag)
     }
@@ -209,18 +210,4 @@ function indexVisitedRegions(legs: VisitedLegRecord[]): {
     visitedRegionByName,
     allRegionsDistinctModes: Array.from(allRegionModesById.values()),
   }
-}
-
-function extractDistinctModesFromLegs(legs: VisitedLegRecord[]): ActiveModeTag[] {
-  const modesById = new Map<number, ActiveModeTag>()
-  for (const leg of legs) {
-    if (leg.rowView.legModeId > 0 && !modesById.has(leg.rowView.legModeId)) {
-      modesById.set(leg.rowView.legModeId, {
-        modeId: leg.rowView.legModeId,
-        modeName: leg.rowView.legModeName || 'Travel',
-        modeColor: leg.rowView.legModeColor || DEFAULT_MODE_COLOR,
-      })
-    }
-  }
-  return Array.from(modesById.values())
 }

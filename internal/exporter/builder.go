@@ -45,13 +45,15 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 	if populateError := populateExpeditionTelemetry(databaseConnection, expeditionRecord, queryAfter, displayStart, departed, currentTime, dependencies, &exportSnapshot); populateError != nil {
 		return ExpeditionExport{}, populateError
 	}
-	if detailsError := populateRowDetailsAndBaseline(databaseConnection, planView, dependencies.Projections, &exportSnapshot); detailsError != nil {
+	if detailsError := populateRowDetailsAndBaseline(databaseConnection, planView, currentTime, dependencies.Projections, &exportSnapshot); detailsError != nil {
 		return ExpeditionExport{}, detailsError
 	}
 	if bucketsError := populateModeBuckets(planView, queryAfter, departed, dependencies.Projections, &exportSnapshot); bucketsError != nil {
 		return ExpeditionExport{}, bucketsError
 	}
+	exportSnapshot.LegTelemetry, exportSnapshot.RegionBuckets = BuildLegAndRegionTelemetry(planView, exportSnapshot.RowDetails, currentTime)
 	exportSnapshot.HighlightsFullOrder = ComputeHighlightLeaderboards(planView, exportSnapshot.RowDetails, currentTime)
+	exportSnapshot.HighlightsVariants = ComputeHighlightVariants(planView, exportSnapshot.RowDetails)
 	return exportSnapshot, nil
 }
 
@@ -111,7 +113,10 @@ func initializeExportHeader(
 		Adjustments:            expeditionRecord.Adjustments.ToMetrics(),
 		ModeBuckets:            []ModeBucket{},
 		RowDetails:             []expedition.WaypointDetails{},
+		LegTelemetry:           []ExportLegTelemetry{},
+		RegionBuckets:          []RegionBucket{},
 		HighlightsFullOrder:    []HighlightLeaderboard{},
+		HighlightsVariants:     []HighlightLeaderboard{},
 	}
 }
 
@@ -136,9 +141,14 @@ func populateExpeditionTelemetry(
 		exportSnapshot.Expedition = TelemetrySnapshot{
 			Metrics:     expeditionSummary.Metrics.Add(manualAdjustments),
 			Realization: expeditionSummary.Realization,
+			ElapsedDays: ComputeElapsedDays(displayStart, expeditionRecord.EndTimestamp, currentTime),
+			ShipsFlown:  []string{},
 		}
 	} else {
-		exportSnapshot.Expedition = TelemetrySnapshot{Metrics: manualAdjustments}
+		exportSnapshot.Expedition = TelemetrySnapshot{
+			Metrics:    manualAdjustments,
+			ShipsFlown: []string{},
+		}
 	}
 
 	exportSnapshot.CarrierCost = expedition.ComputeCarrierCost(databaseConnection, expeditionRecord, exportSnapshot.Expedition.Metrics, displayStart, departed, currentTime)
@@ -148,6 +158,7 @@ func populateExpeditionTelemetry(
 func populateRowDetailsAndBaseline(
 	databaseConnection *sql.DB,
 	planView expedition.PlanView,
+	currentTime time.Time,
 	expeditionProjections *expedition.Projections,
 	exportSnapshot *ExpeditionExport,
 ) error {
@@ -157,6 +168,20 @@ func populateRowDetailsAndBaseline(
 	}
 	exportSnapshot.OriginBaseline = originBaseline
 	exportSnapshot.RowDetails = rowDetails
+	exportSnapshot.Expedition.ShipsFlown = CollectShipsForVisitedLegs(planView, rowDetails, nil)
+	exportSnapshot.Expedition.Derived = ComputeDerivedMetrics(
+		exportSnapshot.Expedition.Metrics,
+		exportSnapshot.Expedition.Realization,
+		&exportSnapshot.CarrierCost,
+		exportSnapshot.Expedition.ElapsedDays,
+	)
+	if originBaseline != nil {
+		baselineElapsedDays := ComputeElapsedDays(originBaseline.From, originBaseline.To, currentTime)
+		baselineDerived := ComputeDerivedMetrics(originBaseline.Metrics, originBaseline.Realization, nil, baselineElapsedDays)
+		exportSnapshot.OriginBaselineElapsedDays = baselineElapsedDays
+		exportSnapshot.OriginBaselineDerived = &baselineDerived
+		exportSnapshot.CareerDiff = BuildCareerDiff(originBaseline, exportSnapshot.Live, exportSnapshot.Expedition.Realization)
+	}
 	return nil
 }
 
@@ -174,17 +199,21 @@ func populateModeBuckets(
 	if singleCoveringMode {
 		if hasTelemetryActivity(exportSnapshot.Live, exportSnapshot.Expedition.Realization) {
 			singleMode := candidateModes[0]
+			modeID := singleMode.ID
 			exportSnapshot.ModeBuckets = []ModeBucket{{
-				ModeID:      singleMode.ID,
+				ModeID:      modeID,
 				ModeName:    singleMode.Name,
 				ModeColor:   singleMode.Color,
+				ElapsedDays: exportSnapshot.Expedition.ElapsedDays,
+				ShipsFlown:  CollectShipsForVisitedLegs(planView, exportSnapshot.RowDetails, &modeID),
 				Metrics:     exportSnapshot.Live,
 				Realization: exportSnapshot.Expedition.Realization,
+				Derived:     ComputeDerivedMetrics(exportSnapshot.Live, exportSnapshot.Expedition.Realization, nil, exportSnapshot.Expedition.ElapsedDays),
 			}}
 		}
 		return nil
 	}
-	buckets, computeError := computeFilteredModeBuckets(planView.Expedition, queryAfter, candidateModes, expeditionProjections)
+	buckets, computeError := computeFilteredModeBuckets(planView, queryAfter, candidateModes, expeditionProjections, exportSnapshot.RowDetails, exportSnapshot.Expedition.ElapsedDays)
 	if computeError != nil {
 		return computeError
 	}
@@ -193,19 +222,23 @@ func populateModeBuckets(
 }
 
 func computeFilteredModeBuckets(
-	expeditionRecord expedition.Expedition,
+	planView expedition.PlanView,
 	queryAfter string,
 	candidateModes []modes.Mode,
 	expeditionProjections *expedition.Projections,
+	rowDetails []expedition.WaypointDetails,
+	expeditionElapsedDays *float64,
 ) ([]ModeBucket, error) {
+	expeditionRecord := planView.Expedition
 	expScope := expeditionRecord.ProfileScope()
 	expeditionRange := replaystats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
 	buckets := make([]ModeBucket, 0, len(candidateModes))
 	for _, modeItem := range candidateModes {
+		modeID := modeItem.ID
 		modeFilter := replaystats.Filter{
 			Enabled:      true,
 			ExpeditionID: expeditionRecord.ID,
-			Modes:        []replaystats.ModeSelection{{ModeID: modeItem.ID, Travel: true, Discovery: true}},
+			Modes:        []replaystats.ModeSelection{{ModeID: modeID, Travel: true, Discovery: true}},
 			Scope:        expScope,
 		}
 		summary, computeError := expeditionProjections.TimeRangeStats.Compute(expeditionRange, &modeFilter)
@@ -216,11 +249,14 @@ func computeFilteredModeBuckets(
 			continue
 		}
 		buckets = append(buckets, ModeBucket{
-			ModeID:      modeItem.ID,
+			ModeID:      modeID,
 			ModeName:    modeItem.Name,
 			ModeColor:   modeItem.Color,
+			ElapsedDays: expeditionElapsedDays,
+			ShipsFlown:  CollectShipsForVisitedLegs(planView, rowDetails, &modeID),
 			Metrics:     summary.Metrics,
 			Realization: summary.Realization,
+			Derived:     ComputeDerivedMetrics(summary.Metrics, summary.Realization, nil, expeditionElapsedDays),
 		})
 	}
 	return buckets, nil
