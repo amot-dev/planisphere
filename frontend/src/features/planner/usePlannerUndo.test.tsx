@@ -3,6 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { app } from '../../api/models'
+import { ModalShell } from '../../components/ui/ModalShell'
 import { createBusyTaskTracker } from '../../hooks/useBusyTasks'
 
 const mockUndoExpedition = vi.fn()
@@ -234,7 +235,7 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
     }
   })
 
-  it('yields strictly to focused editable elements and suppresses when disabled, invalid expedition, or Alt held', async () => {
+  it('yields strictly to focused editable elements, open ModalShell dialogs, disabled state, invalid expedition, or Alt held', async () => {
     const harness = mountHookHarness({ expeditionId: 5 })
     const inputElement = document.createElement('input')
     const textareaElement = document.createElement('textarea')
@@ -244,6 +245,10 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
     editableDiv.tabIndex = 0
     document.body.append(inputElement, textareaElement, selectElement, editableDiv)
 
+    const modalContainer = document.createElement('div')
+    document.body.appendChild(modalContainer)
+    const modalRoot = createRoot(modalContainer)
+
     try {
       for (const editableControl of [inputElement, textareaElement, selectElement, editableDiv]) {
         editableControl.focus()
@@ -251,6 +256,20 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
         expect(shortcutEvent.defaultPrevented).toBe(false)
       }
       editableDiv.blur()
+
+      // An open ModalShell (such as sidebar-owned CarrierConfigModal) suppresses Ctrl-Z even when disabled is false.
+      act(() => {
+        modalRoot.render(
+          createElement(ModalShell, {
+            title: 'Expedition Carrier Configuration',
+            children: 'Modal body',
+          }),
+        )
+      })
+      expect(dispatchShortcut({ key: 'z', ctrlKey: true }).defaultPrevented).toBe(false)
+      act(() => {
+        modalRoot.unmount()
+      })
 
       expect(dispatchShortcut({ key: 'z', ctrlKey: true, altKey: true }).defaultPrevented).toBe(false)
 
@@ -263,6 +282,8 @@ describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
       expect(mockUndoExpedition).not.toHaveBeenCalled()
       expect(mockRedoExpedition).not.toHaveBeenCalled()
     } finally {
+      act(() => modalRoot.unmount())
+      modalContainer.remove()
       inputElement.remove()
       textareaElement.remove()
       selectElement.remove()

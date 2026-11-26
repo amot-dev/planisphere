@@ -44,6 +44,9 @@ export function ModalShell({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className={`w-full ${maxWidth} max-h-[90vh] flex flex-col border border-ed-border border-t-2 ${topBorderClass} bg-ed-panel shadow-2xl overflow-hidden`}
       >
         <div className="px-5 py-3.5 border-b border-ed-border bg-ed-header flex items-center justify-between">

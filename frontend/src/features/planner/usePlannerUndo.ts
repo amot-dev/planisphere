@@ -166,6 +166,7 @@ export function usePlannerUndo(options: UsePlannerUndoOptions): UsePlannerUndoRe
         document.activeElement,
       )
       if (!action) return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return
       // Prevent default even while an RPC is in flight so held repeats do not leak to WebView undo.
       event.preventDefault()
       if (inFlightRef.current) return
