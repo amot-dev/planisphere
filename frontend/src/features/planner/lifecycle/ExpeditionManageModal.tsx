@@ -1,24 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BrowseWaypointImportFile,
   CloneExpedition,
   CreateExpedition,
-  CreateExpeditionWithWaypoints,
+  CreateExpeditionFromImport,
   DeleteExpedition,
+  ParseWaypointImport,
   UpdateExpedition,
   UpdateExpeditionScoped,
 } from '../../../api/backend'
 import { expedition, replay } from '../../../api/models'
 import { ModalShell } from '../../../components/ui/ModalShell'
 import {
-  deriveExpeditionNameFromFilename,
-  parseWaypointImportText,
-} from '../../../domain/waypointImport'
-import {
   ScopedExpeditionInlineEditor,
   type CommanderScopeMode,
 } from './ExpeditionCommanderScopePicker'
-import { WaypointImportSection } from './WaypointImportSection'
+import { WaypointImportSection, type ParsedWaypointImport } from './WaypointImportSection'
+
+const EMPTY_PARSED_IMPORT: ParsedWaypointImport = {
+  format: 'empty',
+  systems: [],
+  collapsedDuplicateCount: 0,
+  skippedLineCount: 0,
+}
+
+const IMPORT_PARSE_DEBOUNCE_MS = 80
 
 /**
  * ExpeditionManageModalProps defines the saved expedition list, active selection,
@@ -50,6 +56,8 @@ export function ExpeditionManageModal({
   const [description, setDescription] = useState('')
   const [importExpanded, setImportExpanded] = useState(false)
   const [rawImportText, setRawImportText] = useState('')
+  const [parsedImport, setParsedImport] = useState<ParsedWaypointImport>(EMPTY_PARSED_IMPORT)
+  const [parsingImport, setParsingImport] = useState(false)
   const [loadedFileNote, setLoadedFileNote] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -61,13 +69,46 @@ export function ExpeditionManageModal({
   const [editScopeMode, setEditScopeMode] = useState<CommanderScopeMode>('all_enabled')
   const [editProfileIds, setEditProfileIds] = useState<number[]>([])
   const [errorMessage, setErrorMessage] = useState('')
+  const parseRequestSeqRef = useRef(0)
+  const parseDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    cancelPendingImportParse()
+  }, [])
 
   const hasMultipleCommanders = commanders.length > 1
   const busy = creating || loadingFile || mutating
-  const parsedImport = useMemo(() => parseWaypointImportText(rawImportText), [rawImportText])
   const hasRawImportText = rawImportText.trim().length > 0
-  const hasInvalidImport = hasRawImportText && parsedImport.systems.length === 0
+  const hasInvalidImport = hasRawImportText && !parsingImport && parsedImport.systems.length === 0
   const stagedWaypointCount = parsedImport.systems.length
+
+  function cancelPendingImportParse(): number {
+    if (parseDebounceTimerRef.current !== null) {
+      clearTimeout(parseDebounceTimerRef.current)
+      parseDebounceTimerRef.current = null
+    }
+    parseRequestSeqRef.current += 1
+    return parseRequestSeqRef.current
+  }
+
+  function resetParsedImport() {
+    cancelPendingImportParse()
+    setParsingImport(false)
+    setParsedImport(EMPTY_PARSED_IMPORT)
+  }
+
+  async function runImportParse(textToParse: string, requestSeq: number) {
+    try {
+      const nextParsed = await ParseWaypointImport(textToParse)
+      if (requestSeq !== parseRequestSeqRef.current) return
+      setParsedImport({ ...nextParsed, systems: nextParsed.systems ?? [] })
+      setParsingImport(false)
+    } catch (parseError) {
+      if (requestSeq !== parseRequestSeqRef.current) return
+      setParsingImport(false)
+      setErrorMessage(String(parseError))
+    }
+  }
 
   async function runExpeditionAction(action: () => Promise<void>) {
     if (busy) return
@@ -88,15 +129,17 @@ export function ExpeditionManageModal({
     setLoadingFile(true)
     try {
       const selectedFile = await BrowseWaypointImportFile()
-      if (!selectedFile?.fileName && !selectedFile?.content) {
-        return
-      }
-      const parsedFile = parseWaypointImportText(selectedFile.content ?? '')
-      if (parsedFile.systems.length === 0) {
+      if (!selectedFile?.fileName) return
+      const parsedFile = selectedFile.parsed
+      const importedSystems = parsedFile?.systems ?? []
+      if (importedSystems.length === 0) {
         setErrorMessage(`No star systems found in "${selectedFile.fileName}".`)
         return
       }
-      setRawImportText(parsedFile.systems.join('\n'))
+      cancelPendingImportParse()
+      setParsingImport(false)
+      setRawImportText(selectedFile.normalizedText)
+      setParsedImport({ ...parsedFile, systems: importedSystems })
       const duplicateNote =
         parsedFile.collapsedDuplicateCount > 0
           ? ` (${parsedFile.collapsedDuplicateCount} duplicate body ${
@@ -104,8 +147,10 @@ export function ExpeditionManageModal({
             } collapsed)`
           : ''
       setLoadedFileNote(`Loaded from ${selectedFile.fileName}${duplicateNote}`)
-      if (!name.trim() && selectedFile.fileName) {
-        setName(deriveExpeditionNameFromFilename(selectedFile.fileName))
+      if (selectedFile.suggestedExpeditionName) {
+        setName((currentName) =>
+          currentName.trim() ? currentName : selectedFile.suggestedExpeditionName,
+        )
       }
     } catch (loadError) {
       setErrorMessage(String(loadError))
@@ -114,14 +159,27 @@ export function ExpeditionManageModal({
     }
   }
 
-  function handleChangeImportText(nextText: string) {
+  function handleChangeImportText(nextText: string, options?: { immediate?: boolean }) {
     setRawImportText(nextText)
-    if (loadedFileNote) {
-      setLoadedFileNote('')
+    if (loadedFileNote) setLoadedFileNote('')
+    if (nextText.trim() === '') {
+      resetParsedImport()
+      return
     }
+    const requestSeq = cancelPendingImportParse()
+    setParsingImport(true)
+    if (options?.immediate) {
+      void runImportParse(nextText, requestSeq)
+      return
+    }
+    parseDebounceTimerRef.current = setTimeout(() => {
+      parseDebounceTimerRef.current = null
+      void runImportParse(nextText, requestSeq)
+    }, IMPORT_PARSE_DEBOUNCE_MS)
   }
 
   function handleClearImportText() {
+    resetParsedImport()
     setRawImportText('')
     setLoadedFileNote('')
     setErrorMessage('')
@@ -132,14 +190,10 @@ export function ExpeditionManageModal({
     return runExpeditionAction(async () => {
       setCreating(true)
       try {
-        const created =
-          parsedImport.systems.length > 0
-            ? await CreateExpeditionWithWaypoints(
-                name.trim(),
-                description.trim(),
-                parsedImport.systems,
-              )
-            : await CreateExpedition(name.trim(), description.trim())
+        const created = hasRawImportText
+          ? await CreateExpeditionFromImport(name.trim(), description.trim(), rawImportText)
+          : await CreateExpedition(name.trim(), description.trim())
+        resetParsedImport()
         setName('')
         setDescription('')
         setRawImportText('')
@@ -227,6 +281,7 @@ export function ExpeditionManageModal({
             parsedImport={parsedImport}
             loadedFileNote={loadedFileNote}
             loadingFile={loadingFile}
+            parsing={parsingImport}
             disabled={creating || mutating}
             onChangeText={handleChangeImportText}
             onLoadFile={() => void handleLoadImportFile()}

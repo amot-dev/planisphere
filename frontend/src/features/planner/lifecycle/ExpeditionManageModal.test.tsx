@@ -7,7 +7,10 @@ import { app, expedition, replay } from '../../../api/models'
 const mockBrowseWaypointImportFile = vi.fn<() => Promise<app.WaypointImportFile>>()
 const mockCloneExpedition = vi.fn()
 const mockCreateExpedition = vi.fn()
-const mockCreateExpeditionWithWaypoints = vi.fn()
+const mockCreateExpeditionFromImport = vi.fn()
+const mockParseWaypointImport = vi.fn<
+  (rawText: string) => Promise<expedition.ParsedWaypointImport>
+>()
 const mockUpdateExpedition = vi.fn()
 const mockUpdateExpeditionScoped = vi.fn()
 
@@ -15,8 +18,9 @@ vi.mock('../../../api/backend', () => ({
   BrowseWaypointImportFile: () => mockBrowseWaypointImportFile(),
   CloneExpedition: (...args: unknown[]) => mockCloneExpedition(...args),
   CreateExpedition: (...args: unknown[]) => mockCreateExpedition(...args),
-  CreateExpeditionWithWaypoints: (...args: unknown[]) => mockCreateExpeditionWithWaypoints(...args),
+  CreateExpeditionFromImport: (...args: unknown[]) => mockCreateExpeditionFromImport(...args),
   DeleteExpedition: vi.fn(),
+  ParseWaypointImport: (rawText: string) => mockParseWaypointImport(rawText),
   UpdateExpedition: (...args: unknown[]) => mockUpdateExpedition(...args),
   UpdateExpeditionScoped: (...args: unknown[]) => mockUpdateExpeditionScoped(...args),
 }))
@@ -59,8 +63,21 @@ function setInputValue(input: HTMLInputElement, nextValue: string): void {
   input.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+function setTextareaValue(
+  textarea: HTMLTextAreaElement,
+  nextValue: string,
+  options?: { paste?: boolean },
+): void {
+  if (options?.paste) {
+    textarea.dispatchEvent(new Event('paste', { bubbles: true }))
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+  descriptor?.set?.call(textarea, nextValue)
+  textarea.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
 describe('WaypointImportSection', () => {
-  it('omits format badges while preserving waypoint count and duplicate collapse summary', () => {
+  it('omits format badges, preserves duplicate summary, and suppresses invalid warning while parsing', () => {
     const spanshView = mountElement(
       createElement(WaypointImportSection, {
         rawImportText: '"System Name"\n"Sol"\n"Sol"\n"Colonia"',
@@ -90,17 +107,18 @@ describe('WaypointImportSection', () => {
       spanshView.unmount()
     }
 
-    const plainListView = mountElement(
+    const parsingView = mountElement(
       createElement(WaypointImportSection, {
         rawImportText: 'Sol',
         parsedImport: {
-          format: 'plain',
-          systems: ['Sol'],
+          format: 'empty',
+          systems: [],
           collapsedDuplicateCount: 0,
           skippedLineCount: 0,
         },
         loadedFileNote: '',
         loadingFile: false,
+        parsing: true,
         disabled: false,
         onChangeText: () => {},
         onLoadFile: () => {},
@@ -109,21 +127,20 @@ describe('WaypointImportSection', () => {
     )
 
     try {
-      expect(plainListView.container.textContent).toContain('1 WAYPOINT READY')
-      expect(plainListView.container.textContent).not.toContain('SPANSH CSV')
-      expect(plainListView.container.textContent).not.toContain('PLAIN LIST')
+      expect(parsingView.container.textContent).not.toContain('No valid star systems detected')
     } finally {
-      plainListView.unmount()
+      parsingView.unmount()
     }
   })
 })
 
 describe('ExpeditionManageModal', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
   })
 
-  it('disables expedition creation while a waypoint import file is loading and enables it after load completes', async () => {
+  it('disables expedition creation while a waypoint import file is loading and hydrates directly from Go response', async () => {
     let resolveImportFile!: (file: app.WaypointImportFile) => void
     mockBrowseWaypointImportFile.mockImplementation(
       () =>
@@ -131,10 +148,10 @@ describe('ExpeditionManageModal', () => {
           resolveImportFile = resolve
         }),
     )
-    mockCreateExpeditionWithWaypoints.mockResolvedValue(
+    mockCreateExpeditionFromImport.mockResolvedValue(
       expedition.Expedition.createFrom({
         id: 42,
-        name: 'Distant Worlds',
+        name: 'spansh-route',
         description: '',
         status: 'planning',
       }),
@@ -163,12 +180,7 @@ describe('ExpeditionManageModal', () => {
     try {
       const nameInput = modalView.container.querySelector('input[type="text"]') as HTMLInputElement
       expect(nameInput).toBeTruthy()
-      act(() => {
-        setInputValue(nameInput, 'Distant Worlds')
-      })
-
-      const createButtonBeforeLoad = findButtonByText(modalView.container, 'CREATE EXPEDITION')
-      expect(createButtonBeforeLoad.disabled).toBe(false)
+      expect(nameInput.value).toBe('')
 
       const importToggleButton = findButtonByText(modalView.container, '+ IMPORT WAYPOINTS')
       act(() => {
@@ -192,19 +204,31 @@ describe('ExpeditionManageModal', () => {
         createButtonWhileLoading.click()
       })
       expect(mockCreateExpedition).not.toHaveBeenCalled()
-      expect(mockCreateExpeditionWithWaypoints).not.toHaveBeenCalled()
+      expect(mockCreateExpeditionFromImport).not.toHaveBeenCalled()
 
       await act(async () => {
         resolveImportFile(
           app.WaypointImportFile.createFrom({
             fileName: 'spansh-route.csv',
-            content: '"System Name","Jumps"\n"Sol","0"\n"Colonia","1"\n',
+            suggestedExpeditionName: 'spansh-route',
+            normalizedText: 'Sol\nColonia',
+            parsed: {
+              format: 'spansh-csv',
+              systems: ['Sol', 'Colonia'],
+              collapsedDuplicateCount: 1,
+              skippedLineCount: 0,
+            },
           }),
         )
         await Promise.resolve()
       })
 
+      expect(mockParseWaypointImport).not.toHaveBeenCalled()
+      expect(nameInput.value).toBe('spansh-route')
       expect(modalView.container.textContent).toContain('2 WAYPOINTS READY')
+      expect(modalView.container.textContent).toContain(
+        'Loaded from spansh-route.csv (1 duplicate body row collapsed)',
+      )
 
       const createAndImportButton = findButtonByText(modalView.container, 'CREATE AND IMPORT (2)')
       expect(createAndImportButton.disabled).toBe(false)
@@ -215,12 +239,176 @@ describe('ExpeditionManageModal', () => {
         await Promise.resolve()
       })
 
-      expect(mockCreateExpeditionWithWaypoints).toHaveBeenCalledWith('Distant Worlds', '', [
-        'Sol',
-        'Colonia',
-      ])
+      expect(mockCreateExpeditionFromImport).toHaveBeenCalledWith(
+        'spansh-route',
+        '',
+        'Sol\nColonia',
+      )
       expect(onSelect).toHaveBeenCalledWith(42, { persist: false })
       expect(onClose).toHaveBeenCalledTimes(1)
+    } finally {
+      modalView.unmount()
+    }
+  })
+
+  it('parses immediately on paste, debounces keystrokes by 80 ms, resets blank edits without IPC, and submits raw text via CreateExpeditionFromImport', async () => {
+    vi.useFakeTimers()
+    mockParseWaypointImport.mockImplementation(async (rawText: string) => {
+      const lines = rawText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith('#'))
+      return expedition.ParsedWaypointImport.createFrom({
+        format: lines.length > 0 ? 'plain' : 'plain',
+        systems: lines,
+        collapsedDuplicateCount: 0,
+        skippedLineCount: 0,
+      })
+    })
+    mockCreateExpeditionFromImport.mockResolvedValue(
+      expedition.Expedition.createFrom({
+        id: 77,
+        name: 'Fast Paste Route',
+        description: 'Live import',
+        status: 'planning',
+      }),
+    )
+
+    const onSelect = vi.fn()
+    const onClose = vi.fn()
+    const modalView = mountElement(
+      createElement(ExpeditionManageModal, {
+        expeditions: [
+          expedition.Expedition.createFrom({ id: 1, name: 'Alpha', description: '', status: 'active' }),
+        ],
+        activeId: 1,
+        onSelect,
+        onClose,
+      }),
+    )
+
+    try {
+      const textInputs = Array.from(
+        modalView.container.querySelectorAll('input[type="text"]'),
+      ) as HTMLInputElement[]
+      act(() => {
+        setInputValue(textInputs[0], 'Fast Paste Route')
+        setInputValue(textInputs[1], 'Live import')
+        findButtonByText(modalView.container, '+ IMPORT WAYPOINTS').click()
+      })
+
+      const textarea = modalView.container.querySelector('textarea') as HTMLTextAreaElement
+      expect(textarea).toBeTruthy()
+
+      // Paste triggers immediate 0 ms ParseWaypointImport without advancing timers.
+      await act(async () => {
+        setTextareaValue(textarea, 'Sol\nColonia\nBeagle Point', { paste: true })
+        await Promise.resolve()
+      })
+      expect(mockParseWaypointImport).toHaveBeenCalledTimes(1)
+      expect(mockParseWaypointImport).toHaveBeenLastCalledWith('Sol\nColonia\nBeagle Point')
+      expect(modalView.container.textContent).toContain('3 WAYPOINTS READY')
+
+      // Clearing resets synchronously with zero additional ParseWaypointImport calls.
+      act(() => {
+        findButtonByText(modalView.container, 'CLEAR').click()
+      })
+      expect(mockParseWaypointImport).toHaveBeenCalledTimes(1)
+      expect(textarea.value).toBe('')
+
+      // Typing debounces by 80 ms and coalesces rapid keystrokes.
+      act(() => {
+        setTextareaValue(textarea, 'Shinrarta')
+        vi.advanceTimersByTime(40)
+        setTextareaValue(textarea, 'Shinrarta Dezhra\nSagittarius A*')
+      })
+      expect(mockParseWaypointImport).toHaveBeenCalledTimes(1)
+      expect(modalView.container.textContent).not.toContain('No valid star systems detected')
+
+      // Submitting before the 80 ms preview debounce fires still sends the latest rawImportText.
+      await act(async () => {
+        findButtonByText(modalView.container, 'CREATE EXPEDITION').click()
+        await Promise.resolve()
+      })
+      expect(mockCreateExpeditionFromImport).toHaveBeenCalledWith(
+        'Fast Paste Route',
+        'Live import',
+        'Shinrarta Dezhra\nSagittarius A*',
+      )
+      expect(mockParseWaypointImport).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledWith(77, { persist: false })
+      expect(onClose).toHaveBeenCalledTimes(1)
+    } finally {
+      modalView.unmount()
+    }
+  })
+
+  it('debounces typing after 80 ms and ignores stale out-of-order ParseWaypointImport responses', async () => {
+    vi.useFakeTimers()
+    let resolveFirstParse!: (parsed: expedition.ParsedWaypointImport) => void
+    let callNumber = 0
+    mockParseWaypointImport.mockImplementation((rawText: string) => {
+      callNumber += 1
+      if (callNumber === 1) {
+        return new Promise<expedition.ParsedWaypointImport>((resolve) => {
+          resolveFirstParse = resolve
+        })
+      }
+      return Promise.resolve(
+        expedition.ParsedWaypointImport.createFrom({
+          format: 'plain',
+          systems: rawText.split('\n').filter(Boolean),
+          collapsedDuplicateCount: 0,
+          skippedLineCount: 0,
+        }),
+      )
+    })
+
+    const modalView = mountElement(
+      createElement(ExpeditionManageModal, {
+        expeditions: [
+          expedition.Expedition.createFrom({ id: 1, name: 'Alpha', description: '', status: 'active' }),
+        ],
+        activeId: 1,
+        onSelect: () => {},
+        onClose: () => {},
+      }),
+    )
+
+    try {
+      act(() => {
+        findButtonByText(modalView.container, '+ IMPORT WAYPOINTS').click()
+      })
+      const textarea = modalView.container.querySelector('textarea') as HTMLTextAreaElement
+
+      await act(async () => {
+        setTextareaValue(textarea, 'Sol')
+        vi.advanceTimersByTime(80)
+        await Promise.resolve()
+      })
+      expect(mockParseWaypointImport).toHaveBeenCalledTimes(1)
+
+      // Second paste arrives and resolves before the first in-flight RPC settles.
+      await act(async () => {
+        setTextareaValue(textarea, 'Colonia\nRohini', { paste: true })
+        await Promise.resolve()
+      })
+      expect(mockParseWaypointImport).toHaveBeenCalledTimes(2)
+      expect(modalView.container.textContent).toContain('2 WAYPOINTS READY')
+
+      await act(async () => {
+        resolveFirstParse(
+          expedition.ParsedWaypointImport.createFrom({
+            format: 'plain',
+            systems: ['Sol'],
+            collapsedDuplicateCount: 0,
+            skippedLineCount: 0,
+          }),
+        )
+        await Promise.resolve()
+      })
+      expect(modalView.container.textContent).toContain('2 WAYPOINTS READY')
+      expect(modalView.container.textContent).toContain('#01 Colonia -> #02 Rohini')
     } finally {
       modalView.unmount()
     }

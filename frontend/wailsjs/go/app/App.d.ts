@@ -33,6 +33,8 @@ export function CompleteSpanshCarrierJump(arg1:number):Promise<expedition.Active
 
 export function CreateExpedition(arg1:string,arg2:string):Promise<expedition.Expedition>;
 
+export function CreateExpeditionFromImport(arg1:string,arg2:string,arg3:string):Promise<expedition.Expedition>;
+
 export function CreateExpeditionWithWaypoints(arg1:string,arg2:string,arg3:Array<string>):Promise<expedition.Expedition>;
 
 export function CreateMode(arg1:string,arg2:string,arg3:string):Promise<modes.Mode>;
@@ -84,6 +86,8 @@ export function OpenManualCarrierRoute(arg1:number):Promise<expedition.ActiveCar
 export function OpenURL(arg1:string):Promise<void>;
 
 export function OverrideCarrierStopArrival(arg1:number,arg2:boolean):Promise<void>;
+
+export function ParseWaypointImport(arg1:string):Promise<expedition.ParsedWaypointImport>;
 
 export function PickExportSavePath(arg1:string,arg2:string):Promise<string>;
 

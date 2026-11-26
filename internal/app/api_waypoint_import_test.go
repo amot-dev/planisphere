@@ -100,16 +100,26 @@ func TestCreateExpeditionWithWaypointsOfflineResolutionAndGEC(testingContext *te
 func TestReadWaypointImportFileValidation(testingContext *testing.T) {
 	temporaryDirectory := testingContext.TempDir()
 
-	validFilePath := filepath.Join(temporaryDirectory, "Xibalba.txt")
-	if writeError := os.WriteFile(validFilePath, []byte("Sol\nColonia\n"), 0o600); writeError != nil {
+	validFilePath := filepath.Join(temporaryDirectory, "Xibalba.route.csv")
+	csvContent := "\"System Name\",\"Body Name\"\n\"Sol\",\"Sol 3\"\n\"sol\",\"Sol 4\"\n\"Colonia\",\"Colonia 1\"\n"
+	if writeError := os.WriteFile(validFilePath, []byte(csvContent), 0o600); writeError != nil {
 		testingContext.Fatalf("write valid file: %v", writeError)
 	}
 	loadedFile, loadError := readWaypointImportFile(validFilePath)
 	if loadError != nil {
 		testingContext.Fatalf("readWaypointImportFile valid: %v", loadError)
 	}
-	if loadedFile.FileName != "Xibalba.txt" || loadedFile.Content != "Sol\nColonia\n" {
+	if loadedFile.FileName != "Xibalba.route.csv" ||
+		loadedFile.SuggestedExpeditionName != "Xibalba.route" ||
+		loadedFile.NormalizedText != "Sol\nColonia" ||
+		loadedFile.Parsed.Format != expedition.WaypointImportSpanshCSV ||
+		!slices.Equal(loadedFile.Parsed.Systems, []string{"Sol", "Colonia"}) ||
+		loadedFile.Parsed.CollapsedDuplicateCount != 1 {
 		testingContext.Fatalf("unexpected loaded file: %+v", loadedFile)
+	}
+	cancelledFile := emptyWaypointImportFile()
+	if cancelledFile.Parsed.Format != expedition.WaypointImportEmpty || cancelledFile.Parsed.Systems == nil || len(cancelledFile.Parsed.Systems) != 0 {
+		testingContext.Fatalf("expected non-nil empty systems on cancelled file, got %+v", cancelledFile)
 	}
 
 	binaryFilePath := filepath.Join(temporaryDirectory, "workbook.xlsx")
@@ -130,6 +140,38 @@ func TestReadWaypointImportFileValidation(testingContext *testing.T) {
 	}
 	if _, sizeError := readWaypointImportFile(oversizeFilePath); sizeError == nil || !strings.Contains(sizeError.Error(), "5 MiB") {
 		testingContext.Fatalf("expected oversize file rejection, got %v", sizeError)
+	}
+}
+
+func TestParseWaypointImportAndCreateExpeditionFromImport(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	if _, onlineError := testApp.SetOnlineLookups(false); onlineError != nil {
+		testingContext.Fatalf("disable online lookups: %v", onlineError)
+	}
+
+	uninitializedParsed := New().ParseWaypointImport("1. Sol\n# skip\n2. Colonia")
+	if uninitializedParsed.Format != expedition.WaypointImportPlain ||
+		!slices.Equal(uninitializedParsed.Systems, []string{"Sol", "Colonia"}) ||
+		uninitializedParsed.SkippedLineCount != 1 {
+		testingContext.Fatalf("unexpected ParseWaypointImport result: %+v", uninitializedParsed)
+	}
+
+	if _, emptyError := testApp.CreateExpeditionFromImport("Empty Import", "", "# comment only\n   \n"); emptyError == nil ||
+		!strings.Contains(emptyError.Error(), "no valid star systems") {
+		testingContext.Fatalf("expected empty import error, got %v", emptyError)
+	}
+
+	createdExpedition, createError := testApp.CreateExpeditionFromImport(
+		"Spansh Import",
+		"From CSV",
+		"\"System Name\",\"Jumps\"\n\"Sol\",\"0\"\n\"Sol\",\"0\"\n\"Colonia\",\"12\"\n",
+	)
+	if createError != nil {
+		testingContext.Fatalf("CreateExpeditionFromImport: %v", createError)
+	}
+	planView, planError := testApp.GetPlan(createdExpedition.ID)
+	if planError != nil || len(planView.Rows) != 2 || planView.Rows[0].Row.SystemName != "Sol" || planView.Rows[1].Row.SystemName != "Colonia" {
+		testingContext.Fatalf("expected 2 imported rows [Sol, Colonia], got err=%v rows=%+v", planError, planView.Rows)
 	}
 }
 

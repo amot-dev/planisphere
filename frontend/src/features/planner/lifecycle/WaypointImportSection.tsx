@@ -1,4 +1,14 @@
-import type { ParsedWaypointImport } from '../../../domain/waypointImport'
+import { useRef } from 'react'
+import type { expedition } from '../../../api/models'
+
+/**
+ * ParsedWaypointImport is the plain-object-compatible subset of
+ * expedition.ParsedWaypointImport rendered by the bulk-import preview.
+ */
+export type ParsedWaypointImport = Pick<
+  expedition.ParsedWaypointImport,
+  'format' | 'systems' | 'collapsedDuplicateCount' | 'skippedLineCount'
+>
 
 /**
  * WaypointImportSectionProps defines the editable import text, parsed summary,
@@ -10,8 +20,9 @@ export interface WaypointImportSectionProps {
   parsedImport: ParsedWaypointImport
   loadedFileNote: string
   loadingFile: boolean
+  parsing?: boolean
   disabled: boolean
-  onChangeText: (nextText: string) => void
+  onChangeText: (nextText: string, options?: { immediate?: boolean }) => void
   onLoadFile: () => void
   onClear: () => void
 }
@@ -26,15 +37,19 @@ export function WaypointImportSection({
   parsedImport,
   loadedFileNote,
   loadingFile,
+  parsing = false,
   disabled,
   onChangeText,
   onLoadFile,
   onClear,
 }: WaypointImportSectionProps) {
+  const pastePendingRef = useRef(false)
   const hasRawText = rawImportText.trim().length > 0
   const systemCount = parsedImport.systems.length
   const firstSystem = systemCount > 0 ? parsedImport.systems[0] : ''
   const lastSystem = systemCount > 1 ? parsedImport.systems[systemCount - 1] : ''
+  const showSummary = systemCount > 0
+  const showInvalidWarning = !showSummary && !parsing && (hasRawText || Boolean(loadedFileNote))
 
   return (
     <div className="pt-2 border-t border-ed-border-subtle space-y-2">
@@ -70,14 +85,24 @@ export function WaypointImportSection({
         spellCheck={false}
         disabled={disabled}
         value={rawImportText}
-        onChange={(event) => onChangeText(event.target.value)}
+        onKeyDown={() => {
+          pastePendingRef.current = false
+        }}
+        onPaste={() => {
+          pastePendingRef.current = true
+        }}
+        onChange={(event) => {
+          const immediate = pastePendingRef.current
+          pastePendingRef.current = false
+          onChangeText(event.target.value, immediate ? { immediate: true } : undefined)
+        }}
         placeholder={'Shinrarta Dezhra\nOmega Sector VE-Q b5-15\nSkaude AA-A h294\nColonia'}
         className="w-full bg-ed-void border border-ed-border px-2.5 py-2 font-mono-tabular text-xs text-ed-text-main placeholder:text-ed-text-dim focus:border-ed-amber focus:outline-none resize-y"
       />
 
-      {(hasRawText || loadedFileNote) && (
+      {(showSummary || showInvalidWarning) && (
         <div className="space-y-1 text-[11px]">
-          {systemCount > 0 ? (
+          {showSummary ? (
             <>
               <div className="flex flex-wrap items-center gap-2 font-mono-tabular">
                 <span className="font-bold text-ed-amber">
@@ -109,4 +134,3 @@ export function WaypointImportSection({
     </div>
   )
 }
-

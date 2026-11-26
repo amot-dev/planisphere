@@ -20,15 +20,27 @@ import (
 
 const maxWaypointImportFileBytes = 5 << 20
 
-// WaypointImportFile holds the base filename and text content loaded from a
+// WaypointImportFile holds the base filename, suggested expedition name,
+// newline-joined normalized systems, and parsed import summary loaded from a
 // user-selected plain-text or CSV waypoint list file.
 type WaypointImportFile struct {
-	FileName string `json:"fileName"`
-	Content  string `json:"content"`
+	FileName                string                          `json:"fileName"`
+	SuggestedExpeditionName string                          `json:"suggestedExpeditionName"`
+	NormalizedText          string                          `json:"normalizedText"`
+	Parsed                  expedition.ParsedWaypointImport `json:"parsed"`
+}
+
+func emptyWaypointImportFile() WaypointImportFile {
+	return WaypointImportFile{
+		Parsed: expedition.ParsedWaypointImport{
+			Format:  expedition.WaypointImportEmpty,
+			Systems: []string{},
+		},
+	}
 }
 
 // BrowseWaypointImportFile opens a native file picker for a plain-text or CSV
-// waypoint list and returns its filename and UTF-8 contents (empty when cancelled).
+// waypoint list and returns its parsed waypoint summary (empty when cancelled).
 func (app *App) BrowseWaypointImportFile() (WaypointImportFile, error) {
 	selectedPath, dialogError := runtime.OpenFileDialog(app.context(), runtime.OpenDialogOptions{
 		Title: "Select Waypoint List or Spansh CSV",
@@ -38,7 +50,7 @@ func (app *App) BrowseWaypointImportFile() (WaypointImportFile, error) {
 		},
 	})
 	if dialogError != nil || strings.TrimSpace(selectedPath) == "" {
-		return WaypointImportFile{}, dialogError
+		return emptyWaypointImportFile(), dialogError
 	}
 	return readWaypointImportFile(selectedPath)
 }
@@ -46,23 +58,27 @@ func (app *App) BrowseWaypointImportFile() (WaypointImportFile, error) {
 func readWaypointImportFile(filePath string) (WaypointImportFile, error) {
 	openedFile, openError := os.Open(filePath)
 	if openError != nil {
-		return WaypointImportFile{}, fmt.Errorf("open waypoint import file: %w", openError)
+		return emptyWaypointImportFile(), fmt.Errorf("open waypoint import file: %w", openError)
 	}
 	defer openedFile.Close()
 
 	rawContent, readError := io.ReadAll(io.LimitReader(openedFile, maxWaypointImportFileBytes+1))
 	if readError != nil {
-		return WaypointImportFile{}, fmt.Errorf("read waypoint import file: %w", readError)
+		return emptyWaypointImportFile(), fmt.Errorf("read waypoint import file: %w", readError)
 	}
 	if int64(len(rawContent)) > maxWaypointImportFileBytes {
-		return WaypointImportFile{}, errors.New("selected file exceeds the 5 MiB import limit")
+		return emptyWaypointImportFile(), errors.New("selected file exceeds the 5 MiB import limit")
 	}
 	if bytes.IndexByte(rawContent, 0) >= 0 {
-		return WaypointImportFile{}, errors.New("selected file does not appear to be plain text or CSV")
+		return emptyWaypointImportFile(), errors.New("selected file does not appear to be plain text or CSV")
 	}
+	baseName := filepath.Base(filePath)
+	parsed := expedition.ParseWaypointImportText(string(rawContent))
 	return WaypointImportFile{
-		FileName: filepath.Base(filePath),
-		Content:  string(rawContent),
+		FileName:                baseName,
+		SuggestedExpeditionName: expedition.DeriveExpeditionNameFromFilename(baseName),
+		NormalizedText:          strings.Join(parsed.Systems, "\n"),
+		Parsed:                  parsed,
 	}, nil
 }
 
@@ -93,7 +109,7 @@ func (app *App) buildSeedWaypoints(systemNames []string) ([]expedition.SeedWaypo
 	uniqueKeys := make([]string, 0, len(systemNames))
 	seenKeys := make(map[string]struct{}, len(systemNames))
 	for _, rawSystemName := range systemNames {
-		normalizedName := strings.Join(strings.Fields(rawSystemName), " ")
+		normalizedName := expedition.NormalizeImportedSystemName(rawSystemName)
 		if normalizedName == "" {
 			continue
 		}
@@ -163,4 +179,21 @@ func (app *App) CreateExpeditionWithWaypoints(name, description string, systemNa
 	}
 	app.publishApp(createdExpedition.ID, events.AppExpeditionPlanChanged)
 	return createdExpedition, nil
+}
+
+// ParseWaypointImport parses a plain-text system list or Spansh CSV export into
+// normalized star system names and summary counts without database access.
+func (app *App) ParseWaypointImport(rawText string) expedition.ParsedWaypointImport {
+	return expedition.ParseWaypointImportText(rawText)
+}
+
+// CreateExpeditionFromImport parses rawImportText as a plain-text waypoint list
+// or Spansh CSV export and creates a planning-mode expedition pre-populated with
+// the extracted star systems.
+func (app *App) CreateExpeditionFromImport(name, description, rawImportText string) (expedition.Expedition, error) {
+	parsed := expedition.ParseWaypointImportText(rawImportText)
+	if len(parsed.Systems) == 0 {
+		return expedition.Expedition{}, errors.New("no valid star systems found in waypoint import text")
+	}
+	return app.CreateExpeditionWithWaypoints(name, description, parsed.Systems)
 }

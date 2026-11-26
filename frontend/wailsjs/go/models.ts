@@ -306,7 +306,9 @@ export namespace app {
 	}
 	export class WaypointImportFile {
 	    fileName: string;
-	    content: string;
+	    suggestedExpeditionName: string;
+	    normalizedText: string;
+	    parsed: expedition.ParsedWaypointImport;
 	
 	    static createFrom(source: any = {}) {
 	        return new WaypointImportFile(source);
@@ -315,8 +317,28 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.fileName = source["fileName"];
-	        this.content = source["content"];
+	        this.suggestedExpeditionName = source["suggestedExpeditionName"];
+	        this.normalizedText = source["normalizedText"];
+	        this.parsed = this.convertValues(source["parsed"], expedition.ParsedWaypointImport);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
@@ -658,6 +680,24 @@ export namespace expedition {
 		    }
 		    return a;
 		}
+	}
+	export class ParsedWaypointImport {
+	    format: string;
+	    systems: string[];
+	    collapsedDuplicateCount: number;
+	    skippedLineCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ParsedWaypointImport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.systems = source["systems"];
+	        this.collapsedDuplicateCount = source["collapsedDuplicateCount"];
+	        this.skippedLineCount = source["skippedLineCount"];
+	    }
 	}
 	export class WaypointPermissions {
 	    systemLocked: boolean;

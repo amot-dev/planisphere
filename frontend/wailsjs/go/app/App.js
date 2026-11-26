@@ -54,6 +54,10 @@ export function CreateExpedition(arg1, arg2) {
   return window['go']['app']['App']['CreateExpedition'](arg1, arg2);
 }
 
+export function CreateExpeditionFromImport(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateExpeditionFromImport'](arg1, arg2, arg3);
+}
+
 export function CreateExpeditionWithWaypoints(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateExpeditionWithWaypoints'](arg1, arg2, arg3);
 }
@@ -156,6 +160,10 @@ export function OpenURL(arg1) {
 
 export function OverrideCarrierStopArrival(arg1, arg2) {
   return window['go']['app']['App']['OverrideCarrierStopArrival'](arg1, arg2);
+}
+
+export function ParseWaypointImport(arg1) {
+  return window['go']['app']['App']['ParseWaypointImport'](arg1);
 }
 
 export function PickExportSavePath(arg1, arg2) {
