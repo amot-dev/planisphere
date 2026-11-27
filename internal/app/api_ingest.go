@@ -30,10 +30,22 @@ type IngestStatus struct {
 	CurrentSystem        string `json:"currentSystem"`
 	CurrentShip          string `json:"currentShip"`
 	ClosedWindowRevision uint64 `json:"closedWindowRevision"`
+	TelemetryRevision    uint64 `json:"telemetryRevision"`
+	ArchiveLoaded        bool   `json:"archiveLoaded"`
 }
 
-// GetIngestStatus returns the journal ingestion status.
+// GetIngestStatus returns the journal ingestion status including archive row counts.
 func (app *App) GetIngestStatus() (IngestStatus, error) {
+	return app.collectIngestStatus(true)
+}
+
+// GetLiveIngestStatus returns live watcher, HUD location and vessel, and revision
+// status without scanning journal archive row counts.
+func (app *App) GetLiveIngestStatus() (IngestStatus, error) {
+	return app.collectIngestStatus(false)
+}
+
+func (app *App) collectIngestStatus(includeArchive bool) (IngestStatus, error) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	readyError := app.ready()
@@ -46,16 +58,20 @@ func (app *App) GetIngestStatus() (IngestStatus, error) {
 	}
 	if app.timeRangeStats != nil {
 		status.ClosedWindowRevision = app.timeRangeStats.ClosedWindowRevision()
+		status.TelemetryRevision = app.timeRangeStats.TelemetryRevision()
 	}
 	status.LastScanAt = settings.LastScanAt(app.db)
-	archiveStatus, archiveError := replay.ArchiveStatus(app.db)
-	if archiveError != nil {
-		return status, archiveError
+	if includeArchive {
+		archiveStatus, archiveError := replay.ArchiveStatus(app.db)
+		if archiveError != nil {
+			return status, archiveError
+		}
+		status.ArchiveLoaded = true
+		status.FilesTracked, status.EventsStored = archiveStatus.FilesTracked, archiveStatus.EventsStored
+		status.FirstEventAt, status.LastEventAt = archiveStatus.FirstEventAt, archiveStatus.LastEventAt
+		status.FirstEventGalactic = reference.ToGalactic(archiveStatus.FirstEventAt)
+		status.LastEventGalactic = reference.ToGalactic(archiveStatus.LastEventAt)
 	}
-	status.FilesTracked, status.EventsStored = archiveStatus.FilesTracked, archiveStatus.EventsStored
-	status.FirstEventAt, status.LastEventAt = archiveStatus.FirstEventAt, archiveStatus.LastEventAt
-	status.FirstEventGalactic = reference.ToGalactic(archiveStatus.FirstEventAt)
-	status.LastEventGalactic = reference.ToGalactic(archiveStatus.LastEventAt)
 	if _, currentSystemName, locationError := replay.QueryLatestPlayerLocation(app.db); locationError == nil {
 		status.CurrentSystem = currentSystemName
 	}

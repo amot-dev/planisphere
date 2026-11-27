@@ -57,6 +57,87 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	}
 }
 
+func TestQuietHUDIngestSubscriptionAndLiveIngestStatus(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:00:00Z", "LoadGame", "hud-load-game",
+		`{"timestamp":"2026-01-01T00:00:00Z","event":"LoadGame","Commander":"CMDR Hud","FID":"F42","Ship":"mandalay","ShipName":"Quiet Star","Odyssey":true}`)
+	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:05:00Z", "FSDJump", "hud-jump-sol",
+		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":12.5}`)
+
+	fullStatus, fullError := testApp.GetIngestStatus()
+	if fullError != nil {
+		testingContext.Fatalf("GetIngestStatus: %v", fullError)
+	}
+	if !fullStatus.ArchiveLoaded || fullStatus.EventsStored != 2 || fullStatus.CurrentSystem != "Sol" || fullStatus.CurrentShip == "" {
+		testingContext.Fatalf("unexpected full IngestStatus: %+v", fullStatus)
+	}
+
+	liveStatus, liveError := testApp.GetLiveIngestStatus()
+	if liveError != nil {
+		testingContext.Fatalf("GetLiveIngestStatus: %v", liveError)
+	}
+	if liveStatus.ArchiveLoaded || liveStatus.FilesTracked != 0 || liveStatus.EventsStored != 0 || liveStatus.FirstEventAt != "" || liveStatus.LastEventAt != "" {
+		testingContext.Fatalf("expected GetLiveIngestStatus to skip archive counts, got %+v", liveStatus)
+	}
+	if liveStatus.CurrentSystem != fullStatus.CurrentSystem ||
+		liveStatus.CurrentShip != fullStatus.CurrentShip ||
+		liveStatus.ClosedWindowRevision != fullStatus.ClosedWindowRevision ||
+		liveStatus.TelemetryRevision != fullStatus.TelemetryRevision {
+		testingContext.Fatalf("expected live HUD and revision fields to match full status: live=%+v full=%+v", liveStatus, fullStatus)
+	}
+
+	// Ambient persisted events (such as FSDTarget, Docked, StartJump, FSSDiscoveryScan) must not emit UITargetIngest or bump TelemetryRevision.
+	revisionBeforeAmbient := testApp.timeRangeStats.TelemetryRevision()
+	ambientTargets := testApp.publishJournalBatch(
+		journal.NewEventSet(
+			journal.EventFSDTarget,
+			journal.EventDocked,
+			journal.EventUndocked,
+			journal.EventStartJump,
+			journal.EventFSSDiscoveryScan,
+		),
+		"2026-01-01T00:10:00Z",
+		"2026-01-01T00:10:00Z",
+	)
+	if !ambientTargets.IsEmpty() {
+		testingContext.Fatalf("expected empty UITargetSet for ambient journal events, got %v", ambientTargets.Names())
+	}
+	if testApp.timeRangeStats.TelemetryRevision() != revisionBeforeAmbient {
+		testingContext.Fatalf("expected ambient journal events to preserve TelemetryRevision %d, got %d",
+			revisionBeforeAmbient, testApp.timeRangeStats.TelemetryRevision())
+	}
+
+	// Telemetry, arrival, and vessel events must emit UITargetIngest and increment TelemetryRevision monotonically.
+	expectedTelemetryRevision := revisionBeforeAmbient
+	for _, telemetryEvent := range []journal.EventType{
+		journal.EventScan,
+		journal.EventFSDJump,
+		journal.EventShipyardSwap,
+		journal.EventLoadGame,
+	} {
+		targets := testApp.publishJournalBatch(
+			journal.NewEventSet(telemetryEvent),
+			"2026-01-01T00:20:00Z",
+			"2026-01-01T00:20:00Z",
+		)
+		expectedTelemetryRevision++
+		if !targets.Has(events.UITargetIngest) {
+			testingContext.Fatalf("expected %s to emit UITargetIngest, got %v", journal.EventName(telemetryEvent), targets.Names())
+		}
+		if gotRevision := testApp.timeRangeStats.TelemetryRevision(); gotRevision != expectedTelemetryRevision {
+			testingContext.Fatalf("expected %s to advance TelemetryRevision to %d, got %d",
+				journal.EventName(telemetryEvent), expectedTelemetryRevision, gotRevision)
+		}
+	}
+
+	// Rewiring projections across a hot database switch must advance TelemetryRevision above its prior watermark.
+	testApp.wireProjections(testApp.db)
+	if gotSwitchedRevision := testApp.timeRangeStats.TelemetryRevision(); gotSwitchedRevision <= expectedTelemetryRevision {
+		testingContext.Fatalf("expected wireProjections to advance TelemetryRevision past %d, got %d",
+			expectedTelemetryRevision, gotSwitchedRevision)
+	}
+}
+
 func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	journalDirectory := testingContext.TempDir()

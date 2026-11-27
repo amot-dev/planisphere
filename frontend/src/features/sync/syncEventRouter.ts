@@ -27,7 +27,7 @@ export interface DataChangedDispatchContext {
   currentActiveExpeditionId: number
   currentFilter: stats.Filter
   refreshExpeditionListOnly: () => void
-  loadIngestStatusOnly: () => Promise<unknown>
+  loadIngestStatusOnly: (includeArchive?: boolean) => Promise<unknown>
   loadSettingsOnly: () => Promise<unknown>
   loadModesOnly: () => Promise<unknown>
   loadPlanOnly: (expeditionId: number) => Promise<void>
@@ -85,7 +85,7 @@ export function routeDataChangedEvent(
     !eventExpeditionId || (currentActive > 0 && eventExpeditionId === currentActive)
 
   if (domainSet.has('ingest')) {
-    void dispatchContext.loadIngestStatusOnly()
+    void dispatchContext.loadIngestStatusOnly(domainSet.has('settings'))
   }
   if (domainSet.has('settings')) {
     void dispatchContext.loadSettingsOnly()
@@ -130,11 +130,16 @@ export function flushDeferredBootEvents(dispatchContext: DataChangedDispatchCont
     return
   }
 
+  const hasDeferredSettings = queuedPayloads.some((payload) =>
+    (payload.domains ?? []).includes('settings'),
+  )
   const deduplicatedContext: DataChangedDispatchContext = {
     ...dispatchContext,
     bootState: { ...dispatchContext.bootState, initialBootComplete: true },
     refreshExpeditionListOnly: createOnceCallback(dispatchContext.refreshExpeditionListOnly),
-    loadIngestStatusOnly: createOnceCallback(dispatchContext.loadIngestStatusOnly),
+    loadIngestStatusOnly: createOnceCallback(() =>
+      dispatchContext.loadIngestStatusOnly(hasDeferredSettings),
+    ),
     loadSettingsOnly: createOnceCallback(dispatchContext.loadSettingsOnly),
     loadModesOnly: createOnceCallback(dispatchContext.loadModesOnly),
     loadPlanOnly: createOnceCallback(dispatchContext.loadPlanOnly),

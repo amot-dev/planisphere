@@ -15,6 +15,8 @@ export namespace app {
 	    currentSystem: string;
 	    currentShip: string;
 	    closedWindowRevision: number;
+	    telemetryRevision: number;
+	    archiveLoaded: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new IngestStatus(source);
@@ -36,6 +38,8 @@ export namespace app {
 	        this.currentSystem = source["currentSystem"];
 	        this.currentShip = source["currentShip"];
 	        this.closedWindowRevision = source["closedWindowRevision"];
+	        this.telemetryRevision = source["telemetryRevision"];
+	        this.archiveLoaded = source["archiveLoaded"];
 	    }
 	}
 	export class ModesState {

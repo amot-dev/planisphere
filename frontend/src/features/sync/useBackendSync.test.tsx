@@ -297,4 +297,112 @@ describe('useBackendSync lifecycle', () => {
     expect(spies.GetSidebarStats).toHaveBeenLastCalledWith(5, expect.anything(), true)
     expect(mountedHook.getResult().sidebarStats?.allTimeLoaded).toBe(true)
   })
+
+  it('uses GetLiveIngestStatus on routine ingest notifications, preserves archive counts, and guards stale live responses against full GetIngestStatus', async () => {
+    const runtimeMock = installWailsRuntimeMock()
+    let pendingLiveResolver: ((status: app.IngestStatus) => void) | null = null
+    let pauseNextLive = false
+    let fullCallCount = 0
+
+    const { spies } = installWailsAppMock({
+      SetLiveSyncPaused: async () => {},
+      GetSettings: async () => makeSettings({ setupCompleted: true, activeExpeditionId: 4 }),
+      GetIngestStatus: async () => {
+        fullCallCount += 1
+        return app.IngestStatus.createFrom({
+          filesTracked: fullCallCount === 1 ? 12 : 14,
+          eventsStored: fullCallCount === 1 ? 800 : 950,
+          firstEventAt: '2025-01-01T00:00:00Z',
+          lastEventAt: '2026-02-01T00:00:00Z',
+          currentSystem: fullCallCount === 1 ? 'Sol' : 'Colonia',
+          currentShip: 'Mandalay',
+          closedWindowRevision: 1,
+          telemetryRevision: fullCallCount === 1 ? 1 : 3,
+          archiveLoaded: true,
+        })
+      },
+      GetLiveIngestStatus: () => {
+        if (pauseNextLive) {
+          pauseNextLive = false
+          return new Promise<app.IngestStatus>((resolve) => {
+            pendingLiveResolver = resolve
+          })
+        }
+        return Promise.resolve(
+          app.IngestStatus.createFrom({
+            currentSystem: 'Alpha Centauri',
+            currentShip: 'Cobra Mk V',
+            closedWindowRevision: 1,
+            telemetryRevision: 2,
+            archiveLoaded: false,
+          }),
+        )
+      },
+      GetModesState: async () =>
+        app.ModesState.createFrom({ modes: [makeMode({ id: 1, name: 'Travel' })] }),
+      ListExpeditions: async () => [
+        expedition.Expedition.createFrom({ id: 4, name: 'Quiet HUD Test', status: 'active' }),
+      ],
+      GetPlan: async (expeditionId: number) =>
+        makePlanView({ expedition: { id: expeditionId, name: 'Quiet HUD Test', status: 'active' } }),
+      GetSidebarStats: async (expeditionId: number) =>
+        makeSidebarStats({ expeditionId, status: 'active' }),
+    })
+
+    const mountedHook = renderHook(() => useBackendSync())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(spies.GetIngestStatus).toHaveBeenCalledTimes(1)
+    expect(spies.GetLiveIngestStatus).not.toHaveBeenCalled()
+
+    // Routine live ingest domain update invokes GetLiveIngestStatus and preserves cached archive counts.
+    await act(async () => {
+      runtimeMock.emitDataChanged({ domains: ['ingest'] })
+      await Promise.resolve()
+    })
+    expect(spies.GetLiveIngestStatus).toHaveBeenCalledTimes(1)
+    expect(spies.GetIngestStatus).toHaveBeenCalledTimes(1)
+    expect(mountedHook.getResult().ingest).toEqual(
+      expect.objectContaining({
+        currentSystem: 'Alpha Centauri',
+        currentShip: 'Cobra Mk V',
+        telemetryRevision: 2,
+        filesTracked: 12,
+        eventsStored: 800,
+        firstEventAt: '2025-01-01T00:00:00Z',
+        lastEventAt: '2026-02-01T00:00:00Z',
+        archiveLoaded: true,
+      }),
+    )
+
+    // Launch a slow live ingest request, supersede it with a full settings+ingest notification, and verify the late live response is discarded.
+    pauseNextLive = true
+    act(() => {
+      runtimeMock.emitDataChanged({ domains: ['ingest'] })
+    })
+    expect(spies.GetLiveIngestStatus).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      runtimeMock.emitDataChanged({ domains: ['ingest', 'settings'] })
+      await Promise.resolve()
+    })
+    expect(spies.GetIngestStatus).toHaveBeenCalledTimes(2)
+    expect(mountedHook.getResult().ingest?.eventsStored).toBe(950)
+    expect(mountedHook.getResult().ingest?.telemetryRevision).toBe(3)
+
+    await act(async () => {
+      pendingLiveResolver?.(
+        app.IngestStatus.createFrom({
+          currentSystem: 'Stale System',
+          telemetryRevision: 2,
+          archiveLoaded: false,
+        }),
+      )
+      await Promise.resolve()
+    })
+    expect(mountedHook.getResult().ingest?.currentSystem).toBe('Colonia')
+    expect(mountedHook.getResult().ingest?.eventsStored).toBe(950)
+    expect(mountedHook.getResult().ingest?.telemetryRevision).toBe(3)
+  })
 })

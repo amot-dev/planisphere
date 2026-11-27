@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CockpitTopBar } from './components/ui/CockpitTopBar'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { TerminalBootScreen } from './components/ui/TerminalBootScreen'
@@ -44,11 +44,18 @@ export default function App() {
     refreshAll,
     handleRefreshPlan,
     refreshSettings,
+    refreshIngestStatus,
+    setIncludeArchiveIngest,
   } = useBackendSync()
 
   const [activeModal, setActiveModal] = useState<
     null | 'start' | 'settings' | 'expeditions' | 'export'
   >(null)
+
+  const isSetupIncomplete = Boolean(settings && !settings.setupCompleted)
+  useEffect(() => {
+    setIncludeArchiveIngest(activeModal === 'settings' || isSetupIncomplete)
+  }, [activeModal, isSetupIncomplete, setIncludeArchiveIngest])
 
   const [sidebarCollapsed, toggleSidebarCollapsed] = useLocalStorageBoolean(
     'planisphere_sidebar_collapsed',
@@ -103,13 +110,12 @@ export default function App() {
   )
 
   const handleOpenSettingsModal = useCallback(() => {
+    setIncludeArchiveIngest(true)
     void refreshSettings()
+    void refreshIngestStatus(true)
     setActiveModal('settings')
-  }, [refreshSettings])
+  }, [refreshIngestStatus, refreshSettings, setIncludeArchiveIngest])
 
-  const archiveRevision = ingest
-    ? `${ingest.eventsStored}:${ingest.firstEventAt}:${ingest.lastEventAt}`
-    : ''
   const exportEnabled = isExpeditionExportEnabled(activeExpeditionId, plan, sidebarStats)
 
   if (booting) {
@@ -170,7 +176,7 @@ export default function App() {
           <ExpeditionPlanner
             plan={plan}
             dbPath={settings?.dbPath ?? ''}
-            archiveRevision={archiveRevision}
+            telemetryRevision={ingest?.telemetryRevision ?? 0}
             closedWindowRevision={ingest?.closedWindowRevision ?? 0}
             clockSuspended={isClockSuspended}
             externalLinkInara={settings?.externalLinkInara}

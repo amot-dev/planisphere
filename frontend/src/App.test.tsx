@@ -10,6 +10,7 @@ import {
   makePlanView,
   makeSettings,
   makeSidebarStats,
+  makeWaypointDetails,
 } from './test/fixtures'
 import { buildSampleExportData } from './test/fixtures/exportFixtures'
 import { mountTestRoot, setFormControlValue } from './test/render'
@@ -18,9 +19,10 @@ import { installWailsAppMock, installWailsRuntimeMock } from './test/wailsMock'
 describe('App top-level shell orchestration', () => {
   it('renders TerminalBootScreen while bootstrap RPCs are pending, runs SetupWizard when unconfigured, and transitions into workspace on completion', async () => {
     installResizeObserverMock()
-    installWailsRuntimeMock()
+    const runtimeMock = installWailsRuntimeMock()
 
     let setupCompleted = false
+    let journalsConfigured = false
     let isFirstSettingsCall = true
     let resolveInitialSettings!: (value: app.Settings) => void
 
@@ -29,10 +31,19 @@ describe('App top-level shell orchestration', () => {
       name: 'First Horizon',
       status: 'active',
     })
-    const defaultIngest = app.IngestStatus.createFrom({
+    const emptyBootIngest = app.IngestStatus.createFrom({
+      filesTracked: 0,
+      eventsStored: 0,
+      scanning: false,
+      archiveLoaded: true,
+    })
+    const scannedIngest = app.IngestStatus.createFrom({
       filesTracked: 3,
       eventsStored: 120,
+      firstEventAt: '2026-01-01T00:00:00Z',
+      lastEventAt: '2026-01-02T00:00:00Z',
       scanning: false,
+      archiveLoaded: true,
     })
 
     const { spies } = installWailsAppMock({
@@ -54,7 +65,7 @@ describe('App top-level shell orchestration', () => {
           }),
         )
       },
-      GetIngestStatus: async () => defaultIngest,
+      GetIngestStatus: async () => (journalsConfigured ? scannedIngest : emptyBootIngest),
       GetModesState: async () =>
         app.ModesState.createFrom({ modes: [makeMode({ id: 1, name: 'Travel' })] }),
       ListExpeditions: async () => [activeExpedition],
@@ -65,7 +76,10 @@ describe('App top-level shell orchestration', () => {
           journalDir: '/tmp/journals',
           journalDirExists: true,
         }),
-      SetupConfigureJournals: async () => defaultIngest,
+      SetupConfigureJournals: async () => {
+        journalsConfigured = true
+        return scannedIngest
+      },
       CompleteSetup: async () => {
         setupCompleted = true
         return makeSettings({
@@ -120,6 +134,19 @@ describe('App top-level shell orchestration', () => {
       mounted.findButtonByText('NEXT').click()
       await Promise.resolve()
     })
+    expect(mounted.container.textContent).toContain('3 files')
+    expect(mounted.container.textContent).toContain('120 events')
+
+    // Live ingest notification during HistoricalImportStep invokes full GetIngestStatus and preserves the scanned summary.
+    const ingestCallsBeforeLiveDuringSetup = spies.GetIngestStatus.mock.calls.length
+    await act(async () => {
+      runtimeMock.emitDataChanged({ domains: ['ingest'] })
+      await Promise.resolve()
+    })
+    expect(spies.GetIngestStatus).toHaveBeenCalledTimes(ingestCallsBeforeLiveDuringSetup + 1)
+    expect(mounted.container.textContent).toContain('3 files')
+    expect(mounted.container.textContent).toContain('120 events')
+
     act(() => {
       mounted.findButtonByText('NEXT').click()
     })
@@ -400,5 +427,146 @@ describe('App top-level shell orchestration', () => {
     } finally {
       window.localStorage.removeItem('planisphere_sidebar_collapsed')
     }
+  })
+
+  it('keeps open active-leg drawers idle across unchanged telemetryRevision, refreshes archive counts on opening CONFIG, and refreshes drawers when telemetryRevision advances', async () => {
+    installResizeObserverMock()
+    const runtimeMock = installWailsRuntimeMock()
+    let currentTelemetryRevision = 1
+    let fullArchiveEvents = 400
+    let detailsCallCount = 0
+
+    const activePlan = makePlanView({
+      expedition: { id: 1, name: 'Telemetry Gate Run', status: 'active' },
+      rows: [
+        makeOriginRowView({
+          row: {
+            id: 101,
+            expeditionId: 1,
+            systemName: 'Sol',
+            visitedAt: '2026-01-01T10:00:00Z',
+            departedAt: '2026-01-01T10:15:00Z',
+          },
+          drawerTo: '2026-01-01T10:15:00Z',
+        }),
+        expedition.RowView.createFrom({
+          row: {
+            id: 102,
+            expeditionId: 1,
+            rowType: 'waypoint',
+            systemName: 'Alpha Centauri',
+            seq: 1,
+            visitedAt: '2026-01-01T11:00:00Z',
+            departedAt: '',
+          },
+          number: 2,
+          visitState: 'visited',
+          drawerFrom: '2026-01-01T10:15:00Z',
+          permissions: { hasDrawer: true },
+        }),
+      ],
+      lastVisitedIndex: 1,
+      visitedWaypointCount: 2,
+      waypointCount: 2,
+    })
+
+    const { spies } = installWailsAppMock({
+      SetLiveSyncPaused: async () => {},
+      GetSettings: async () =>
+        makeSettings({
+          setupCompleted: true,
+          activeExpeditionId: 1,
+          dbPath: '/tmp/planisphere.db',
+          journalDir: '/tmp/journals',
+          journalDirExists: true,
+        }),
+      GetIngestStatus: async () =>
+        app.IngestStatus.createFrom({
+          filesTracked: 8,
+          eventsStored: fullArchiveEvents,
+          currentSystem: 'Alpha Centauri',
+          currentShip: 'Mandalay',
+          closedWindowRevision: 1,
+          telemetryRevision: currentTelemetryRevision,
+          archiveLoaded: true,
+        }),
+      GetLiveIngestStatus: async () =>
+        app.IngestStatus.createFrom({
+          currentSystem: 'Alpha Centauri',
+          currentShip: 'Mandalay',
+          closedWindowRevision: 1,
+          telemetryRevision: currentTelemetryRevision,
+          archiveLoaded: false,
+        }),
+      GetModesState: async () =>
+        app.ModesState.createFrom({ modes: [makeMode({ id: 1, name: 'Travel' })] }),
+      ListExpeditions: async () => [
+        expedition.Expedition.createFrom({ id: 1, name: 'Telemetry Gate Run', status: 'active' }),
+      ],
+      GetPlan: async () => activePlan,
+      GetSidebarStats: async (expeditionId: number) =>
+        makeSidebarStats({ expeditionId, status: 'active', departed: true }),
+      GetWaypointDetails: async (rowId: number) => {
+        detailsCallCount += 1
+        return makeWaypointDetails({
+          rowId,
+          kind: 'leg',
+          number: 2,
+          from: '2026-01-01T10:15:00Z',
+          to: '',
+          arrivedAt: '2026-01-01T11:00:00Z',
+          inSystem: true,
+          metrics: { jumps: detailsCallCount === 1 ? 3 : 4 },
+        })
+      },
+    })
+
+    const mounted = mountTestRoot(createElement(App))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const drawerToggles = mounted.container.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label="Toggle per-waypoint leg telemetry drawer"]',
+    )
+    await act(async () => {
+      drawerToggles[1].click()
+      await Promise.resolve()
+    })
+    expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(1)
+
+    // Live ingest notification with unchanged telemetryRevision uses GetLiveIngestStatus and keeps open active-leg drawer idle.
+    await act(async () => {
+      runtimeMock.emitDataChanged({ domains: ['ingest'] })
+      await Promise.resolve()
+    })
+    expect(spies.GetLiveIngestStatus).toHaveBeenCalledTimes(1)
+    expect(spies.GetIngestStatus).toHaveBeenCalledTimes(1)
+    expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(1)
+
+    // Silent ambient events increased SQLite archive count to 425 without advancing telemetryRevision; opening CONFIG fetches full GetIngestStatus without re-fetching the drawer.
+    fullArchiveEvents = 425
+    await act(async () => {
+      mounted.findButtonByText('CONFIG').click()
+      await Promise.resolve()
+    })
+    expect(spies.GetIngestStatus).toHaveBeenCalledTimes(2)
+    expect(mounted.container.textContent).toContain('425')
+    expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(1)
+
+    // Close SettingsModal, then emit a live telemetry event advancing telemetryRevision to 2: GetLiveIngestStatus runs and refreshes the open active-leg drawer.
+    const settingsDialog = mounted.container.querySelector(
+      '[aria-label="Terminal Configuration"]',
+    ) as HTMLElement
+    act(() => {
+      ;(settingsDialog.querySelector('button') as HTMLButtonElement).click()
+    })
+    currentTelemetryRevision = 2
+    await act(async () => {
+      runtimeMock.emitDataChanged({ domains: ['ingest'] })
+      await Promise.resolve()
+    })
+    expect(spies.GetLiveIngestStatus).toHaveBeenCalledTimes(2)
+    expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(2)
   })
 })

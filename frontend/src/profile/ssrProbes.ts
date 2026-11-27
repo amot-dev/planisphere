@@ -321,7 +321,7 @@ export function executeSSRRenderPass(hydrated: HydratedFrontendFixture): {
   const plannerHTML = renderToString(
     createElement(ExpeditionPlanner, {
       plan,
-      archiveRevision: 'live-profile-rev',
+      telemetryRevision: 1,
       externalLinkInara: 'always',
       externalLinkEdsm: 'if_no_gec',
       externalLinkGec: 'always',

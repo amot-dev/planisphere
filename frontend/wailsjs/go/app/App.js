@@ -82,6 +82,10 @@ export function GetIngestStatus() {
   return window['go']['app']['App']['GetIngestStatus']();
 }
 
+export function GetLiveIngestStatus() {
+  return window['go']['app']['App']['GetLiveIngestStatus']();
+}
+
 export function GetModeUsage(arg1) {
   return window['go']['app']['App']['GetModeUsage'](arg1);
 }

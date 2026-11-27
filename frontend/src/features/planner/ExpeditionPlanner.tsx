@@ -25,7 +25,7 @@ const SEARCH_HIGHLIGHT_DURATION_MS = 2000
 
 /**
  * ExpeditionPlannerProps defines the active expedition plan state, database
- * path key, journal archive revision token, external-link visibility settings,
+ * path key, telemetry revision counter, external-link visibility settings,
  * modal-open undo shortcut suppression (`hasModalOpen`), targeted row scroll
  * and visit-search callbacks (`scrollTarget`, `onScrollTargetConsumed`,
  * `onSearchSystemVisits`), optimistic update handlers, lifecycle modal
@@ -34,7 +34,7 @@ const SEARCH_HIGHLIGHT_DURATION_MS = 2000
 export interface ExpeditionPlannerProps {
   plan: expedition.PlanView | null
   dbPath?: string
-  archiveRevision?: string
+  telemetryRevision?: number
   closedWindowRevision?: number
   clockSuspended?: boolean
   externalLinkInara?: string
@@ -61,7 +61,7 @@ export interface ExpeditionPlannerProps {
 export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   plan,
   dbPath = '',
-  archiveRevision = '',
+  telemetryRevision = 0,
   closedWindowRevision = 0,
   clockSuspended = false,
   externalLinkInara,
@@ -87,7 +87,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   const drawerState = useWaypointDetails(
     plan,
     Boolean(isPlanning),
-    archiveRevision,
+    telemetryRevision,
     isOptimisticPlan,
     closedWindowRevision,
     dbPath,

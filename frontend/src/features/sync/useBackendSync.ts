@@ -60,6 +60,11 @@ export function useBackendSync() {
   } | null>(null)
   const filterRef = useRef(filter)
   const includeAllTimeRef = useRef(false)
+  const includeArchiveIngestRef = useRef(false)
+
+  const setIncludeArchiveIngest = useCallback((includeArchive: boolean) => {
+    includeArchiveIngestRef.current = includeArchive
+  }, [])
 
   const handleRefreshAllFilterReconciled = useCallback(
     (nextFilter: stats.Filter, chosenId: number, willTransitionEffectReload: boolean) => {
@@ -99,6 +104,7 @@ export function useBackendSync() {
   } = useDomainLoaders({
     filterRef,
     includeAllTimeRef,
+    includeArchiveIngestRef,
     bootStateRef,
     lastEffectPlanExpeditionIdRef,
     onRefreshAllFilterReconciled: handleRefreshAllFilterReconciled,
@@ -319,6 +325,8 @@ export function useBackendSync() {
     refreshAll,
     handleRefreshPlan,
     refreshSettings: loadSettingsOnly,
+    refreshIngestStatus: loadIngestStatusOnly,
+    setIncludeArchiveIngest,
   }
 }
 

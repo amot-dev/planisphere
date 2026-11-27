@@ -47,6 +47,8 @@ export function GetExpeditionExportData(arg1:number):Promise<exporter.Expedition
 
 export function GetIngestStatus():Promise<app.IngestStatus>;
 
+export function GetLiveIngestStatus():Promise<app.IngestStatus>;
+
 export function GetModeUsage(arg1:number):Promise<Array<modes.ExpeditionUsage>>;
 
 export function GetModesState():Promise<app.ModesState>;

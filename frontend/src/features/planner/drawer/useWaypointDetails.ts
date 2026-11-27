@@ -37,7 +37,7 @@ function pruneDrawerRecord<T>(
 }
 
 interface DrawerRevisionSnapshot {
-  archiveRevision?: string
+  telemetryRevision?: number
   closedWindowRevision?: number
   scopeSignature?: string
 }
@@ -50,7 +50,7 @@ function isLoadedDrawerFresh(
   rowView: expedition.RowView,
   loadedDetails: expedition.WaypointDetails | undefined,
   loadedRevisions: DrawerRevisionSnapshot,
-  archiveRevision: string,
+  telemetryRevision: number,
   closedWindowRevision: number,
   commanderScopeSignature: string,
 ): boolean {
@@ -66,7 +66,7 @@ function isLoadedDrawerFresh(
   const isRevisionFresh =
     expectedTo !== ''
       ? loadedRevisions.closedWindowRevision === closedWindowRevision
-      : loadedRevisions.archiveRevision === archiveRevision &&
+      : loadedRevisions.telemetryRevision === telemetryRevision &&
         loadedRevisions.closedWindowRevision === closedWindowRevision
   return (
     isRevisionFresh &&
@@ -84,7 +84,7 @@ function isLoadedDrawerFresh(
 export function useWaypointDetails(
   plan: expedition.PlanView | null,
   isPlanning: boolean,
-  archiveRevision = '',
+  telemetryRevision = 0,
   isOptimisticPlan = false,
   closedWindowRevision = 0,
   databaseKey = '',
@@ -106,8 +106,8 @@ export function useWaypointDetails(
   const databaseKeyRef = useRef<string>(databaseKey)
   databaseKeyRef.current = databaseKey
 
-  const archiveRevisionRef = useRef<string>(archiveRevision)
-  archiveRevisionRef.current = archiveRevision
+  const telemetryRevisionRef = useRef<number>(telemetryRevision)
+  telemetryRevisionRef.current = telemetryRevision
 
   const closedWindowRevisionRef = useRef<number>(closedWindowRevision)
   closedWindowRevisionRef.current = closedWindowRevision
@@ -116,7 +116,7 @@ export function useWaypointDetails(
   const commanderScopeSignatureRef = useRef<string>(commanderScopeSignature)
   commanderScopeSignatureRef.current = commanderScopeSignature
 
-  const loadedArchiveRevisionByIdRef = useRef<Record<number, string>>({})
+  const loadedTelemetryRevisionByIdRef = useRef<Record<number, number>>({})
   const loadedClosedRevisionByIdRef = useRef<Record<number, number>>({})
   const loadedScopeSignatureByIdRef = useRef<Record<number, string>>({})
   const requestSeqByRowIdRef = useRef<Record<number, number>>({})
@@ -134,7 +134,7 @@ export function useWaypointDetails(
   const loadDetails = useCallback((rowId: number) => {
     const requestExpeditionId = activeExpeditionIdRef.current
     const requestDatabaseKey = databaseKeyRef.current
-    const requestArchiveRevision = archiveRevisionRef.current
+    const requestTelemetryRevision = telemetryRevisionRef.current
     const requestClosedRevision = closedWindowRevisionRef.current
     const requestScopeSignature = commanderScopeSignatureRef.current
     const requestSequence = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
@@ -153,12 +153,12 @@ export function useWaypointDetails(
           return
         }
         if (!details || !details.kind) {
-          delete loadedArchiveRevisionByIdRef.current[rowId]
+          delete loadedTelemetryRevisionByIdRef.current[rowId]
           delete loadedClosedRevisionByIdRef.current[rowId]
           delete loadedScopeSignatureByIdRef.current[rowId]
           return
         }
-        loadedArchiveRevisionByIdRef.current[rowId] = requestArchiveRevision
+        loadedTelemetryRevisionByIdRef.current[rowId] = requestTelemetryRevision
         loadedClosedRevisionByIdRef.current[rowId] = requestClosedRevision
         loadedScopeSignatureByIdRef.current[rowId] = requestScopeSignature
         setDetailsById((previous) => {
@@ -173,7 +173,7 @@ export function useWaypointDetails(
           databaseKeyRef.current === requestDatabaseKey &&
           requestSeqByRowIdRef.current[rowId] === requestSequence
         ) {
-          delete loadedArchiveRevisionByIdRef.current[rowId]
+          delete loadedTelemetryRevisionByIdRef.current[rowId]
           delete loadedClosedRevisionByIdRef.current[rowId]
           delete loadedScopeSignatureByIdRef.current[rowId]
           console.error('Failed to load waypoint details:', detailsError)
@@ -193,7 +193,7 @@ export function useWaypointDetails(
 
   // Reset open drawers and cached payloads when switching expeditions, switching databases, or entering planning mode.
   useEffect(() => {
-    loadedArchiveRevisionByIdRef.current = {}
+    loadedTelemetryRevisionByIdRef.current = {}
     loadedClosedRevisionByIdRef.current = {}
     loadedScopeSignatureByIdRef.current = {}
     requestSeqByRowIdRef.current = {}
@@ -214,7 +214,7 @@ export function useWaypointDetails(
     if (!plan || isPlanning || isOptimisticPlan) return
 
     const invalidatePrunedRow = (rowId: number) => {
-      delete loadedArchiveRevisionByIdRef.current[rowId]
+      delete loadedTelemetryRevisionByIdRef.current[rowId]
       delete loadedClosedRevisionByIdRef.current[rowId]
       delete loadedScopeSignatureByIdRef.current[rowId]
       requestSeqByRowIdRef.current[rowId] = (requestSeqByRowIdRef.current[rowId] ?? 0) + 1
@@ -247,11 +247,11 @@ export function useWaypointDetails(
           rowView,
           detailsByIdRef.current[rowId],
           {
-            archiveRevision: loadedArchiveRevisionByIdRef.current[rowId],
+            telemetryRevision: loadedTelemetryRevisionByIdRef.current[rowId],
             closedWindowRevision: loadedClosedRevisionByIdRef.current[rowId],
             scopeSignature: loadedScopeSignatureByIdRef.current[rowId],
           },
-          archiveRevision,
+          telemetryRevision,
           closedWindowRevision,
           commanderScopeSignature,
         )
@@ -261,7 +261,6 @@ export function useWaypointDetails(
       loadDetails(rowId)
     }
   }, [
-    archiveRevision,
     closedWindowRevision,
     commanderScopeSignature,
     isOptimisticPlan,
@@ -269,6 +268,7 @@ export function useWaypointDetails(
     loadDetails,
     plan,
     rowViewById,
+    telemetryRevision,
   ])
 
   const toggleExpand = useCallback(

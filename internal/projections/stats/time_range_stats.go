@@ -17,6 +17,11 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
+var closedWindowRevisionAppEvents = events.NewAppSet(
+	events.AppCommanderFilterChanged,
+	events.AppDatabaseSwitched,
+)
+
 // TimeRangeStats caches bounded expedition and telemetry window metrics across
 // specialized section projections.
 type TimeRangeStats struct {
@@ -27,6 +32,7 @@ type TimeRangeStats struct {
 	realization          *TimeRangeRealization
 	watermarkMu          sync.Mutex
 	closedWindowRevision uint64
+	telemetryRevision    uint64
 	highWaterTimestamp   string
 }
 
@@ -49,11 +55,20 @@ func NewTimeRangeStats(
 		exobiology:           NewTimeRangeExobiology(dbConn, bus, salesLedger, modeLoader),
 		realization:          NewTimeRangeRealization(dbConn, bus, salesLedger, modeLoader),
 		closedWindowRevision: 1,
+		telemetryRevision:    1,
 		highWaterTimestamp:   initialHighWater,
 	}
 	if bus != nil {
 		bus.OnTrigger(
-			timeRangeStats.Triggers().WithJournal(journal.EventLoadGame, journal.EventShipyardSwap),
+			timeRangeStats.Triggers().
+				WithJournal(
+					journal.EventCommander,
+					journal.EventLoadGame,
+					journal.EventShipyardSwap,
+					journal.EventClearSavedGame,
+					journal.EventNewCommander,
+				).
+				WithApp(events.AppExpeditionModesChanged),
 			timeRangeStats.observeTrigger,
 		)
 	}
@@ -132,13 +147,35 @@ func (timeRangeStats *TimeRangeStats) EnsureMinClosedWindowRevision(minRevision 
 	}
 }
 
+// TelemetryRevision returns a monotonic revision counter that advances whenever
+// travel, discovery, realization, vessel, identity, or expedition mode triggers
+// may affect open waypoint telemetry drawers.
+func (timeRangeStats *TimeRangeStats) TelemetryRevision() uint64 {
+	timeRangeStats.watermarkMu.Lock()
+	defer timeRangeStats.watermarkMu.Unlock()
+	return timeRangeStats.telemetryRevision
+}
+
+// EnsureMinTelemetryRevision raises telemetryRevision to at least minRevision
+// so replacing TimeRangeStats across a hot database switch never resets or collides
+// with an earlier revision.
+func (timeRangeStats *TimeRangeStats) EnsureMinTelemetryRevision(minRevision uint64) {
+	timeRangeStats.watermarkMu.Lock()
+	defer timeRangeStats.watermarkMu.Unlock()
+	if timeRangeStats.telemetryRevision < minRevision {
+		timeRangeStats.telemetryRevision = minRevision
+	}
+}
+
 func (timeRangeStats *TimeRangeStats) observeTrigger(observed projection.Triggers) {
 	timeRangeStats.watermarkMu.Lock()
 	defer timeRangeStats.watermarkMu.Unlock()
-	if !observed.App.IsEmpty() ||
-		observed.Journal.Intersects(realizationRetroactiveJournalEvents) ||
-		observed.EarliestTimestamp == "" ||
-		observed.EarliestTimestamp <= timeRangeStats.highWaterTimestamp {
+	timeRangeStats.telemetryRevision++
+	if observed.App.Intersects(closedWindowRevisionAppEvents) ||
+		(!observed.Journal.IsEmpty() &&
+			(observed.Journal.Intersects(realizationRetroactiveJournalEvents) ||
+				observed.EarliestTimestamp == "" ||
+				observed.EarliestTimestamp <= timeRangeStats.highWaterTimestamp)) {
 		timeRangeStats.closedWindowRevision++
 	}
 	latestObserved := max(observed.LatestTimestamp, observed.EarliestTimestamp)

@@ -68,7 +68,7 @@ function mountWorkspaceTree(
         }),
         createElement(ExpeditionPlanner, {
           plan,
-          archiveRevision: 'live-profile-rev',
+          telemetryRevision: 1,
           externalLinkInara: 'on',
           externalLinkEdsm: 'if_no_gec',
           externalLinkGec: 'on',

@@ -15,10 +15,14 @@ import (
 )
 
 func (app *App) wireProjections(dbConn *sql.DB) {
-	var previousClosedRevision uint64
+	var (
+		previousClosedRevision    uint64
+		previousTelemetryRevision uint64
+	)
 	hasPreviousTimeRangeStats := app.timeRangeStats != nil
 	if hasPreviousTimeRangeStats {
 		previousClosedRevision = app.timeRangeStats.ClosedWindowRevision()
+		previousTelemetryRevision = app.timeRangeStats.TelemetryRevision()
 	}
 
 	bus := projection.NewBus()
@@ -32,6 +36,7 @@ func (app *App) wireProjections(dbConn *sql.DB) {
 	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps, expedition.LoadModeLookup)
 	if hasPreviousTimeRangeStats {
 		app.timeRangeStats.EnsureMinClosedWindowRevision(previousClosedRevision + 1)
+		app.timeRangeStats.EnsureMinTelemetryRevision(previousTelemetryRevision + 1)
 	}
 
 	bus.OnTrigger(
@@ -48,10 +53,18 @@ func (app *App) wireProjections(dbConn *sql.DB) {
 func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetIngest,
-		projection.Triggers{
-			Journal: journal.AllEvents,
-			App:     events.NewAppSet(events.AppCommanderFilterChanged, events.AppDatabaseSwitched),
-		},
+		projection.TriggersFrom(app.timeRangeStats, app.shipHistory, app.systemArrivals).
+			WithJournal(
+				journal.EventCommander,
+				journal.EventLoadGame,
+				journal.EventClearSavedGame,
+				journal.EventNewCommander,
+			).
+			WithApp(
+				events.AppCommanderFilterChanged,
+				events.AppDatabaseSwitched,
+				events.AppExpeditionModesChanged,
+			),
 	)
 	bus.SubscribeUI(
 		events.UITargetStats,

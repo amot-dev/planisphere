@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type MutableRefObject } from 'react'
 import {
   GetIngestStatus,
+  GetLiveIngestStatus,
   GetModesState,
   GetPlan,
   GetSettings,
@@ -59,13 +60,33 @@ export function reconcileModeFilter(
   })
 }
 
+function mergeLiveIngestStatus(
+  previousIngest: app.IngestStatus | null,
+  nextIngest: app.IngestStatus,
+): app.IngestStatus {
+  if (nextIngest.archiveLoaded || !previousIngest) {
+    return nextIngest
+  }
+  return app.IngestStatus.createFrom({
+    ...nextIngest,
+    filesTracked: previousIngest.filesTracked,
+    eventsStored: previousIngest.eventsStored,
+    firstEventAt: previousIngest.firstEventAt,
+    firstEventGalactic: previousIngest.firstEventGalactic,
+    lastEventAt: previousIngest.lastEventAt,
+    lastEventGalactic: previousIngest.lastEventGalactic,
+    archiveLoaded: previousIngest.archiveLoaded,
+  })
+}
+
 /**
- * UseDomainLoadersOptions provides shared filter, sidebar scope, and boot
- * lifecycle refs used by sequence-guarded backend RPC loaders.
+ * UseDomainLoadersOptions provides shared filter, sidebar scope, archive ingest,
+ * and boot lifecycle refs used by sequence-guarded backend RPC loaders.
  */
 export interface UseDomainLoadersOptions {
   filterRef: MutableRefObject<stats.Filter>
   includeAllTimeRef?: MutableRefObject<boolean>
+  includeArchiveIngestRef?: MutableRefObject<boolean>
   bootStateRef: MutableRefObject<SyncBootLifecycleState>
   lastEffectPlanExpeditionIdRef: MutableRefObject<number>
   onRefreshAllFilterReconciled?: (
@@ -82,6 +103,7 @@ export interface UseDomainLoadersOptions {
 export function useDomainLoaders({
   filterRef,
   includeAllTimeRef,
+  includeArchiveIngestRef,
   bootStateRef,
   lastEffectPlanExpeditionIdRef,
   onRefreshAllFilterReconciled,
@@ -99,25 +121,47 @@ export function useDomainLoaders({
   const setupCompletedRef = useRef(false)
   const coreStateRequestSequenceRef = useRef(0)
   const ingestRequestSequenceRef = useRef(0)
+  const inFlightArchiveIngestCountRef = useRef(0)
   const settingsRequestSequenceRef = useRef(0)
   const modesRequestSequenceRef = useRef(0)
   const planRequestSequenceRef = useRef(0)
   const statsRequestSequenceRef = useRef(0)
   const lastStatsRequestIncludedAllTimeRef = useRef(false)
 
-  const loadIngestStatusOnly = useCallback(async () => {
-    const requestSequence = ++ingestRequestSequenceRef.current
-    try {
-      const ingestStatus = await GetIngestStatus()
-      if (requestSequence === ingestRequestSequenceRef.current) {
-        setIngest(ingestStatus)
+  const loadIngestStatusOnly = useCallback(
+    async (includeArchive = true) => {
+      const shouldIncludeArchive =
+        includeArchive ||
+        !setupCompletedRef.current ||
+        Boolean(includeArchiveIngestRef?.current) ||
+        inFlightArchiveIngestCountRef.current > 0
+      const requestSequence = ++ingestRequestSequenceRef.current
+      if (shouldIncludeArchive) {
+        inFlightArchiveIngestCountRef.current += 1
       }
-      return ingestStatus
-    } catch (ingestError) {
-      console.error('Failed to load ingest status:', ingestError)
-      return null
-    }
-  }, [])
+      try {
+        const ingestStatus = shouldIncludeArchive
+          ? await GetIngestStatus()
+          : await GetLiveIngestStatus()
+        if (requestSequence === ingestRequestSequenceRef.current && ingestStatus) {
+          setIngest((previousIngest) =>
+            shouldIncludeArchive
+              ? ingestStatus
+              : mergeLiveIngestStatus(previousIngest, ingestStatus),
+          )
+        }
+        return ingestStatus
+      } catch (ingestError) {
+        console.error('Failed to load ingest status:', ingestError)
+        return null
+      } finally {
+        if (shouldIncludeArchive) {
+          inFlightArchiveIngestCountRef.current -= 1
+        }
+      }
+    },
+    [includeArchiveIngestRef],
+  )
 
   const loadSettingsOnly = useCallback(async () => {
     const requestSequence = ++settingsRequestSequenceRef.current
@@ -182,6 +226,7 @@ export function useDomainLoaders({
     const ingestRequestSequence = ++ingestRequestSequenceRef.current
     const settingsRequestSequence = ++settingsRequestSequenceRef.current
     const modesRequestSequence = ++modesRequestSequenceRef.current
+    inFlightArchiveIngestCountRef.current += 1
     try {
       const [settingsData, ingestStatus, modesStateData, expeditionList] = await Promise.all([
         GetSettings(),
@@ -239,6 +284,8 @@ export function useDomainLoaders({
     } catch (coreStateError) {
       console.error('Failed to load core state:', coreStateError)
       return { settingsData: null, modesStateData: null, chosenId: 0 }
+    } finally {
+      inFlightArchiveIngestCountRef.current -= 1
     }
   }, [])
 

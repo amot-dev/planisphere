@@ -22,7 +22,7 @@ function createDeferred<T>(): Deferred<T> {
 
 interface HarnessProps {
   plan: expedition.PlanView
-  archiveRevision?: string
+  telemetryRevision?: number
   closedWindowRevision?: number
   databaseKey?: string
 }
@@ -40,11 +40,11 @@ function mountWaypointDetailsHarness(initialProps: HarnessProps, deferredCount: 
   const mountedHook = renderHook(
     ({
       plan,
-      archiveRevision = 'rev-1',
+      telemetryRevision = 1,
       closedWindowRevision = 1,
       databaseKey,
     }: HarnessProps) =>
-      useWaypointDetails(plan, false, archiveRevision, false, closedWindowRevision, databaseKey),
+      useWaypointDetails(plan, false, telemetryRevision, false, closedWindowRevision, databaseKey),
     initialProps,
   )
   const resolveLoad = async (index: number, details: expedition.WaypointDetails) => {
@@ -95,7 +95,7 @@ describe('useWaypointDetails', () => {
     })
 
     const { mountedHook, spies, resolveLoad } = mountWaypointDetailsHarness(
-      { plan: activePlanInSystem, archiveRevision: 'rev-1', closedWindowRevision: 1 },
+      { plan: activePlanInSystem, telemetryRevision: 1, closedWindowRevision: 1 },
       4,
     )
 
@@ -123,9 +123,15 @@ describe('useWaypointDetails', () => {
     expect(mountedHook.getResult().loadingDetails[102]).toBe(false)
     expect(mountedHook.getResult().detailsById[102]?.metrics.jumps).toBe(4)
 
-    // Subsequent archiveRevision refresh must keep existing details visible without toggling loading true.
+    // Re-rendering with unchanged telemetryRevision and bounds must not re-fetch open active-leg details.
     await act(async () => {
-      mountedHook.rerender({ plan: activePlanInSystem, archiveRevision: 'rev-2', closedWindowRevision: 1 })
+      mountedHook.rerender({ plan: activePlanInSystem, telemetryRevision: 1, closedWindowRevision: 1 })
+    })
+    expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(1)
+
+    // Subsequent telemetryRevision refresh must keep existing details visible without toggling loading true.
+    await act(async () => {
+      mountedHook.rerender({ plan: activePlanInSystem, telemetryRevision: 2, closedWindowRevision: 1 })
     })
     expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(2)
     expect(mountedHook.getResult().loadingDetails[102]).toBe(false)
@@ -149,9 +155,9 @@ describe('useWaypointDetails', () => {
     expect(mountedHook.getResult().loadingDetails[102]).toBe(false)
     expect(mountedHook.getResult().detailsById[102]?.realization.totalRealized).toBe(5000000)
 
-    // Departure transition on the open drawer must trigger a flicker-free refresh even on the same archiveRevision.
+    // Departure transition on the open drawer must trigger a flicker-free refresh even on the same telemetryRevision.
     await act(async () => {
-      mountedHook.rerender({ plan: activePlanDeparted, archiveRevision: 'rev-2', closedWindowRevision: 1 })
+      mountedHook.rerender({ plan: activePlanDeparted, telemetryRevision: 2, closedWindowRevision: 1 })
     })
     expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(3)
     expect(mountedHook.getResult().loadingDetails[102]).toBe(false)
@@ -172,15 +178,15 @@ describe('useWaypointDetails', () => {
     expect(mountedHook.getResult().detailsById[102]?.to).toBe('2026-01-01T11:30:00Z')
     expect(mountedHook.getResult().detailsById[102]?.metrics.bodiesScanned).toBe(7)
 
-    // Closed drawers ignore forward archiveRevision updates while closedWindowRevision stays constant.
+    // Closed drawers ignore forward telemetryRevision updates while closedWindowRevision stays constant.
     await act(async () => {
-      mountedHook.rerender({ plan: activePlanDeparted, archiveRevision: 'rev-3', closedWindowRevision: 1 })
+      mountedHook.rerender({ plan: activePlanDeparted, telemetryRevision: 3, closedWindowRevision: 1 })
     })
     expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(3)
 
     // Incrementing closedWindowRevision refreshes the closed drawer without loading flash.
     await act(async () => {
-      mountedHook.rerender({ plan: activePlanDeparted, archiveRevision: 'rev-4', closedWindowRevision: 2 })
+      mountedHook.rerender({ plan: activePlanDeparted, telemetryRevision: 4, closedWindowRevision: 2 })
     })
     expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(4)
     expect(mountedHook.getResult().loadingDetails[102]).toBe(false)
@@ -219,7 +225,7 @@ describe('useWaypointDetails', () => {
     })
 
     const { mountedHook, spies, resolveLoad } = mountWaypointDetailsHarness(
-      { plan: planWithCurrentRow, archiveRevision: 'rev-1' },
+      { plan: planWithCurrentRow, telemetryRevision: 1 },
       3,
     )
 
@@ -235,12 +241,12 @@ describe('useWaypointDetails', () => {
 
     // Start an open-leg refresh, then demote row 203 to future before the response resolves.
     await act(async () => {
-      mountedHook.rerender({ plan: planWithCurrentRow, archiveRevision: 'rev-2' })
+      mountedHook.rerender({ plan: planWithCurrentRow, telemetryRevision: 2 })
     })
     expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(2)
 
     await act(async () => {
-      mountedHook.rerender({ plan: planAfterInsertDemotingToFuture, archiveRevision: 'rev-2' })
+      mountedHook.rerender({ plan: planAfterInsertDemotingToFuture, telemetryRevision: 2 })
     })
     expect(mountedHook.getResult().expandedRowIds[203]).toBeUndefined()
     expect(mountedHook.getResult().detailsById[203]).toBeUndefined()
@@ -255,7 +261,7 @@ describe('useWaypointDetails', () => {
 
     // Promoting row 203 back to current must not auto-reopen or flash stale details.
     await act(async () => {
-      mountedHook.rerender({ plan: planWithCurrentRow, archiveRevision: 'rev-2' })
+      mountedHook.rerender({ plan: planWithCurrentRow, telemetryRevision: 2 })
     })
     expect(mountedHook.getResult().expandedRowIds[203]).toBeUndefined()
     expect(mountedHook.getResult().detailsById[203]).toBeUndefined()

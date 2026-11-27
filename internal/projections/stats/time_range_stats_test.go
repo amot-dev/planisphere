@@ -261,8 +261,28 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
 		testingContext.Fatalf("expected initial ClosedWindowRevision 1, got %d", gotRevision)
 	}
+	if gotTelemetryRevision := timeRangeStats.TelemetryRevision(); gotTelemetryRevision != 1 {
+		testingContext.Fatalf("expected initial TelemetryRevision 1, got %d", gotTelemetryRevision)
+	}
 
-	// Chronological forward non-retroactive gameplay batches advance the high-water mark without incrementing ClosedWindowRevision.
+	// Ambient non-telemetry journal events must leave both ClosedWindowRevision and TelemetryRevision unchanged.
+	eventBus.PublishJournalSince(
+		journal.NewEventSet(
+			journal.EventFSDTarget,
+			journal.EventDocked,
+			journal.EventUndocked,
+			journal.EventStartJump,
+			journal.EventFSSDiscoveryScan,
+		),
+		"2026-01-18T19:45:00Z",
+	)
+	if timeRangeStats.ClosedWindowRevision() != 1 || timeRangeStats.TelemetryRevision() != 1 {
+		testingContext.Fatalf("expected ambient events to preserve revisions at 1, got closed=%d telemetry=%d",
+			timeRangeStats.ClosedWindowRevision(), timeRangeStats.TelemetryRevision())
+	}
+
+	// Chronological forward non-retroactive gameplay batches advance the high-water mark and TelemetryRevision without incrementing ClosedWindowRevision.
+	expectedTelemetryRevision := uint64(1)
 	forwardBatches := []struct {
 		events    journal.EventSet
 		timestamp string
@@ -270,21 +290,40 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 		{events: journal.NewEventSet(journal.EventFSDJump), timestamp: "2026-01-18T20:00:00Z"},
 		{events: journal.NewEventSet(journal.EventScan, journal.EventSAAScanComplete), timestamp: "2026-01-18T20:10:00Z"},
 		{events: journal.NewEventSet(journal.EventScanOrganic), timestamp: "2026-01-18T20:20:00Z"},
+		{events: journal.NewEventSet(journal.EventCommander, journal.EventLoadGame), timestamp: "2026-01-18T20:21:00Z"},
 	}
 	for _, batch := range forwardBatches {
 		eventBus.PublishJournalSince(batch.events, batch.timestamp)
+		expectedTelemetryRevision++
 		if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
 			testingContext.Fatalf("expected forward batch at %s to keep ClosedWindowRevision 1, got %d", batch.timestamp, gotRevision)
 		}
+		if gotTelemetry := timeRangeStats.TelemetryRevision(); gotTelemetry != expectedTelemetryRevision {
+			testingContext.Fatalf("expected forward batch at %s to advance TelemetryRevision to %d, got %d",
+				batch.timestamp, expectedTelemetryRevision, gotTelemetry)
+		}
 	}
-	// Multi-event forward range [T1, T3] advances highWaterTimestamp to T3 without incrementing ClosedWindowRevision.
+	// Multi-event forward range [T1, T3] advances highWaterTimestamp to T3 and TelemetryRevision without incrementing ClosedWindowRevision.
 	eventBus.PublishJournalRange(
 		journal.NewEventSet(journal.EventFSDJump, journal.EventShipyardSwap),
 		"2026-01-18T20:22:00Z",
 		"2026-01-18T20:28:00Z",
 	)
+	expectedTelemetryRevision++
 	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
 		testingContext.Fatalf("expected forward [T1, T3] range to preserve ClosedWindowRevision 1, got %d", gotRevision)
+	}
+	if gotTelemetry := timeRangeStats.TelemetryRevision(); gotTelemetry != expectedTelemetryRevision {
+		testingContext.Fatalf("expected forward [T1, T3] range to advance TelemetryRevision to %d, got %d",
+			expectedTelemetryRevision, gotTelemetry)
+	}
+
+	// AppExpeditionModesChanged advances TelemetryRevision while preserving ClosedWindowRevision.
+	eventBus.PublishApp(events.AppExpeditionModesChanged)
+	expectedTelemetryRevision++
+	if timeRangeStats.ClosedWindowRevision() != 1 || timeRangeStats.TelemetryRevision() != expectedTelemetryRevision {
+		testingContext.Fatalf("expected AppExpeditionModesChanged to keep ClosedWindowRevision=1 and set TelemetryRevision=%d, got closed=%d telemetry=%d",
+			expectedTelemetryRevision, timeRangeStats.ClosedWindowRevision(), timeRangeStats.TelemetryRevision())
 	}
 
 	expectedRevision := uint64(1)
@@ -339,6 +378,13 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 	timeRangeStats.EnsureMinClosedWindowRevision(expectedRevision + 2)
 	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != monotonicFloor {
 		testingContext.Fatalf("expected EnsureMinClosedWindowRevision monotonic floor %d, got %d", monotonicFloor, gotRevision)
+	}
+
+	telemetryFloor := timeRangeStats.TelemetryRevision() + 7
+	timeRangeStats.EnsureMinTelemetryRevision(telemetryFloor)
+	timeRangeStats.EnsureMinTelemetryRevision(telemetryFloor - 3)
+	if gotTelemetry := timeRangeStats.TelemetryRevision(); gotTelemetry != telemetryFloor {
+		testingContext.Fatalf("expected EnsureMinTelemetryRevision monotonic floor %d, got %d", telemetryFloor, gotTelemetry)
 	}
 }
 

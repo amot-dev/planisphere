@@ -21,6 +21,7 @@ export {
   DeleteRow,
   GetExpeditionExportData,
   GetIngestStatus,
+  GetLiveIngestStatus,
   GetModeUsage,
   GetModesState,
   GetPlan,
