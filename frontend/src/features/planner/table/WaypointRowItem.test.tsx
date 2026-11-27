@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act, type ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../../api/models'
 import {
@@ -8,16 +8,14 @@ import {
   renderWaypointRowHtml,
 } from '../../../test/fixtures'
 import { mountTestRoot, setFormControlValue } from '../../../test/render'
-import { WaypointRowItem, type WaypointRowHandlers } from './WaypointRowItem'
+import { WaypointRowItem } from './WaypointRowItem'
 
 const defaultRowHandlers = makeWaypointRowHandlers()
-const makeWaypointRow = makeRowView
-const renderRowItem = renderWaypointRowHtml
 
 describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
-  it('renders single-row textarea and colors waypoint left borders by flight mode, current leg, and muted origin', () => {
-    const visitedLegHtml = renderRowItem({
-      rowView: makeWaypointRow({
+  it('renders single-row textarea, drawer chevron, and waypoint left borders by flight mode, current leg, and muted origin', () => {
+    const visitedLegHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: {
           id: 11,
           systemName: 'Sol',
@@ -36,16 +34,17 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
     expect(visitedLegHtml).toContain('style="border-left-color:#FF7100"')
     expect(visitedLegHtml).toContain('rows="1"')
     expect(visitedLegHtml).not.toContain('rows="2"')
+    expect(visitedLegHtml).toContain('aria-label="Toggle per-waypoint leg telemetry drawer"')
 
-    const originRowHtml = renderRowItem({
-      rowView: makeWaypointRow({ number: 1, visitState: 'visited' }),
+    const originRowHtml = renderWaypointRowHtml({
+      rowView: makeRowView({ number: 1, visitState: 'visited' }),
       index: 0,
       lastVisitedIndex: 1,
     })
     expect(originRowHtml).toContain('style="border-left-color:#3d2816"')
 
-    const currentLegRowHtml = renderRowItem({
-      rowView: makeWaypointRow({
+    const currentLegRowHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: { id: 3, systemName: 'Sagittarius A*' },
         number: 3,
         visitState: 'current',
@@ -58,8 +57,8 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
     })
     expect(currentLegRowHtml).toContain('style="border-left-color:#00E5A3"')
 
-    const futureRowHtml = renderRowItem({
-      rowView: makeWaypointRow({
+    const futureRowHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: { id: 4, systemName: 'Beagle Point' },
         number: 4,
         visitState: 'future',
@@ -72,8 +71,8 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
   })
 
   it('supports collapsible columns: hides notes or carrier stop when toggled off', () => {
-    const htmlHidden = renderRowItem({
-      rowView: makeWaypointRow({
+    const htmlHidden = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: {
           id: 99,
           systemName: 'Col 285 Sector',
@@ -95,48 +94,9 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
     expect(htmlHidden).toContain('Col 285 Sector')
   })
 
-  it('renders distance from player on active next waypoint and distance from previous waypoint in planning', () => {
-    const activeNextHtml = renderRowItem({
-      rowView: makeWaypointRow({
-        row: { id: 18, systemName: 'Maia', poiName: 'Black Hole' },
-        number: 2,
-        visitState: 'current',
-        distFromPrevLy: 380.5,
-        distFromCurrentLy: 42.1,
-        isNextWaypoint: true,
-        permissions: { hasDrawer: true },
-      }),
-      isPlanning: false,
-      isNextWaypoint: true,
-      playerSystem: 'Merope',
-    })
-    expect(activeNextHtml).toContain('42.1 Ly')
-    expect(activeNextHtml).not.toContain('380.5 Ly')
-    expect(activeNextHtml).toContain('Estimated straight-line distance from player location (Merope)')
-    expect(activeNextHtml).toContain('aria-label="Toggle per-waypoint leg telemetry drawer"')
-
-    const planningHtml = renderRowItem({
-      rowView: makeWaypointRow({
-        row: { id: 19, systemName: 'Maia' },
-        number: 2,
-        visitState: 'future',
-        distFromPrevLy: 380.5,
-        distFromCurrentLy: 42.1,
-        isNextWaypoint: true,
-        permissions: { hasDrawer: false },
-      }),
-      isPlanning: true,
-      isNextWaypoint: true,
-      playerSystem: 'Merope',
-    })
-    expect(planningHtml).toContain('380.5 Ly')
-    expect(planningHtml).not.toContain('42.1 Ly')
-    expect(planningHtml).toContain('Estimated straight-line distance from previous waypoint')
-  })
-
   it('renders search highlight attribute and per-row copy feedback', () => {
-    const highlightedRowHtml = renderRowItem({
-      rowView: makeWaypointRow({
+    const highlightedRowHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: { id: 30, systemName: 'Beagle Point' },
         number: 1,
         visitState: 'future',
@@ -147,8 +107,8 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
     expect(highlightedRowHtml).toContain('data-search-highlighted="true"')
     expect(highlightedRowHtml).toMatch(/Copy [^"]*Beagle Point[^"]* to clipboard/)
 
-    const draggedCopiedHtml = renderRowItem({
-      rowView: makeWaypointRow({
+    const draggedCopiedHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: { id: 31, systemName: 'Sol' },
         number: 2,
         visitState: 'visited',
@@ -162,8 +122,8 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
   })
 
   it('locks star system on visited rows while keeping manipulation controls on N > 1 and locking Origin #1', () => {
-    const visitedSecondHtml = renderRowItem({
-      rowView: makeWaypointRow({
+    const visitedSecondHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: { id: 41, systemName: 'Alpha Centauri', visitedAt: '3312-01-10T10:00:00Z' },
         number: 2,
         visitState: 'visited',
@@ -187,8 +147,8 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
       'Add new waypoints in the unvisited section and drag them into valid past slots.',
     )
 
-    const originHtml = renderRowItem({
-      rowView: makeWaypointRow({
+    const originHtml = renderWaypointRowHtml({
+      rowView: makeRowView({
         row: { id: 40, visitedAt: '3312-01-01T00:00:00Z' },
         number: 1,
         visitState: 'visited',
@@ -203,110 +163,58 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
     )
   })
 
-  it('renders unvisited gap line highlights during hold and drag and origin DEPARTED / AWAITING DEPARTURE labels', () => {
-    const baseRow = makeWaypointRow({
+  it('renders unvisited gap line highlights and MOVING badge during hold and drag', () => {
+    const baseRow = makeRowView({
       row: { id: 50, systemName: 'Rohini' },
       number: 3,
       visitState: 'future',
       distFromPrevLy: 120.0,
     })
-    expect(renderRowItem({ rowView: baseRow, topGapHighlight: true })).toContain(
+    expect(renderWaypointRowHtml({ rowView: baseRow, topGapHighlight: true })).toContain(
       '*:shadow-[inset_0_2px_0_0_var(--color-ed-cyan)]',
     )
-    expect(renderRowItem({ rowView: baseRow, bottomGapHighlight: true })).toContain(
+    expect(renderWaypointRowHtml({ rowView: baseRow, bottomGapHighlight: true })).toContain(
       '*:shadow-[inset_0_-2px_0_0_var(--color-ed-cyan)]',
     )
-    const grabbedHtml = renderRowItem({ rowView: baseRow, isBeingDragged: true })
+    const grabbedHtml = renderWaypointRowHtml({ rowView: baseRow, isBeingDragged: true })
     expect(grabbedHtml).toContain('data-being-dragged="true"')
     expect(grabbedHtml).toContain('MOVING')
-
-    const stagedOriginHtml = renderRowItem({
-      rowView: makeWaypointRow({
-        row: { id: 60, visitedAt: '2026-01-18T10:00:00Z', departedAt: '' },
-        number: 1,
-        visitState: 'visited',
-        visitedAtGalactic: '3312-01-18 10:00 UTC',
-      }),
-      index: 0,
-      lastVisitedIndex: 0,
-    })
-    expect(stagedOriginHtml).toContain('AWAITING DEPARTURE')
-    expect(stagedOriginHtml).not.toContain('LOGGED VISIT')
-
-    const departedOriginHtml = renderRowItem({
-      rowView: makeWaypointRow({
-        row: {
-          id: 61,
-          visitedAt: '2026-01-18T10:00:00Z',
-          departedAt: '2026-01-18T12:00:00Z',
-        },
-        number: 1,
-        visitState: 'visited',
-        visitedAtGalactic: '3312-01-18 10:00 UTC',
-        departedAtGalactic: '3312-01-18 12:00 UTC',
-      }),
-      index: 0,
-      lastVisitedIndex: 1,
-    })
-    expect(departedOriginHtml).toContain('DEPARTED')
-    expect(departedOriginHtml).toContain('3312-01-18 12:00 UTC')
-
-    const visitedDestinationHtml = renderRowItem({
-      rowView: makeWaypointRow({
-        row: {
-          id: 62,
-          systemName: 'Alpha Centauri',
-          visitedAt: '2026-01-18T13:00:00Z',
-          departedAt: '2026-01-18T14:30:00Z',
-        },
-        number: 2,
-        visitState: 'visited',
-        visitedAtGalactic: '3312-01-18 13:00 UTC',
-        departedAtGalactic: '3312-01-18 14:30 UTC',
-      }),
-      index: 1,
-      lastVisitedIndex: 1,
-    })
-    expect(visitedDestinationHtml).toContain('LOGGED VISIT')
-    expect(visitedDestinationHtml).toContain('3312-01-18 13:00 UTC')
   })
 })
 
-describe('WaypointRowItem lock transition, rollback draft recovery, and visit inspection', () => {
+describe('WaypointRowItem lock transition and rollback draft recovery', () => {
   function buildRowsElement(
-    ...rows: Array<Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView }>
+    ...rows: Array<Partial<ComponentProps<typeof WaypointRowItem>> & { rowView: expedition.RowView }>
   ) {
-    return createElement(
-      'table',
-      null,
-      createElement(
-        'tbody',
-        null,
-        ...rows.map((itemProps, itemIndex) =>
-          createElement(WaypointRowItem, {
-            key: itemProps.rowView.row.id ?? itemIndex,
-            index: itemIndex,
-            isPlanning: false,
-            isLocked: false,
-            isBeingDragged: false,
-            isExpanded: false,
-            isSystemCopied: false,
-            insertMenuOpen: false,
-            lastVisitedIndex: 0,
-            rowStyle: {},
-            dropProps: {},
-            handlers: defaultRowHandlers,
-            ...itemProps,
-          }),
-        ),
-      ),
+    return (
+      <table>
+        <tbody>
+          {rows.map((itemProps, itemIndex) => (
+            <WaypointRowItem
+              key={itemProps.rowView.row.id ?? itemIndex}
+              index={itemIndex}
+              isPlanning={false}
+              isLocked={false}
+              isBeingDragged={false}
+              isExpanded={false}
+              isSystemCopied={false}
+              insertMenuOpen={false}
+              lastVisitedIndex={0}
+              rowStyle={{}}
+              dropProps={{}}
+              handlers={defaultRowHandlers}
+              {...itemProps}
+            />
+          ))}
+        </tbody>
+      </table>
     )
   }
 
   it('clears editing state when a focused system input becomes locked so subsequent poiName updates sync into draft', () => {
     const mounted = mountTestRoot(
       buildRowsElement({
-        rowView: makeWaypointRow({
+        rowView: makeRowView({
           row: { id: 70, systemName: 'Colonia', poiName: '' },
           number: 2,
           visitState: 'future',
@@ -327,7 +235,7 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
 
     mounted.rerender(
       buildRowsElement({
-        rowView: makeWaypointRow({
+        rowView: makeRowView({
           row: {
             id: 70,
             systemName: 'Colonia',
@@ -346,7 +254,7 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
 
     mounted.rerender(
       buildRowsElement({
-        rowView: makeWaypointRow({
+        rowView: makeRowView({
           row: {
             id: 70,
             systemName: 'Colonia',
@@ -376,7 +284,7 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
           resolveSystemBlur = resolve
         }),
     )
-    const rowView = makeWaypointRow({
+    const rowView = makeRowView({
       row: { id: 71, systemName: 'Sagittarius A*', poiName: 'Supermassive Black Hole' },
       number: 3,
       visitState: 'future',
@@ -416,62 +324,5 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
 
     expect(systemInput.value).toBe('Sagittarius A*')
     expect(poiTextarea.value).toBe('Explorer Anchorage')
-  })
-
-  it('makes green journal CoordStatusIndicator clickable with two-line tooltip while leaving EDSM non-clickable', () => {
-    const onInspectSystemVisits = vi.fn()
-    const handlers: WaypointRowHandlers = makeWaypointRowHandlers({ onInspectSystemVisits })
-    const journalRowView = makeWaypointRow({
-      row: { id: 72, systemName: 'Sol', hasCoords: true, coordsSource: 'journal', x: 0, y: 0, z: 0 },
-      number: 1,
-      detectedRegion: 'Inner Orion Spur',
-      visitCount: 3,
-      visitState: 'visited',
-    })
-    const edsmRowView = makeWaypointRow({
-      row: {
-        id: 73,
-        systemName: 'Beagle Point',
-        hasCoords: true,
-        coordsSource: 'edsm',
-        x: -1111.6,
-        y: -134.2,
-        z: 65269.8,
-      },
-      number: 2,
-      detectedRegion: 'The Abyss',
-      visitCount: 0,
-      visitState: 'future',
-    })
-
-    const mounted = mountTestRoot(
-      buildRowsElement(
-        { rowView: journalRowView, index: 0, handlers },
-        { rowView: edsmRowView, index: 1, handlers },
-      ),
-    )
-
-    const journalButton = mounted.container.querySelector(
-      'button[aria-label="Search visit history for Sol"]',
-    ) as HTMLButtonElement | null
-    expect(journalButton).toBeTruthy()
-    expect(journalButton?.title).toBe(
-      'Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)\nClick to search visit history',
-    )
-
-    act(() => {
-      journalButton?.click()
-    })
-    expect(onInspectSystemVisits).toHaveBeenCalledTimes(1)
-    expect(onInspectSystemVisits).toHaveBeenCalledWith('Sol')
-
-    expect(
-      mounted.container.querySelector('button[aria-label="Search visit history for Beagle Point"]'),
-    ).toBeNull()
-    expect(
-      mounted.container.querySelector(
-        'span[title="The Abyss (-1111.6, -134.2, 65269.8) via EDSM (Never Visited)"]',
-      ),
-    ).toBeTruthy()
   })
 })

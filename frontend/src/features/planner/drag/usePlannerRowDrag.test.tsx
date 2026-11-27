@@ -1,4 +1,3 @@
-import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../../api/models'
@@ -140,84 +139,68 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
   })
 
   it('renders dashed drop-slot rows and collapsed visited summary rows during hold and drag', () => {
-    // Dashed valid historical drop-slot row
     const historicalSlotHtml = renderToString(
-      createElement(
-        'table',
-        null,
-        createElement(
-          'tbody',
-          null,
-          createElement(PlannerDropSlotRow, {
-            gapIndex: 2,
-            visibleColumnCount: 8,
-            grabbedSystemName: 'LP 355-65',
-            preview: expedition.DropSlotPreview.createFrom({
+      <table>
+        <tbody>
+          <PlannerDropSlotRow
+            gapIndex={2}
+            visibleColumnCount={8}
+            grabbedSystemName="LP 355-65"
+            preview={expedition.DropSlotPreview.createFrom({
               targetIndex: 2,
               status: 'valid_visited',
               visitedAt: '2026-01-18T20:10:00Z',
               visitedAtGalactic: '3312-01-18 20:10 UTC',
-            }),
-            isDragTarget: false,
-            onDragOver: () => {},
-            onDrop: () => {},
-          }),
-        ),
-      ),
+            })}
+            isDragTarget={false}
+            onDragOver={() => {}}
+            onDrop={() => {}}
+          />
+        </tbody>
+      </table>,
     )
     expect(historicalSlotHtml).toContain('border-dashed border-ed-cyan/80')
     expect(historicalSlotHtml).toContain('+ DROP LP 355-65 HERE')
     expect(historicalSlotHtml).toContain('LOG VISIT')
     expect(historicalSlotHtml).toContain('3312-01-18 20:10 UTC')
 
-    // Dashed orange FC-blocked drop-slot row
     const fcBlockedSlotHtml = renderToString(
-      createElement(
-        'table',
-        null,
-        createElement(
-          'tbody',
-          null,
-          createElement(PlannerDropSlotRow, {
-            gapIndex: 1,
-            visibleColumnCount: 8,
-            grabbedSystemName: 'LP 355-65',
-            preview: expedition.DropSlotPreview.createFrom({
+      <table>
+        <tbody>
+          <PlannerDropSlotRow
+            gapIndex={1}
+            visibleColumnCount={8}
+            grabbedSystemName="LP 355-65"
+            preview={expedition.DropSlotPreview.createFrom({
               targetIndex: 1,
               status: 'blocked_fc',
-            }),
-            isDragTarget: false,
-            onDragOver: () => {},
-            onDrop: () => {},
-          }),
-        ),
-      ),
+            })}
+            isDragTarget={false}
+            onDragOver={() => {}}
+            onDrop={() => {}}
+          />
+        </tbody>
+      </table>,
     )
     expect(fcBlockedSlotHtml).toContain('border-dashed border-ed-amber')
     expect(fcBlockedSlotHtml).toContain('FC STOP ORDER BLOCKED')
 
-    // Collapsed visited summary row
     const collapsedRowHtml = renderToString(
-      createElement(
-        'table',
-        null,
-        createElement(
-          'tbody',
-          null,
-          createElement(PlannerCollapsedVisitedRow, {
-            visibleColumnCount: 8,
-            waypointCount: 6,
-            regionCount: 0,
-            firstWaypointNumber: 1,
-            firstSystemName: 'HR 839',
-            lastWaypointNumber: 6,
-            lastSystemName: 'BD+41 4773',
-          }),
-        ),
-      ),
+      <table>
+        <tbody>
+          <PlannerCollapsedVisitedRow
+            visibleColumnCount={8}
+            waypointCount={6}
+            regionCount={0}
+            firstWaypointNumber={1}
+            firstSystemName="HR 839"
+            lastWaypointNumber={6}
+            lastSystemName="BD+41 4773"
+          />
+        </tbody>
+      </table>,
     )
     expect(collapsedRowHtml).toContain('⋯ #01 HR 839 → #06 BD+41 4773')
     expect(collapsedRowHtml).toContain('(6 visited waypoints collapsed) ⋯')
   })
 })
-

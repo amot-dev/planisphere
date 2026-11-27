@@ -1,31 +1,33 @@
-package expedition
+package expedition_test
 
 import (
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
+
+	"planisphere/internal/store/expedition"
 )
 
 func TestParseWaypointImportText(testingContext *testing.T) {
 	testCases := []struct {
 		name     string
 		rawInput string
-		expected ParsedWaypointImport
+		expected expedition.ParsedWaypointImport
 	}{
 		{
 			name:     "empty string returns non-nil empty systems slice",
 			rawInput: "",
-			expected: ParsedWaypointImport{
-				Format:  WaypointImportEmpty,
+			expected: expedition.ParsedWaypointImport{
+				Format:  expedition.WaypointImportEmpty,
 				Systems: []string{},
 			},
 		},
 		{
 			name:     "whitespace and mixed line endings return empty format",
 			rawInput: "   \r\n\t\r  \n ",
-			expected: ParsedWaypointImport{
-				Format:  WaypointImportEmpty,
+			expected: expedition.ParsedWaypointImport{
+				Format:  expedition.WaypointImportEmpty,
 				Systems: []string{},
 			},
 		},
@@ -45,8 +47,8 @@ func TestParseWaypointImportText(testingContext *testing.T) {
 				"",
 				"Shinrarta Dezhra",
 			}, "\r\n"),
-			expected: ParsedWaypointImport{
-				Format: WaypointImportPlain,
+			expected: expedition.ParsedWaypointImport{
+				Format: expedition.WaypointImportPlain,
 				Systems: []string{
 					"Shinrarta Dezhra",
 					"Omega Sector VE-Q b5-15",
@@ -67,8 +69,8 @@ func TestParseWaypointImportText(testingContext *testing.T) {
 				"\"Sol\",\"0\",\"22000.47\",\"No\",\"0\"\r\n" +
 				"\"Jackson's Lighthouse\",\"137.45\",\"21863.02\",\"Yes\",\"3\"\r\n" +
 				"\"Colonia\",\"22000.47\",\"0\",\"No\",\"1\"\r\n",
-			expected: ParsedWaypointImport{
-				Format:                  WaypointImportSpanshCSV,
+			expected: expedition.ParsedWaypointImport{
+				Format:                  expedition.WaypointImportSpanshCSV,
 				Systems:                 []string{"Sol", "Jackson's Lighthouse", "Colonia"},
 				CollapsedDuplicateCount: 0,
 				SkippedLineCount:        0,
@@ -83,8 +85,8 @@ func TestParseWaypointImportText(testingContext *testing.T) {
 				"\"Rocky body\",\"Epsilon Indi\",\"120\"",
 				"\"High metal content\",\"Sol\",\"360\"",
 			}, "\n"),
-			expected: ParsedWaypointImport{
-				Format:                  WaypointImportSpanshCSV,
+			expected: expedition.ParsedWaypointImport{
+				Format:                  expedition.WaypointImportSpanshCSV,
 				Systems:                 []string{"Sol", "Epsilon Indi", "Sol"},
 				CollapsedDuplicateCount: 1,
 				SkippedLineCount:        0,
@@ -101,8 +103,8 @@ func TestParseWaypointImportText(testingContext *testing.T) {
 				"3,   ,missing system",
 				"4,\"Gandharvi,unclosed",
 			}, "\n"),
-			expected: ParsedWaypointImport{
-				Format:                  WaypointImportSpanshCSV,
+			expected: expedition.ParsedWaypointImport{
+				Format:                  expedition.WaypointImportSpanshCSV,
 				Systems:                 []string{"Rohini", "Gandharvi,unclosed"},
 				CollapsedDuplicateCount: 0,
 				SkippedLineCount:        2,
@@ -111,24 +113,24 @@ func TestParseWaypointImportText(testingContext *testing.T) {
 		{
 			name:     "single-column System line is treated as plain text rather than CSV header",
 			rawInput: "System\nSol",
-			expected: ParsedWaypointImport{
-				Format:  WaypointImportPlain,
+			expected: expedition.ParsedWaypointImport{
+				Format:  expedition.WaypointImportPlain,
 				Systems: []string{"System", "Sol"},
 			},
 		},
 		{
 			name:     "header-only CSV yields non-nil empty systems slice",
 			rawInput: "\"System Name\",\"Jumps\"\n",
-			expected: ParsedWaypointImport{
-				Format:  WaypointImportSpanshCSV,
+			expected: expedition.ParsedWaypointImport{
+				Format:  expedition.WaypointImportSpanshCSV,
 				Systems: []string{},
 			},
 		},
 		{
 			name:     "comment-only input yields plain format with skipped count and non-nil empty systems",
 			rawInput: "# only a comment\n# second comment",
-			expected: ParsedWaypointImport{
-				Format:           WaypointImportPlain,
+			expected: expedition.ParsedWaypointImport{
+				Format:           expedition.WaypointImportPlain,
 				Systems:          []string{},
 				SkippedLineCount: 2,
 			},
@@ -137,7 +139,7 @@ func TestParseWaypointImportText(testingContext *testing.T) {
 
 	for _, testCase := range testCases {
 		testingContext.Run(testCase.name, func(subTest *testing.T) {
-			parsed := ParseWaypointImportText(testCase.rawInput)
+			parsed := expedition.ParseWaypointImportText(testCase.rawInput)
 			if parsed.Systems == nil {
 				subTest.Fatalf("expected non-nil Systems slice")
 			}
@@ -170,7 +172,7 @@ func TestDeriveExpeditionNameFromFilename(testingContext *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		if got := DeriveExpeditionNameFromFilename(testCase.fileName); got != testCase.expected {
+		if got := expedition.DeriveExpeditionNameFromFilename(testCase.fileName); got != testCase.expected {
 			testingContext.Fatalf("DeriveExpeditionNameFromFilename(%q) = %q, want %q", testCase.fileName, got, testCase.expected)
 		}
 	}

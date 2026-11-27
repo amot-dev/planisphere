@@ -10,7 +10,6 @@
   "ignore": [
     "src/version.ts",
     "src/test/**",
-    "src/features/export/exportTestFixtures.ts",
     "wailsjs/**"
   ],
   "ignoreExportsUsedInFile": true,

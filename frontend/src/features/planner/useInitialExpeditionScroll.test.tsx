@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, useRef } from 'react'
+import { act, useRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { installAnimationFrameQueue } from '../../test/domMocks'
 import { mountTestRoot } from '../../test/render'
@@ -39,32 +39,30 @@ function ScrollHarness({
     onScrollTargetMissed,
   )
 
-  return createElement(
-    'div',
-    {
-      ref: (element: HTMLDivElement | null) => {
+  return (
+    <div
+      ref={(element: HTMLDivElement | null) => {
         scrollContainerRef.current = element
         if (element) {
           onContainerReady?.(element)
         }
-      },
-    },
-    createElement(
-      'table',
-      null,
-      createElement('thead', null, createElement('tr', null, createElement('th', null, 'System'))),
-      createElement(
-        'tbody',
-        null,
-        rowIds.map((rowId, index) =>
-          createElement(
-            'tr',
-            { key: rowId, 'data-row-id': rowId, 'data-row-index': index },
-            createElement('td', null, `Row ${rowId}`),
-          ),
-        ),
-      ),
-    ),
+      }}
+    >
+      <table>
+        <thead>
+          <tr>
+            <th>System</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rowIds.map((rowId, index) => (
+            <tr key={rowId} data-row-id={rowId} data-row-index={index}>
+              <td>{`Row ${rowId}`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -123,15 +121,15 @@ describe('useInitialExpeditionScroll targeted jump', () => {
 
     // Mount expedition 1 first.
     const mounted = mountTestRoot(
-      createElement(ScrollHarness, {
-        expeditionId: 1,
-        status: 'completed',
-        rowIds: [10, 11],
-        onContainerReady: (element) => {
+      <ScrollHarness
+        expeditionId={1}
+        status="completed"
+        rowIds={[10, 11]}
+        onContainerReady={(element) => {
           scrollElement = element
           configureGeometry(element, { 10: 40, 11: 80 })
-        },
-      }),
+        }}
+      />,
     )
     expect(scrollElement.scrollTop).toBe(0)
 
@@ -140,18 +138,18 @@ describe('useInitialExpeditionScroll targeted jump', () => {
     let geometry = { scrollIntoViewByRowId: new Map<number, ReturnType<typeof vi.fn>>() }
     scrollElement.scrollTop = 100
     mounted.rerender(
-      createElement(ScrollHarness, {
-        expeditionId: 2,
-        status: 'planning',
-        rowIds: [21, 22, 23],
-        scrollTarget: { expeditionId: 2, rowId: 22, nonce: 1 },
-        onScrollTargetApplied,
-        onContainerReady: (element) => {
+      <ScrollHarness
+        expeditionId={2}
+        status="planning"
+        rowIds={[21, 22, 23]}
+        scrollTarget={{ expeditionId: 2, rowId: 22, nonce: 1 }}
+        onScrollTargetApplied={onScrollTargetApplied}
+        onContainerReady={(element) => {
           scrollElement = element
           // visibleCenter = 40 + (400 - 40) / 2 = 220; row 22 center = 300 + 20 = 320 -> delta = +100.
           geometry = configureGeometry(element, { 21: 100, 22: 300, 23: 500 })
-        },
-      }),
+        }}
+      />,
     )
 
     expect(geometry.scrollIntoViewByRowId.get(22)).toHaveBeenCalledWith({
@@ -164,13 +162,13 @@ describe('useInitialExpeditionScroll targeted jump', () => {
 
     // Clearing scrollTarget after consumption must NOT trigger the default planning scroll to bottom.
     mounted.rerender(
-      createElement(ScrollHarness, {
-        expeditionId: 2,
-        status: 'planning',
-        rowIds: [21, 22, 23],
-        scrollTarget: null,
-        onScrollTargetApplied,
-      }),
+      <ScrollHarness
+        expeditionId={2}
+        status="planning"
+        rowIds={[21, 22, 23]}
+        scrollTarget={null}
+        onScrollTargetApplied={onScrollTargetApplied}
+      />,
     )
     expect(scrollElement.scrollTop).toBe(200)
 
@@ -191,32 +189,32 @@ describe('useInitialExpeditionScroll targeted jump', () => {
     const onScrollTargetMissed = vi.fn()
 
     const mounted = mountTestRoot(
-      createElement(ScrollHarness, {
-        expeditionId: 1,
-        status: 'completed',
-        rowIds: [10],
-        onContainerReady: (element) => {
+      <ScrollHarness
+        expeditionId={1}
+        status="completed"
+        rowIds={[10]}
+        onContainerReady={(element) => {
           scrollElement = element
           configureGeometry(element, { 10: 40 })
-        },
-      }),
+        }}
+      />,
     )
     scrollElement.scrollTop = 120
 
     // Switch to planning expedition 2 targeting missing row 999.
     mounted.rerender(
-      createElement(ScrollHarness, {
-        expeditionId: 2,
-        status: 'planning',
-        rowIds: [21, 22],
-        scrollTarget: { expeditionId: 2, rowId: 999, nonce: 1 },
-        onScrollTargetApplied,
-        onScrollTargetMissed,
-        onContainerReady: (element) => {
+      <ScrollHarness
+        expeditionId={2}
+        status="planning"
+        rowIds={[21, 22]}
+        scrollTarget={{ expeditionId: 2, rowId: 999, nonce: 1 }}
+        onScrollTargetApplied={onScrollTargetApplied}
+        onScrollTargetMissed={onScrollTargetMissed}
+        onContainerReady={(element) => {
           scrollElement = element
           configureGeometry(element, { 21: 40, 22: 80 })
-        },
-      }),
+        }}
+      />,
     )
     expect(onScrollTargetApplied).not.toHaveBeenCalled()
     expect(onScrollTargetMissed).not.toHaveBeenCalled()
@@ -232,14 +230,14 @@ describe('useInitialExpeditionScroll targeted jump', () => {
 
     // Later stage change on expedition 2 still applies default scroll normally.
     mounted.rerender(
-      createElement(ScrollHarness, {
-        expeditionId: 2,
-        status: 'completed',
-        rowIds: [21, 22],
-        scrollTarget: null,
-        onScrollTargetApplied,
-        onScrollTargetMissed,
-      }),
+      <ScrollHarness
+        expeditionId={2}
+        status="completed"
+        rowIds={[21, 22]}
+        scrollTarget={null}
+        onScrollTargetApplied={onScrollTargetApplied}
+        onScrollTargetMissed={onScrollTargetMissed}
+      />,
     )
     expect(scrollElement.scrollTop).toBe(0)
   })

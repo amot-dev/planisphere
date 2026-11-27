@@ -21,7 +21,6 @@ export default defineConfig({
         'src/**/*.d.ts',
         'src/test/**',
         'src/profile/**',
-        'src/features/export/exportTestFixtures.ts',
         'src/version.ts',
         'src/main.tsx',
       ],

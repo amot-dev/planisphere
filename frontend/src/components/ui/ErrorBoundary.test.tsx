@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { mountTestRoot } from '../../test/render'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -7,11 +7,9 @@ import { ErrorBoundary } from './ErrorBoundary'
 describe('ErrorBoundary', () => {
   it('renders children normally when no error is thrown', () => {
     const mounted = mountTestRoot(
-      createElement(
-        ErrorBoundary,
-        { fallbackTitle: 'Test Error' },
-        createElement('div', { id: 'child-content' }, 'Operational Child Content'),
-      ),
+      <ErrorBoundary fallbackTitle="Test Error">
+        <div id="child-content">Operational Child Content</div>
+      </ErrorBoundary>,
     )
 
     expect(mounted.container.querySelector('#child-content')?.textContent).toBe(
@@ -28,16 +26,14 @@ describe('ErrorBoundary', () => {
       if (shouldThrow) {
         throw new Error('Critical telemetry failure')
       }
-      return createElement('div', { id: 'recovered-child' }, 'Operational Child Content')
+      return <div id="recovered-child">Operational Child Content</div>
     }
 
     try {
       const mounted = mountTestRoot(
-        createElement(
-          ErrorBoundary,
-          { fallbackTitle: 'Subsystem Sensor Malfunction' },
-          createElement(ThrowingChild),
-        ),
+        <ErrorBoundary fallbackTitle="Subsystem Sensor Malfunction">
+          <ThrowingChild />
+        </ErrorBoundary>,
       )
 
       const fallbackText = mounted.container.textContent ?? ''
@@ -69,4 +65,3 @@ describe('ErrorBoundary', () => {
     }
   })
 })
-

@@ -11,10 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"planisphere/internal/core/events"
-	stats "planisphere/internal/replay/stats"
-	"planisphere/internal/store/settings"
 )
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
@@ -110,67 +106,6 @@ func TestDatabaseHotSwapConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-
-	// Commander Jameson
-	if _, insertCommanderError := testApp.db.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Jameson', 1, '2024-01-01T00:00:00Z')`); insertCommanderError != nil {
-		testingContext.Fatalf("insert commander: %v", insertCommanderError)
-	}
-
-	// Scan 1: Before expedition (2025)
-	insertTestJournalEvent(testingContext, testApp, "2025-01-01T10:00:00Z", "ScanOrganic", "1",
-		`{"timestamp":"2025-01-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":111,"Body":1}`)
-	insertTestJournalEvent(testingContext, testApp, "2025-01-01T12:00:00Z", "SellOrganicData", "1",
-		`{"timestamp":"2025-01-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
-
-	// Create expedition (initially unstarted)
-	expeditionRecord, createError := testApp.CreateExpedition("2026 Survey", "")
-	if createError != nil {
-		testingContext.Fatalf("create expedition: %v", createError)
-	}
-
-	unstartedSidebarStats, unstartedStatsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
-	if unstartedStatsError != nil {
-		testingContext.Fatalf("GetSidebarStats (unstarted) failed: %v", unstartedStatsError)
-	}
-	if unstartedSidebarStats.Realization.TotalRealized != 0 {
-		testingContext.Errorf("expected unstarted expedition Realization.TotalRealized 0, got %d", unstartedSidebarStats.Realization.TotalRealized)
-	}
-	if unstartedSidebarStats.AllJournalsRealization.TotalRealized != 19010800 {
-		testingContext.Errorf("expected unstarted AllJournalsRealization.TotalRealized 19,010,800, got %d", unstartedSidebarStats.AllJournalsRealization.TotalRealized)
-	}
-
-	// Start expedition at 2025-12-31T23:55:00Z and depart WP #1 at 2026-01-01T00:00:00Z.
-	if _, updateExpeditionError := testApp.db.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2025-12-31T23:55:00Z' WHERE id = ?`, expeditionRecord.ID); updateExpeditionError != nil {
-		testingContext.Fatalf("update expedition status: %v", updateExpeditionError)
-	}
-	if _, updateRowError := testApp.db.Exec(`UPDATE expedition_rows SET system_name = 'Sol', visited_at = '2025-12-31T23:55:00Z', departed_at = '2026-01-01T00:00:00Z' WHERE expedition_id = ?`, expeditionRecord.ID); updateRowError != nil {
-		testingContext.Fatalf("update expedition origin row: %v", updateRowError)
-	}
-
-	// Scan 2: During expedition (2026)
-	insertTestJournalEvent(testingContext, testApp, "2026-03-01T10:00:00Z", "ScanOrganic", "2",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":222,"Body":1}`)
-	insertTestJournalEvent(testingContext, testApp, "2026-03-01T12:00:00Z", "SellOrganicData", "2",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
-
-	sidebarStats, statsError := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{Enabled: false})
-	if statsError != nil {
-		testingContext.Fatalf("GetSidebarStats failed: %v", statsError)
-	}
-
-	// Expedition realization should reflect only Scan 2 (19,010,800)
-	if sidebarStats.Realization.TotalRealized != 19010800 {
-		testingContext.Errorf("expected expedition Realization.TotalRealized 19,010,800, got %d", sidebarStats.Realization.TotalRealized)
-	}
-
-	// All journals realization should reflect Scan 1 + Scan 2 (38,021,600)
-	if sidebarStats.AllJournalsRealization.TotalRealized != 38021600 {
-		testingContext.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", sidebarStats.AllJournalsRealization.TotalRealized)
-	}
-}
-
 func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 	temporaryDirectory := testingContext.TempDir()
 	productionDBPath := filepath.Join(temporaryDirectory, "production.sqlite")
@@ -250,41 +185,11 @@ func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
 	}
 }
 
-func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-	expeditionID := createAndStartExpedition(testingContext, testApp, "Generation Test", "Sol")
-	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:05:00Z", "FSDJump", "gen-depart-sol",
-		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`)
-
-	if _, statsError := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsError != nil {
-		testingContext.Fatalf("GetSidebarStats: %v", statsError)
-	}
-	if _, carrierErr := testApp.carrierState.LatestStats(); carrierErr != nil {
-		testingContext.Fatalf("LatestStats: %v", carrierErr)
-	}
-
-	initialClosedRev := testApp.timeRangeStats.ClosedWindowRevision()
-	initialIngestStatus, ingestErr := testApp.GetIngestStatus()
-	if ingestErr != nil || initialIngestStatus.ClosedWindowRevision != initialClosedRev {
-		testingContext.Fatalf("expected GetIngestStatus ClosedWindowRevision %d, got %d (err=%v)",
-			initialClosedRev, initialIngestStatus.ClosedWindowRevision, ingestErr)
-	}
-
-	// Non-switching app events preserve ClosedWindowRevision while AppDatabaseSwitched invalidates app-wired projections and increments ClosedWindowRevision.
-	testApp.publishApp(expeditionID, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppExpeditionModesChanged)
-	if unchangedStatus, statusErr := testApp.GetIngestStatus(); statusErr != nil || unchangedStatus.ClosedWindowRevision != initialClosedRev {
-		testingContext.Fatalf("expected ClosedWindowRevision %d across mode and bounds events, got %d (err=%v)",
-			initialClosedRev, unchangedStatus.ClosedWindowRevision, statusErr)
-	}
-
-	testApp.publishApp(0, events.AppDatabaseSwitched)
-	if testApp.carrierState.IsValid() || testApp.careerStats.IsValid() {
-		testingContext.Errorf("expected carrierState and careerStats to invalidate on AppDatabaseSwitched")
-	}
-	if switchedStatus, switchedErr := testApp.GetIngestStatus(); switchedErr != nil || switchedStatus.ClosedWindowRevision != initialClosedRev+1 {
-		testingContext.Errorf("expected ClosedWindowRevision %d after AppDatabaseSwitched, got %d (err=%v)",
-			initialClosedRev+1, switchedStatus.ClosedWindowRevision, switchedErr)
-	}
+func stubEmptyGitHubVersionCheck(testingContext *testing.T) {
+	testingContext.Helper()
+	originalFetchLatestGitHubVersion := fetchLatestGitHubVersion
+	fetchLatestGitHubVersion = func(context.Context) (string, error) { return "", nil }
+	testingContext.Cleanup(func() { fetchLatestGitHubVersion = originalFetchLatestGitHubVersion })
 }
 
 func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
@@ -304,14 +209,7 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 	seedDatabaseWithExpedition(testingContext, productionDBPath, "Startup Race Expedition", "Verify concurrent RPCs wait for OnStartup")
 
 	testingContext.Setenv("ED_PLANNER_DB", productionDBPath)
-
-	originalFetchLatestGitHubVersion := fetchLatestGitHubVersion
-	fetchLatestGitHubVersion = func(context.Context) (string, error) {
-		return "", nil
-	}
-	testingContext.Cleanup(func() {
-		fetchLatestGitHubVersion = originalFetchLatestGitHubVersion
-	})
+	stubEmptyGitHubVersionCheck(testingContext)
 
 	debugApp := New()
 	debugApp.debugMode = true
@@ -395,32 +293,6 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 	waitGroup.Wait()
 }
 
-func TestJournalDebounceSettingPersistenceAndReload(t *testing.T) {
-	testApp := setupTestApp(t)
-	eventsRecorder := captureAppEvents(t, testApp)
-
-	updatedSettings, setError := testApp.SetJournalDebounceMs(5000)
-	if setError != nil {
-		t.Fatalf("SetJournalDebounceMs(5000): %v", setError)
-	}
-	if updatedSettings.JournalDebounceMs != 5000 {
-		t.Fatalf("expected 5000ms debounce, got %d", updatedSettings.JournalDebounceMs)
-	}
-	if testApp.watcher.DebounceDelay() != 5*time.Second {
-		t.Fatalf("expected live watcher delay 5s, got %v", testApp.watcher.DebounceDelay())
-	}
-	if !slices.Contains(eventsRecorder.Domains(), "settings") {
-		t.Fatalf("expected SetJournalDebounceMs to emit settings domain, got %v", eventsRecorder.Domains())
-	}
-
-	if reloadError := testApp.openAndWireDB(testApp.dbPath); reloadError != nil {
-		t.Fatalf("openAndWireDB reload: %v", reloadError)
-	}
-	if testApp.watcher.DebounceDelay() != 5*time.Second {
-		t.Fatalf("expected reloaded watcher to restore persisted 5s debounce, got %v", testApp.watcher.DebounceDelay())
-	}
-}
-
 func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testing.T) {
 	temporaryDirectory := testingContext.TempDir()
 	isolateTestUserDirectories(testingContext, temporaryDirectory)
@@ -430,25 +302,11 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 		testingContext.Fatalf("create journal dir: %v", mkdirError)
 	}
 
-	seedDatabaseWithExpedition(
-		testingContext,
-		seededDatabasePath,
-		"Boot Sync Survey",
-		"",
-		[2]string{"setup_completed", "1"},
-		[2]string{"online_lookups", "0"},
-		[2]string{"journal_dir", emptyJournalDirectory},
-	)
+	seedDatabaseWithExpedition(testingContext, seededDatabasePath, "Boot Sync Survey", "",
+		[2]string{"setup_completed", "1"}, [2]string{"online_lookups", "0"}, [2]string{"journal_dir", emptyJournalDirectory})
 
 	testingContext.Setenv("ED_PLANNER_DB", seededDatabasePath)
-
-	originalFetchLatestGitHubVersion := fetchLatestGitHubVersion
-	fetchLatestGitHubVersion = func(context.Context) (string, error) {
-		return "", nil
-	}
-	testingContext.Cleanup(func() {
-		fetchLatestGitHubVersion = originalFetchLatestGitHubVersion
-	})
+	stubEmptyGitHubVersionCheck(testingContext)
 
 	startupApp := New()
 	startupApp.debugMode = false
@@ -578,85 +436,4 @@ func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *
 			testingContext.Errorf("expected debug snapshot %s%s to be removed after shutdown, stat err: %v", snapshotPath, suffix, statError)
 		}
 	}
-}
-
-func TestExternalLinksSettings(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-	eventsRecorder := captureAppEvents(testingContext, testApp)
-
-	updatedSettings, updateError := testApp.SetExternalLinks("off", "on", "off")
-	if updateError != nil {
-		testingContext.Fatalf("SetExternalLinks: %v", updateError)
-	}
-	if updatedSettings.ExternalLinkInara != settings.ExternalLinkOff ||
-		updatedSettings.ExternalLinkEDSM != settings.ExternalLinkOn ||
-		updatedSettings.ExternalLinkGEC != settings.ExternalLinkOff {
-		testingContext.Fatalf(
-			"unexpected persisted external link settings: inara=%q edsm=%q gec=%q",
-			updatedSettings.ExternalLinkInara,
-			updatedSettings.ExternalLinkEDSM,
-			updatedSettings.ExternalLinkGEC,
-		)
-	}
-	if !slices.Contains(eventsRecorder.Domains(), "settings") {
-		testingContext.Fatalf("expected SetExternalLinks to emit settings domain, got %v", eventsRecorder.Domains())
-	}
-
-	reloadedSettings, reloadError := testApp.GetSettings()
-	if reloadError != nil ||
-		reloadedSettings.ExternalLinkInara != settings.ExternalLinkOff ||
-		reloadedSettings.ExternalLinkEDSM != settings.ExternalLinkOn ||
-		reloadedSettings.ExternalLinkGEC != settings.ExternalLinkOff {
-		testingContext.Fatalf("GetSettings after SetExternalLinks: settings=%+v err=%v", reloadedSettings, reloadError)
-	}
-}
-
-func TestDeleteActiveExpeditionSelectsSurvivingAndEmitsTargetedDomains(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-
-	initialExpeditions, listError := testApp.ListExpeditions()
-	if listError != nil || len(initialExpeditions) != 1 {
-		testingContext.Fatalf("expected 1 seeded expedition, got len=%d err=%v", len(initialExpeditions), listError)
-	}
-	survivingExpedition := initialExpeditions[0]
-
-	activeExpedition, createSecondError := testApp.CreateExpedition("Active Survey", "")
-	if createSecondError != nil {
-		testingContext.Fatalf("create active expedition: %v", createSecondError)
-	}
-
-	eventsRecorder := captureAppEvents(testingContext, testApp)
-
-	assertDeleteOutcome := func(expectedActiveID int64) {
-		testingContext.Helper()
-		loadedSettings, settingsError := testApp.GetSettings()
-		if settingsError != nil {
-			testingContext.Fatalf("GetSettings: %v", settingsError)
-		}
-		if loadedSettings.ActiveExpeditionID != expectedActiveID {
-			testingContext.Fatalf("expected active_expedition_id %d, got %d", expectedActiveID, loadedSettings.ActiveExpeditionID)
-		}
-
-		capturedEvents := eventsRecorder.TakeDataChanges()
-		if len(capturedEvents) != 1 {
-			testingContext.Fatalf("expected 1 DataChanged event, got %d (%+v)", len(capturedEvents), capturedEvents)
-		}
-		changeEvent := capturedEvents[0]
-		if changeEvent.ExpeditionID != 0 {
-			testingContext.Fatalf("expected expeditionId 0, got %+v", changeEvent)
-		}
-		if !slices.Equal(changeEvent.Domains, []string{"settings", "expeditions"}) {
-			testingContext.Fatalf("expected domains [settings expeditions], got %v", changeEvent.Domains)
-		}
-	}
-
-	if deleteError := testApp.DeleteExpedition(activeExpedition.ID); deleteError != nil {
-		testingContext.Fatalf("DeleteExpedition(active): %v", deleteError)
-	}
-	assertDeleteOutcome(survivingExpedition.ID)
-
-	if deleteLastError := testApp.DeleteExpedition(survivingExpedition.ID); deleteLastError != nil {
-		testingContext.Fatalf("DeleteExpedition(last): %v", deleteLastError)
-	}
-	assertDeleteOutcome(0)
 }

@@ -11,7 +11,7 @@ import {
   ExportRegionModeBucket,
   ExportTelemetrySnapshot,
   PlainWailsDto,
-} from './exportTypes'
+} from '../../features/export/exportTypes'
 
 const DAY_MS = 86_400_000
 

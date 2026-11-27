@@ -1,4 +1,3 @@
-import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../../api/models'
@@ -13,26 +12,26 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
       key: `${rowView.row.rowType}-${rowView.row.id}`,
     }))
     return renderToString(
-      createElement(PlannerRouteTable, {
-        plan,
-        isPlanning: false,
-        isCompleted: false,
-        columns: {
+      <PlannerRouteTable
+        plan={plan}
+        isPlanning={false}
+        isCompleted={false}
+        columns={{
           visibleColumnCount: 8,
           tableMinWidthPixels: 1200,
           showNotes: true,
           showCarrierStop: true,
           onToggleShowNotes: () => {},
           onToggleShowCarrierStop: () => {},
-        },
-        externalLinks: {},
-        drawerState: {
+        }}
+        externalLinks={{}}
+        drawerState={{
           expandedRowIds: {},
           detailsById: {},
           loadingDetails: {},
           toggleExpand: () => {},
-        },
-        dragState: {
+        }}
+        dragState={{
           tableItems,
           dropSlotGaps: new Set<number>(),
           heldOrDraggedIndex: null,
@@ -45,8 +44,8 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
           onRowHoldEnd: () => {},
           onRowDragStart: () => {},
           onRowDragEnd: () => {},
-        },
-        rowActions: {
+        }}
+        rowActions={{
           copiedSystemRowId: null,
           insertMenuAfterId,
           onSetInsertMenuAfterId: () => {},
@@ -59,8 +58,8 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
           onToggleFcStop: () => {},
           onOverrideFcArrived: () => {},
           onOpenCarrierRoutePrompt: () => {},
-        },
-      }),
+        }}
+      />,
     )
   }
 

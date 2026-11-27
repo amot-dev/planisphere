@@ -1,9 +1,9 @@
-import { createElement } from 'react'
+import { type ComponentProps } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { PlannerConfirmModal } from './PlannerConfirmModal'
 
-type ConfirmState = Parameters<typeof PlannerConfirmModal>[0]['confirmState']
+type ConfirmState = ComponentProps<typeof PlannerConfirmModal>['confirmState']
 
 describe('PlannerConfirmModal', () => {
   it.each<{
@@ -77,15 +77,14 @@ describe('PlannerConfirmModal', () => {
     },
   ])('renders $caseLabel confirmation modal', ({ confirmState, expectedText }) => {
     const renderedHtml = renderToString(
-      createElement(PlannerConfirmModal, {
-        confirmState,
-        onConfirm: () => {},
-        onCancel: () => {},
-      }),
+      <PlannerConfirmModal
+        confirmState={confirmState}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
     )
     for (const expectedSubstring of expectedText) {
       expect(renderedHtml).toContain(expectedSubstring)
     }
   })
 })
-

@@ -15,7 +15,7 @@ import {
   scopeSupportsModeSplit,
 } from './exportMetrics'
 import { CartBlockItem, defaultMetricsForSection } from './exportTypes'
-import { buildSampleExportData } from './exportTestFixtures'
+import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 
 describe('exportMetrics', () => {
   it('resolves Go-computed derived metrics, baseline fallbacks, and region buckets across scopes', () => {

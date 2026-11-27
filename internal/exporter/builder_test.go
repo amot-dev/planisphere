@@ -13,9 +13,11 @@ import (
 	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
 	"planisphere/internal/reference"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/store/settings"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/expeditiontest"
 	"planisphere/internal/testutil/journaltest"
@@ -346,5 +348,61 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 		if !reflect.DeepEqual(rowDetail, expectedDetail) {
 			testingContext.Fatalf("RowDetails[%d] parity mismatch:\ngot:  %+v\nwant: %+v", index, rowDetail, expectedDetail)
 		}
+	}
+}
+
+func TestBuildArchivedPreWipeCareerSelectedExpedition(testingContext *testing.T) {
+	fixture := setupExportFixture(testingContext)
+	fixedTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	journaltest.IngestLines(testingContext, fixture.databaseConnection,
+		`{"timestamp":"2024-05-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2024-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":501,"StarPos":[67,-119,24],"JumpDist":20.0}`,
+		`{"timestamp":"2024-05-01T10:15:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2024-05-01T11:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":6006,"StarPos":[-9530,-910,19808],"JumpDist":22000.0}`,
+		`{"timestamp":"2024-05-01T11:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Colonia 1","BodyID":1,"StarSystem":"Colonia","SystemAddress":6006,"PlanetClass":"Earthlike body","MassEM":1.0,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2025-01-01T00:00:00Z","event":"ClearSavedGame","Name":"CMDR Pioneer","FID":"F777"}`,
+		`{"timestamp":"2025-01-01T00:00:05Z","event":"NewCommander","Name":"CMDR Pioneer","FID":"F777","Package":"Sidewinder"}`,
+		`{"timestamp":"2025-01-01T00:05:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"SideWinder","Ship_Localised":"Sidewinder","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2025-01-01T00:10:00Z","event":"Location","StarSystem":"Matet","SystemAddress":9001,"StarPos":[10,20,30]}`,
+	)
+
+	commanders, listError := replay.ListCommanders(fixture.databaseConnection)
+	if listError != nil || len(commanders) != 2 || !commanders[0].IsArchivedCareer || commanders[0].Enabled {
+		testingContext.Fatalf("expected era:0 archived disabled and era:1 active enabled, got %+v err=%v", commanders, listError)
+	}
+	archivedProfile := commanders[0]
+
+	histExp, createError := expedition.CreateWithWaypoints(fixture.databaseConnection, "2024 Pre-Wipe Colonia Run", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "journal"},
+		{SystemName: "Colonia", SystemAddress: 6006, HasCoords: true, X: -9530, Y: -910, Z: 19808, CoordsSource: "journal"},
+	})
+	if createError != nil {
+		testingContext.Fatalf("create historical expedition: %v", createError)
+	}
+	if startError := expedition.StartScopedTx(fixture.databaseConnection, histExp.ID, "2024-05-01T10:15:00Z", 0, expedition.ScopeSelected, []int64{archivedProfile.ID}); startError != nil {
+		testingContext.Fatalf("StartScopedTx archived profile: %v", startError)
+	}
+	if completeError := expedition.CompleteTx(fixture.databaseConnection, histExp.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx archived expedition: %v", completeError)
+	}
+	if scopeError := settings.SetCareerBaselineScope(fixture.databaseConnection, settings.CareerScopeExpedition); scopeError != nil {
+		testingContext.Fatal(scopeError)
+	}
+
+	exportSnapshot, buildError := exporter.Build(fixture.databaseConnection, histExp.ID, fixture.builderDeps(fixedTime))
+	if buildError != nil {
+		testingContext.Fatalf("exporter.Build archived expedition: %v", buildError)
+	}
+	if !reflect.DeepEqual(exportSnapshot.Commanders, []string{"CMDR Pioneer"}) {
+		testingContext.Fatalf("expected Commanders=[CMDR Pioneer], got %v", exportSnapshot.Commanders)
+	}
+	if exportSnapshot.CareerStart != "2024-05-01T10:00:00Z" || exportSnapshot.OriginBaseline == nil || math.Abs(exportSnapshot.OriginBaseline.Metrics.DistanceLy-20.0) > 0.01 {
+		testingContext.Fatalf("expected pre-wipe CareerStart and OriginBaseline 20.0 Ly, got start=%q baseline=%+v",
+			exportSnapshot.CareerStart, exportSnapshot.OriginBaseline)
+	}
+	if math.Abs(exportSnapshot.Live.DistanceLy-22000.0) > 0.01 || len(exportSnapshot.RowDetails) != 1 || !reflect.DeepEqual(exportSnapshot.RowDetails[0].ShipsUsed, []string{"Anaconda"}) {
+		testingContext.Fatalf("expected 22000 Ly Anaconda leg on archived expedition export, got live=%+v details=%+v",
+			exportSnapshot.Live, exportSnapshot.RowDetails)
 	}
 }

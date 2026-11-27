@@ -67,3 +67,12 @@ func mustGetActiveCarrierRoute(testingContext *testing.T, databaseConnection *sq
 	}
 	return routeState
 }
+
+func mustCaptureSnapshot(testingContext *testing.T, databaseConnection *sql.DB, expeditionID int64) expedition.Snapshot {
+	testingContext.Helper()
+	snapshot, captureError := expedition.CaptureSnapshot(databaseConnection, expeditionID)
+	if captureError != nil {
+		testingContext.Fatalf("CaptureSnapshot(%d): %v", expeditionID, captureError)
+	}
+	return snapshot
+}

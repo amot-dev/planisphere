@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
 import { defaultMetricsForSection } from './exportTypes'
 import { generateSelfContainedHtmlReport } from './htmlGenerator'
-import { buildSampleExportData } from './exportTestFixtures'
+import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 
 describe('htmlGenerator', () => {
   it('renders a self-contained offline HTML report with escaped titles, print rules, departure badges, and no TOC bar', () => {

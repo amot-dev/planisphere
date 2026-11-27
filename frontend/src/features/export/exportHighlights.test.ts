@@ -4,7 +4,7 @@ import {
   computeAllHighlightLeaderboards,
   selectHighlightCards,
 } from './exportHighlights'
-import { buildSampleExportData } from './exportTestFixtures'
+import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 
 describe('exportHighlights', () => {
   it('selects canonical Go leaderboards including IN SYSTEM while excluding unvisited legs', () => {

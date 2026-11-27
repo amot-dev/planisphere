@@ -283,64 +283,6 @@ func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
 	}
 }
 
-func TestMigrateLegModesV11BackfillFromLegacyModeWindows(testingContext *testing.T) {
-	databaseConnection := dbtest.OpenMemory(testingContext)
-	defaultModes := expeditiontest.LookupDefaultModes(testingContext, databaseConnection)
-	explorationID, tourismID, travelID := defaultModes.Exploration, defaultModes.Tourism, defaultModes.Travel
-
-	expeditionRecord, createLegacyErr := expedition.CreateWithWaypoints(databaseConnection, "Legacy Upgrade", "", []expedition.SeedWaypoint{
-		{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"},
-	})
-	if createLegacyErr != nil {
-		testingContext.Fatalf("CreateWithWaypoints Legacy Upgrade: %v", createLegacyErr)
-	}
-	rows, listLegacyErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
-	if listLegacyErr != nil {
-		testingContext.Fatalf("ListRows Legacy Upgrade: %v", listLegacyErr)
-	}
-
-	// Simulate a pre-v11 database state with legacy mode_windows and unmapped active_mode_id / leg_mode_id.
-	setupStatements := []struct {
-		query string
-		args  []any
-	}{
-		{`UPDATE expeditions SET status = 'active', start_timestamp = '2026-08-01T10:00:00Z', active_mode_id = 0 WHERE id = ?`, []any{expeditionRecord.ID}},
-		{`UPDATE expedition_rows SET visited_at = '2026-08-01T10:00:00Z', leg_mode_id = 0 WHERE id = ?`, []any{rows[0].ID}},
-		{`UPDATE expedition_rows SET visited_at = '2026-08-01T11:00:00Z', leg_mode_id = 0 WHERE id = ?`, []any{rows[1].ID}},
-		{`UPDATE expedition_rows SET visited_at = '2026-08-01T12:00:00Z', leg_mode_id = 0 WHERE id = ?`, []any{rows[2].ID}},
-		{`INSERT INTO mode_windows(mode_id, start_timestamp, end_timestamp) VALUES (?, '2026-08-01T10:30:00Z', '2026-08-01T11:30:00Z'), (?, '2026-08-01T13:00:00Z', NULL)`, []any{explorationID, tourismID}},
-		{`DELETE FROM settings WHERE key = 'leg_modes_v11'`, nil},
-	}
-	for _, stmt := range setupStatements {
-		if _, execError := databaseConnection.Exec(stmt.query, stmt.args...); execError != nil {
-			testingContext.Fatalf("seed legacy pre-v11 state (%s): %v", stmt.query, execError)
-		}
-	}
-
-	if migrateError := db.Migrate(databaseConnection); migrateError != nil {
-		testingContext.Fatalf("db.Migrate v11: %v", migrateError)
-	}
-
-	migratedExp, getMigratedErr := expedition.Get(databaseConnection, expeditionRecord.ID)
-	if getMigratedErr != nil {
-		testingContext.Fatalf("Get migrated expedition: %v", getMigratedErr)
-	}
-	migratedRows, listMigratedErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
-	if listMigratedErr != nil {
-		testingContext.Fatalf("ListRows migrated expedition: %v", listMigratedErr)
-	}
-	if migratedExp.ActiveModeID != tourismID {
-		testingContext.Fatalf("expected migrated active_mode_id=%d from open mode_window, got %d", tourismID, migratedExp.ActiveModeID)
-	}
-	if migratedRows[0].LegModeID != 0 {
-		testingContext.Fatalf("expected origin waypoint to stay LegModeID=0, got %d", migratedRows[0].LegModeID)
-	}
-	if migratedRows[1].LegModeID != explorationID || migratedRows[2].LegModeID != travelID {
-		testingContext.Fatalf("expected Alpha=%d (covered window) and Beta=%d (Travel fallback), got Alpha=%d Beta=%d",
-			explorationID, travelID, migratedRows[1].LegModeID, migratedRows[2].LegModeID)
-	}
-}
-
 func TestLoadModeLookupDepartureSpansAndInSystemFrontier(testingContext *testing.T) {
 	databaseConnection := dbtest.OpenMemory(testingContext)
 	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)

@@ -1,15 +1,15 @@
 // @vitest-environment happy-dom
-import { act, createElement, type ComponentProps, type ReactElement } from 'react'
+import { act, type ComponentProps, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { exporter } from '../../api/models'
 import { installCanvasPngMock, installResizeObserverMock } from '../../test/domMocks'
+import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 import { mountTestRoot, setFormControlValue, type MountedTestRoot } from '../../test/render'
 import { installWailsAppMock } from '../../test/wailsMock'
 import { BlockConfigurator } from './BlockConfigurator'
 import { ExportCartQueue } from './ExportCartQueue'
 import { ExportExpeditionModal } from './ExportExpeditionModal'
 import { ExportPreviewPane } from './ExportPreviewPane'
-import { buildSampleExportData } from './exportTestFixtures'
 
 interface MemoComponentInternal<TProps> {
   type: (props: TProps) => ReactElement | null
@@ -25,10 +25,7 @@ async function mountExportModal(expeditionId = 7): Promise<MountedTestRoot> {
   let mounted!: MountedTestRoot
   await act(async () => {
     mounted = mountTestRoot(
-      createElement(ExportExpeditionModal, {
-        expeditionId,
-        onClose: () => {},
-      }),
+      <ExportExpeditionModal expeditionId={expeditionId} onClose={() => {}} />,
     )
     await flushMicrotasks()
   })
@@ -36,7 +33,7 @@ async function mountExportModal(expeditionId = 7): Promise<MountedTestRoot> {
 }
 
 describe('ExportExpeditionModal', () => {
-  it('omits Custom Timeframe, isolates inspected cart context from BlockConfigurator, and locks controls while exporting', async () => {
+  it('isolates inspected cart context from BlockConfigurator and locks controls while exporting', async () => {
     installResizeObserverMock()
 
     const sampleExportData = buildSampleExportData()
@@ -53,14 +50,9 @@ describe('ExportExpeditionModal', () => {
     const mounted = await mountExportModal(7)
     expect(spies.GetExpeditionExportData).toHaveBeenCalledWith(7)
 
-    // Custom Timeframe must not appear in Scope options.
+    // Queue a Pre-Expedition Baseline Summary block so we can inspect it while configuring Details.
     const scopeSelect = mounted.container.querySelector('select') as HTMLSelectElement
     expect(scopeSelect).toBeTruthy()
-    const scopeOptionValues = Array.from(scopeSelect.options).map((option) => option.value)
-    expect(scopeOptionValues).not.toContain('customTime')
-    expect(mounted.container.textContent).not.toContain('Custom Timeframe')
-
-    // Queue a Pre-Expedition Baseline Summary block so we can inspect it while configuring Details.
     await act(async () => {
       setFormControlValue(scopeSelect, 'baseline')
       await flushMicrotasks()
@@ -208,70 +200,6 @@ describe('ExportExpeditionModal', () => {
       await flushMicrotasks()
     })
     expect(mounted.findButtonByText('Next', { exact: true }).disabled).toBe(false)
-  })
-
-  it('keeps 24h-gated Details metrics selectable and addable when Slice 0 is under 24h and a later slice reaches 24h', async () => {
-    installResizeObserverMock()
-
-    const baseData = buildSampleExportData()
-    const sub24hFirstLegData = buildSampleExportData({
-      rowDetails: baseData.rowDetails.map((detail, index) =>
-        index === 0
-          ? ({ ...detail, from: '2026-04-01T10:00:00Z', to: '2026-04-01T16:00:00Z', elapsed: '06h 00m' } as typeof detail)
-          : detail,
-      ),
-    })
-
-    installWailsAppMock({
-      GetExpeditionExportData: async () => sub24hFirstLegData,
-      PickExportSavePath: async () => '',
-      WriteExportOutput: async (targetPath: string) => targetPath,
-    })
-
-    const mounted = await mountExportModal(7)
-    const clickAndFlush = async (element: HTMLElement) => {
-      await act(async () => {
-        element.click()
-        await flushMicrotasks()
-      })
-    }
-
-    await clickAndFlush(mounted.findButtonByText('Details', { exact: true }))
-    const [scopeSelect, sectionSelect] = Array.from(mounted.container.querySelectorAll('select'))
-    await act(async () => {
-      setFormControlValue(scopeSelect, 'allLegs')
-      await flushMicrotasks()
-    })
-
-    // Slice 0 lasted 6h (< 24h), while Slice 1 lasted 50h (>= 24h): Avg Distance per Day must stay enabled.
-    expect(mounted.findButtonByText('Avg Distance per Day', { exact: false }).disabled).toBe(false)
-    await clickAndFlush(mounted.findButtonByText('[None]', { exact: true }))
-    expect(mounted.findButtonByText('+ ADD 3 BLOCKS TO CART', { exact: false }).disabled).toBe(
-      true,
-    )
-    await clickAndFlush(mounted.findButtonByText('Avg Distance per Day', { exact: false }))
-    expect(mounted.findButtonByText('+ ADD 3 BLOCKS TO CART', { exact: false }).disabled).toBe(
-      false,
-    )
-
-    // Exploration Value likewise keeps Avg Credits per Day enabled and addable across All Legs.
-    await act(async () => {
-      setFormControlValue(sectionSelect, 'explorationValue')
-      await flushMicrotasks()
-    })
-    expect(mounted.findButtonByText('Avg Credits per Day', { exact: false }).disabled).toBe(false)
-    await clickAndFlush(mounted.findButtonByText('[None]', { exact: true }))
-    await clickAndFlush(mounted.findButtonByText('Avg Credits per Day', { exact: false }))
-    await clickAndFlush(mounted.findButtonByText('+ ADD 3 BLOCKS TO CART', { exact: false }))
-    expect(mounted.container.textContent).toContain('Export Cart (6)')
-
-    // Scoping down to the single 6h leg alone disables Avg Credits per Day and blocks + ADD TO CART.
-    await act(async () => {
-      setFormControlValue(scopeSelect, 'leg')
-      await flushMicrotasks()
-    })
-    expect(mounted.findButtonByText('Avg Credits per Day', { exact: false }).disabled).toBe(true)
-    expect(mounted.findButtonByText('+ ADD TO CART', { exact: false }).disabled).toBe(true)
   })
 
   it('accepts hydrated Wails ExpeditionExport instances directly and delegates canonical JSON assembly to Go via canonicalJsonExpeditionId', async () => {

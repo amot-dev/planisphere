@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { type ComponentProps } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { app, stats } from '../../api/models'
@@ -8,16 +8,16 @@ import { StatsSidebar } from './StatsSidebar'
 describe('StatsSidebar', () => {
   it('renders LOG JUMP button only in active Expedition scope and disables it when carrierRouteOpen is true', () => {
     const emptyFilter = stats.Filter.createFrom({ enabled: false, modes: [] })
-    const renderStatsSidebar = (overrides: Partial<Parameters<typeof StatsSidebar>[0]> = {}) =>
+    const renderStatsSidebar = (overrides: Partial<ComponentProps<typeof StatsSidebar>> = {}) =>
       renderToString(
-        createElement(StatsSidebar, {
-          sidebarStats: null,
-          modesState: null,
-          filter: emptyFilter,
-          onFilterChange: () => {},
-          onLogCarrierJump: () => {},
-          ...overrides,
-        }),
+        <StatsSidebar
+          sidebarStats={null}
+          modesState={null}
+          filter={emptyFilter}
+          onFilterChange={() => {}}
+          onLogCarrierJump={() => {}}
+          {...overrides}
+        />,
       )
 
     expect(renderStatsSidebar()).not.toContain('LOG JUMP')
@@ -82,22 +82,22 @@ describe('StatsSidebar', () => {
     )
 
     const allTimeSectionHtml = renderToString(
-      createElement(NavigationTelemetrySection, {
-        viewScope: 'allTime',
-        sidebarStats: app.SidebarStats.createFrom({
+      <NavigationTelemetrySection
+        viewScope="allTime"
+        sidebarStats={app.SidebarStats.createFrom({
           allJournals: {
             carrierDistanceLy: 12500,
             carrierJumps: 28,
             tritiumUsed: 1900,
           },
-        }),
-        displayedMetrics: stats.Metrics.createFrom({
+        })}
+        displayedMetrics={stats.Metrics.createFrom({
           carrierDistanceLy: 12500,
           carrierJumps: 28,
           tritiumUsed: 1900,
-        }),
-        carrierRouteOpen: false,
-      }),
+        })}
+        carrierRouteOpen={false}
+      />,
     )
 
     expect(allTimeSectionHtml).toContain('Personal Carrier Operations')
@@ -112,35 +112,35 @@ describe('StatsSidebar', () => {
     const emptyMetrics = stats.Metrics.createFrom({})
 
     const planningHtml = renderToString(
-      createElement(NavigationTelemetrySection, {
-        viewScope: 'expedition',
-        sidebarStats: app.SidebarStats.createFrom({
+      <NavigationTelemetrySection
+        viewScope="expedition"
+        sidebarStats={app.SidebarStats.createFrom({
           expeditionId: 1,
           status: 'planning',
           started: false,
           departed: false,
-        }),
-        displayedMetrics: emptyMetrics,
-        carrierRouteOpen: false,
-      }),
+        })}
+        displayedMetrics={emptyMetrics}
+        carrierRouteOpen={false}
+      />,
     )
     expect(planningHtml).toContain('NOT STARTED')
     expect(planningHtml).not.toContain('AWAITING DEPARTURE')
     expect(planningHtml).not.toContain('START:')
 
     const stagedHtml = renderToString(
-      createElement(NavigationTelemetrySection, {
-        viewScope: 'expedition',
-        sidebarStats: app.SidebarStats.createFrom({
+      <NavigationTelemetrySection
+        viewScope="expedition"
+        sidebarStats={app.SidebarStats.createFrom({
           expeditionId: 1,
           status: 'active',
           started: true,
           departed: false,
           endIsNow: false,
-        }),
-        displayedMetrics: emptyMetrics,
-        carrierRouteOpen: false,
-      }),
+        })}
+        displayedMetrics={emptyMetrics}
+        carrierRouteOpen={false}
+      />,
     )
     expect(stagedHtml).toContain('AWAITING DEPARTURE')
     expect(stagedHtml).not.toContain('NOT STARTED')
@@ -148,9 +148,9 @@ describe('StatsSidebar', () => {
     expect(stagedHtml).not.toContain('CURRENT:')
 
     const underwayHtml = renderToString(
-      createElement(NavigationTelemetrySection, {
-        viewScope: 'expedition',
-        sidebarStats: app.SidebarStats.createFrom({
+      <NavigationTelemetrySection
+        viewScope="expedition"
+        sidebarStats={app.SidebarStats.createFrom({
           expeditionId: 1,
           status: 'active',
           started: true,
@@ -158,10 +158,10 @@ describe('StatsSidebar', () => {
           startGalactic: '3312-01-18 12:00 UTC',
           endIsNow: true,
           duration: '2h 15m',
-        }),
-        displayedMetrics: emptyMetrics,
-        carrierRouteOpen: false,
-      }),
+        })}
+        displayedMetrics={emptyMetrics}
+        carrierRouteOpen={false}
+      />,
     )
     expect(underwayHtml).toContain('2h 15m')
     expect(underwayHtml).toContain('START:')
@@ -170,4 +170,3 @@ describe('StatsSidebar', () => {
     expect(underwayHtml).not.toContain('AWAITING DEPARTURE')
   })
 })
-

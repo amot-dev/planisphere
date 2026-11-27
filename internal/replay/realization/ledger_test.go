@@ -1,13 +1,34 @@
-package stats_test
+package realization_test
 
 import (
+	"database/sql"
 	"testing"
 
-	"planisphere/internal/replay/stats"
+	"planisphere/internal/replay/realization"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/journaltest"
 )
+
+func insertRawUIDEvent(testingContext *testing.T, databaseConnection *sql.DB, timestamp, eventName, rawJSON string) {
+	testingContext.Helper()
+	eventUID := journal.ComputeUID(timestamp, eventName, rawJSON)
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
+		eventUID, timestamp, eventName, rawJSON, timestamp,
+	); execError != nil {
+		testingContext.Fatalf("insert raw-UID %s event: %v", eventName, execError)
+	}
+}
+
+func mustBuildLedger(testingContext *testing.T, databaseConnection *sql.DB) *realization.Ledger {
+	testingContext.Helper()
+	ledger, buildError := realization.BuildLedger(databaseConnection, true)
+	if buildError != nil {
+		testingContext.Fatalf("BuildLedger failed: %v", buildError)
+	}
+	return ledger
+}
 
 func TestRealizationNpcCrewCut(t *testing.T) {
 	databaseConnection := dbtest.OpenMemory(t)
@@ -23,11 +44,7 @@ func TestRealizationNpcCrewCut(t *testing.T) {
 		`{"timestamp":"2026-03-01T12:00:02Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`,
 	)
 
-	engine := stats.NewEngine(databaseConnection)
-	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
-	}
+	realizationBreakdown := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:00:00Z", "2026-03-01T11:00:00Z", nil)
 
 	// Net Credits Pocketed = (19,010,800 - 1,901,080) + 1,000,000 = 18,109,720.
 	expectedNetRealized := int64(19010800 - 1901080 + 1000000)
@@ -41,7 +58,6 @@ func TestRealizationNpcCrewCut(t *testing.T) {
 
 func TestRealizationCartoLostDeathAndSold(t *testing.T) {
 	databaseConnection := dbtest.OpenMemory(t)
-	engineInstance := stats.NewEngine(databaseConnection)
 
 	// Ship destruction via insurance rebuy, free Sidewinder, or bankruptcy each loses pending cartography.
 	journaltest.InsertParsedLines(
@@ -55,18 +71,17 @@ func TestRealizationCartoLostDeathAndSold(t *testing.T) {
 		`{"timestamp":"2026-03-01T15:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":true}`,
 	)
 
+	ledger := mustBuildLedger(t, databaseConnection)
 	for _, scenario := range []struct {
-		label  string
-		window stats.Range
+		label string
+		after string
+		until string
 	}{
-		{label: "insurance rebuy", window: stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}},
-		{label: "freewinder replacement", window: stats.Range{After: "2026-03-01T11:30:00Z", Until: "2026-03-01T12:30:00Z"}},
-		{label: "bankruptcy replacement", window: stats.Range{After: "2026-03-01T13:30:00Z", Until: "2026-03-01T14:30:00Z"}},
+		{label: "insurance rebuy", after: "2026-03-01T09:00:00Z", until: "2026-03-01T10:30:00Z"},
+		{label: "freewinder replacement", after: "2026-03-01T11:30:00Z", until: "2026-03-01T12:30:00Z"},
+		{label: "bankruptcy replacement", after: "2026-03-01T13:30:00Z", until: "2026-03-01T14:30:00Z"},
 	} {
-		realizationBreakdown, computeError := engineInstance.ComputeRealization(scenario.window, nil)
-		if computeError != nil {
-			t.Fatalf("ComputeRealization (%s) failed: %v", scenario.label, computeError)
-		}
+		realizationBreakdown := ledger.Breakdown(scenario.after, scenario.until, nil)
 		if realizationBreakdown.CartoLostDeath <= 0 {
 			t.Errorf("%s: expected CartoLostDeath > 0, got %d", scenario.label, realizationBreakdown.CartoLostDeath)
 		}
@@ -90,11 +105,7 @@ func TestRealizationOnFootDeathPreservesCarto(t *testing.T) {
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Sol","NumBodies":1}]}`,
 	)
 
-	engineInstance := stats.NewEngine(databaseConnection)
-	realizationBreakdown, computeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:45:00Z"}, nil)
-	if computeError != nil {
-		t.Fatalf("ComputeRealization failed: %v", computeError)
-	}
+	realizationBreakdown := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:00:00Z", "2026-03-01T10:45:00Z", nil)
 
 	if realizationBreakdown.CartoLostDeath != 0 {
 		t.Errorf("expected CartoLostDeath 0 for on-foot death, got %d", realizationBreakdown.CartoLostDeath)
@@ -121,13 +132,7 @@ func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[{"SystemName":"Alpha","NumBodies":1}]}`,
 	)
 
-	engineInstance := stats.NewEngine(databaseConnection)
-	legWindow := stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}
-
-	afterFirstPageBreakdown, firstPageError := engineInstance.ComputeRealization(legWindow, nil)
-	if firstPageError != nil {
-		t.Fatalf("ComputeRealization after first page failed: %v", firstPageError)
-	}
+	afterFirstPageBreakdown := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:00:00Z", "2026-03-01T10:30:00Z", nil)
 	if afterFirstPageBreakdown.TotalRealized != 1000000 {
 		t.Errorf("expected TotalRealized 1,000,000 after first page, got %d", afterFirstPageBreakdown.TotalRealized)
 	}
@@ -146,10 +151,7 @@ func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
 		`{"timestamp":"2026-03-08T12:05:00Z","event":"SellExplorationData","Systems":["Gamma"],"Discovered":[],"BaseValue":15117,"Bonus":0,"TotalEarnings":15117}`,
 	)
 
-	afterSecondPageBreakdown, secondPageError := engineInstance.ComputeRealization(legWindow, nil)
-	if secondPageError != nil {
-		t.Fatalf("ComputeRealization after second page failed: %v", secondPageError)
-	}
+	afterSecondPageBreakdown := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:00:00Z", "2026-03-01T10:30:00Z", nil)
 	if afterSecondPageBreakdown.TotalRealized != 2515117 {
 		t.Errorf("expected combined TotalRealized 2,515,117 across sales, got %d", afterSecondPageBreakdown.TotalRealized)
 	}
@@ -161,19 +163,7 @@ func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
 	}
 }
 
-func TestRealizationSameTimestampDistinctSalesPreservedAndCanonicalUID(t *testing.T) {
-	// Verify ParseLine generates the exact same UID for raw journal vs EDDiscovery whitespace formatting
-	rawLine := []byte(`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`)
-	eddLine := []byte(`{ "timestamp":"2026-03-01T12:00:00Z", "event":"SellOrganicData", "MarketID":123, "BioData":[ { "Species":"$Codex_Ent_Bacterial_01_Name;", "Value":1000000, "Bonus":0 } ] }`)
-	rawJournalEvent, isRawValid, rawParseError := journal.ParseLine(rawLine, "Journal.log")
-	eddJournalEvent, isEDDValid, eddParseError := journal.ParseLine(eddLine, "EDDiscovery")
-	if !isRawValid || !isEDDValid || rawParseError != nil || eddParseError != nil {
-		t.Fatalf("ParseLine failed: isRawValid=%v rawParseError=%v isEDDValid=%v eddParseError=%v", isRawValid, rawParseError, isEDDValid, eddParseError)
-	}
-	if rawJournalEvent.UID != eddJournalEvent.UID {
-		t.Fatalf("expected identical canonical UID for SellOrganicData across whitespace differences, got %s vs %s", rawJournalEvent.UID, eddJournalEvent.UID)
-	}
-
+func TestRealizationSameTimestampDistinctSalesPreserved(t *testing.T) {
 	// Verify duplicate whitespace-varied sales with legacy un-canonicalized UIDs are ignored while genuinely distinct sales sharing the same 1-second timestamp are both preserved
 	databaseConnection := dbtest.OpenMemory(t)
 	journaltest.InsertParsedLines(
@@ -190,11 +180,7 @@ func TestRealizationSameTimestampDistinctSalesPreservedAndCanonicalUID(t *testin
 	insertRawUIDEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
 
-	engine := stats.NewEngine(databaseConnection)
-	realizationBreakdown, err := engine.ComputeRealization(stats.Range{}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
-	}
+	realizationBreakdown := mustBuildLedger(t, databaseConnection).Breakdown("", "", nil)
 	if realizationBreakdown.TotalRealized != 20010800 {
 		t.Errorf("expected TotalRealized 20,010,800 for two distinct sales at same timestamp with duplicate ignored, got %d", realizationBreakdown.TotalRealized)
 	}
@@ -221,11 +207,7 @@ func TestRealizationFirstFootfallOnlyDeterminesFirstLoggedAndStolen(t *testing.T
 		]}`,
 	)
 
-	engine := stats.NewEngine(databaseConnection)
-	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
-	if err != nil {
-		t.Fatalf("ComputeRealization failed: %v", err)
-	}
+	realizationBreakdown := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:00:00Z", "2026-03-01T11:00:00Z", nil)
 
 	// Only Stratum Tectonicas (76,043,200 bonus) on un-footfalled Body 2 should be flagged stolen;
 	// Cactoida Vermis on already-footfalled Body 1 must NOT be flagged stolen.
@@ -237,105 +219,8 @@ func TestRealizationFirstFootfallOnlyDeterminesFirstLoggedAndStolen(t *testing.T
 	}
 }
 
-func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
-	databaseConnection := dbtest.OpenMemory(t)
-	engine := stats.NewEngine(databaseConnection)
-
-	// Body already has WasFootfalled: true (another commander landed previously without logging organics).
-	journaltest.InsertParsedLines(
-		t,
-		databaseConnection,
-		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"FootfalledSys","SystemAddress":6001,"BodyID":1,"BodyName":"FootfalledSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`,
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":6001,"Body":1}`,
-	)
-
-	legWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T10:30:00Z"}
-
-	// Before sale: estimated at base value only (19,010,800 Cr) because WasFootfalled is true.
-	beforeMetrics, beforeError := engine.ComputeExobiology(legWindow, nil)
-	if beforeError != nil {
-		t.Fatalf("ComputeExobiology before sale failed: %v", beforeError)
-	}
-	if beforeMetrics.FirstLogged != 0 {
-		t.Errorf("expected FirstLogged 0 before sale, got %d", beforeMetrics.FirstLogged)
-	}
-	if beforeMetrics.OrganicValueTotal != 19010800 {
-		t.Errorf("expected OrganicValueTotal 19,010,800 before sale, got %d", beforeMetrics.OrganicValueTotal)
-	}
-
-	// Sold on a later leg with the 4x first-logged bonus (76,043,200 Cr).
-	journaltest.InsertParsedLines(
-		t,
-		databaseConnection,
-		`{"timestamp":"2026-03-01T14:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
-			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200}
-		]}`,
-	)
-
-	// After sale: the original leg's Exobiology Value upgrades to include the first-logged bonus (95,054,000 Cr).
-	afterMetrics, afterError := engine.ComputeExobiology(legWindow, nil)
-	if afterError != nil {
-		t.Fatalf("ComputeExobiology after sale failed: %v", afterError)
-	}
-	if afterMetrics.FirstLogged != 1 {
-		t.Errorf("expected FirstLogged 1 after sale, got %d", afterMetrics.FirstLogged)
-	}
-	if afterMetrics.OrganicValueBonus != 76043200 {
-		t.Errorf("expected OrganicValueBonus 76,043,200 after sale, got %d", afterMetrics.OrganicValueBonus)
-	}
-	if afterMetrics.OrganicValueTotal != 95054000 {
-		t.Errorf("expected OrganicValueTotal 95,054,000 after sale, got %d", afterMetrics.OrganicValueTotal)
-	}
-}
-
-func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T) {
-	databaseConnection := dbtest.OpenMemory(t)
-	engineInstance := stats.NewEngine(databaseConnection)
-
-	// First scan Stratum Tectonicas on an already-footfalled body (WasFootfalled: true),
-	// then scan the same species on an un-footfalled body (WasFootfalled: false), and sell both together.
-	journaltest.InsertParsedLines(
-		t,
-		databaseConnection,
-		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":1,"BodyName":"TieBreakSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`,
-		`{"timestamp":"2026-03-01T09:52:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":2,"BodyName":"TieBreakSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`,
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":1}`,
-		`{"timestamp":"2026-03-01T10:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":2}`,
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
-			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200},
-			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":0}
-		]}`,
-	)
-
-	organicWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T11:00:00Z"}
-	realizationResult, realizationError := engineInstance.ComputeRealization(organicWindow, nil)
-	if realizationError != nil {
-		t.Fatalf("ComputeRealization failed: %v", realizationError)
-	}
-	expectedRealized := int64(19010800 + 76043200 + 19010800)
-	if realizationResult.TotalRealized != expectedRealized {
-		t.Errorf("expected TotalRealized %d, got %d", expectedRealized, realizationResult.TotalRealized)
-	}
-	if realizationResult.OrganicStolen != 0 {
-		t.Errorf("expected OrganicStolen 0, got %d", realizationResult.OrganicStolen)
-	}
-	if realizationResult.PendingValue != 0 {
-		t.Errorf("expected PendingValue 0, got %d", realizationResult.PendingValue)
-	}
-
-	legWindow := stats.Range{After: "2026-03-01T09:45:00Z", Until: "2026-03-01T11:00:00Z"}
-	legMetrics, computeError := engineInstance.ComputeExobiology(legWindow, nil)
-	if computeError != nil {
-		t.Fatalf("ComputeExobiology failed: %v", computeError)
-	}
-	if legMetrics.FirstLogged != 1 {
-		t.Errorf("expected FirstLogged 1, got %d", legMetrics.FirstLogged)
-	}
-}
-
 func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) {
 	databaseConnection := dbtest.OpenMemory(t)
-	engineInstance := stats.NewEngine(databaseConnection)
 
 	// Initial AutoScan of DedupeSys 1.
 	journaltest.InsertParsedLines(
@@ -344,11 +229,7 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 	)
 
-	firstLegWindow := stats.Range{After: "2026-03-01T09:50:00Z", Until: "2026-03-01T10:30:00Z"}
-	afterInitialScan, initialScanError := engineInstance.ComputeRealization(firstLegWindow, nil)
-	if initialScanError != nil {
-		t.Fatalf("ComputeRealization after initial scan failed: %v", initialScanError)
-	}
+	afterInitialScan := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:50:00Z", "2026-03-01T10:30:00Z", nil)
 	bodyScanOnlyValue := afterInitialScan.PendingValue
 	if bodyScanOnlyValue <= 0 {
 		t.Fatalf("expected positive PendingValue after initial scan, got %d", bodyScanOnlyValue)
@@ -363,10 +244,7 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 		`{"timestamp":"2026-03-01T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 	)
 
-	afterMappingAndDuplicateScan, duplicateScanError := engineInstance.ComputeRealization(firstLegWindow, nil)
-	if duplicateScanError != nil {
-		t.Fatalf("ComputeRealization after mapping and duplicate scan failed: %v", duplicateScanError)
-	}
+	afterMappingAndDuplicateScan := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:50:00Z", "2026-03-01T10:30:00Z", nil)
 	if afterMappingAndDuplicateScan.PendingValue <= bodyScanOnlyValue {
 		t.Fatalf("expected PendingValue after DSS mapping (%d) to exceed scan-only value (%d) without being overwritten by follow-up Scan",
 			afterMappingAndDuplicateScan.PendingValue, bodyScanOnlyValue)
@@ -379,10 +257,7 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 		`{"timestamp":"2026-03-01T11:00:00Z","event":"MultiSellExplorationData","BaseValue":1500000,"Bonus":500000,"TotalEarnings":2000000,"Discovered":[{"SystemName":"DedupeSys","NumBodies":1}]}`,
 	)
 
-	afterSale, afterSaleError := engineInstance.ComputeRealization(firstLegWindow, nil)
-	if afterSaleError != nil {
-		t.Fatalf("ComputeRealization after sale failed: %v", afterSaleError)
-	}
+	afterSale := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T09:50:00Z", "2026-03-01T10:30:00Z", nil)
 	if afterSale.PendingValue != 0 {
 		t.Errorf("expected PendingValue 0 after selling DedupeSys, got %d", afterSale.PendingValue)
 	}
@@ -398,11 +273,7 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 		`{"timestamp":"2026-03-01T12:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`,
 	)
 
-	rescanSoldWindow := stats.Range{After: "2026-03-01T11:30:00Z", Until: "2026-03-01T12:30:00Z"}
-	afterSoldRescan, soldRescanError := engineInstance.ComputeRealization(rescanSoldWindow, nil)
-	if soldRescanError != nil {
-		t.Fatalf("ComputeRealization after re-scanning sold body failed: %v", soldRescanError)
-	}
+	afterSoldRescan := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T11:30:00Z", "2026-03-01T12:30:00Z", nil)
 	if afterSoldRescan.PendingValue != 0 {
 		t.Errorf("expected PendingValue 0 when re-scanning an already-sold body, got %d", afterSoldRescan.PendingValue)
 	}
@@ -416,11 +287,7 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 	)
 
-	postRebuyWindow := stats.Range{After: "2026-03-01T13:45:00Z", Until: "2026-03-01T14:30:00Z"}
-	afterPostRebuyRescan, postRebuyRescanError := engineInstance.ComputeRealization(postRebuyWindow, nil)
-	if postRebuyRescanError != nil {
-		t.Fatalf("ComputeRealization after post-rebuy rescan failed: %v", postRebuyRescanError)
-	}
+	afterPostRebuyRescan := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T13:45:00Z", "2026-03-01T14:30:00Z", nil)
 	if afterPostRebuyRescan.PendingValue != bodyScanOnlyValue {
 		t.Errorf("expected PendingValue %d after re-scanning lost body post-rebuy, got %d", bodyScanOnlyValue, afterPostRebuyRescan.PendingValue)
 	}
@@ -432,10 +299,7 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 		`{"timestamp":"2026-03-01T15:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"RebuySys","NumBodies":1}]}`,
 	)
 
-	afterPostRebuySale, postRebuySaleError := engineInstance.ComputeRealization(postRebuyWindow, nil)
-	if postRebuySaleError != nil {
-		t.Fatalf("ComputeRealization after post-rebuy sale failed: %v", postRebuySaleError)
-	}
+	afterPostRebuySale := mustBuildLedger(t, databaseConnection).Breakdown("2026-03-01T13:45:00Z", "2026-03-01T14:30:00Z", nil)
 	if afterPostRebuySale.PendingValue != 0 {
 		t.Errorf("expected PendingValue 0 after selling post-rebuy rescan, got %d", afterPostRebuySale.PendingValue)
 	}
@@ -446,7 +310,6 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 
 func TestRealizationCrewWageWindowAndBinarySearchBounds(testingContext *testing.T) {
 	databaseConnection := dbtest.OpenMemory(testingContext)
-	engineInstance := stats.NewEngine(databaseConnection)
 
 	// Record at exact After boundary (excluded), inside window (included), and after Until boundary (excluded),
 	// plus NpcCrewPaidWage 5-second window boundaries around the 10:30:00Z sale.
@@ -465,11 +328,7 @@ func TestRealizationCrewWageWindowAndBinarySearchBounds(testingContext *testing.
 		`{"timestamp":"2026-03-01T10:30:01Z","event":"SellExplorationData","Systems":["AfterSys"],"Discovered":[],"BaseValue":700000,"Bonus":0,"TotalEarnings":700000}`,
 	)
 
-	window := stats.Range{After: "2026-03-01T10:00:00Z", Until: "2026-03-01T10:30:00Z"}
-	breakdown, computeError := engineInstance.ComputeRealization(window, nil)
-	if computeError != nil {
-		testingContext.Fatalf("ComputeRealization failed: %v", computeError)
-	}
+	breakdown := mustBuildLedger(testingContext, databaseConnection).Breakdown("2026-03-01T10:00:00Z", "2026-03-01T10:30:00Z", nil)
 	if breakdown.PendingValue != 19010800 {
 		testingContext.Errorf("expected PendingValue 19,010,800 from single in-window organic scan, got %d", breakdown.PendingValue)
 	}

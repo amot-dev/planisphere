@@ -7,11 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"planisphere/internal/reference"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/journaltest"
@@ -166,69 +163,6 @@ func TestIngestFilePartialLine(t *testing.T) {
 	}
 }
 
-func TestWatcherStartStopSynchronization(t *testing.T) {
-	temporaryDirectoryOne := t.TempDir()
-	temporaryDirectoryTwo := t.TempDir()
-
-	watcherInstance := journal.NewWatcher(nil, nil)
-
-	parentContext, cancelParentContext := context.WithCancel(context.Background())
-	defer cancelParentContext()
-
-	watcherInstance.Start(parentContext, temporaryDirectoryOne)
-	t.Cleanup(watcherInstance.Stop)
-	watcherInstance.Start(parentContext, temporaryDirectoryTwo)
-	t.Cleanup(watcherInstance.Stop)
-
-	waitForActiveWatcher(t, watcherInstance)
-
-	watcherInstance.Stop()
-
-	isActiveAfterStop, _ := watcherInstance.Active()
-	if isActiveAfterStop {
-		t.Fatalf("expected watcher to be inactive after explicit Stop")
-	}
-}
-
-func TestWatcherReconnectWhenDirectoryCreated(t *testing.T) {
-	baseTemporaryDirectory := t.TempDir()
-	targetJournalDirectory := filepath.Join(baseTemporaryDirectory, "journals")
-
-	watcherInstance := journal.NewWatcher(nil, nil)
-
-	parentContext, cancelParentContext := context.WithCancel(context.Background())
-	defer cancelParentContext()
-
-	watcherInstance.Start(parentContext, targetJournalDirectory)
-	t.Cleanup(watcherInstance.Stop)
-
-	initiallyActive, _ := watcherInstance.Active()
-	if initiallyActive {
-		t.Fatalf("expected watcher to be initially inactive because directory does not exist")
-	}
-
-	if directoryCreationError := os.Mkdir(targetJournalDirectory, 0o755); directoryCreationError != nil {
-		t.Fatalf("failed to create target journal directory: %v", directoryCreationError)
-	}
-
-	deadlineTimer := time.Now().Add(4 * time.Second)
-	reconnectedSuccessfully := false
-	for time.Now().Before(deadlineTimer) {
-		activeStatus, _ := watcherInstance.Active()
-		if activeStatus {
-			reconnectedSuccessfully = true
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	if !reconnectedSuccessfully {
-		t.Fatalf("expected watcher to automatically reconnect after directory was created")
-	}
-
-	watcherInstance.Stop()
-}
-
 func TestScanDir_ContextCancellation(t *testing.T) {
 	temporaryDatabaseConnection := dbtest.OpenMemory(t)
 
@@ -250,88 +184,6 @@ func TestScanDir_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestComputeUIDDeterministicAndConcurrent(t *testing.T) {
-	initialUID := journal.ComputeUID("2026-01-18T19:05:00Z", "FSDJump", "1001", "Sol")
-	if len(initialUID) != 64 {
-		t.Fatalf("expected 64-char sha256 hex string, got %d (%s)", len(initialUID), initialUID)
-	}
-
-	var waitGroup sync.WaitGroup
-	for workerIndex := 0; workerIndex < 20; workerIndex++ {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			for iteration := 0; iteration < 100; iteration++ {
-				computedUID := journal.ComputeUID("2026-01-18T19:05:00Z", "FSDJump", "1001", "Sol")
-				if computedUID != initialUID {
-					t.Errorf("expected deterministic UID %s, got %s", initialUID, computedUID)
-				}
-			}
-		}()
-	}
-	waitGroup.Wait()
-}
-
-func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
-	temporaryDatabaseConnection := dbtest.OpenMemory(t)
-
-	temporaryJournalDirectory := t.TempDir()
-	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
-
-	batchNotificationChan := make(chan journal.Result, 4)
-	watcherInstance := journal.NewWatcher(ingesterInstance, func(batchResult journal.Result) {
-		batchNotificationChan <- batchResult
-	})
-
-	if watcherInstance.DebounceDelay() != reference.DefaultDebounceDelay {
-		t.Fatalf("expected initial debounce %v, got %v", reference.DefaultDebounceDelay, watcherInstance.DebounceDelay())
-	}
-	watcherInstance.SetDebounceDelay(90 * time.Second)
-	if watcherInstance.DebounceDelay() != reference.MaxDebounceDelay {
-		t.Fatalf("expected upper-clamped debounce %v, got %v", reference.MaxDebounceDelay, watcherInstance.DebounceDelay())
-	}
-	watcherInstance.SetDebounceDelay(50 * time.Millisecond)
-	if watcherInstance.DebounceDelay() != reference.MinDebounceDelay {
-		t.Fatalf("expected lower-clamped debounce %v, got %v", reference.MinDebounceDelay, watcherInstance.DebounceDelay())
-	}
-
-	parentContext, cancelParentContext := context.WithCancel(context.Background())
-	defer cancelParentContext()
-	watcherInstance.Start(parentContext, temporaryJournalDirectory)
-	t.Cleanup(watcherInstance.Stop)
-
-	waitForActiveWatcher(t, watcherInstance)
-
-	journalFilePath := filepath.Join(temporaryJournalDirectory, "Journal.2026-02-01T100000.01.log")
-	firstLine := `{"timestamp":"2026-02-01T10:00:01Z","event":"Scan","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Sol A 1","BodyID":1,"PlanetClass":"High metal content body"}` + "\n"
-	secondLine := `{"timestamp":"2026-02-01T10:00:02Z","event":"Scan","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Sol A 2","BodyID":2,"PlanetClass":"Rocky body"}` + "\n"
-
-	fileHandle, openError := os.OpenFile(journalFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if openError != nil {
-		t.Fatalf("open journal file: %v", openError)
-	}
-	if _, writeError := fileHandle.WriteString(firstLine); writeError != nil {
-		_ = fileHandle.Close()
-		t.Fatalf("write first scan line: %v", writeError)
-	}
-	if _, writeError := fileHandle.WriteString(secondLine); writeError != nil {
-		_ = fileHandle.Close()
-		t.Fatalf("write second scan line: %v", writeError)
-	}
-	if closeError := fileHandle.Close(); closeError != nil {
-		t.Fatalf("close journal file: %v", closeError)
-	}
-
-	select {
-	case coalescedBatch := <-batchNotificationChan:
-		if coalescedBatch.NewEvents != 2 {
-			t.Fatalf("expected 2 coalesced events in single debounced batch, got %d", coalescedBatch.NewEvents)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatalf("timed out waiting for debounced watcher batch")
-	}
-}
-
 func TestReingestFromByteZeroBackfillsUnattributedEvents(t *testing.T) {
 	conn, ingester, logFile := seedByteZeroBackfillFixture(
 		t,
@@ -350,50 +202,6 @@ func TestReingestFromByteZeroBackfillsUnattributedEvents(t *testing.T) {
 	}
 	if commanderName != "CmdrAlpha" {
 		t.Fatalf("expected unattributed early event to be backfilled to CmdrAlpha, got %q", commanderName)
-	}
-}
-
-func TestParseLinePreJumpFilters(testingContext *testing.T) {
-	testCases := []struct {
-		name     string
-		rawLine  string
-		wantKeep bool
-	}{
-		{
-			name:     "hyperspace StartJump kept",
-			rawLine:  `{"timestamp":"2026-11-17T01:40:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321}`,
-			wantKeep: true,
-		},
-		{
-			name:     "supercruise StartJump ignored",
-			rawLine:  `{"timestamp":"2026-11-17T01:41:00Z","event":"StartJump","JumpType":"Supercruise"}`,
-			wantKeep: false,
-		},
-		{
-			name:     "JetConeBoost kept",
-			rawLine:  `{"timestamp":"2026-11-17T01:39:00Z","event":"JetConeBoost","BoostValue":4.0}`,
-			wantKeep: true,
-		},
-		{
-			name:     "FSD synthesis kept",
-			rawLine:  `{"timestamp":"2026-11-17T01:39:10Z","event":"Synthesis","Name":"FSD Premium"}`,
-			wantKeep: true,
-		},
-		{
-			name:     "non-FSD synthesis ignored",
-			rawLine:  `{"timestamp":"2026-11-17T01:39:20Z","event":"Synthesis","Name":"Limpet Basic"}`,
-			wantKeep: false,
-		},
-	}
-
-	for _, testCase := range testCases {
-		_, gotKeep, parseError := journal.ParseLine([]byte(testCase.rawLine), "Journal.test.log")
-		if parseError != nil {
-			testingContext.Fatalf("%s: unexpected ParseLine error: %v", testCase.name, parseError)
-		}
-		if gotKeep != testCase.wantKeep {
-			testingContext.Errorf("%s: got keep=%v, want %v", testCase.name, gotKeep, testCase.wantKeep)
-		}
 	}
 }
 

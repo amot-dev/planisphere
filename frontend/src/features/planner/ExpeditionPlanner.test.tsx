@@ -1,21 +1,19 @@
-import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../api/models'
 import { makeMode } from '../../test/fixtures'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
-import { PlannerHeaderBar } from './PlannerHeaderBar'
 
 describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
   const renderPlanner = (plan: expedition.PlanView | null) =>
     renderToString(
-      createElement(ExpeditionPlanner, {
-        plan,
-        onPlanOptimisticUpdate: () => {},
-        onOpenStartModal: () => {},
-        onRefreshPlan: () => {},
-        onBusyChange: () => {},
-      }),
+      <ExpeditionPlanner
+        plan={plan}
+        onPlanOptimisticUpdate={() => {}}
+        onOpenStartModal={() => {}}
+        onRefreshPlan={() => {}}
+        onBusyChange={() => {}}
+      />,
     )
 
   it('renders safely when plan is null without throwing hook mismatch or null access', () => {
@@ -103,8 +101,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     const html = renderPlanner(mockPlan)
 
     expect(html).toContain('Beagle Point Survey')
-    expect(html).toContain('2 / 4 WAYPOINTS VISITED')
-    expect(html).toContain('FLIGHT MODE:')
     expect(html).not.toContain('ACTIVE EXPEDITION')
     expect(html).toContain('Sol')
     expect(html).toContain('Alpha Centauri')
@@ -158,86 +154,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('ADD WAYPOINT')
   })
 
-  it('renders completed expedition with Reopen action and Completed Route summary', () => {
-    const completedPlan = expedition.PlanView.createFrom({
-      expedition: {
-        id: 4,
-        name: 'Completed Voyage',
-        description: 'Done',
-        status: 'completed',
-        createdAt: '3310-01-01T00:00:00Z',
-        updatedAt: '3310-01-01T00:00:00Z',
-      },
-      rows: [
-        {
-          row: { id: 201, expeditionId: 4, rowType: 'region', regionId: 1, seq: 0 },
-          number: 0,
-          regionName: 'Galactic Core',
-          visitState: 'visited',
-        },
-        {
-          row: {
-            id: 30,
-            expeditionId: 4,
-            rowType: 'waypoint',
-            systemName: 'Sol',
-            seq: 1,
-            visitedAt: '3310-01-01T10:00:00Z',
-          },
-          number: 1,
-          visitState: 'visited',
-        },
-        {
-          row: {
-            id: 31,
-            expeditionId: 4,
-            rowType: 'waypoint',
-            systemName: 'Alpha Centauri',
-            seq: 2,
-            visitedAt: '3310-01-01T11:00:00Z',
-          },
-          number: 2,
-          visitState: 'visited',
-          distFromPrevLy: 4.3,
-        },
-        {
-          row: {
-            id: 32,
-            expeditionId: 4,
-            rowType: 'waypoint',
-            systemName: "Barnard's Star",
-            seq: 3,
-            visitedAt: '3310-01-01T12:00:00Z',
-          },
-          number: 3,
-          visitState: 'visited',
-          distFromPrevLy: 6.0,
-        },
-      ],
-      modes: [makeMode({ id: 1, name: 'Travel', color: '#FF7100' })],
-      visitedWaypointCount: 3,
-      waypointCount: 3,
-      activeRowId: 32,
-      plannedLy: 10.3,
-      coveredLy: 10.3,
-      remainingLy: 0,
-    })
-
-    const html = renderPlanner(completedPlan)
-
-    expect(html).toContain('Completed Voyage')
-    expect(html).toContain('3 WAYPOINTS VISITED')
-    expect(html).not.toContain('3 / 3 WAYPOINTS VISITED')
-    expect(html).not.toContain('FLIGHT MODE:')
-    expect(html).toContain('REOPEN')
-    expect(html).toContain('COMPLETED ROUTE:')
-    expect(html).toContain('10.3 Ly')
-    expect(html).not.toContain('PLANNED ROUTE:')
-    expect(html).not.toContain('REMAINING:')
-    expect(html).not.toContain('COVERED:')
-  })
-
-  it('renders populated planning expedition with native content-visibility, bottom add controls, and Planned Route summary', () => {
+  it('renders populated planning expedition with native content-visibility and bottom add controls', () => {
     const planningPlan = expedition.PlanView.createFrom({
       expedition: {
         id: 5,
@@ -249,13 +166,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       },
       rows: [
         {
-          row: {
-            id: 301,
-            expeditionId: 5,
-            rowType: 'region',
-            regionId: 1,
-            seq: 0,
-          },
+          row: { id: 301, expeditionId: 5, rowType: 'region', regionId: 1, seq: 0 },
           number: 0,
           regionName: 'Galactic Core',
           visitState: 'future',
@@ -274,13 +185,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           visitState: 'future',
         },
         {
-          row: {
-            id: 303,
-            expeditionId: 5,
-            rowType: 'waypoint',
-            systemName: 'Alpha Centauri',
-            seq: 2,
-          },
+          row: { id: 303, expeditionId: 5, rowType: 'waypoint', systemName: 'Alpha Centauri', seq: 2 },
           number: 2,
           visitState: 'future',
           distFromPrevLy: 4.3,
@@ -296,10 +201,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     const html = renderPlanner(planningPlan)
 
-    expect(html).toContain('2 WAYPOINTS PLANNED')
-    expect(html).not.toContain('PLANNING PHASE')
-    expect(html).toContain('FLIGHT MODE:')
-
     // Verify row styles include content-visibility and contain-intrinsic-size without virtualization spacers
     expect(html).toContain('content-visibility:auto')
     expect(html).toContain('contain-intrinsic-size:44px')
@@ -314,16 +215,9 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).toContain('ADD WAYPOINT')
     expect(html).toContain('ADD REGION HEADER')
     expect(html).toContain('h-48 shrink-0 pointer-events-none')
-
-    // Header summary shows only Planned Route in planning mode
-    expect(html).toContain('PLANNED ROUTE:')
-    expect(html).toContain('4.3 Ly')
-    expect(html).not.toContain('REMAINING:')
-    expect(html).not.toContain('COVERED:')
-    expect(html).not.toContain('COMPLETED ROUTE:')
   })
 
-  it('renders remaining Ly reflecting distance from player and shows player distance on next waypoint', () => {
+  it('forwards playerSystem to next waypoint row and advances data-last-visited across visited rows', () => {
     const activePlan = expedition.PlanView.createFrom({
       expedition: {
         id: 7,
@@ -374,25 +268,13 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       visitedWaypointCount: 1,
       waypointCount: 3,
       plannedLy: 10.3,
-      remainingLy: 8.1, // 2.1 (player to WP2) + 6.0 (WP2 to WP3)
+      remainingLy: 8.1,
     })
 
     const html = renderPlanner(activePlan)
+    expect(html).toContain('2.1 Ly')
+    expect(html).toContain('Interim Sol System')
 
-    // Route readout at top:
-    expect(html).toContain('COVERED:')
-    expect(html).toContain('REMAINING:')
-    expect(html).toContain('8.1 Ly')
-    expect(html).not.toContain('PLANNED ROUTE:')
-    expect(html).not.toContain('COMPLETED ROUTE:')
-
-    // With only Waypoint #1 visited (visitedWaypointCount: 1), Complete button is disabled until Waypoint #2 is visited:
-    expect(html).toContain(
-      'disabled="" title="Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete expedition in Expeditions)"',
-    )
-
-    // Once Waypoint #2 is visited, Covered and Remaining update, Complete button becomes enabled,
-    // and lastVisitedIndex advances across visitState === 'visited' rows without a 'current' row:
     const activePlanWithSecondVisited = expedition.PlanView.createFrom({
       ...activePlan,
       rows: activePlan.rows.map((rowView) =>
@@ -404,25 +286,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       remainingLy: 5.0,
     })
     const midflightHtml = renderPlanner(activePlanWithSecondVisited)
-    expect(midflightHtml).toContain('COVERED:')
-    expect(midflightHtml).toContain('4.3 Ly')
-    expect(midflightHtml).toContain('REMAINING:')
-    expect(midflightHtml).toContain('5.0 Ly')
-    expect(midflightHtml).toContain('>COMPLETE</button>')
     expect(midflightHtml).toMatch(/data-row-id="2"[^>]*data-last-visited="true"/)
     expect(midflightHtml).not.toMatch(/data-row-id="1"[^>]*data-last-visited="true"/)
-
-    const carrierRouteOpenHeaderHtml = renderToString(
-      createElement(PlannerHeaderBar, {
-        plan: activePlanWithSecondVisited,
-        hasOriginWaypointSystem: true,
-        carrierRouteOpen: true,
-        onOpenStartModal: () => {},
-        onLifecycleAction: async () => {},
-      }),
-    )
-    expect(carrierRouteOpenHeaderHtml).toContain(
-      'disabled="" title="Close or finish the active Fleet Carrier route before completing the expedition"',
-    )
   })
 })

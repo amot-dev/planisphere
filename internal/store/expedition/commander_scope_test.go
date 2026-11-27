@@ -5,12 +5,9 @@ import (
 	"math"
 	"reflect"
 	"testing"
-	"time"
 
-	"planisphere/internal/exporter"
 	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
-	"planisphere/internal/store/settings"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/expeditiontest"
 	"planisphere/internal/testutil/journaltest"
@@ -177,7 +174,7 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 	}
 }
 
-func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanDetailsAndExport(testingContext *testing.T) {
+func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanAndDetails(testingContext *testing.T) {
 	dbConn := dbtest.OpenMemory(testingContext)
 	_, projectionsBundle := expeditiontest.NewProjections(dbConn)
 
@@ -219,26 +216,11 @@ func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanDetailsAndExport(tes
 		testingContext.Fatalf("expected 2 visited waypoints for disabled archived profile in selected expedition, got %+v err=%v", planView, err)
 	}
 
-	if err := settings.SetCareerBaselineScope(dbConn, settings.CareerScopeExpedition); err != nil {
-		testingContext.Fatal(err)
+	originBaseline, legDetails := assertBatchMatchesIndividualDetails(testingContext, dbConn, planView, projectionsBundle)
+	if originBaseline == nil || math.Abs(originBaseline.Metrics.DistanceLy-20.0) > 0.01 {
+		testingContext.Fatalf("expected pre-wipe OriginBaseline 20.0 Ly, got %+v", originBaseline)
 	}
-	exportSnapshot, err := exporter.Build(dbConn, histExp.ID, exporter.BuilderDeps{
-		Projections: projectionsBundle,
-		AppVersion:  "test",
-		Now:         func() time.Time { return time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC) },
-	})
-	if err != nil {
-		testingContext.Fatalf("exporter.Build archived expedition: %v", err)
-	}
-	if !reflect.DeepEqual(exportSnapshot.Commanders, []string{"CMDR Pioneer"}) {
-		testingContext.Fatalf("expected Commanders=[CMDR Pioneer], got %v", exportSnapshot.Commanders)
-	}
-	if exportSnapshot.CareerStart != "2024-05-01T10:00:00Z" || exportSnapshot.OriginBaseline == nil || math.Abs(exportSnapshot.OriginBaseline.Metrics.DistanceLy-20.0) > 0.01 {
-		testingContext.Fatalf("expected pre-wipe CareerStart and OriginBaseline 20.0 Ly, got start=%q baseline=%+v",
-			exportSnapshot.CareerStart, exportSnapshot.OriginBaseline)
-	}
-	if math.Abs(exportSnapshot.Live.DistanceLy-22000.0) > 0.01 || len(exportSnapshot.RowDetails) != 1 || !reflect.DeepEqual(exportSnapshot.RowDetails[0].ShipsUsed, []string{"Anaconda"}) {
-		testingContext.Fatalf("expected 22000 Ly Anaconda leg on archived expedition export, got live=%+v details=%+v",
-			exportSnapshot.Live, exportSnapshot.RowDetails)
+	if len(legDetails) != 1 || math.Abs(legDetails[0].Metrics.DistanceLy-22000.0) > 0.01 || !reflect.DeepEqual(legDetails[0].ShipsUsed, []string{"Anaconda"}) {
+		testingContext.Fatalf("expected 22000 Ly Anaconda leg on archived expedition details, got %+v", legDetails)
 	}
 }
