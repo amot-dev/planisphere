@@ -77,13 +77,13 @@ describe('useDomainLoaders refreshAll', () => {
     })
     expect(loaders.activeExpeditionIdRef.current).toBe(4)
 
-    // Default refreshAll() prefetches active expedition 4 immediately.
+    // Default refreshAll() prefetches active expedition 4 immediately with includeAllTime = false.
     await act(async () => {
       loaders.refreshAll()
       await Promise.resolve()
     })
     expect(spies.GetPlan).toHaveBeenCalledWith(4)
-    expect(spies.GetSidebarStats).toHaveBeenCalledWith(4, expect.anything())
+    expect(spies.GetSidebarStats).toHaveBeenCalledWith(4, expect.anything(), false)
 
     // Database switch to active expedition 9 (matching lastEffectPlanExpeditionIdRef.current = 9)
     // with different flight modes: skipPrefetch never queries stale expedition 4 and passes a
@@ -104,12 +104,18 @@ describe('useDomainLoaders refreshAll', () => {
     })
 
     expect(spies.GetPlan).not.toHaveBeenCalledWith(4)
-    expect(spies.GetSidebarStats).not.toHaveBeenCalledWith(4, expect.anything())
+    expect(spies.GetSidebarStats).not.toHaveBeenCalledWith(
+      4,
+      expect.anything(),
+      expect.anything(),
+    )
     expect(spies.GetPlan).toHaveBeenCalledTimes(1)
     expect(spies.GetPlan).toHaveBeenCalledWith(9)
     expect(spies.GetSidebarStats).toHaveBeenCalledTimes(1)
-    const [calledExpeditionId, calledFilter] = spies.GetSidebarStats.mock.calls[0]
+    const [calledExpeditionId, calledFilter, calledIncludeAllTime] =
+      spies.GetSidebarStats.mock.calls[0]
     expect(calledExpeditionId).toBe(9)
+    expect(calledIncludeAllTime).toBe(false)
     expect(calledFilter.enabled).toBe(false)
     expect(calledFilter.modes).toEqual([
       expect.objectContaining({ modeId: 1, travel: true, discovery: true }),

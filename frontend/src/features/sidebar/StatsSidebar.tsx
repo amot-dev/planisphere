@@ -13,10 +13,12 @@ export interface StatsSidebarProps {
   sidebarStats: app.SidebarStats | null
   modesState: app.ModesState | null
   filter: stats.Filter
+  viewScope?: 'expedition' | 'allTime'
   collapsed?: boolean
   carrierRouteOpen?: boolean
   clockSuspended?: boolean
   onFilterChange: (next: stats.Filter) => void
+  onViewScopeChange?: (nextScope: 'expedition' | 'allTime') => void
   onToggleCollapse?: () => void
   onLogCarrierJump?: () => void
 }
@@ -29,14 +31,23 @@ export const StatsSidebar = memo(function StatsSidebar({
   sidebarStats,
   modesState,
   filter,
+  viewScope,
   collapsed = false,
   carrierRouteOpen = false,
   clockSuspended = false,
   onFilterChange,
+  onViewScopeChange,
   onToggleCollapse,
   onLogCarrierJump,
 }: StatsSidebarProps) {
-  const [viewScope, setViewScope] = useState<'expedition' | 'allTime'>('expedition')
+  const [fallbackViewScope, setFallbackViewScope] = useState<'expedition' | 'allTime'>('expedition')
+  const activeViewScope = viewScope ?? fallbackViewScope
+  const handleSelectViewScope = (nextScope: 'expedition' | 'allTime') => {
+    if (viewScope === undefined) {
+      setFallbackViewScope(nextScope)
+    }
+    onViewScopeChange?.(nextScope)
+  }
   const [flightOpsExpanded, setFlightOpsExpanded] = useState(true)
   const [carrierOpsExpanded, setCarrierOpsExpanded] = useState(true)
   const [carrierCostExpanded, setCarrierCostExpanded] = useState(true)
@@ -48,7 +59,7 @@ export const StatsSidebar = memo(function StatsSidebar({
 
   const displayedMetrics: stats.Metrics = (() => {
     if (!sidebarStats) return new stats.Metrics()
-    if (viewScope === 'allTime') {
+    if (activeViewScope === 'allTime') {
       return sidebarStats.allJournals ?? new stats.Metrics()
     }
     return sidebarStats.expedition ?? new stats.Metrics()
@@ -56,7 +67,7 @@ export const StatsSidebar = memo(function StatsSidebar({
 
   const displayedRealization: realization.Breakdown = (() => {
     if (!sidebarStats) return new realization.Breakdown()
-    if (viewScope === 'allTime') {
+    if (activeViewScope === 'allTime') {
       return sidebarStats.allJournalsRealization ?? new realization.Breakdown()
     }
     return sidebarStats.realization ?? new realization.Breakdown()
@@ -91,10 +102,10 @@ export const StatsSidebar = memo(function StatsSidebar({
         <div className="inline-flex border border-ed-border bg-ed-void">
           <button
             type="button"
-            onClick={() => setViewScope('expedition')}
+            onClick={() => handleSelectViewScope('expedition')}
             title="Show metrics recorded during the active expedition"
             className={`px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] transition cursor-pointer ${
-              viewScope === 'expedition'
+              activeViewScope === 'expedition'
                 ? 'bg-ed-amber text-ed-void'
                 : 'text-ed-text-muted hover:text-ed-text-main'
             }`}
@@ -103,10 +114,10 @@ export const StatsSidebar = memo(function StatsSidebar({
           </button>
           <button
             type="button"
-            onClick={() => setViewScope('allTime')}
+            onClick={() => handleSelectViewScope('allTime')}
             title="Show cumulative metrics across all loaded journal history"
             className={`px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] transition cursor-pointer ${
-              viewScope === 'allTime'
+              activeViewScope === 'allTime'
                 ? 'bg-ed-amber text-ed-void'
                 : 'text-ed-text-muted hover:text-ed-text-main'
             }`}
@@ -119,7 +130,7 @@ export const StatsSidebar = memo(function StatsSidebar({
       {/* Tracked Metrics List */}
       <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5">
         <NavigationTelemetrySection
-          viewScope={viewScope}
+          viewScope={activeViewScope}
           sidebarStats={sidebarStats}
           displayedMetrics={displayedMetrics}
           carrierRouteOpen={carrierRouteOpen}

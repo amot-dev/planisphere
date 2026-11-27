@@ -106,6 +106,27 @@ describe('StatsSidebar', () => {
     expect(allTimeSectionHtml).toContain('Personal Carrier Jumps')
     expect(allTimeSectionHtml).not.toContain('Personal Carrier Tritium')
     expect(allTimeSectionHtml).not.toContain('Carrier Cost')
+
+    const controlledAllTimeHtml = renderStatsSidebar({
+      viewScope: 'allTime',
+      sidebarStats: app.SidebarStats.createFrom({
+        expeditionId: 1,
+        status: 'active',
+        allTimeLoaded: true,
+        careerStart: '2024-01-01T00:00:00Z',
+        careerStartGalactic: '3310-01-01 00:00 UTC',
+        careerDuration: '2y 10d',
+        allJournals: {
+          jumps: 412,
+          carrierDistanceLy: 12500,
+          carrierJumps: 28,
+        },
+      }),
+    })
+    expect(controlledAllTimeHtml).toContain('Career Duration')
+    expect(controlledAllTimeHtml).toContain('2y 10d')
+    expect(controlledAllTimeHtml).toContain('Personal Carrier Operations')
+    expect(controlledAllTimeHtml).not.toContain('LOG JUMP')
   })
 
   it('renders NOT STARTED, AWAITING DEPARTURE, and active elapsed duration states in Expedition Duration', () => {

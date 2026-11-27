@@ -60,11 +60,12 @@ export function reconcileModeFilter(
 }
 
 /**
- * UseDomainLoadersOptions provides shared filter and boot lifecycle refs used
- * by sequence-guarded backend RPC loaders.
+ * UseDomainLoadersOptions provides shared filter, sidebar scope, and boot
+ * lifecycle refs used by sequence-guarded backend RPC loaders.
  */
 export interface UseDomainLoadersOptions {
   filterRef: MutableRefObject<stats.Filter>
+  includeAllTimeRef?: MutableRefObject<boolean>
   bootStateRef: MutableRefObject<SyncBootLifecycleState>
   lastEffectPlanExpeditionIdRef: MutableRefObject<number>
   onRefreshAllFilterReconciled?: (
@@ -80,6 +81,7 @@ export interface UseDomainLoadersOptions {
  */
 export function useDomainLoaders({
   filterRef,
+  includeAllTimeRef,
   bootStateRef,
   lastEffectPlanExpeditionIdRef,
   onRefreshAllFilterReconciled,
@@ -101,6 +103,7 @@ export function useDomainLoaders({
   const modesRequestSequenceRef = useRef(0)
   const planRequestSequenceRef = useRef(0)
   const statsRequestSequenceRef = useRef(0)
+  const lastStatsRequestIncludedAllTimeRef = useRef(false)
 
   const loadIngestStatusOnly = useCallback(async () => {
     const requestSequence = ++ingestRequestSequenceRef.current
@@ -162,6 +165,7 @@ export function useDomainLoaders({
             setActiveExpeditionId(0)
             setPlan(null)
             setSidebarStats(null)
+            lastStatsRequestIncludedAllTimeRef.current = false
             setStatsLoading(false)
           }
         }
@@ -228,6 +232,7 @@ export function useDomainLoaders({
         activeExpeditionIdRef.current = 0
         setPlan(null)
         setSidebarStats(null)
+        lastStatsRequestIncludedAllTimeRef.current = false
         setStatsLoading(false)
       }
       return { settingsData, modesStateData, chosenId }
@@ -254,33 +259,46 @@ export function useDomainLoaders({
     }
   }, [])
 
-  const loadStatsOnly = useCallback(async (expeditionId: number, currentFilter: stats.Filter) => {
-    if (!expeditionId) return
-    const requestSequence = ++statsRequestSequenceRef.current
-    setStatsLoading(true)
-    try {
-      const fetchedSidebarStats = await GetSidebarStats(expeditionId, currentFilter)
-      if (
-        requestSequence === statsRequestSequenceRef.current &&
-        activeExpeditionIdRef.current === expeditionId
-      ) {
-        setSidebarStats(fetchedSidebarStats)
+  const loadStatsOnly = useCallback(
+    async (expeditionId: number, currentFilter: stats.Filter, includeAllTime?: boolean) => {
+      if (!expeditionId) return
+      const shouldIncludeAllTime = includeAllTime ?? Boolean(includeAllTimeRef?.current)
+      const requestSequence = ++statsRequestSequenceRef.current
+      lastStatsRequestIncludedAllTimeRef.current = shouldIncludeAllTime
+      setStatsLoading(true)
+      try {
+        const fetchedSidebarStats = await GetSidebarStats(
+          expeditionId,
+          currentFilter,
+          shouldIncludeAllTime,
+        )
+        if (
+          requestSequence === statsRequestSequenceRef.current &&
+          activeExpeditionIdRef.current === expeditionId
+        ) {
+          setSidebarStats(fetchedSidebarStats)
+        }
+      } catch (statsError) {
+        if (requestSequence === statsRequestSequenceRef.current) {
+          lastStatsRequestIncludedAllTimeRef.current = false
+        }
+        console.error('Failed to load sidebar stats:', statsError)
+      } finally {
+        if (
+          requestSequence === statsRequestSequenceRef.current &&
+          activeExpeditionIdRef.current === expeditionId
+        ) {
+          setStatsLoading(false)
+        }
       }
-    } catch (statsError) {
-      console.error('Failed to load sidebar stats:', statsError)
-    } finally {
-      if (
-        requestSequence === statsRequestSequenceRef.current &&
-        activeExpeditionIdRef.current === expeditionId
-      ) {
-        setStatsLoading(false)
-      }
-    }
-  }, [])
+    },
+    [includeAllTimeRef],
+  )
 
   const refreshAll = useCallback((options?: RefreshAllOptions) => {
     if (options?.skipPrefetch) {
       activeExpeditionIdRef.current = 0
+      lastStatsRequestIncludedAllTimeRef.current = false
     }
     const prefetchedExpeditionId =
       !options?.skipPrefetch && setupCompletedRef.current ? activeExpeditionIdRef.current : 0
@@ -335,6 +353,7 @@ export function useDomainLoaders({
     plan,
     setPlan,
     sidebarStats,
+    lastStatsRequestIncludedAllTimeRef,
     loadIngestStatusOnly,
     loadSettingsOnly,
     loadModesOnly,

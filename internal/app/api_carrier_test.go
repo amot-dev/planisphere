@@ -14,7 +14,7 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	filter := stats.Filter{Enabled: false}
 
 	// Before departing WP #1, sidebar reports Started=true, Departed=false and skips TimeRangeStats.
-	preDepartureSidebar, preErr := testApp.GetSidebarStats(expeditionID, filter)
+	preDepartureSidebar, preErr := testApp.GetSidebarStats(expeditionID, filter, false)
 	if preErr != nil {
 		testingContext.Fatalf("GetSidebarStats pre-departure failed: %v", preErr)
 	}
@@ -27,7 +27,7 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`)
 
 	// First call to GetSidebarStats after departure should populate liveStatsCache
-	sidebar1, err := testApp.GetSidebarStats(expeditionID, filter)
+	sidebar1, err := testApp.GetSidebarStats(expeditionID, filter, false)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats failed: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	}
 
 	// Second call to GetSidebarStats uses the cached live metrics and combines with new adjustments
-	sidebar2, err := testApp.GetSidebarStats(expeditionID, filter)
+	sidebar2, err := testApp.GetSidebarStats(expeditionID, filter, false)
 	if err != nil {
 		testingContext.Fatalf("second GetSidebarStats failed: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 	}
 
 	// Unstarted expedition with 0 jumps and 0 upkeep has 0 cost and TotalEstimated = false.
-	unstartedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{})
+	unstartedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{}, false)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 		testingContext.Fatalf("Complete failed: %v", err)
 	}
 
-	completedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{})
+	completedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{}, false)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats completed failed: %v", err)
 	}

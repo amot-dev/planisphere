@@ -106,8 +106,8 @@ export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }
 
-export function GetSidebarStats(arg1, arg2) {
-  return window['go']['app']['App']['GetSidebarStats'](arg1, arg2);
+export function GetSidebarStats(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetSidebarStats'](arg1, arg2, arg3);
 }
 
 export function GetStartCandidates(arg1) {

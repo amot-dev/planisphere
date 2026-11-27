@@ -169,7 +169,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		{Enabled: false, Modes: []stats.ModeSelection{}},
 		{Enabled: false, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}}},
 	} {
-		if _, statsError := testApp.GetSidebarStats(expeditionID, filterVariant); statsError != nil {
+		if _, statsError := testApp.GetSidebarStats(expeditionID, filterVariant, false); statsError != nil {
 			testingContext.Fatalf("GetSidebarStats unfiltered: %v", statsError)
 		}
 	}
@@ -182,7 +182,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}, {ModeID: 2, Discovery: true}}},
 		{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 99, Travel: false, Discovery: false}, {ModeID: 2, Discovery: true}, {ModeID: 1, Travel: true}}},
 	} {
-		if _, statsError := testApp.GetSidebarStats(expeditionID, filterVariant); statsError != nil {
+		if _, statsError := testApp.GetSidebarStats(expeditionID, filterVariant, false); statsError != nil {
 			testingContext.Fatalf("GetSidebarStats filtered: %v", statsError)
 		}
 	}
@@ -215,7 +215,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("expected CompleteExpedition to evict mode-filtered entry while preserving unfiltered window, got %d entries", sizeAfterComplete)
 	}
 
-	completedSidebar, completedSidebarError := testApp.GetSidebarStats(expeditionID, stats.Filter{})
+	completedSidebar, completedSidebarError := testApp.GetSidebarStats(expeditionID, stats.Filter{}, false)
 	if completedSidebarError != nil {
 		testingContext.Fatalf("GetSidebarStats completed: %v", completedSidebarError)
 	}
@@ -250,7 +250,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("ReevaluateTx post-destination: %v", reevalError)
 	}
 	modeOneFilter := stats.Filter{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}}}
-	activeModeOneStats, activeErr := testApp.GetSidebarStats(expeditionID, modeOneFilter)
+	activeModeOneStats, activeErr := testApp.GetSidebarStats(expeditionID, modeOneFilter, false)
 	if activeErr != nil || activeModeOneStats.Live.Jumps != 1 {
 		testingContext.Fatalf("expected 1 Mode-1 jump while active (outbound jump in Mode 2), got %+v err=%v", activeModeOneStats.Live, activeErr)
 	}
@@ -276,7 +276,7 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	if reopenError := testApp.ReopenExpedition(expeditionID); reopenError != nil {
 		testingContext.Fatalf("second ReopenExpedition: %v", reopenError)
 	}
-	reopenedModeOneStats, reopenedErr := testApp.GetSidebarStats(expeditionID, modeOneFilter)
+	reopenedModeOneStats, reopenedErr := testApp.GetSidebarStats(expeditionID, modeOneFilter, false)
 	if reopenedErr != nil || reopenedModeOneStats.Live.Jumps != 1 {
 		testingContext.Fatalf("expected ReopenExpedition to evict stale open Mode-1 cache (want Jumps=1, got %d, err=%v)", reopenedModeOneStats.Live.Jumps, reopenedErr)
 	}

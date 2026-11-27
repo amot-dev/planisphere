@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
@@ -24,6 +26,7 @@ type SidebarStats struct {
 	CareerStartGalactic    string                     `json:"careerStartGalactic"`
 	CareerDuration         string                     `json:"careerDuration"`
 	FilterActive           bool                       `json:"filterActive"`
+	AllTimeLoaded          bool                       `json:"allTimeLoaded"`
 	Live                   stats.Metrics              `json:"live"`                   // from journals (mode-filtered)
 	Adjustments            stats.Metrics              `json:"adjustments"`            // manual
 	Expedition             stats.Metrics              `json:"expedition"`             // live + adjustments
@@ -33,8 +36,9 @@ type SidebarStats struct {
 	CarrierCost            expedition.CarrierCost     `json:"carrierCost"`
 }
 
-// GetSidebarStats computes the sidebar for an expedition with mode filters.
-func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (SidebarStats, error) {
+// GetSidebarStats computes the sidebar for an expedition with mode filters,
+// computing career-wide All Time metrics only when includeAllTime is true.
+func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter, includeAllTime bool) (SidebarStats, error) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()
 	if readyError := app.ready(); readyError != nil {
@@ -55,26 +59,31 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	}
 
 	expScope := expeditionRecord.ProfileScope()
-	careerScope := expScope
-	if settings.CareerBaselineScope(app.db) == settings.CareerScopeAllEnabled {
-		careerScope = replay.ProfileScope{}
-	}
-	careerScope = replay.NormalizeAllTimeProfileScope(app.db, careerScope)
+	if includeAllTime {
+		careerScope := expScope
+		if settings.CareerBaselineScope(app.db) == settings.CareerScopeAllEnabled {
+			careerScope = replay.ProfileScope{}
+		}
+		careerScope = replay.NormalizeAllTimeProfileScope(app.db, careerScope)
 
-	// Mode filters apply only to the current expedition, never to All Time.
-	// All-time personal carrier data comes directly from Frontier's lifetime Statistics.
-	if app.careerStats != nil {
-		if allTimeSummary, careerError := app.careerStats.GetScoped(careerScope); careerError == nil {
+		// Mode filters apply only to the current expedition, never to All Time.
+		// All-time personal carrier data comes directly from Frontier's lifetime Statistics.
+		if app.careerStats != nil {
+			allTimeSummary, careerError := app.careerStats.GetScoped(careerScope)
+			if careerError != nil {
+				return sidebar, fmt.Errorf("compute all-time career stats: %w", careerError)
+			}
 			sidebar.AllJournals = allTimeSummary.Metrics
 			sidebar.AllJournalsRealization = allTimeSummary.Realization
 		}
-	}
 
-	// Career metrics across ingested journals for the configured career scope.
-	if careerStart, careerStartGalactic := replay.CareerStartScoped(app.db, careerScope); careerStart != "" {
-		sidebar.CareerStart = careerStart
-		sidebar.CareerStartGalactic = careerStartGalactic
-		sidebar.CareerDuration = reference.Elapsed(careerStart, "")
+		// Career metrics across ingested journals for the configured career scope.
+		if careerStart, careerStartGalactic := replay.CareerStartScoped(app.db, careerScope); careerStart != "" {
+			sidebar.CareerStart = careerStart
+			sidebar.CareerStartGalactic = careerStartGalactic
+			sidebar.CareerDuration = reference.Elapsed(careerStart, "")
+		}
+		sidebar.AllTimeLoaded = true
 	}
 
 	var effectiveDisplayStart string

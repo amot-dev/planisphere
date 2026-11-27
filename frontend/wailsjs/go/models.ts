@@ -199,6 +199,7 @@ export namespace app {
 	    careerStartGalactic: string;
 	    careerDuration: string;
 	    filterActive: boolean;
+	    allTimeLoaded: boolean;
 	    live: stats.Metrics;
 	    adjustments: stats.Metrics;
 	    expedition: stats.Metrics;
@@ -227,6 +228,7 @@ export namespace app {
 	        this.careerStartGalactic = source["careerStartGalactic"];
 	        this.careerDuration = source["careerDuration"];
 	        this.filterActive = source["filterActive"];
+	        this.allTimeLoaded = source["allTimeLoaded"];
 	        this.live = this.convertValues(source["live"], stats.Metrics);
 	        this.adjustments = this.convertValues(source["adjustments"], stats.Metrics);
 	        this.expedition = this.convertValues(source["expedition"], stats.Metrics);

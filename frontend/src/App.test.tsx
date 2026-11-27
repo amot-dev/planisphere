@@ -320,4 +320,85 @@ describe('App top-level shell orchestration', () => {
     })
     expect(mounted.container.querySelector('[role="dialog"]')).toBeNull()
   })
+
+  it('skips All Time sidebar telemetry while collapsed or in Expedition scope and lazily loads it on clicking All Time', async () => {
+    installResizeObserverMock()
+    installWailsRuntimeMock()
+    window.localStorage.setItem('planisphere_sidebar_collapsed', 'true')
+
+    try {
+      const { spies } = installWailsAppMock({
+        SetLiveSyncPaused: async () => {},
+        GetSettings: async () =>
+          makeSettings({
+            setupCompleted: true,
+            activeExpeditionId: 1,
+            dbPath: '/tmp/planisphere.db',
+            journalDir: '/tmp/journals',
+            journalDirExists: true,
+          }),
+        GetIngestStatus: async () => app.IngestStatus.createFrom({ scanning: false }),
+        GetModesState: async () =>
+          app.ModesState.createFrom({ modes: [makeMode({ id: 1, name: 'Travel' })] }),
+        ListExpeditions: async () => [
+          expedition.Expedition.createFrom({ id: 1, name: 'Lazy Telemetry Run', status: 'active' }),
+        ],
+        GetPlan: async (expeditionId: number) =>
+          makePlanView({
+            expedition: { id: expeditionId, name: 'Lazy Telemetry Run', status: 'active' },
+            rows: [makeOriginRowView()],
+          }),
+        GetSidebarStats: async (
+          expeditionId: number,
+          _filter: stats.Filter,
+          includeAllTime: boolean,
+        ) =>
+          makeSidebarStats({
+            expeditionId,
+            status: 'active',
+            started: true,
+            departed: true,
+            duration: '3d 4h',
+            allTimeLoaded: includeAllTime,
+            careerStart: includeAllTime ? '2024-01-01T00:00:00Z' : '',
+            careerStartGalactic: includeAllTime ? '3310-01-01 00:00 UTC' : '',
+            careerDuration: includeAllTime ? '2y 30d' : '',
+            expedition: { jumps: 9, distanceLy: 450 },
+            allJournals: includeAllTime ? { jumps: 512, distanceLy: 25600 } : { jumps: 0 },
+          }),
+      })
+
+      const mounted = mountTestRoot(createElement(App))
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Booting with collapsed sidebar still queries Expedition stats with includeAllTime=false.
+      expect(spies.GetSidebarStats).toHaveBeenCalledTimes(1)
+      expect(spies.GetSidebarStats).toHaveBeenLastCalledWith(1, expect.anything(), false)
+
+      const expandButton = mounted.container.querySelector(
+        'button[title="Expand Telemetry Sidebar"]',
+      ) as HTMLButtonElement
+      act(() => {
+        expandButton.click()
+      })
+      expect(spies.GetSidebarStats).toHaveBeenCalledTimes(1)
+      expect(mounted.container.textContent).toContain('Expedition Duration')
+      expect(mounted.container.textContent).toContain('3d 4h')
+
+      // Clicking All Time keeps the sidebar rendered and triggers GetSidebarStats(..., true).
+      await act(async () => {
+        mounted.findButtonByText('All Time').click()
+        await Promise.resolve()
+      })
+      expect(spies.GetSidebarStats).toHaveBeenCalledTimes(2)
+      expect(spies.GetSidebarStats).toHaveBeenLastCalledWith(1, expect.anything(), true)
+      expect(mounted.container.textContent).toContain('Career Duration')
+      expect(mounted.container.textContent).toContain('2y 30d')
+      expect(mounted.container.textContent).toContain('25,600.0')
+    } finally {
+      window.localStorage.removeItem('planisphere_sidebar_collapsed')
+    }
+  })
 })

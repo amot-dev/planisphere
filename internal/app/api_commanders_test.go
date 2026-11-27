@@ -111,7 +111,7 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	}
 
 	// Under default CareerBaselineScope("expedition"), AllJournals, CareerStart, and OriginBaseline reflect ONLY Danielle Current (30+50+200=280 Ly career, 80 Ly origin baseline, 2025-01-10 career start).
-	sidebarScoped, err := testApp.GetSidebarStats(createdExp.ID, stats.Filter{})
+	sidebarScoped, err := testApp.GetSidebarStats(createdExp.ID, stats.Filter{}, true)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats(expedition scope): %v", err)
 	}
@@ -144,7 +144,7 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 		testingContext.Fatalf("expected stats, plan, and settings domains on SetCareerBaselineScope, got %v", scopeDomains)
 	}
 
-	sidebarAllEnabled, err := testApp.GetSidebarStats(createdExp.ID, stats.Filter{})
+	sidebarAllEnabled, err := testApp.GetSidebarStats(createdExp.ID, stats.Filter{}, true)
 	if err != nil {
 		testingContext.Fatalf("GetSidebarStats(all_enabled): %v", err)
 	}
@@ -236,7 +236,7 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 	if _, err := testApp.SetCareerBaselineScope(settings.CareerScopeAllEnabled); err != nil {
 		testingContext.Fatalf("SetCareerBaselineScope(all_enabled): %v", err)
 	}
-	statsBeforeWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	statsBeforeWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}, true)
 	if err != nil || statsBeforeWipe.AllJournals.BodiesScanned != 1 {
 		testingContext.Fatalf("expected 1 pre-wipe scanned body in warm AllJournals, got %+v err=%v", statsBeforeWipe.AllJournals, err)
 	}
@@ -269,7 +269,7 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 		testingContext.Fatalf("expected ClosedWindowRevision to advance after wipe (%d -> %d, err=%v)",
 			ingestBefore.ClosedWindowRevision, ingestAfter.ClosedWindowRevision, err)
 	}
-	statsAfterWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	statsAfterWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}, true)
 	if err != nil || statsAfterWipe.AllJournals.BodiesScanned != 0 {
 		testingContext.Fatalf("expected pre-wipe era:0 CareerCartographics evicted (BodiesScanned=0), got %+v err=%v",
 			statsAfterWipe.AllJournals, err)
@@ -333,7 +333,7 @@ func TestByteZeroBackfillAndStatisticsCareerWipeBusInvalidation(testingContext *
 	if _, err := testApp.SetCareerBaselineScope(settings.CareerScopeAllEnabled); err != nil {
 		testingContext.Fatal(err)
 	}
-	warmStatsBeforeHeal, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	warmStatsBeforeHeal, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}, true)
 	if err != nil || warmStatsBeforeHeal.AllJournals.Jumps != 1 {
 		testingContext.Fatalf("expected 1 unattributed jump before byte-zero heal, got %+v err=%v", warmStatsBeforeHeal.AllJournals, err)
 	}
@@ -357,7 +357,7 @@ func TestByteZeroBackfillAndStatisticsCareerWipeBusInvalidation(testingContext *
 	if testApp.salesLedger.Generation() <= ledgerGenBefore {
 		testingContext.Fatal("expected byte-zero heal to invalidate SalesLedger")
 	}
-	statsAfterHeal, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	statsAfterHeal, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}, true)
 	if err != nil || statsAfterHeal.AllJournals.Jumps != 0 {
 		testingContext.Fatalf("expected healed jump on disabled commander excluded from AllJournals, got %+v err=%v", statsAfterHeal.AllJournals, err)
 	}
@@ -370,7 +370,7 @@ func TestByteZeroBackfillAndStatisticsCareerWipeBusInvalidation(testingContext *
 	if _, err := testApp.SetCommanderEnabled("live:f410:era:0", true); err != nil {
 		testingContext.Fatal(err)
 	}
-	if _, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}); err != nil {
+	if _, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}, true); err != nil {
 		testingContext.Fatal(err)
 	}
 	closedRevBeforeRoutine := testApp.timeRangeStats.ClosedWindowRevision()
@@ -416,7 +416,7 @@ func TestByteZeroBackfillAndStatisticsCareerWipeBusInvalidation(testingContext *
 	if testApp.timeRangeStats.ClosedWindowRevision() <= closedRevBeforeRoutine {
 		testingContext.Fatal("expected ClosedWindowRevision to advance on Statistics career-wipe split")
 	}
-	statsAfterStatsWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	statsAfterStatsWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}, true)
 	if err != nil || statsAfterStatsWipe.AllJournals.Jumps != 0 {
 		testingContext.Fatalf("expected pre-wipe jumps archived and disabled after Statistics wipe split, got %+v err=%v",
 			statsAfterStatsWipe.AllJournals, err)

@@ -59,7 +59,7 @@ export function GetRowDropPreviews(arg1:number):Promise<Array<expedition.DropSlo
 
 export function GetSettings():Promise<app.Settings>;
 
-export function GetSidebarStats(arg1:number,arg2:stats.Filter):Promise<app.SidebarStats>;
+export function GetSidebarStats(arg1:number,arg2:stats.Filter,arg3:boolean):Promise<app.SidebarStats>;
 
 export function GetStartCandidates(arg1:number):Promise<app.StartCandidates>;
 

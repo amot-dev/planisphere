@@ -43,6 +43,9 @@ export function useBackendSync() {
   const [filter, setFilter] = useState<stats.Filter>(() =>
     stats.Filter.createFrom({ enabled: false, modes: [] }),
   )
+  const [sidebarViewScope, setSidebarViewScopeState] = useState<'expedition' | 'allTime'>(
+    'expedition',
+  )
   const [eddProgress, setEddProgress] = useState<EddImportProgress | null>(null)
 
   const bootStateRef = useRef<SyncBootLifecycleState>({
@@ -56,6 +59,7 @@ export function useBackendSync() {
     filter: stats.Filter
   } | null>(null)
   const filterRef = useRef(filter)
+  const includeAllTimeRef = useRef(false)
 
   const handleRefreshAllFilterReconciled = useCallback(
     (nextFilter: stats.Filter, chosenId: number, willTransitionEffectReload: boolean) => {
@@ -83,6 +87,7 @@ export function useBackendSync() {
     plan,
     setPlan,
     sidebarStats,
+    lastStatsRequestIncludedAllTimeRef,
     loadIngestStatusOnly,
     loadSettingsOnly,
     loadModesOnly,
@@ -93,10 +98,35 @@ export function useBackendSync() {
     refreshAll,
   } = useDomainLoaders({
     filterRef,
+    includeAllTimeRef,
     bootStateRef,
     lastEffectPlanExpeditionIdRef,
     onRefreshAllFilterReconciled: handleRefreshAllFilterReconciled,
   })
+
+  const sidebarStatsRef = useRef(sidebarStats)
+  sidebarStatsRef.current = sidebarStats
+
+  const setSidebarViewScope = useCallback(
+    (nextScope: 'expedition' | 'allTime') => {
+      const nextIncludeAllTime = nextScope === 'allTime'
+      if (nextIncludeAllTime === includeAllTimeRef.current) return
+      includeAllTimeRef.current = nextIncludeAllTime
+      setSidebarViewScopeState(nextScope)
+      const currentExpeditionId = activeExpeditionIdRef.current
+      if (
+        nextIncludeAllTime &&
+        bootStateRef.current.initialBootComplete &&
+        currentExpeditionId > 0 &&
+        (!sidebarStatsRef.current?.allTimeLoaded ||
+          sidebarStatsRef.current.expeditionId !== currentExpeditionId ||
+          !lastStatsRequestIncludedAllTimeRef.current)
+      ) {
+        void loadStatsOnly(currentExpeditionId, filterRef.current, true)
+      }
+    },
+    [activeExpeditionIdRef, lastStatsRequestIncludedAllTimeRef, loadStatsOnly],
+  )
 
   const reconciledFilter = useMemo(
     () => reconcileModeFilter(filter, modesState?.modes),
@@ -275,6 +305,8 @@ export function useBackendSync() {
     plan,
     setPlan,
     sidebarStats,
+    sidebarViewScope,
+    setSidebarViewScope,
     filter: reconciledFilter,
     setFilter,
     eddProgress,

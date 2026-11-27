@@ -21,7 +21,7 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:05:00Z", "FSDJump", "gen-depart-sol",
 		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`)
 
-	if _, statsError := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsError != nil {
+	if _, statsError := testApp.GetSidebarStats(expeditionID, stats.Filter{}, true); statsError != nil {
 		testingContext.Fatalf("GetSidebarStats: %v", statsError)
 	}
 	if _, carrierErr := testApp.carrierState.LatestStats(); carrierErr != nil {

@@ -30,6 +30,8 @@ export default function App() {
     plan,
     setPlan,
     sidebarStats,
+    sidebarViewScope,
+    setSidebarViewScope,
     filter,
     setFilter,
     eddProgress,
@@ -153,10 +155,12 @@ export default function App() {
             sidebarStats={sidebarStats}
             modesState={modesState}
             filter={filter}
+            viewScope={sidebarViewScope}
             collapsed={sidebarCollapsed}
             carrierRouteOpen={carrierRouteOpen}
             clockSuspended={isClockSuspended}
             onFilterChange={setFilter}
+            onViewScopeChange={setSidebarViewScope}
             onToggleCollapse={toggleSidebarCollapsed}
             onLogCarrierJump={handleLogCarrierJump}
           />
