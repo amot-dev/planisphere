@@ -4,12 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+type notifyCloseReadCloser struct {
+	io.ReadCloser
+	closeOnce sync.Once
+	onClose   func()
+}
+
+func (reader *notifyCloseReadCloser) Close() error {
+	closeError := reader.ReadCloser.Close()
+	reader.closeOnce.Do(reader.onClose)
+	return closeError
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (transport roundTripFunc) RoundTrip(httpRequest *http.Request) (*http.Response, error) {
+	return transport(httpRequest)
+}
 
 func TestReconcileSpanshJumps(t *testing.T) {
 	rawJumps := []RawJump{
@@ -37,12 +57,12 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 	testCases := []struct {
 		name         string
 		pollInterval time.Duration
-		setupCtx     func(pollStarted chan struct{}) (context.Context, context.CancelFunc)
+		setupCtx     func(jobSubmitted, submitResponseClosed, pollStarted chan struct{}) (context.Context, context.CancelFunc)
 		expectedErr  error
 	}{
 		{
 			name: "ContextCanceledDuringPollDo",
-			setupCtx: func(pollStarted chan struct{}) (context.Context, context.CancelFunc) {
+			setupCtx: func(_, _, pollStarted chan struct{}) (context.Context, context.CancelFunc) {
 				requestContext, cancelFunction := context.WithCancel(context.Background())
 				go func() {
 					<-pollStarted
@@ -54,11 +74,12 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 		},
 		{
 			name:         "ContextCanceledDuringTickerWait",
-			pollInterval: 1 * time.Second,
-			setupCtx: func(pollStarted chan struct{}) (context.Context, context.CancelFunc) {
+			pollInterval: 1 * time.Hour,
+			setupCtx: func(jobSubmitted, submitResponseClosed, _ chan struct{}) (context.Context, context.CancelFunc) {
 				requestContext, cancelFunction := context.WithCancel(context.Background())
 				go func() {
-					time.Sleep(30 * time.Millisecond)
+					<-jobSubmitted
+					<-submitResponseClosed
 					cancelFunction()
 				}()
 				return requestContext, cancelFunction
@@ -71,9 +92,11 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 		testingContext.Run(testCase.name, func(testingContext *testing.T) {
 			originalBaseURL := baseURL
 			originalPollInterval := pollInterval
+			originalDefaultTransport := http.DefaultTransport
 			testingContext.Cleanup(func() {
 				baseURL = originalBaseURL
 				pollInterval = originalPollInterval
+				http.DefaultTransport = originalDefaultTransport
 			})
 			if testCase.pollInterval > 0 {
 				pollInterval = testCase.pollInterval
@@ -81,11 +104,35 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 				pollInterval = 5 * time.Millisecond
 			}
 
+			jobSubmitted := make(chan struct{})
+			submitResponseClosed := make(chan struct{})
 			pollStarted := make(chan struct{})
+			var closeSubmittedOnce, closeResponseOnce sync.Once
+
+			http.DefaultTransport = roundTripFunc(func(httpRequest *http.Request) (*http.Response, error) {
+				httpResponse, roundTripError := originalDefaultTransport.RoundTrip(httpRequest)
+				if roundTripError == nil && httpRequest.URL.Path == "/api/fleetcarrier/route" {
+					httpResponse.Body = &notifyCloseReadCloser{
+						ReadCloser: httpResponse.Body,
+						onClose: func() {
+							closeResponseOnce.Do(func() {
+								close(submitResponseClosed)
+							})
+						},
+					}
+				}
+				return httpResponse, roundTripError
+			})
+
 			testServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 				if httpRequest.URL.Path == "/api/fleetcarrier/route" {
 					responseWriter.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-test"})
+					if encodeError := json.NewEncoder(responseWriter).Encode(map[string]string{"job": "job-test"}); encodeError != nil {
+						testingContext.Errorf("encode job response: %v", encodeError)
+					}
+					closeSubmittedOnce.Do(func() {
+						close(jobSubmitted)
+					})
 					return
 				}
 				if strings.HasPrefix(httpRequest.URL.Path, "/api/results/") {
@@ -102,7 +149,7 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 			defer testServer.Close()
 			baseURL = testServer.URL
 
-			requestContext, cancelFunction := testCase.setupCtx(pollStarted)
+			requestContext, cancelFunction := testCase.setupCtx(jobSubmitted, submitResponseClosed, pollStarted)
 			defer cancelFunction()
 
 			jumps, queryError := QueryCarrierRoute(requestContext, "Sol", "Colonia", 0, 1000)

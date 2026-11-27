@@ -60,7 +60,7 @@ function findButtonByText(container: HTMLElement, textMatch: string): HTMLButton
 describe('WaypointSearchModal', () => {
   afterEach(() => {
     vi.useRealTimers()
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it('executes immediately for non-empty initialQuery, navigates single-stop and hub cards, and renders truncation footer', async () => {

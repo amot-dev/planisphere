@@ -83,7 +83,10 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 	if err != nil || len(allSolCandidates) != 2 {
 		testingContext.Fatalf("expected 2 Sol candidates before scoping, got %+v err=%v", allSolCandidates, err)
 	}
-	encodedCandidate, _ := json.Marshal(allSolCandidates[0])
+	encodedCandidate, marshalErr := json.Marshal(allSolCandidates[0])
+	if marshalErr != nil {
+		testingContext.Fatalf("marshal StartCandidate: %v", marshalErr)
+	}
 	var candidatePayload map[string]any
 	if err := json.Unmarshal(encodedCandidate, &candidatePayload); err != nil || candidatePayload["commander"] == nil || candidatePayload["profileId"] == nil {
 		testingContext.Fatalf("expected StartCandidates JSON to include profileId and commander, got %s", string(encodedCandidate))

@@ -187,14 +187,11 @@ func TestWatcherStartStopSynchronization(t *testing.T) {
 	defer cancelParentContext()
 
 	watcherInstance.Start(parentContext, temporaryDirectoryOne)
+	t.Cleanup(watcherInstance.Stop)
 	watcherInstance.Start(parentContext, temporaryDirectoryTwo)
+	t.Cleanup(watcherInstance.Stop)
 
-	time.Sleep(50 * time.Millisecond)
-
-	isActive, watcherErrorMessage := watcherInstance.Active()
-	if !isActive {
-		t.Fatalf("expected watcher to remain active after sequential Start calls, got inactive with error: %s", watcherErrorMessage)
-	}
+	waitForActiveWatcher(t, watcherInstance)
 
 	watcherInstance.Stop()
 
@@ -214,6 +211,7 @@ func TestWatcherReconnectWhenDirectoryCreated(t *testing.T) {
 	defer cancelParentContext()
 
 	watcherInstance.Start(parentContext, targetJournalDirectory)
+	t.Cleanup(watcherInstance.Stop)
 
 	initiallyActive, _ := watcherInstance.Active()
 	if initiallyActive {
@@ -311,16 +309,9 @@ func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
 	parentContext, cancelParentContext := context.WithCancel(context.Background())
 	defer cancelParentContext()
 	watcherInstance.Start(parentContext, temporaryJournalDirectory)
-	defer watcherInstance.Stop()
+	t.Cleanup(watcherInstance.Stop)
 
-	activeDeadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(activeDeadline) {
-		isActive, _ := watcherInstance.Active()
-		if isActive {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitForActiveWatcher(t, watcherInstance)
 
 	journalFilePath := filepath.Join(temporaryJournalDirectory, "Journal.2026-02-01T100000.01.log")
 	firstLine := `{"timestamp":"2026-02-01T10:00:01Z","event":"Scan","StarSystem":"Sol","SystemAddress":10477373803,"BodyName":"Sol A 1","BodyID":1,"PlanetClass":"High metal content body"}` + "\n"
@@ -334,7 +325,6 @@ func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
 		_ = fileHandle.Close()
 		t.Fatalf("write first scan line: %v", writeError)
 	}
-	time.Sleep(50 * time.Millisecond)
 	if _, writeError := fileHandle.WriteString(secondLine); writeError != nil {
 		_ = fileHandle.Close()
 		t.Fatalf("write second scan line: %v", writeError)
@@ -507,6 +497,9 @@ func TestIngestMidFileClearSavedGameAndNewCommander(testingContext *testing.T) {
 				rowIndex, eventName, cmdr, fid, key, archived, enabled, want)
 		}
 		rowIndex++
+	}
+	if rowsError := rows.Err(); rowsError != nil {
+		testingContext.Fatalf("iterate journal_events: %v", rowsError)
 	}
 	if rowIndex != len(wantRows) {
 		testingContext.Fatalf("got %d rows, want %d", rowIndex, len(wantRows))

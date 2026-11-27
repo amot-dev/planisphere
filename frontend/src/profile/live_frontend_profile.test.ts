@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { stats } from '../api/models'
 import { ExpeditionPlanner } from '../features/planner/ExpeditionPlanner'
 import { StatsSidebar } from '../features/sidebar/StatsSidebar'
@@ -34,6 +34,10 @@ const iterationsCount =
 
 const noop = () => {}
 
+afterEach(() => {
+  delete (globalThis as Record<string, unknown>).go
+})
+
 function clickMatchingButton(container: HTMLElement, selector: string): void {
   const targetButton = container.querySelector<HTMLButtonElement>(selector)
   if (!targetButton) return
@@ -65,9 +69,9 @@ function mountWorkspaceTree(
         createElement(ExpeditionPlanner, {
           plan,
           archiveRevision: 'live-profile-rev',
-          externalLinkInara: 'always',
+          externalLinkInara: 'on',
           externalLinkEdsm: 'if_no_gec',
-          externalLinkGec: 'always',
+          externalLinkGec: 'on',
           onPlanOptimisticUpdate: noop,
           onOpenStartModal: noop,
           onRefreshPlan: noop,

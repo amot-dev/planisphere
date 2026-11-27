@@ -52,22 +52,24 @@ describe('ErrorBoundary', () => {
 
   it('logs caught errors to console via componentDidCatch', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const boundary = new ErrorBoundary({
-      children: createElement('div', null, 'child'),
-    })
+    try {
+      const boundary = new ErrorBoundary({
+        children: createElement('div', null, 'child'),
+      })
 
-    const testError = new Error('Test log error')
-    const testInfo = { componentStack: 'stack trace' } as any
+      const testError = new Error('Test log error')
+      const testInfo = { componentStack: 'stack trace' }
 
-    boundary.componentDidCatch(testError, testInfo)
+      boundary.componentDidCatch(testError, testInfo)
 
-    expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('[TerminalErrorBoundary caught error]'),
-      testError,
-      testInfo,
-    )
-
-    spy.mockRestore()
+      expect(spy).toHaveBeenCalledWith(
+        expect.stringContaining('[TerminalErrorBoundary caught error]'),
+        testError,
+        testInfo,
+      )
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

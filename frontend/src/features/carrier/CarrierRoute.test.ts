@@ -278,7 +278,7 @@ function buildCarrierPlan(
 
 describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
   afterEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     vi.useRealTimers()
   })
 
@@ -489,7 +489,6 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
 
   it('coordinates Spansh hop completion, depot refill, manual switch, manual jump logging, arrival error recovery, and route cancel', async () => {
     vi.useFakeTimers()
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const initialSpanshState = expedition.ActiveCarrierRouteState.createFrom({
       expeditionId: 1,
@@ -586,6 +585,7 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
       await act(async () => {

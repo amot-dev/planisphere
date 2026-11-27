@@ -137,7 +137,7 @@ describe('WaypointImportSection', () => {
 describe('ExpeditionManageModal', () => {
   afterEach(() => {
     vi.useRealTimers()
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it('disables expedition creation while a waypoint import file is loading and hydrates directly from Go response', async () => {

@@ -108,6 +108,9 @@ func queryProfiles(testingContext *testing.T, conn *sql.DB) []gotProfile {
 		}
 		profiles = append(profiles, profileRow)
 	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		testingContext.Fatalf("iterate commander_profiles: %v", rowsErr)
+	}
 	return profiles
 }
 
@@ -129,6 +132,9 @@ func queryAliases(testingContext *testing.T, conn *sql.DB) []gotAlias {
 			testingContext.Fatalf("scan alias: %v", scanErr)
 		}
 		aliases = append(aliases, aliasRow)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		testingContext.Fatalf("iterate commander_aliases: %v", rowsErr)
 	}
 	return aliases
 }

@@ -2,11 +2,84 @@ package expedition_test
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"planisphere/internal/store/expedition"
 )
+
+func parseDurationLabelMinutes(label string) (int, error) {
+	fields := strings.Fields(label)
+	if len(fields) < 2 || len(fields) > 4 || strings.Join(fields, " ") != label {
+		return 0, fmt.Errorf("invalid duration label %q", label)
+	}
+	minuteToken := fields[len(fields)-1]
+	hourToken := fields[len(fields)-2]
+	if len(minuteToken) != 3 || !strings.HasSuffix(minuteToken, "m") || !strings.HasSuffix(hourToken, "h") {
+		return 0, fmt.Errorf("missing hours/minutes in duration label %q", label)
+	}
+	minutes, minErr := strconv.Atoi(strings.TrimSuffix(minuteToken, "m"))
+	hours, hourErr := strconv.Atoi(strings.TrimSuffix(hourToken, "h"))
+	if minErr != nil || hourErr != nil || minutes < 0 || minutes >= 60 || hours < 0 || hours >= 24 {
+		return 0, fmt.Errorf("out-of-range hours/minutes in duration label %q", label)
+	}
+	years, days := 0, 0
+	for _, prefixToken := range fields[:len(fields)-2] {
+		switch {
+		case strings.HasSuffix(prefixToken, "y") && years == 0 && days == 0:
+			parsedYears, err := strconv.Atoi(strings.TrimSuffix(prefixToken, "y"))
+			if err != nil || parsedYears <= 0 {
+				return 0, fmt.Errorf("invalid years in duration label %q", label)
+			}
+			years = parsedYears
+		case strings.HasSuffix(prefixToken, "d") && days == 0:
+			parsedDays, err := strconv.Atoi(strings.TrimSuffix(prefixToken, "d"))
+			if err != nil || parsedDays <= 0 || parsedDays >= 365 {
+				return 0, fmt.Errorf("invalid days in duration label %q", label)
+			}
+			days = parsedDays
+		default:
+			return 0, fmt.Errorf("unexpected token %q in duration label %q", prefixToken, label)
+		}
+	}
+	totalDays := years*365 + days
+	return (totalDays*24+hours)*60 + minutes, nil
+}
+
+func normalizeOpenWindowElapsed(
+	testingContext *testing.T,
+	label string,
+	batchDetail *expedition.WaypointDetails,
+	expectedDetail expedition.WaypointDetails,
+) {
+	testingContext.Helper()
+	if batchDetail.To != "" {
+		return
+	}
+	if batchDetail.From == "" && expectedDetail.From == "" {
+		return
+	}
+	batchMinutes, batchParseErr := parseDurationLabelMinutes(batchDetail.Elapsed)
+	expectedMinutes, expectedParseErr := parseDurationLabelMinutes(expectedDetail.Elapsed)
+	if batchParseErr != nil || expectedParseErr != nil {
+		testingContext.Fatalf("%s open-window Elapsed parse failure: batch=%q (%v) single=%q (%v)",
+			label, batchDetail.Elapsed, batchParseErr, expectedDetail.Elapsed, expectedParseErr)
+	}
+	if batchDetail.Elapsed != expectedDetail.Elapsed {
+		minuteDelta := batchMinutes - expectedMinutes
+		if minuteDelta < 0 {
+			minuteDelta = -minuteDelta
+		}
+		if minuteDelta > 1 {
+			testingContext.Fatalf("%s open-window Elapsed mismatch exceeds 1m rollover tolerance: batch=%q (%dm) single=%q (%dm)",
+				label, batchDetail.Elapsed, batchMinutes, expectedDetail.Elapsed, expectedMinutes)
+		}
+		batchDetail.Elapsed = expectedDetail.Elapsed
+	}
+}
 
 func assertBatchMatchesIndividualDetails(
 	testingContext *testing.T,
@@ -56,9 +129,7 @@ func assertBatchMatchesIndividualDetails(
 	}
 	if originBaseline != nil {
 		normalizedOrigin := *originBaseline
-		if normalizedOrigin.To == "" && normalizedOrigin.Elapsed != "" && expectedOrigin.Elapsed != "" {
-			normalizedOrigin.Elapsed = expectedOrigin.Elapsed
-		}
+		normalizeOpenWindowElapsed(testingContext, "originBaseline", &normalizedOrigin, *expectedOrigin)
 		if !reflect.DeepEqual(normalizedOrigin, *expectedOrigin) {
 			testingContext.Fatalf("originBaseline mismatch:\nbatch:  %+v\nsingle: %+v", normalizedOrigin, *expectedOrigin)
 		}
@@ -69,9 +140,7 @@ func assertBatchMatchesIndividualDetails(
 	}
 	for index := range batchRowDetails {
 		normalizedBatch := batchRowDetails[index]
-		if normalizedBatch.To == "" && normalizedBatch.Elapsed != "" && expectedLegs[index].Elapsed != "" {
-			normalizedBatch.Elapsed = expectedLegs[index].Elapsed
-		}
+		normalizeOpenWindowElapsed(testingContext, fmt.Sprintf("leg[%d]", index), &normalizedBatch, expectedLegs[index])
 		if !reflect.DeepEqual(normalizedBatch, expectedLegs[index]) {
 			testingContext.Fatalf("leg[%d] mismatch:\nbatch:  %+v\nsingle: %+v", index, normalizedBatch, expectedLegs[index])
 		}

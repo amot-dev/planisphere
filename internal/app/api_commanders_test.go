@@ -140,7 +140,7 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	// Switch to SetCareerBaselineScope("all_enabled"): AllJournals, CareerStart, and OriginBaseline now include CMDR EarlyAlt (+120 Ly, 2024-02-01), while Live remains 200 Ly!
 	var emittedDomains []string
 	var emitMu sync.Mutex
-	testApp.emit = func(eventName string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
 		if eventName == EventDataChanged && len(payload) > 0 {
 			if changed, ok := payload[0].(DataChanged); ok {
 				emitMu.Lock()
@@ -148,7 +148,7 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 				emitMu.Unlock()
 			}
 		}
-	}
+	})
 	updatedScopeSettings, err := testApp.SetCareerBaselineScope(settings.CareerScopeAllEnabled)
 	if err != nil || updatedScopeSettings.CareerBaselineScope != settings.CareerScopeAllEnabled {
 		testingContext.Fatalf("SetCareerBaselineScope(all_enabled): settings=%+v err=%v", updatedScopeSettings, err)

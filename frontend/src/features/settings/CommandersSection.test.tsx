@@ -120,7 +120,7 @@ const multiCommanderSettings = () =>
 
 describe('CommandersSection and CommanderManageModal', () => {
   afterEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it('hides Career and Baseline Scope for a single commander and renders badges, historic aliases, and scope toggle for multiple profiles', async () => {

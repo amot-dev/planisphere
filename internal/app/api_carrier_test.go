@@ -192,7 +192,6 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 }
 
 func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.T) {
-	testingContext.Setenv("XDG_CONFIG_HOME", testingContext.TempDir())
 	testApp := setupTestApp(testingContext)
 	originalSpanshQuery := querySpanshCarrierRoute
 	testingContext.Cleanup(func() { querySpanshCarrierRoute = originalSpanshQuery })
@@ -243,8 +242,20 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 		cancel func()
 	}{
 		{name: "CancelCarrierRoutePlot", cancel: testApp.CancelCarrierRoutePlot},
-		{name: "SetActiveExpedition", cancel: func() { _ = testApp.SetActiveExpedition(expTwo.ID) }},
-		{name: "SetDatabasePath", cancel: func() { _, _ = testApp.SetDatabasePath(filepath.Join(testingContext.TempDir(), "switched.db")) }},
+		{name: "SetActiveExpedition", cancel: func() {
+			if setErr := testApp.SetActiveExpedition(expTwo.ID); setErr != nil {
+				testingContext.Errorf("SetActiveExpedition: %v", setErr)
+			}
+		}},
+		{name: "SetDatabasePath", cancel: func() {
+			if _, switchErr := testApp.SetDatabasePath(filepath.Join(testingContext.TempDir(), "switched.db")); switchErr != nil {
+				testingContext.Errorf("SetDatabasePath: %v", switchErr)
+				return
+			}
+			if _, disableErr := testApp.SetOnlineLookups(false); disableErr != nil {
+				testingContext.Errorf("SetOnlineLookups(false): %v", disableErr)
+			}
+		}},
 	}
 	for _, trigger := range cancellationTriggers {
 		enteredPoll := make(chan struct{})
@@ -254,7 +265,11 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 			return nil, ctx.Err()
 		}
 		targetExpID := expOne.ID
-		if currentList, _ := testApp.ListExpeditions(); len(currentList) > 0 {
+		currentList, listBeforeErr := testApp.ListExpeditions()
+		if listBeforeErr != nil {
+			testingContext.Fatalf("ListExpeditions before %s: %v", trigger.name, listBeforeErr)
+		}
+		if len(currentList) > 0 {
 			targetExpID = currentList[0].ID
 		} else {
 			seeded, seedErr := testApp.CreateExpedition("Switched Exp", "")
@@ -278,8 +293,15 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 		if outcome.err != nil || outcome.state != nil {
 			testingContext.Fatalf("%s: expected cancelled StartCarrierRoute to return (nil, nil), got (%+v, %v)", trigger.name, outcome.state, outcome.err)
 		}
-		if currentList, _ := testApp.ListExpeditions(); len(currentList) > 0 {
-			checkPlan, _ := testApp.GetPlan(currentList[0].ID)
+		afterList, listAfterErr := testApp.ListExpeditions()
+		if listAfterErr != nil {
+			testingContext.Fatalf("ListExpeditions after %s: %v", trigger.name, listAfterErr)
+		}
+		if len(afterList) > 0 {
+			checkPlan, checkPlanErr := testApp.GetPlan(afterList[0].ID)
+			if checkPlanErr != nil {
+				testingContext.Fatalf("GetPlan after %s: %v", trigger.name, checkPlanErr)
+			}
 			if checkPlan.ActiveCarrierRoute != nil {
 				testingContext.Fatalf("%s: expected cancelled plot not to persist route, got %+v", trigger.name, checkPlan.ActiveCarrierRoute)
 			}
@@ -292,7 +314,10 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	if err != nil {
 		testingContext.Fatalf("createExpeditionWithWaypoints activeExp: %v", err)
 	}
-	activePlan, _ := testApp.GetPlan(activeExp.ID)
+	activePlan, activePlanErr := testApp.GetPlan(activeExp.ID)
+	if activePlanErr != nil {
+		testingContext.Fatalf("GetPlan activeExp: %v", activePlanErr)
+	}
 	beagleStopID := activePlan.Rows[1].Row.ID
 	if err := testApp.UpdateRow(expedition.RowPatch{ID: beagleStopID, FCStop: &fcStop}); err != nil {
 		testingContext.Fatalf("UpdateRow beagleStopID: %v", err)
@@ -306,9 +331,10 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 		testingContext.Fatalf("expected non-cancellation Spansh error to persist manual fallback, got state=%+v err=%v", fallbackState, err)
 	}
 
+	testApp.backgroundWg.Wait()
 	var emittedDomains [][]string
 	var emitMu sync.Mutex
-	testApp.emit = func(event string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(event string, payload ...any) {
 		if event == EventDataChanged && len(payload) > 0 {
 			if changed, ok := payload[0].(DataChanged); ok {
 				emitMu.Lock()
@@ -316,7 +342,7 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 				emitMu.Unlock()
 			}
 		}
-	}
+	})
 	if err := testApp.ClearActiveCarrierRouteWithUndo(activeExp.ID); err != nil {
 		testingContext.Fatalf("ClearActiveCarrierRouteWithUndo: %v", err)
 	}
@@ -333,7 +359,10 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	if err := testApp.CompleteCarrierRouteArrival(activeExp.ID, 0, 0, 0); err != nil {
 		testingContext.Fatalf("CompleteCarrierRouteArrival(0): %v", err)
 	}
-	resolvedArrivalPlan, _ := testApp.GetPlan(activeExp.ID)
+	resolvedArrivalPlan, resolvedPlanErr := testApp.GetPlan(activeExp.ID)
+	if resolvedPlanErr != nil {
+		testingContext.Fatalf("GetPlan resolvedArrivalPlan: %v", resolvedPlanErr)
+	}
 	if !resolvedArrivalPlan.Rows[1].Row.FCArrived || resolvedArrivalPlan.ActiveCarrierRoute != nil {
 		testingContext.Fatalf("expected targetRowID=0 arrival to mark Beagle Point arrived and clear route, got row=%+v route=%+v",
 			resolvedArrivalPlan.Rows[1].Row, resolvedArrivalPlan.ActiveCarrierRoute)

@@ -34,9 +34,12 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		testingContext.Fatalf("set setup completed: %v", setSetupError)
 	}
 
+	var emitMutex sync.Mutex
 	var observedScanningStates []bool
 	var journalChangedCount int
-	testApp.emit = func(event string, data ...any) {
+	setTestEmitHook(testingContext, testApp, func(event string, data ...any) {
+		emitMutex.Lock()
+		defer emitMutex.Unlock()
 		switch event {
 		case EventIngest:
 			observedScanningStates = append(observedScanningStates, testApp.scanning.Load())
@@ -45,15 +48,19 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 				journalChangedCount++
 			}
 		}
-	}
+	})
 
 	testApp.prepareInitialState()
 
-	if len(observedScanningStates) != 2 || !observedScanningStates[0] || observedScanningStates[1] {
-		testingContext.Fatalf("expected EventIngest scanning states [true, false], got %v", observedScanningStates)
+	emitMutex.Lock()
+	initialStates := append([]bool(nil), observedScanningStates...)
+	initialJournalChanges := journalChangedCount
+	emitMutex.Unlock()
+	if len(initialStates) != 2 || !initialStates[0] || initialStates[1] {
+		testingContext.Fatalf("expected EventIngest scanning states [true, false], got %v", initialStates)
 	}
-	if journalChangedCount != 1 {
-		testingContext.Fatalf("expected 1 journal data:changed emission on initial scan, got %d", journalChangedCount)
+	if initialJournalChanges != 1 {
+		testingContext.Fatalf("expected 1 journal data:changed emission on initial scan, got %d", initialJournalChanges)
 	}
 
 	if !testApp.careerStats.IsValid() || !testApp.salesLedger.IsValid() {
@@ -68,17 +75,23 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		testingContext.Fatalf("append non-relevant line: %v", writeError)
 	}
 
+	emitMutex.Lock()
 	observedScanningStates = nil
 	journalChangedCount = 0
+	emitMutex.Unlock()
 	if rescanError := testApp.RescanJournals(); rescanError != nil {
 		testingContext.Fatalf("RescanJournals: %v", rescanError)
 	}
 
-	if len(observedScanningStates) != 2 || !observedScanningStates[0] || observedScanningStates[1] {
-		testingContext.Fatalf("expected RescanJournals EventIngest scanning states [true, false], got %v", observedScanningStates)
+	emitMutex.Lock()
+	rescanStates := append([]bool(nil), observedScanningStates...)
+	rescanJournalChanges := journalChangedCount
+	emitMutex.Unlock()
+	if len(rescanStates) != 2 || !rescanStates[0] || rescanStates[1] {
+		testingContext.Fatalf("expected RescanJournals EventIngest scanning states [true, false], got %v", rescanStates)
 	}
-	if journalChangedCount != 0 {
-		testingContext.Fatalf("expected 0 journal data:changed emissions when NewEvents == 0, got %d", journalChangedCount)
+	if rescanJournalChanges != 0 {
+		testingContext.Fatalf("expected 0 journal data:changed emissions when NewEvents == 0, got %d", rescanJournalChanges)
 	}
 
 	if !testApp.careerStats.IsValid() || !testApp.salesLedger.IsValid() || testApp.careerStats.Generation() != careerGenerationBeforeNoOp {
@@ -96,20 +109,27 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 		testingContext.Fatalf("expected 2 stored events across 1 tracked file, got events=%d files=%d", ingestStatus.EventsStored, ingestStatus.FilesTracked)
 	}
 
-	previousEmit := testApp.emit
+	var previousEmit func(event string, data ...any)
 	acquiredInCompletionCallback := false
-	testApp.emit = func(event string, data ...any) {
+	previousEmit = setTestEmitHook(testingContext, testApp, func(event string, data ...any) {
 		if event == EventIngest && !testApp.scanning.Load() {
+			emitMutex.Lock()
 			acquiredInCompletionCallback = testApp.scanning.CompareAndSwap(false, true)
+			emitMutex.Unlock()
 		}
-		previousEmit(event, data...)
-	}
+		if previousEmit != nil {
+			previousEmit(event, data...)
+		}
+	})
 	if rescanError := testApp.RescanJournals(); rescanError != nil {
 		testingContext.Fatalf("RescanJournals with completion handoff: %v", rescanError)
 	}
-	testApp.emit = previousEmit
-	if !acquiredInCompletionCallback || !testApp.scanning.Load() {
-		testingContext.Fatalf("expected scanning flag to stay acquired after completion callback handoff (acquired=%v scanning=%v)", acquiredInCompletionCallback, testApp.scanning.Load())
+	setTestEmitHook(testingContext, testApp, previousEmit)
+	emitMutex.Lock()
+	wasAcquired := acquiredInCompletionCallback
+	emitMutex.Unlock()
+	if !wasAcquired || !testApp.scanning.Load() {
+		testingContext.Fatalf("expected scanning flag to stay acquired after completion callback handoff (acquired=%v scanning=%v)", wasAcquired, testApp.scanning.Load())
 	}
 	testApp.scanning.Store(false)
 }
@@ -234,7 +254,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 	var emittedPendingStates []bool
 	var pendingTrueChan = make(chan struct{}, 4)
 
-	testApp.emit = func(eventName string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
 		emittedMutex.Lock()
 		defer emittedMutex.Unlock()
 		switch eventName {
@@ -257,9 +277,10 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 				}
 			}
 		}
-	}
+	})
 
 	takeEmitted := func() ([]DataChanged, []bool) {
+		testingContext.Helper()
 		emittedMutex.Lock()
 		defer emittedMutex.Unlock()
 		changes := append([]DataChanged(nil), emittedDataChanges...)

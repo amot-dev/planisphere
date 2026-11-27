@@ -128,24 +128,24 @@ func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testi
 		journal.EventShipyardSwap,
 		journal.EventResurrect,
 	))
-	stillCachedArrivals, _ := systemArrivals.InWindow("2026-05-02T10:00:00Z", "")
-	if len(stillCachedArrivals) != 2 {
-		testingContext.Fatalf("expected non-arrival events not to invalidate SystemArrivals, got len=%d", len(stillCachedArrivals))
+	stillCachedArrivals, cachedArrErr := systemArrivals.InWindow("2026-05-02T10:00:00Z", "")
+	if cachedArrErr != nil || len(stillCachedArrivals) != 2 {
+		testingContext.Fatalf("expected non-arrival events not to invalidate SystemArrivals, got len=%d err=%v", len(stillCachedArrivals), cachedArrErr)
 	}
-	stillCachedCounts, _ := visitCounts.CountsForSystems([]string{"WaySys"})
-	if stillCachedCounts["waysys"] != 1 {
-		testingContext.Fatalf("expected non-arrival events not to invalidate SystemVisitCounts, got %d", stillCachedCounts["waysys"])
+	stillCachedCounts, cachedCountsErr := visitCounts.CountsForSystems([]string{"WaySys"})
+	if cachedCountsErr != nil || stillCachedCounts["waysys"] != 1 {
+		testingContext.Fatalf("expected non-arrival events not to invalidate SystemVisitCounts, got %d err=%v", stillCachedCounts["waysys"], cachedCountsErr)
 	}
 
 	// Publishing EventFSDJump invalidates both SystemArrivals and SystemVisitCounts.
 	eventBus.PublishJournal(journal.NewEventSet(journal.EventFSDJump))
-	refreshedArrivals, _ := systemArrivals.InWindow("2026-05-02T10:00:00Z", "")
-	if len(refreshedArrivals) != 3 {
-		testingContext.Fatalf("expected refreshed SystemArrivals len=3, got %d", len(refreshedArrivals))
+	refreshedArrivals, refreshedArrErr := systemArrivals.InWindow("2026-05-02T10:00:00Z", "")
+	if refreshedArrErr != nil || len(refreshedArrivals) != 3 {
+		testingContext.Fatalf("expected refreshed SystemArrivals len=3, got %d err=%v", len(refreshedArrivals), refreshedArrErr)
 	}
-	refreshedCounts, _ := visitCounts.CountsForSystems([]string{"WaySys"})
-	if refreshedCounts["waysys"] != 2 {
-		testingContext.Fatalf("expected WaySys visit count 2 after refresh, got %d", refreshedCounts["waysys"])
+	refreshedCounts, refreshedCountsErr := visitCounts.CountsForSystems([]string{"WaySys"})
+	if refreshedCountsErr != nil || refreshedCounts["waysys"] != 2 {
+		testingContext.Fatalf("expected WaySys visit count 2 after refresh, got %d err=%v", refreshedCounts["waysys"], refreshedCountsErr)
 	}
 }
 

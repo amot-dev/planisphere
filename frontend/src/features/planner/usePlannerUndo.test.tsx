@@ -70,7 +70,7 @@ describe('usePlannerUndo pure shortcut resolution helpers', () => {
 
 describe('usePlannerUndo keyboard hook lifecycle and guards', () => {
   afterEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     vi.useRealTimers()
   })
 

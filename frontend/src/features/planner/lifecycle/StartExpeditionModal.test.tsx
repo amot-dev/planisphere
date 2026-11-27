@@ -19,7 +19,9 @@ import { StartExpeditionModal } from './StartExpeditionModal'
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('StartExpeditionModal', () => {
-  afterEach(() => vi.clearAllMocks())
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
 
   it('disables close and action buttons during StartExpedition, hides scope picker for <=1 commander, and ignores candidate settlement after unmount', async () => {
     mockGetStartCandidates.mockResolvedValueOnce(
@@ -80,9 +82,12 @@ describe('StartExpeditionModal', () => {
     const unmountContainer = document.createElement('div')
     document.body.appendChild(unmountContainer)
     const unmountRoot = createRoot(unmountContainer)
-    act(() => unmountRoot.render(createElement(StartExpeditionModal, { expeditionId: 6, onClose: () => {} })))
-    act(() => unmountRoot.unmount())
-    unmountContainer.remove()
+    try {
+      act(() => unmountRoot.render(createElement(StartExpeditionModal, { expeditionId: 6, onClose: () => {} })))
+    } finally {
+      act(() => unmountRoot.unmount())
+      unmountContainer.remove()
+    }
     await act(async () => { rejectCandidates(new Error('aborted')); await Promise.resolve() })
   })
 

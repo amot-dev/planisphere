@@ -18,6 +18,7 @@ import (
 	"planisphere/internal/projections"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/projections/stats"
+	"planisphere/internal/reference"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
@@ -373,7 +374,23 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 		if detailError != nil {
 			testingContext.Fatalf("Details(%d): %v", rowDetail.RowID, detailError)
 		}
-		if rowDetail.To == "" && rowDetail.Elapsed != "" && expectedDetail.Elapsed != "" {
+		if rowDetail.To == "" {
+			if rowDetail.From != "2026-04-01T12:00:00Z" {
+				testingContext.Fatalf("expected open leg From=2026-04-01T12:00:00Z, got %q", rowDetail.From)
+			}
+			legStartTime, parseFromErr := reference.ParseISO(rowDetail.From)
+			if parseFromErr != nil {
+				testingContext.Fatalf("parse open leg From: %v", parseFromErr)
+			}
+			elapsedNow := time.Now().UTC().Sub(legStartTime)
+			currentMinuteLabel := reference.DurationLabel(elapsedNow)
+			previousMinuteLabel := reference.DurationLabel(elapsedNow - time.Minute)
+			if rowDetail.Elapsed != currentMinuteLabel && rowDetail.Elapsed != previousMinuteLabel {
+				testingContext.Fatalf("open leg batch Elapsed=%q, want %q or %q", rowDetail.Elapsed, currentMinuteLabel, previousMinuteLabel)
+			}
+			if expectedDetail.Elapsed != currentMinuteLabel && expectedDetail.Elapsed != previousMinuteLabel {
+				testingContext.Fatalf("open leg single Elapsed=%q, want %q or %q", expectedDetail.Elapsed, currentMinuteLabel, previousMinuteLabel)
+			}
 			rowDetail.Elapsed = expectedDetail.Elapsed
 		}
 		if !reflect.DeepEqual(rowDetail, expectedDetail) {

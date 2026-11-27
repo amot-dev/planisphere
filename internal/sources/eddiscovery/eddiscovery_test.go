@@ -123,6 +123,9 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 		}
 		index++
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate journal_events: %v", err)
+	}
 	if index != len(expectedCommanders) {
 		t.Fatalf("expected %d rows, got %d", len(expectedCommanders), index)
 	}
@@ -144,6 +147,9 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		commanders = append(commanders, commander)
+	}
+	if err := commanderRows.Err(); err != nil {
+		t.Fatalf("iterate commanders: %v", err)
 	}
 	if len(commanders) != 2 {
 		t.Fatalf("expected 2 commanders, got %d", len(commanders))

@@ -37,8 +37,8 @@ func TestSettingsRoundTripsAndNormalization(testingContext *testing.T) {
 	if deleteError := settings.Delete(dbConn, "custom_key"); deleteError != nil {
 		testingContext.Fatalf("Delete custom_key: %v", deleteError)
 	}
-	if deletedValue, _ := settings.Get(dbConn, "custom_key"); deletedValue != "" {
-		testingContext.Fatalf("expected empty after delete, got %q", deletedValue)
+	if deletedValue, getDeletedError := settings.Get(dbConn, "custom_key"); getDeletedError != nil || deletedValue != "" {
+		testingContext.Fatalf("expected empty after delete, got %q err=%v", deletedValue, getDeletedError)
 	}
 
 	// External links defaults and normalization
@@ -154,6 +154,9 @@ func listProfileSummaries(testingContext *testing.T, dbConn *sql.DB) map[string]
 			enabled           int
 			hasManualOverride int
 		}{id: id, displayName: displayName, enabled: enabled, hasManualOverride: manual}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		testingContext.Fatalf("iterate commander_profiles: %v", rowsErr)
 	}
 	return result
 }

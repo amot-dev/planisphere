@@ -248,7 +248,7 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 
 	var emittedMutex sync.Mutex
 	var planEmitCount int
-	testApp.emit = func(eventName string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
 		if eventName == EventDataChanged && len(payload) > 0 {
 			if dataChanged, ok := payload[0].(DataChanged); ok && slices.Contains(dataChanged.Domains, "plan") {
 				emittedMutex.Lock()
@@ -256,14 +256,17 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 				emittedMutex.Unlock()
 			}
 		}
-	}
+	})
 
 	var onlineRequests atomic.Int32
 	offlineVerifiedBeforeFirstHTTP := atomic.Bool{}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requestNumber := onlineRequests.Add(1)
 		if requestNumber == 1 {
-			rowsBeforeOnline, _ := expedition.ListRows(testApp.db, createdExpedition.ID)
+			rowsBeforeOnline, listBeforeErr := expedition.ListRows(testApp.db, createdExpedition.ID)
+			if listBeforeErr != nil {
+				testingContext.Errorf("list rows before online: %v", listBeforeErr)
+			}
 			emittedMutex.Lock()
 			emitsSoFar := planEmitCount
 			emittedMutex.Unlock()
@@ -271,17 +274,18 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 				offlineVerifiedBeforeFirstHTTP.Store(true)
 			}
 		}
-		if requestNumber == 3 {
-			time.Sleep(150 * time.Millisecond)
-		}
 		writer.Header().Set("Content-Type", "application/json")
+		var responsePayload []byte
 		switch request.URL.Query().Get("systemName") {
 		case "Barnards Loop":
-			_, _ = writer.Write([]byte(`{"name":"Barnards Loop","id":10,"id64":5001,"coords":{"x":100,"y":-200,"z":-1300}}`))
+			responsePayload = []byte(`{"name":"Barnards Loop","id":10,"id64":5001,"coords":{"x":100,"y":-200,"z":-1300}}`)
 		case "Beagle Point":
-			_, _ = writer.Write([]byte(`{"name":"Beagle Point","id":20,"id64":827689533218,"coords":{"x":-1111.5,"y":-134.2,"z":65269.75}}`))
+			responsePayload = []byte(`{"name":"Beagle Point","id":20,"id64":827689533218,"coords":{"x":-1111.5,"y":-134.2,"z":65269.75}}`)
 		default:
-			_, _ = writer.Write([]byte(`[]`))
+			responsePayload = []byte(`[]`)
+		}
+		if _, writeErr := writer.Write(responsePayload); writeErr != nil {
+			testingContext.Errorf("write mock EDSM response: %v", writeErr)
 		}
 	}))
 	testingContext.Cleanup(mockServer.Close)
@@ -317,7 +321,10 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 	}
 	onlineRequests.Store(0)
 	testApp.runExpeditionResolutionWorker(testApp.db, offlineExpedition.ID, false)
-	offlineRows, _ := expedition.ListRows(testApp.db, offlineExpedition.ID)
+	offlineRows, offlineListErr := expedition.ListRows(testApp.db, offlineExpedition.ID)
+	if offlineListErr != nil {
+		testingContext.Fatalf("list offline expedition rows: %v", offlineListErr)
+	}
 	emittedMutex.Lock()
 	offlinePlanEmits := planEmitCount
 	emittedMutex.Unlock()
@@ -333,7 +340,10 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 		testingContext.Fatalf("prepare missing POI rows: %v", execError)
 	}
 	testApp.populateMissingPOIs()
-	updatedRows, _ := expedition.ListRows(testApp.db, createdExpedition.ID)
+	updatedRows, updatedListErr := expedition.ListRows(testApp.db, createdExpedition.ID)
+	if updatedListErr != nil {
+		testingContext.Fatalf("list updated rows: %v", updatedListErr)
+	}
 	if updatedRows[1].POIName != "Jaques Station" || updatedRows[4].POIName != "Custom Beagle Label" {
 		testingContext.Fatalf("unexpected POI backfill: colonia=%q beagle=%q", updatedRows[1].POIName, updatedRows[4].POIName)
 	}
@@ -342,7 +352,10 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 	}); staleUpdateErr != nil {
 		testingContext.Fatalf("SetMissingRowPOIsTx stale system guard: %v", staleUpdateErr)
 	}
-	guardedRow, _ := expedition.GetRow(testApp.db, updatedRows[3].ID)
+	guardedRow, guardedRowErr := expedition.GetRow(testApp.db, updatedRows[3].ID)
+	if guardedRowErr != nil {
+		testingContext.Fatalf("get guarded row: %v", guardedRowErr)
+	}
 	if guardedRow.POIName != "" {
 		testingContext.Fatalf("expected mismatched system_name POI update to be skipped, got %q", guardedRow.POIName)
 	}
@@ -360,7 +373,7 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	var emittedMutex sync.Mutex
 	var emittedEventNames []string
 	var emittedDomains [][]string
-	testApp.emit = func(eventName string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
 		emittedMutex.Lock()
 		defer emittedMutex.Unlock()
 		emittedEventNames = append(emittedEventNames, eventName)
@@ -369,7 +382,7 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 				emittedDomains = append(emittedDomains, dataChanged.Domains)
 			}
 		}
-	}
+	})
 
 	initialStatus, setupError := testApp.SetupConfigureJournals(journalDirectory)
 	if setupError != nil || initialStatus.EventsStored != 1 {
@@ -377,7 +390,11 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	}
 	watcherStarted := false
 	for attempt := 0; attempt < 50; attempt++ {
-		if status, _ := testApp.GetIngestStatus(); status.WatcherActive {
+		status, statusErr := testApp.GetIngestStatus()
+		if statusErr != nil {
+			testingContext.Fatalf("GetIngestStatus: %v", statusErr)
+		}
+		if status.WatcherActive {
 			watcherStarted = true
 			break
 		}
@@ -482,8 +499,6 @@ func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) 
 
 func TestOnlineResolutionAbortsAcrossDatabaseSwitch(testingContext *testing.T) {
 	tempDir := testingContext.TempDir()
-	testingContext.Setenv("XDG_CONFIG_HOME", tempDir)
-	testingContext.Setenv("APPDATA", tempDir)
 	testApp := setupTestApp(testingContext)
 	enteredHTTP, releaseHTTP, httpCalls := make(chan struct{}), make(chan struct{}), atomic.Int32{}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -524,13 +539,13 @@ func TestAsyncResolutionVisitedAddressMatchEmitsStatsDomain(testingContext *test
 		testingContext.Fatalf("prepare active expedition: createErr=%v addErr=%v", createErr, addErr)
 	}
 	aliasName, sawPlanAndStats := "Eol Prou RS-T d3-94", atomic.Bool{}
-	testApp.emit = func(eventName string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
 		if eventName == EventDataChanged && len(payload) > 0 {
 			if changed, ok := payload[0].(DataChanged); ok && slices.Contains(changed.Domains, "plan") && slices.Contains(changed.Domains, "stats") {
 				sawPlanAndStats.Store(true)
 			}
 		}
-	}
+	})
 	updateErr := testApp.UpdateRow(expedition.RowPatch{ID: addedRow.ID, SystemName: &aliasName})
 	testApp.backgroundWg.Wait()
 	resolvedRow, rowErr := expedition.GetRow(testApp.db, addedRow.ID)

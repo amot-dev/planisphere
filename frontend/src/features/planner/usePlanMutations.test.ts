@@ -74,53 +74,60 @@ function buildSamplePlan(): expedition.PlanView {
   })
 }
 
+afterEach(() => {
+  vi.resetAllMocks()
+})
+
 describe('executePlanMutation', () => {
   it('rolls back via onRefreshPlan and clears busy state when mutation fails', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const samplePlan = buildSamplePlan()
-    const optimisticUpdateCalls: expedition.PlanView[] = []
-    const busyStates: Array<string | null> = []
-    const refreshPlan = vi.fn(async () => {})
-    const onSuccess = vi.fn()
+    try {
+      const samplePlan = buildSamplePlan()
+      const optimisticUpdateCalls: expedition.PlanView[] = []
+      const busyStates: Array<string | null> = []
+      const refreshPlan = vi.fn(async () => {})
+      const onSuccess = vi.fn()
 
-    const mutationSucceeded = await executePlanMutation(
-      'REORDERING ROUTE',
-      'Failed to reorder route row',
-      async () => {
-        throw new Error('sqlite busy')
-      },
-      {
-        onBusyChange: (busyMessage) => busyStates.push(busyMessage),
-        onPlanOptimisticUpdate: (nextPlan) => optimisticUpdateCalls.push(nextPlan),
-        onRefreshPlan: refreshPlan,
-      },
-      {
-        optimisticPlan: samplePlan,
-        onSuccess,
-      },
-    )
+      const mutationSucceeded = await executePlanMutation(
+        'REORDERING ROUTE',
+        'Failed to reorder route row',
+        async () => {
+          throw new Error('sqlite busy')
+        },
+        {
+          onBusyChange: (busyMessage) => busyStates.push(busyMessage),
+          onPlanOptimisticUpdate: (nextPlan) => optimisticUpdateCalls.push(nextPlan),
+          onRefreshPlan: refreshPlan,
+        },
+        {
+          optimisticPlan: samplePlan,
+          onSuccess,
+        },
+      )
 
-    expect(mutationSucceeded).toBe(false)
-    expect(optimisticUpdateCalls).toEqual([samplePlan])
-    expect(onSuccess).not.toHaveBeenCalled()
-    expect(refreshPlan).toHaveBeenCalledTimes(1)
-    expect(busyStates).toEqual(['REORDERING ROUTE', null])
-    expect(errorSpy).toHaveBeenCalledTimes(1)
+      expect(mutationSucceeded).toBe(false)
+      expect(optimisticUpdateCalls).toEqual([samplePlan])
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(refreshPlan).toHaveBeenCalledTimes(1)
+      expect(busyStates).toEqual(['REORDERING ROUTE', null])
+      expect(errorSpy).toHaveBeenCalledTimes(1)
 
-    const retrySucceeded = await executePlanMutation(
-      'REORDERING ROUTE',
-      'Failed to reorder route row',
-      async () => {},
-      {
-        onBusyChange: (busyMessage) => busyStates.push(busyMessage),
-        onPlanOptimisticUpdate: (nextPlan) => optimisticUpdateCalls.push(nextPlan),
-        onRefreshPlan: refreshPlan,
-      },
-      { onSuccess },
-    )
-    expect(retrySucceeded).toBe(true)
-    expect(onSuccess).toHaveBeenCalledTimes(1)
-    errorSpy.mockRestore()
+      const retrySucceeded = await executePlanMutation(
+        'REORDERING ROUTE',
+        'Failed to reorder route row',
+        async () => {},
+        {
+          onBusyChange: (busyMessage) => busyStates.push(busyMessage),
+          onPlanOptimisticUpdate: (nextPlan) => optimisticUpdateCalls.push(nextPlan),
+          onRefreshPlan: refreshPlan,
+        },
+        { onSuccess },
+      )
+      expect(retrySucceeded).toBe(true)
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 })
 
@@ -133,9 +140,6 @@ function createDeferredPromise() {
 }
 
 describe('usePlanMutations overlapping busy coordination and Go permission guards', () => {
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
 
   it('preserves remaining mutation busy message regardless of settlement order and enforces Go carrier permissions', async () => {
     const samplePlan = buildSamplePlan()
@@ -244,17 +248,20 @@ describe('usePlanMutations overlapping busy coordination and Go permission guard
 
       // Verify setFcArrived and commitField propagate boolean resolution outcomes.
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      mockUpdateRow.mockRejectedValueOnce(new Error('locked')).mockResolvedValueOnce(undefined)
-      await expect(latestMutations.setFcArrived(11, true)).resolves.toBe(false)
-      await expect(latestMutations.setFcArrived(11, true)).resolves.toBe(true)
-      await expect(
-        latestMutations.commitField(samplePlan.rows[0].row, 'systemName', 'Sol'),
-      ).resolves.toBe(true)
-      mockUpdateRow.mockRejectedValueOnce(new Error('invalid'))
-      await expect(
-        latestMutations.commitField(samplePlan.rows[0].row, 'poiName', 'Earth'),
-      ).resolves.toBe(false)
-      errorSpy.mockRestore()
+      try {
+        mockUpdateRow.mockRejectedValueOnce(new Error('locked')).mockResolvedValueOnce(undefined)
+        await expect(latestMutations.setFcArrived(11, true)).resolves.toBe(false)
+        await expect(latestMutations.setFcArrived(11, true)).resolves.toBe(true)
+        await expect(
+          latestMutations.commitField(samplePlan.rows[0].row, 'systemName', 'Sol'),
+        ).resolves.toBe(true)
+        mockUpdateRow.mockRejectedValueOnce(new Error('invalid'))
+        await expect(
+          latestMutations.commitField(samplePlan.rows[0].row, 'poiName', 'Earth'),
+        ).resolves.toBe(false)
+      } finally {
+        errorSpy.mockRestore()
+      }
     } finally {
       act(() => {
         root.unmount()

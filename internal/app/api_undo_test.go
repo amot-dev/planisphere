@@ -14,7 +14,6 @@ import (
 	"planisphere/internal/sources/spansh"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
-	"planisphere/internal/store/settings"
 )
 
 func mustGetPlan(testingContext *testing.T, testApp *App, expeditionID int64) expedition.PlanView {
@@ -28,13 +27,10 @@ func mustGetPlan(testingContext *testing.T, testApp *App, expeditionID int64) ex
 
 func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-	if err := settings.SetOnlineLookups(testApp.db, false); err != nil {
-		testingContext.Fatalf("SetOnlineLookups(false): %v", err)
-	}
 
 	var emittedEvents []DataChanged
 	var emitMu sync.Mutex
-	testApp.emit = func(event string, payload ...any) {
+	setTestEmitHook(testingContext, testApp, func(event string, payload ...any) {
 		if event == EventDataChanged && len(payload) > 0 {
 			if changed, ok := payload[0].(DataChanged); ok {
 				emitMu.Lock()
@@ -42,7 +38,7 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 				emitMu.Unlock()
 			}
 		}
-	}
+	})
 
 	insertTestJournalEvent(testingContext, testApp, "2026-04-05T08:00:00Z", "LoadGame", "lg1",
 		`{"timestamp":"2026-04-05T08:00:00Z","event":"LoadGame","Commander":"CMDR Facade","FID":"F1","Ship":"mandalay"}`)
@@ -352,7 +348,6 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 }
 
 func TestAppUndoInvalidatesExportSnapshotScopeChangeAndDBSwitch(testingContext *testing.T) {
-	testingContext.Setenv("XDG_CONFIG_HOME", testingContext.TempDir())
 	testApp := setupTestApp(testingContext)
 
 	currentExportTime := time.Date(2026, 4, 6, 10, 0, 0, 0, time.UTC)

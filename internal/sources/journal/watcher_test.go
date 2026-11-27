@@ -16,14 +16,16 @@ import (
 func waitForActiveWatcher(testingContext *testing.T, watcherInstance *journal.Watcher) {
 	testingContext.Helper()
 	deadline := time.Now().Add(2 * time.Second)
+	var lastErrorMessage string
 	for time.Now().Before(deadline) {
-		isActive, _ := watcherInstance.Active()
+		isActive, watcherError := watcherInstance.Active()
 		if isActive {
 			return
 		}
+		lastErrorMessage = watcherError
 		time.Sleep(15 * time.Millisecond)
 	}
-	testingContext.Fatalf("timed out waiting for journal watcher to become active")
+	testingContext.Fatalf("timed out waiting for journal watcher to become active (last error: %s)", lastErrorMessage)
 }
 
 func TestWatcherPauseCoalescesPendingFilesInChronologicalOrder(testingContext *testing.T) {
@@ -51,7 +53,7 @@ func TestWatcherPauseCoalescesPendingFilesInChronologicalOrder(testingContext *t
 	parentContext, cancelContext := context.WithCancel(context.Background())
 	defer cancelContext()
 	watcherInstance.Start(parentContext, journalDirectory)
-	defer watcherInstance.Stop()
+	testingContext.Cleanup(watcherInstance.Stop)
 	waitForActiveWatcher(testingContext, watcherInstance)
 
 	laterFile := filepath.Join(journalDirectory, "Journal.2026-04-01T110000.01.log")
@@ -119,6 +121,9 @@ func TestWatcherPauseCoalescesPendingFilesInChronologicalOrder(testingContext *t
 		}
 		ingestedFileNames = append(ingestedFileNames, fileName)
 	}
+	if rowsError := rows.Err(); rowsError != nil {
+		testingContext.Fatalf("iterate ingested_journals: %v", rowsError)
+	}
 	expectedOrder := []string{
 		"Journal.2026-04-01T100000.01.log",
 		"Journal.2026-04-01T110000.01.log",
@@ -148,7 +153,7 @@ func TestWatcherClearPendingSuppressesStaleFlushOnResume(testingContext *testing
 	parentContext, cancelContext := context.WithCancel(context.Background())
 	defer cancelContext()
 	watcherInstance.Start(parentContext, journalDirectory)
-	defer watcherInstance.Stop()
+	testingContext.Cleanup(watcherInstance.Stop)
 	waitForActiveWatcher(testingContext, watcherInstance)
 
 	journalFile := filepath.Join(journalDirectory, "Journal.2026-04-02T080000.01.log")

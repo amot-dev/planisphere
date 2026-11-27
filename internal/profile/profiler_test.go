@@ -37,8 +37,12 @@ func seedProfileTestDatabase(t *testing.T) string {
 		`{"timestamp":"2026-01-01T12:00:00Z","event":"SellOrganicData","MarketID":32001,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`,
 	}
 
-	_, _ = conn.Exec(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen) VALUES ('CmdrProfile', 'F100', 1, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z')`)
-	_, _ = conn.Exec(`INSERT INTO ingested_journals(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at) VALUES ('Journal.2026-01-01.log', '/tmp/Journal.2026-01-01.log', 1024, 9, 1024, 9, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z', '2026-01-01T12:00:00Z')`)
+	if _, execErr := conn.Exec(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen) VALUES ('CmdrProfile', 'F100', 1, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z')`); execErr != nil {
+		t.Fatalf("insert seed commander: %v", execErr)
+	}
+	if _, execErr := conn.Exec(`INSERT INTO ingested_journals(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at) VALUES ('Journal.2026-01-01.log', '/tmp/Journal.2026-01-01.log', 1024, 9, 1024, 9, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z', '2026-01-01T12:00:00Z')`); execErr != nil {
+		t.Fatalf("insert seed ingested_journals: %v", execErr)
+	}
 
 	for _, rawLine := range events {
 		parsed, keep, parseErr := journal.ParseLine([]byte(rawLine), "Journal.2026-01-01.log")
@@ -61,24 +65,35 @@ func seedProfileTestDatabase(t *testing.T) string {
 	if createErr != nil {
 		t.Fatalf("create expedition: %v", createErr)
 	}
-	rows, _ := expedition.ListRows(conn, createdExp.ID)
+	rows, listErr := expedition.ListRows(conn, createdExp.ID)
+	if listErr != nil || len(rows) == 0 {
+		t.Fatalf("list initial expedition rows: len=%d err=%v", len(rows), listErr)
+	}
 	solName := "Sol"
-	_, _ = expedition.UpdateRow(conn, expedition.RowPatch{ID: rows[0].ID, SystemName: &solName})
-	_ = db.WithTx(conn, func(tx *sql.Tx) error {
+	if _, updateErr := expedition.UpdateRow(conn, expedition.RowPatch{ID: rows[0].ID, SystemName: &solName}); updateErr != nil {
+		t.Fatalf("update origin row: %v", updateErr)
+	}
+	if txErr := db.WithTx(conn, func(tx *sql.Tx) error {
 		secondRow, err := expedition.InsertRow(tx, createdExp.ID, rows[0].ID, expedition.RowWaypoint, 0)
 		if err != nil {
 			return err
 		}
 		alphaName := "Alpha Centauri"
-		_, _ = expedition.UpdateRow(tx, expedition.RowPatch{ID: secondRow.ID, SystemName: &alphaName})
+		if _, err := expedition.UpdateRow(tx, expedition.RowPatch{ID: secondRow.ID, SystemName: &alphaName}); err != nil {
+			return err
+		}
 		thirdRow, err := expedition.InsertRow(tx, createdExp.ID, secondRow.ID, expedition.RowWaypoint, 0)
 		if err != nil {
 			return err
 		}
 		barnardName := "Barnards Star"
-		_, _ = expedition.UpdateRow(tx, expedition.RowPatch{ID: thirdRow.ID, SystemName: &barnardName})
+		if _, err := expedition.UpdateRow(tx, expedition.RowPatch{ID: thirdRow.ID, SystemName: &barnardName}); err != nil {
+			return err
+		}
 		return expedition.Start(tx, createdExp.ID, "2026-01-01T10:05:00Z", 0)
-	})
+	}); txErr != nil {
+		t.Fatalf("seed expedition waypoints and start: %v", txErr)
+	}
 
 	return dbPath
 }

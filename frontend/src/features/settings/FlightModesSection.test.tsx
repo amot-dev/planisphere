@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { app, modes } from '../../api/models'
 
 const mockUpdateMode = vi.fn()
@@ -20,6 +20,10 @@ import { FlightModesSection } from './FlightModesSection'
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('FlightModesSection delete confirmation', () => {
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
+
   it('loads expedition usage breakdown before confirming custom mode deletion', async () => {
     mockGetModeUsage.mockResolvedValue([
       modes.ExpeditionUsage.createFrom({
@@ -116,33 +120,44 @@ describe('FlightModesSection delete confirmation', () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
+    let unmounted = false
 
-    act(() => {
-      root.render(createElement(FlightModesSection, { modesState, onSetError }))
-    })
+    try {
+      act(() => {
+        root.render(createElement(FlightModesSection, { modesState, onSetError }))
+      })
 
-    const colorInput = container.querySelector('input[type="color"]') as HTMLInputElement
-    act(() => {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-      descriptor?.set?.call(colorInput, '#00e5a3')
-      colorInput.dispatchEvent(new Event('input', { bubbles: true }))
-    })
+      const colorInput = container.querySelector('input[type="color"]') as HTMLInputElement
+      act(() => {
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+        descriptor?.set?.call(colorInput, '#00e5a3')
+        colorInput.dispatchEvent(new Event('input', { bubbles: true }))
+      })
 
-    expect(mockUpdateMode).not.toHaveBeenCalled()
+      expect(mockUpdateMode).not.toHaveBeenCalled()
 
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+      unmounted = true
 
-    expect(mockUpdateMode).toHaveBeenCalledWith(1, 'Travel', 'Fast transit', '#00e5a3')
-    expect(onSetError).not.toHaveBeenCalled()
+      expect(mockUpdateMode).toHaveBeenCalledWith(1, 'Travel', 'Fast transit', '#00e5a3')
+      expect(onSetError).not.toHaveBeenCalled()
 
-    await act(async () => {
-      rejectColorUpdate(new Error('database closed'))
-      await Promise.resolve()
-    })
+      await act(async () => {
+        rejectColorUpdate(new Error('database closed'))
+        await Promise.resolve()
+      })
 
-    expect(onSetError).not.toHaveBeenCalled()
+      expect(onSetError).not.toHaveBeenCalled()
+    } finally {
+      if (!unmounted) {
+        act(() => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    }
   })
 })

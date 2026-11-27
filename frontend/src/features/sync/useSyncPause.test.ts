@@ -8,6 +8,8 @@ import { SyncStatusButton } from '../../components/ui/SyncStatusButton'
 import type { DataChangedDispatchContext } from './syncEventRouter'
 import { useSyncPause, type UseSyncPauseResult } from './useSyncPause'
 
+;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
 function createLiveDispatchHarness(expeditionId = 4) {
   const filter = stats.Filter.createFrom({ enabled: false, modes: [] })
   const refreshExpeditionListOnly = vi.fn()
@@ -78,10 +80,25 @@ function mountSyncPauseHook(
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
+  let unmounted = false
 
-  act(() => {
-    root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
-  })
+  const unmount = () => {
+    if (unmounted) return
+    unmounted = true
+    act(() => {
+      root.unmount()
+    })
+    container.remove()
+  }
+
+  try {
+    act(() => {
+      root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
+    })
+  } catch (mountError) {
+    unmount()
+    throw mountError
+  }
 
   return {
     setLiveSyncPausedMock,
@@ -92,12 +109,7 @@ function mountSyncPauseHook(
         root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
       })
     },
-    unmount: () => {
-      act(() => {
-        root.unmount()
-      })
-      container.remove()
-    },
+    unmount,
   }
 }
 
@@ -112,122 +124,131 @@ describe('useSyncPause', () => {
     const harness = createLiveDispatchHarness()
     const mounted = mountSyncPauseHook(harness)
 
-    expect(mounted.getResult().syncPauseState).toBe('active')
-    expect(mounted.getResult().isClockSuspended).toBe(false)
-    expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(false)
-    mounted.setLiveSyncPausedMock.mockClear()
+    try {
+      expect(mounted.getResult().syncPauseState).toBe('active')
+      expect(mounted.getResult().isClockSuspended).toBe(false)
+      expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(false)
+      mounted.setLiveSyncPausedMock.mockClear()
 
-    act(() => {
-      mounted.getResult().handleToggleSyncPause()
-    })
-
-    expect(mounted.getResult().syncPauseState).toBe('paused')
-    expect(mounted.getResult().isClockSuspended).toBe(true)
-    expect(mounted.getResult().hasPendingSyncUpdates).toBe(false)
-    expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(true)
-
-    // Explicit user mutations (such as AddRow or SetCommanderEnabled) must still route live while PAUSED.
-    act(() => {
-      mounted.getResult().eventHandlers.onDataChanged({
-        domains: ['plan', 'expeditions'],
-        expeditionId: 4,
+      act(() => {
+        mounted.getResult().handleToggleSyncPause()
       })
-      mounted.getResult().eventHandlers.onDataChanged({
-        domains: ['settings'],
+
+      expect(mounted.getResult().syncPauseState).toBe('paused')
+      expect(mounted.getResult().isClockSuspended).toBe(true)
+      expect(mounted.getResult().hasPendingSyncUpdates).toBe(false)
+      expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(true)
+
+      // Explicit user mutations (such as AddRow or SetCommanderEnabled) must still route live while PAUSED.
+      act(() => {
+        mounted.getResult().eventHandlers.onDataChanged({
+          domains: ['plan', 'expeditions'],
+          expeditionId: 4,
+        })
+        mounted.getResult().eventHandlers.onDataChanged({
+          domains: ['settings'],
+        })
       })
-    })
-    expect(harness.loadPlanOnly).toHaveBeenCalledWith(4)
-    expect(harness.refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
-    expect(harness.loadSettingsOnly).toHaveBeenCalledTimes(1)
+      expect(harness.loadPlanOnly).toHaveBeenCalledWith(4)
+      expect(harness.refreshExpeditionListOnly).toHaveBeenCalledTimes(1)
+      expect(harness.loadSettingsOnly).toHaveBeenCalledTimes(1)
 
-    // Backend watcher pending notification turns the amber waiting flag on until resumed or cleared.
-    act(() => {
-      mounted.getResult().eventHandlers.onSyncPending?.(true)
-    })
-    expect(mounted.getResult().hasPendingSyncUpdates).toBe(true)
+      // Backend watcher pending notification turns the amber waiting flag on until resumed or cleared.
+      act(() => {
+        mounted.getResult().eventHandlers.onSyncPending?.(true)
+      })
+      expect(mounted.getResult().hasPendingSyncUpdates).toBe(true)
 
-    act(() => {
-      mounted.getResult().handleToggleSyncPause()
-    })
-    expect(mounted.getResult().syncPauseState).toBe('active')
-    expect(mounted.getResult().isClockSuspended).toBe(false)
-    expect(mounted.getResult().hasPendingSyncUpdates).toBe(false)
-    expect(mounted.setLiveSyncPausedMock).toHaveBeenLastCalledWith(false)
-
-    mounted.unmount()
+      act(() => {
+        mounted.getResult().handleToggleSyncPause()
+      })
+      expect(mounted.getResult().syncPauseState).toBe('active')
+      expect(mounted.getResult().isClockSuspended).toBe(false)
+      expect(mounted.getResult().hasPendingSyncUpdates).toBe(false)
+      expect(mounted.setLiveSyncPausedMock).toHaveBeenLastCalledWith(false)
+    } finally {
+      mounted.unmount()
+    }
   })
 
   it('drains PAUSING into PAUSED when ingest or EDDiscovery tasks finish and supports cancel', () => {
     const harness = createLiveDispatchHarness()
     const mounted = mountSyncPauseHook(harness, 'INGESTING JOURNALS')
-    mounted.setLiveSyncPausedMock.mockClear()
 
-    act(() => {
-      mounted.getResult().handleToggleSyncPause()
-    })
-    expect(mounted.getResult().syncPauseState).toBe('pausing')
-    expect(mounted.getResult().isClockSuspended).toBe(false)
-    expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(true)
+    try {
+      mounted.setLiveSyncPausedMock.mockClear()
 
-    // Completion events are never blocked during PAUSING so activeStatusMessage clears cleanly.
-    const completionProgress: EddImportProgress = {
-      active: false,
-      stage: '',
-      current: 0,
-      total: 0,
-      percent: 0,
-      files: 0,
+      act(() => {
+        mounted.getResult().handleToggleSyncPause()
+      })
+      expect(mounted.getResult().syncPauseState).toBe('pausing')
+      expect(mounted.getResult().isClockSuspended).toBe(false)
+      expect(mounted.setLiveSyncPausedMock).toHaveBeenCalledWith(true)
+
+      // Completion events are never blocked during PAUSING so activeStatusMessage clears cleanly.
+      const completionProgress: EddImportProgress = {
+        active: false,
+        stage: '',
+        current: 0,
+        total: 0,
+        percent: 0,
+        files: 0,
+      }
+      act(() => {
+        mounted.getResult().eventHandlers.onIngestStatus()
+        mounted.getResult().eventHandlers.onEddProgress(completionProgress)
+      })
+      expect(harness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
+      expect(harness.applyEddProgress).toHaveBeenCalledWith(completionProgress)
+
+      mounted.setStatusMessage(null)
+      expect(mounted.getResult().syncPauseState).toBe('paused')
+      expect(mounted.getResult().isClockSuspended).toBe(true)
+
+      // Re-enter PAUSING while busy and verify clicking again cancels back to READY.
+      act(() => {
+        mounted.getResult().handleToggleSyncPause()
+      })
+      mounted.setStatusMessage('COMPUTING TELEMETRY')
+      act(() => {
+        mounted.getResult().handleToggleSyncPause()
+      })
+      expect(mounted.getResult().syncPauseState).toBe('pausing')
+
+      act(() => {
+        mounted.getResult().handleToggleSyncPause()
+      })
+      expect(mounted.getResult().syncPauseState).toBe('active')
+      expect(mounted.setLiveSyncPausedMock).toHaveBeenLastCalledWith(false)
+    } finally {
+      mounted.unmount()
     }
-    act(() => {
-      mounted.getResult().eventHandlers.onIngestStatus()
-      mounted.getResult().eventHandlers.onEddProgress(completionProgress)
-    })
-    expect(harness.loadIngestStatusOnly).toHaveBeenCalledTimes(1)
-    expect(harness.applyEddProgress).toHaveBeenCalledWith(completionProgress)
-
-    mounted.setStatusMessage(null)
-    expect(mounted.getResult().syncPauseState).toBe('paused')
-    expect(mounted.getResult().isClockSuspended).toBe(true)
-
-    // Re-enter PAUSING while busy and verify clicking again cancels back to READY.
-    act(() => {
-      mounted.getResult().handleToggleSyncPause()
-    })
-    mounted.setStatusMessage('COMPUTING TELEMETRY')
-    act(() => {
-      mounted.getResult().handleToggleSyncPause()
-    })
-    expect(mounted.getResult().syncPauseState).toBe('pausing')
-
-    act(() => {
-      mounted.getResult().handleToggleSyncPause()
-    })
-    expect(mounted.getResult().syncPauseState).toBe('active')
-    expect(mounted.setLiveSyncPausedMock).toHaveBeenLastCalledWith(false)
-
-    mounted.unmount()
   })
 
   it('toggles data-document-hidden for CSS animation suspension without deferring sync events', () => {
     const harness = createLiveDispatchHarness()
     const mounted = mountSyncPauseHook(harness)
 
-    expect(document.documentElement.dataset.documentHidden).toBe('false')
+    try {
+      expect(document.documentElement.dataset.documentHidden).toBe('false')
 
-    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
-    act(() => {
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
-    expect(document.documentElement.dataset.documentHidden).toBe('true')
-    expect(mounted.getResult().syncPauseState).toBe('active')
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      expect(document.documentElement.dataset.documentHidden).toBe('true')
+      expect(mounted.getResult().syncPauseState).toBe('active')
 
-    act(() => {
-      mounted.getResult().eventHandlers.onDataChanged({ domains: ['stats'] })
-    })
-    expect(harness.loadStatsOnly).toHaveBeenCalledWith(4, harness.filter)
+      act(() => {
+        mounted.getResult().eventHandlers.onDataChanged({ domains: ['stats'] })
+      })
+      expect(harness.loadStatsOnly).toHaveBeenCalledWith(4, harness.filter)
 
-    mounted.unmount()
-    expect(document.documentElement.dataset.documentHidden).toBeUndefined()
+      mounted.unmount()
+      expect(document.documentElement.dataset.documentHidden).toBeUndefined()
+    } finally {
+      mounted.unmount()
+    }
   })
 })
 

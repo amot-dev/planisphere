@@ -366,16 +366,22 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 	setRowSystemName(t, dbConn, alpha.ID, "Alpha Centauri")
 
 	// Start at 2026-01-18T10:00:00Z, complete at final visited waypoint (2026-01-20T16:00:00Z)
-	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+	if startErr := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		return expedition.Start(transaction, exp.ID, "2026-01-18T10:00:00Z", 0)
-	})
-	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+	}); startErr != nil {
+		t.Fatalf("Start failed: %v", startErr)
+	}
+	if reevalErr := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		_, err := expedition.Reevaluate(transaction, exp.ID)
 		return err
-	})
-	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+	}); reevalErr != nil {
+		t.Fatalf("Reevaluate failed: %v", reevalErr)
+	}
+	if completeErr := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		return expedition.Complete(transaction, exp.ID)
-	})
+	}); completeErr != nil {
+		t.Fatalf("Complete failed: %v", completeErr)
+	}
 
 	// Build plan
 	plan, err := expedition.BuildPlan(dbConn, exp.ID, nil, proj)
@@ -569,7 +575,10 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 	}
 
 	// Verify all 3 positions
-	rows, _ := expedition.ListRows(dbConn, expeditionRecord.ID)
+	rows, listErr := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listErr != nil {
+		t.Fatalf("ListRows after end inserts: %v", listErr)
+	}
 	if len(rows) != 3 || rows[0].Position != 1 || rows[1].Position != 2 || rows[2].Position != 3 {
 		t.Fatalf("unexpected rows after end inserts: %+v", rows)
 	}
@@ -580,7 +589,10 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 		t.Errorf("expected wpMid position 2, got %d", wpMid.Position)
 	}
 
-	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	rows, listErr = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listErr != nil {
+		t.Fatalf("ListRows after middle insert: %v", listErr)
+	}
 	if len(rows) != 4 {
 		t.Fatalf("expected 4 rows, got %d", len(rows))
 	}
@@ -603,7 +615,10 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 		t.Errorf("expected wpTop position 1, got %d", wpTop.Position)
 	}
 
-	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	rows, listErr = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listErr != nil {
+		t.Fatalf("ListRows after top insert: %v", listErr)
+	}
 	if len(rows) != 5 {
 		t.Fatalf("expected 5 rows, got %d", len(rows))
 	}
@@ -621,9 +636,11 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 	setRowSystemName(t, dbConn, wp3.ID, "Alpha")
 
 	// Start expedition
-	_ = db.WithTx(dbConn, func(transaction *sql.Tx) error {
+	if startErr := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		return expedition.Start(transaction, expeditionRecord.ID, "2026-02-01T10:00:00Z", 0)
-	})
+	}); startErr != nil {
+		t.Fatalf("Start failed: %v", startErr)
+	}
 
 	// Commander jumps Alpha -> Interim -> Alpha (early return before Beta) -> Beta -> Gamma.
 	// The early return to Alpha must NOT consume the final return waypoint wp3 ("Alpha"),
@@ -646,7 +663,10 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 		t.Fatalf("expected Reevaluate to report changes")
 	}
 
-	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	rows, listErr = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listErr != nil {
+		t.Fatalf("ListRows after Reevaluate: %v", listErr)
+	}
 	if len(rows) != 5 {
 		t.Fatalf("expected 5 rows, got %d", len(rows))
 	}
@@ -689,7 +709,10 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 	}); validMoveErr != nil {
 		t.Fatalf("expected moving Alpha to its 11:00 historical window to succeed, got %v", validMoveErr)
 	}
-	rows, _ = expedition.ListRows(dbConn, expeditionRecord.ID)
+	rows, listErr = expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listErr != nil {
+		t.Fatalf("ListRows after MoveRow: %v", listErr)
+	}
 	if rows[1].ID != wp3.ID || rows[1].VisitedAt != "2026-02-01T11:00:00Z" {
 		t.Fatalf("expected moved Alpha at index 1 to bind to 2026-02-01T11:00:00Z, got %+v", rows[1])
 	}
@@ -1003,9 +1026,11 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	setRowSystemName(testingContext, databaseConnection, barnardWaypoint.ID, "Barnard's Star")
 
 	fcTrue := true
-	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: solWaypoint.ID, FCStop: &fcTrue})
-	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: siriusWaypoint.ID, FCStop: &fcTrue})
-	_, _ = expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: barnardWaypoint.ID, FCStop: &fcTrue})
+	for _, stopRowID := range []int64{solWaypoint.ID, siriusWaypoint.ID, barnardWaypoint.ID} {
+		if _, updateStopErr := expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: stopRowID, FCStop: &fcTrue}); updateStopErr != nil {
+			testingContext.Fatalf("set FCStop on row %d: %v", stopRowID, updateStopErr)
+		}
+	}
 
 	if startErr := db.WithTx(databaseConnection, func(tx *sql.Tx) error {
 		return expedition.Start(tx, expeditionRecord.ID, "2026-01-18T10:00:00Z", 0)
@@ -1074,7 +1099,10 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); moveBeforePendingErr != nil {
 		testingContext.Fatal(moveBeforePendingErr)
 	}
-	movedRow3, _ := expedition.GetRow(databaseConnection, siriusWaypoint.ID)
+	movedRow3, movedRowErr := expedition.GetRow(databaseConnection, siriusWaypoint.ID)
+	if movedRowErr != nil {
+		testingContext.Fatalf("GetRow moved siriusWaypoint: %v", movedRowErr)
+	}
 	if !movedRow3.FCArrived {
 		testingContext.Fatalf("expected siriusWaypoint to remain FCArrived=true when moved into unvisited slot before first pending stop")
 	}
@@ -1086,7 +1114,10 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 	}); cascadeErr != nil {
 		testingContext.Fatal(cascadeErr)
 	}
-	reloadedAfterCascade, _ := expedition.GetRow(databaseConnection, siriusWaypoint.ID)
+	reloadedAfterCascade, reloadedCascadeErr := expedition.GetRow(databaseConnection, siriusWaypoint.ID)
+	if reloadedCascadeErr != nil {
+		testingContext.Fatalf("GetRow reloaded siriusWaypoint: %v", reloadedCascadeErr)
+	}
 	if reloadedAfterCascade.FCArrived {
 		testingContext.Fatalf("expected SetCarrierArrivalOverride(solWaypoint, false) to cascade to siriusWaypoint")
 	}
@@ -1705,19 +1736,31 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 		testingContext.Fatalf("StartTx: %v", startError)
 	}
 
-	rowsBeforeDepart, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	rowsBeforeDepart, listBeforeErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listBeforeErr != nil {
+		testingContext.Fatalf("ListRows before depart: %v", listBeforeErr)
+	}
 	if rowsBeforeDepart[0].DepartedAt != "" {
 		testingContext.Fatalf("expected WP #1 DepartedAt empty before leaving Sol (multicrew ignored), got %q", rowsBeforeDepart[0].DepartedAt)
 	}
-	planBeforeDepart, _ := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, expeditionProjections)
+	planBeforeDepart, planBeforeErr := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, expeditionProjections)
+	if planBeforeErr != nil {
+		testingContext.Fatalf("BuildPlan before depart: %v", planBeforeErr)
+	}
 	if planBeforeDepart.NextWaypointRowID != 0 || planBeforeDepart.Rows[1].VisitState != expedition.VisitFuture {
 		testingContext.Fatalf("expected WP #2 to remain future before leaving WP #1, got next=%d state=%q", planBeforeDepart.NextWaypointRowID, planBeforeDepart.Rows[1].VisitState)
 	}
-	wp1PreDetails, _ := expedition.Details(databaseConnection, rowsBeforeDepart[0].ID, expeditionProjections)
+	wp1PreDetails, wp1PreErr := expedition.Details(databaseConnection, rowsBeforeDepart[0].ID, expeditionProjections)
+	if wp1PreErr != nil {
+		testingContext.Fatalf("Details WP #1 pre-depart: %v", wp1PreErr)
+	}
 	if !wp1PreDetails.InSystem || wp1PreDetails.Metrics.BodiesScanned != 1 {
 		testingContext.Fatalf("expected WP #1 Historical Baseline InSystem=true with pre-departure scan, got inSystem=%v metrics=%+v", wp1PreDetails.InSystem, wp1PreDetails.Metrics)
 	}
-	wp2PreDetails, _ := expedition.Details(databaseConnection, rowsBeforeDepart[1].ID, expeditionProjections)
+	wp2PreDetails, wp2PreErr := expedition.Details(databaseConnection, rowsBeforeDepart[1].ID, expeditionProjections)
+	if wp2PreErr != nil {
+		testingContext.Fatalf("Details WP #2 pre-depart: %v", wp2PreErr)
+	}
 	if wp2PreDetails.Kind != "" {
 		testingContext.Fatalf("expected WP #2 drawer empty before WP #1 departs, got %+v", wp2PreDetails)
 	}
@@ -1751,20 +1794,32 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
 	}
 
-	rowsAfter, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	rowsAfter, listAfterErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listAfterErr != nil {
+		testingContext.Fatalf("ListRows after depart: %v", listAfterErr)
+	}
 	if rowsAfter[0].DepartedAt != "2026-09-01T11:00:00Z" || rowsAfter[1].DepartedAt != "2026-09-01T12:00:00Z" || rowsAfter[2].DepartedAt != "2026-09-01T12:30:00Z" {
 		testingContext.Fatalf("unexpected DepartedAt sequence: wp1=%q wp2=%q wp3=%q", rowsAfter[0].DepartedAt, rowsAfter[1].DepartedAt, rowsAfter[2].DepartedAt)
 	}
 
-	wp1Details, _ := expedition.Details(databaseConnection, rowsAfter[0].ID, expeditionProjections)
+	wp1Details, wp1Err := expedition.Details(databaseConnection, rowsAfter[0].ID, expeditionProjections)
+	if wp1Err != nil {
+		testingContext.Fatalf("Details WP #1: %v", wp1Err)
+	}
 	if wp1Details.To != "2026-09-01T11:00:00Z" || wp1Details.Metrics.BodiesScanned != 1 || wp1Details.Metrics.Jumps != 0 {
 		testingContext.Fatalf("expected WP #1 baseline to keep Sol scan and exclude departure jump, got to=%q metrics=%+v", wp1Details.To, wp1Details.Metrics)
 	}
-	wp2Details, _ := expedition.Details(databaseConnection, rowsAfter[1].ID, expeditionProjections)
+	wp2Details, wp2Err := expedition.Details(databaseConnection, rowsAfter[1].ID, expeditionProjections)
+	if wp2Err != nil {
+		testingContext.Fatalf("Details WP #2: %v", wp2Err)
+	}
 	if wp2Details.Metrics.Jumps != 1 || wp2Details.Metrics.BodiesScanned != 1 || strings.Join(wp2Details.ShipsUsed, "|") != "Mandalay" {
 		testingContext.Fatalf("expected WP #2 to include direct jump, Alpha scan (ignoring CmdrB), and Mandalay only, got metrics=%+v ships=%v", wp2Details.Metrics, wp2Details.ShipsUsed)
 	}
-	wp3ActiveDetails, _ := expedition.Details(databaseConnection, rowsAfter[2].ID, expeditionProjections)
+	wp3ActiveDetails, wp3ActiveErr := expedition.Details(databaseConnection, rowsAfter[2].ID, expeditionProjections)
+	if wp3ActiveErr != nil {
+		testingContext.Fatalf("Details WP #3 active: %v", wp3ActiveErr)
+	}
 	if wp3ActiveDetails.Metrics.Jumps != 1 || wp3ActiveDetails.Metrics.BodiesScanned != 1 || strings.Join(wp3ActiveDetails.ShipsUsed, "|") != "Anaconda" {
 		testingContext.Fatalf("expected WP #3 to include Beta jump, Beta 2 scan only (first stay), and Anaconda, got metrics=%+v ships=%v", wp3ActiveDetails.Metrics, wp3ActiveDetails.ShipsUsed)
 	}
@@ -1773,21 +1828,27 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
 		testingContext.Fatalf("CompleteTx: %v", completeError)
 	}
-	completedExp, _ := expedition.Get(databaseConnection, expeditionRecord.ID)
+	completedExp := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID)
 	if completedExp.EndTimestamp != "2026-09-01T12:20:00Z" {
 		testingContext.Fatalf("expected completed EndTimestamp=2026-09-01T12:20:00Z, got %q", completedExp.EndTimestamp)
 	}
-	wp3CompletedDetails, _ := expedition.Details(databaseConnection, rowsAfter[2].ID, expeditionProjections)
+	wp3CompletedDetails, wp3CompletedErr := expedition.Details(databaseConnection, rowsAfter[2].ID, expeditionProjections)
+	if wp3CompletedErr != nil {
+		testingContext.Fatalf("Details WP #3 completed: %v", wp3CompletedErr)
+	}
 	if wp3CompletedDetails.To != "2026-09-01T12:20:00Z" || wp3CompletedDetails.Metrics.BodiesScanned != 1 || wp3CompletedDetails.InSystem {
 		testingContext.Fatalf("expected completed WP #3 drawer clamped to 12:20 with 1 scan, got to=%q inSystem=%v metrics=%+v",
 			wp3CompletedDetails.To, wp3CompletedDetails.InSystem, wp3CompletedDetails.Metrics)
 	}
 
 	// Chained expedition starting at Beta (12:00) begins at Beta departure (12:30), causing zero overlap with Beta 2 (12:20).
-	chainedExp, _ := expedition.CreateWithWaypoints(databaseConnection, "Chained Leg 2", "", []expedition.SeedWaypoint{
+	chainedExp, createChainErr := expedition.CreateWithWaypoints(databaseConnection, "Chained Leg 2", "", []expedition.SeedWaypoint{
 		{SystemName: "Beta"},
 		{SystemName: "SideHop"},
 	})
+	if createChainErr != nil {
+		testingContext.Fatalf("CreateWithWaypoints chained: %v", createChainErr)
+	}
 	if startChainErr := expedition.StartTx(databaseConnection, chainedExp.ID, "2026-09-01T12:00:00Z", 0); startChainErr != nil {
 		testingContext.Fatalf("StartTx chained: %v", startChainErr)
 	}
@@ -1795,7 +1856,10 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 	if chainStartErr != nil || !chainDeparted || chainDisplayStart != "2026-09-01T12:30:00Z" || chainQueryAfter != "2026-09-01T12:29:59Z" {
 		testingContext.Fatalf("unexpected chained EffectiveStart: after=%q display=%q departed=%v err=%v", chainQueryAfter, chainDisplayStart, chainDeparted, chainStartErr)
 	}
-	chainSummary, _ := expeditionProjections.TimeRangeStats.Compute(replaystats.Range{After: chainQueryAfter, Until: "2026-09-01T12:59:59Z"}, nil)
+	chainSummary, chainComputeErr := expeditionProjections.TimeRangeStats.Compute(replaystats.Range{After: chainQueryAfter, Until: "2026-09-01T12:59:59Z"}, nil)
+	if chainComputeErr != nil {
+		testingContext.Fatalf("Compute chained summary: %v", chainComputeErr)
+	}
 	if chainSummary.Metrics.Jumps != 1 || chainSummary.Metrics.BodiesScanned != 0 {
 		testingContext.Fatalf("expected chained expedition to exclude Exp 1 Beta scan and include SideHop departure jump, got %+v", chainSummary.Metrics)
 	}

@@ -83,7 +83,11 @@ describe('Scroll Performance and Normalizer', () => {
 
     afterEach(() => {
       cleanup()
-      ;(globalThis as any).window = originalWindow
+      if (originalWindow === undefined) {
+        delete (globalThis as Record<string, unknown>).window
+      } else {
+        ;(globalThis as Record<string, unknown>).window = originalWindow
+      }
     })
 
     function createVerticalScrollContainer(): HTMLElement {

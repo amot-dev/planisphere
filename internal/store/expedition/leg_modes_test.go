@@ -95,8 +95,14 @@ func TestPerExpeditionLegModesEngageCascadeAndActiveSync(testingContext *testing
 	if _, cascadeError := expedition.SetLegModeTx(databaseConnection, rows[2].ID, travelID, true); cascadeError != nil {
 		testingContext.Fatalf("SetLegModeTx cascade: %v", cascadeError)
 	}
-	rowsAfterCascade, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
-	expAfterCascade, _ := expedition.Get(databaseConnection, expeditionRecord.ID)
+	rowsAfterCascade, listCascadeErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listCascadeErr != nil {
+		testingContext.Fatalf("ListRows after cascade: %v", listCascadeErr)
+	}
+	expAfterCascade, getCascadeErr := expedition.Get(databaseConnection, expeditionRecord.ID)
+	if getCascadeErr != nil {
+		testingContext.Fatalf("Get after cascade: %v", getCascadeErr)
+	}
 	if rowsAfterCascade[1].LegModeID != explorationID || rowsAfterCascade[2].LegModeID != travelID || rowsAfterCascade[3].LegModeID != travelID {
 		testingContext.Fatalf("unexpected leg modes after cascade: alpha=%d beta=%d gamma=%d",
 			rowsAfterCascade[1].LegModeID, rowsAfterCascade[2].LegModeID, rowsAfterCascade[3].LegModeID)
@@ -152,7 +158,10 @@ func TestHistoricalLegSplitInheritsSplitLegModeAndOverlappingExpeditionsIsolateS
 	if setActiveError := expedition.SetActiveModeTx(databaseConnection, expeditionA.ID, travelID); setActiveError != nil {
 		testingContext.Fatalf("SetActiveModeTx A: %v", setActiveError)
 	}
-	rowsA, _ := expedition.ListRows(databaseConnection, expeditionA.ID)
+	rowsA, listAErr := expedition.ListRows(databaseConnection, expeditionA.ID)
+	if listAErr != nil {
+		testingContext.Fatalf("ListRows A: %v", listAErr)
+	}
 	if moveError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
 		if _, err := expedition.MoveRow(transaction, rowsA[2].ID, 1); err != nil {
 			return err
@@ -162,7 +171,10 @@ func TestHistoricalLegSplitInheritsSplitLegModeAndOverlappingExpeditionsIsolateS
 	}); moveError != nil {
 		testingContext.Fatalf("MoveRow MidStop into historical slot: %v", moveError)
 	}
-	updatedRowsA, _ := expedition.ListRows(databaseConnection, expeditionA.ID)
+	updatedRowsA, listUpdatedAErr := expedition.ListRows(databaseConnection, expeditionA.ID)
+	if listUpdatedAErr != nil {
+		testingContext.Fatalf("ListRows updated A: %v", listUpdatedAErr)
+	}
 	if updatedRowsA[1].SystemName != "MidStop" || updatedRowsA[1].LegModeID != explorationID {
 		testingContext.Fatalf("expected split historical MidStop to inherit Exploration (%d), got %+v", explorationID, updatedRowsA[1])
 	}
@@ -179,7 +191,10 @@ func TestHistoricalLegSplitInheritsSplitLegModeAndOverlappingExpeditionsIsolateS
 	if startBError := expedition.StartTx(databaseConnection, expeditionB.ID, "2026-05-01T10:00:00Z", tourismID); startBError != nil {
 		testingContext.Fatalf("StartTx B: %v", startBError)
 	}
-	rowsB, _ := expedition.ListRows(databaseConnection, expeditionB.ID)
+	rowsB, listBErr := expedition.ListRows(databaseConnection, expeditionB.ID)
+	if listBErr != nil {
+		testingContext.Fatalf("ListRows B: %v", listBErr)
+	}
 	if _, setOuterError := expedition.SetLegModeTx(databaseConnection, rowsB[2].ID, travelID, false); setOuterError != nil {
 		testingContext.Fatalf("SetLegModeTx B outer: %v", setOuterError)
 	}
@@ -222,20 +237,29 @@ func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
 		`{"timestamp":"2026-07-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":4003,"StarPos":[20,0,0],"JumpDist":10.0}`,
 	})
 
-	activeExp, _ := expedition.CreateWithWaypoints(databaseConnection, "Active Custom", "", []expedition.SeedWaypoint{
+	activeExp, createActiveErr := expedition.CreateWithWaypoints(databaseConnection, "Active Custom", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"},
 	})
+	if createActiveErr != nil {
+		testingContext.Fatalf("CreateWithWaypoints activeExp: %v", createActiveErr)
+	}
 	if err := expedition.StartTx(databaseConnection, activeExp.ID, "2026-07-01T10:00:00Z", customMode.ID); err != nil {
 		testingContext.Fatalf("StartTx activeExp: %v", err)
 	}
 
-	completedExp, _ := expedition.CreateWithWaypoints(databaseConnection, "Completed Unused", "", []expedition.SeedWaypoint{
+	completedExp, createCompletedErr := expedition.CreateWithWaypoints(databaseConnection, "Completed Unused", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"}, {SystemName: "Alpha"},
 	})
+	if createCompletedErr != nil {
+		testingContext.Fatalf("CreateWithWaypoints completedExp: %v", createCompletedErr)
+	}
 	if err := expedition.StartTx(databaseConnection, completedExp.ID, "2026-07-01T10:00:00Z", customMode.ID); err != nil {
 		testingContext.Fatalf("StartTx completedExp: %v", err)
 	}
-	completedRows, _ := expedition.ListRows(databaseConnection, completedExp.ID)
+	completedRows, listCompletedErr := expedition.ListRows(databaseConnection, completedExp.ID)
+	if listCompletedErr != nil {
+		testingContext.Fatalf("ListRows completedExp: %v", listCompletedErr)
+	}
 	if _, err := expedition.SetLegModeTx(databaseConnection, completedRows[1].ID, travelID, false); err != nil {
 		testingContext.Fatalf("SetLegModeTx completedExp: %v", err)
 	}
@@ -254,9 +278,18 @@ func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
 	if deleteError := modes.DeleteTx(databaseConnection, customMode.ID); deleteError != nil {
 		testingContext.Fatalf("DeleteTx: %v", deleteError)
 	}
-	reloadedActiveExp, _ := expedition.Get(databaseConnection, activeExp.ID)
-	reloadedCompletedExp, _ := expedition.Get(databaseConnection, completedExp.ID)
-	reloadedActiveRows, _ := expedition.ListRows(databaseConnection, activeExp.ID)
+	reloadedActiveExp, reloadActiveErr := expedition.Get(databaseConnection, activeExp.ID)
+	if reloadActiveErr != nil {
+		testingContext.Fatalf("Get reloaded activeExp: %v", reloadActiveErr)
+	}
+	reloadedCompletedExp, reloadCompletedErr := expedition.Get(databaseConnection, completedExp.ID)
+	if reloadCompletedErr != nil {
+		testingContext.Fatalf("Get reloaded completedExp: %v", reloadCompletedErr)
+	}
+	reloadedActiveRows, reloadRowsErr := expedition.ListRows(databaseConnection, activeExp.ID)
+	if reloadRowsErr != nil {
+		testingContext.Fatalf("ListRows reloaded activeExp: %v", reloadRowsErr)
+	}
 	if reloadedActiveExp.ActiveModeID != travelID || reloadedCompletedExp.ActiveModeID != travelID {
 		testingContext.Fatalf("expected active_mode_id reassigned to Travel (%d), got active=%d completed=%d",
 			travelID, reloadedActiveExp.ActiveModeID, reloadedCompletedExp.ActiveModeID)
@@ -271,10 +304,16 @@ func TestMigrateLegModesV11BackfillFromLegacyModeWindows(testingContext *testing
 	databaseConnection := openExpeditionTestDB(testingContext)
 	explorationID, tourismID, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
 
-	expeditionRecord, _ := expedition.CreateWithWaypoints(databaseConnection, "Legacy Upgrade", "", []expedition.SeedWaypoint{
+	expeditionRecord, createLegacyErr := expedition.CreateWithWaypoints(databaseConnection, "Legacy Upgrade", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"},
 	})
-	rows, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if createLegacyErr != nil {
+		testingContext.Fatalf("CreateWithWaypoints Legacy Upgrade: %v", createLegacyErr)
+	}
+	rows, listLegacyErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listLegacyErr != nil {
+		testingContext.Fatalf("ListRows Legacy Upgrade: %v", listLegacyErr)
+	}
 
 	// Simulate a pre-v11 database state with legacy mode_windows and unmapped active_mode_id / leg_mode_id.
 	setupStatements := []struct {
@@ -298,8 +337,14 @@ func TestMigrateLegModesV11BackfillFromLegacyModeWindows(testingContext *testing
 		testingContext.Fatalf("db.Migrate v11: %v", migrateError)
 	}
 
-	migratedExp, _ := expedition.Get(databaseConnection, expeditionRecord.ID)
-	migratedRows, _ := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	migratedExp, getMigratedErr := expedition.Get(databaseConnection, expeditionRecord.ID)
+	if getMigratedErr != nil {
+		testingContext.Fatalf("Get migrated expedition: %v", getMigratedErr)
+	}
+	migratedRows, listMigratedErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listMigratedErr != nil {
+		testingContext.Fatalf("ListRows migrated expedition: %v", listMigratedErr)
+	}
 	if migratedExp.ActiveModeID != tourismID {
 		testingContext.Fatalf("expected migrated active_mode_id=%d from open mode_window, got %d", tourismID, migratedExp.ActiveModeID)
 	}
@@ -323,11 +368,14 @@ func TestLoadModeLookupDepartureSpansAndInSystemFrontier(testingContext *testing
 		`{"timestamp":"2026-10-01T11:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Vela 1","BodyID":1,"StarSystem":"Vela","SystemAddress":6002,"PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 	})
 
-	expeditionRecord, _ := expedition.CreateWithWaypoints(databaseConnection, "In-System Mode Test", "", []expedition.SeedWaypoint{
+	expeditionRecord, createInSysErr := expedition.CreateWithWaypoints(databaseConnection, "In-System Mode Test", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"},
 		{SystemName: "Vela"},
 		{SystemName: "Colonia"},
 	})
+	if createInSysErr != nil {
+		testingContext.Fatalf("CreateWithWaypoints In-System Mode Test: %v", createInSysErr)
+	}
 	if startErr := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-10-01T10:00:00Z", explorationID); startErr != nil {
 		testingContext.Fatalf("StartTx: %v", startErr)
 	}
@@ -367,7 +415,10 @@ func TestLoadModeLookupDepartureSpansAndInSystemFrontier(testingContext *testing
 		testingContext.Fatalf("expected departure jump to map to Travel (%d), got %d", travelID, gotDepartMode)
 	}
 
-	planView, _ := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, expeditionProjections)
+	planView, planViewErr := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, expeditionProjections)
+	if planViewErr != nil {
+		testingContext.Fatalf("BuildPlan after departure: %v", planViewErr)
+	}
 	if planView.Rows[2].VisitState != expedition.VisitCurrent || planView.Rows[2].LegModeID != travelID {
 		testingContext.Fatalf("expected Colonia to advance to VisitCurrent with Travel (%d) after departing Vela, got state=%q mode=%d",
 			travelID, planView.Rows[2].VisitState, planView.Rows[2].LegModeID)

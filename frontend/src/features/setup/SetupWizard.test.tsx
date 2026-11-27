@@ -31,7 +31,9 @@ import { SetupWizardModal } from './SetupWizard'
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('SetupWizardModal async edge safety', () => {
-  afterEach(() => vi.clearAllMocks())
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
 
   it('rolls back onlineLookups when SetOnlineLookups rejects and blocks Back, close, and checkboxes during GEC sync', async () => {
     const initialSettings = app.Settings.createFrom({

@@ -454,12 +454,16 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 
 	// Create 3 pre-v12 expeditions: active, completed post-7fabd35 (end == arrival), completed pre-7fabd35 (end > departure, with trailing unvisited row).
 	insertExpedition := func(name, status, startTS, endTS string) int64 {
+		testingContext.Helper()
 		res, err := dbConn.Exec(`INSERT INTO expeditions(name, status, start_timestamp, end_timestamp, created_at, updated_at) VALUES(?, ?, ?, NULLIF(?, ''), '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
 			name, status, startTS, endTS)
 		if err != nil {
 			testingContext.Fatalf("insert expedition %s: %v", name, err)
 		}
-		id, _ := res.LastInsertId()
+		id, lastIDError := res.LastInsertId()
+		if lastIDError != nil {
+			testingContext.Fatalf("last insert id for expedition %s: %v", name, lastIDError)
+		}
 		return id
 	}
 	activeID := insertExpedition("V12 Active", "active", "2026-08-01T10:00:00Z", "")
@@ -467,6 +471,7 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 	compLegacyID := insertExpedition("V12 Completed Legacy", "completed", "2026-08-01T10:00:00Z", "2026-08-06T00:00:00Z")
 
 	seedRows := func(expID int64, includeTrailingUnvisited bool) {
+		testingContext.Helper()
 		if _, err := dbConn.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, system_name, system_address, visited_at, departed_at, created_at, updated_at) VALUES
 			(?, 1, 'waypoint', 'Sol', 1001, '2026-08-01T10:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
 			(?, 2, 'waypoint', 'Alpha', 1002, '2026-08-01T11:00:00Z', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
@@ -494,14 +499,25 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 	}
 
 	readDepartures := func(expID int64) (endTS string, departures []string, visited []string) {
-		_ = dbConn.QueryRow(`SELECT COALESCE(end_timestamp, '') FROM expeditions WHERE id = ?`, expID).Scan(&endTS)
-		rows, _ := dbConn.Query(`SELECT COALESCE(visited_at, ''), COALESCE(departed_at, '') FROM expedition_rows WHERE expedition_id = ? ORDER BY position`, expID)
+		testingContext.Helper()
+		if scanEndErr := dbConn.QueryRow(`SELECT COALESCE(end_timestamp, '') FROM expeditions WHERE id = ?`, expID).Scan(&endTS); scanEndErr != nil {
+			testingContext.Fatalf("query end_timestamp exp %d: %v", expID, scanEndErr)
+		}
+		rows, queryErr := dbConn.Query(`SELECT COALESCE(visited_at, ''), COALESCE(departed_at, '') FROM expedition_rows WHERE expedition_id = ? ORDER BY position`, expID)
+		if queryErr != nil {
+			testingContext.Fatalf("query expedition_rows exp %d: %v", expID, queryErr)
+		}
 		defer rows.Close()
 		for rows.Next() {
 			var vis, dep string
-			_ = rows.Scan(&vis, &dep)
+			if scanErr := rows.Scan(&vis, &dep); scanErr != nil {
+				testingContext.Fatalf("scan expedition_row exp %d: %v", expID, scanErr)
+			}
 			visited = append(visited, vis)
 			departures = append(departures, dep)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			testingContext.Fatalf("iterate expedition_rows exp %d: %v", expID, rowsErr)
 		}
 		return endTS, departures, visited
 	}

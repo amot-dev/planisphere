@@ -126,7 +126,7 @@ describe('WaypointDetailsDrawer', () => {
     expect(html).not.toContain('[FLIGHT MODE]:')
   })
 
-  it('renders Realized Value card with combined total sold and 5 orange negative lines without emojis', () => {
+  it('renders Realized Value card with combined total sold and 6 orange negative lines without emojis', () => {
     const mockRowView = expedition.RowView.createFrom({
       row: {
         id: 2,
@@ -376,56 +376,60 @@ describe('WaypointDetailsDrawer', () => {
     })
 
     const container = document.createElement('div')
+    document.body.appendChild(container)
     const root = createRoot(container)
-    await act(async () => {
-      root.render(
-        createElement(WaypointDetailsDrawer, {
-          details: liveDetails,
-          loading: false,
-          rowView: legRowView,
-          clockSuspended: false,
-        }),
-      )
-    })
-    expect(container.textContent).toContain('[IN SYSTEM]:0h 10m')
+    try {
+      await act(async () => {
+        root.render(
+          createElement(WaypointDetailsDrawer, {
+            details: liveDetails,
+            loading: false,
+            rowView: legRowView,
+            clockSuspended: false,
+          }),
+        )
+      })
+      expect(container.textContent).toContain('[IN SYSTEM]:0h 10m')
 
-    await act(async () => {
-      vi.advanceTimersByTime(60_000)
-    })
-    expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
+      await act(async () => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
 
-    // Pausing live sync suspends the 60-second timer until resumed.
-    await act(async () => {
-      root.render(
-        createElement(WaypointDetailsDrawer, {
-          details: liveDetails,
-          loading: false,
-          rowView: legRowView,
-          clockSuspended: true,
-        }),
-      )
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(180_000)
-    })
-    expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
+      // Pausing live sync suspends the 60-second timer until resumed.
+      await act(async () => {
+        root.render(
+          createElement(WaypointDetailsDrawer, {
+            details: liveDetails,
+            loading: false,
+            rowView: legRowView,
+            clockSuspended: true,
+          }),
+        )
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(180_000)
+      })
+      expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
 
-    // Resuming immediately refreshes to current elapsed duration.
-    await act(async () => {
-      root.render(
-        createElement(WaypointDetailsDrawer, {
-          details: liveDetails,
-          loading: false,
-          rowView: legRowView,
-          clockSuspended: false,
-        }),
-      )
-    })
-    expect(container.textContent).toContain('[IN SYSTEM]:0h 14m')
-
-    await act(async () => {
-      root.unmount()
-    })
+      // Resuming immediately refreshes to current elapsed duration.
+      await act(async () => {
+        root.render(
+          createElement(WaypointDetailsDrawer, {
+            details: liveDetails,
+            loading: false,
+            rowView: legRowView,
+            clockSuspended: false,
+          }),
+        )
+      })
+      expect(container.textContent).toContain('[IN SYSTEM]:0h 14m')
+    } finally {
+      act(() => {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 })
 
