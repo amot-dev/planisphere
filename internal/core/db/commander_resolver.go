@@ -52,25 +52,48 @@ type resolverBaseGroup struct {
 // career wipe eras, aliases, journal_events.profile_id assignments, and
 // expedition commander_profile_id event anchors.
 func ResolveCommanders(transaction *sql.Tx) error {
+	_, err := ResolveCommandersChanged(transaction)
+	return err
+}
+
+// ResolveCommandersChanged runs ResolveCommanders and reports whether commander
+// profile topology or expedition commander bindings changed.
+func ResolveCommandersChanged(transaction *sql.Tx) (bool, error) {
+	beforeTopology, err := snapshotProfileTopology(transaction)
+	if err != nil {
+		return false, err
+	}
+	expeditionsChanged, err := resolveCommandersCore(transaction)
+	if err != nil {
+		return false, err
+	}
+	afterTopology, err := snapshotProfileTopology(transaction)
+	if err != nil {
+		return false, err
+	}
+	return expeditionsChanged || !slices.Equal(beforeTopology, afterTopology), nil
+}
+
+func resolveCommandersCore(transaction *sql.Tx) (bool, error) {
 	anchors, err := snapshotExpeditionCommanderAnchors(transaction)
 	if err != nil {
-		return err
+		return false, err
 	}
 	existingEnabled, legacyEnabled, profilesWereEmpty, err := loadExistingAndLegacyEnabled(transaction)
 	if err != nil {
-		return err
+		return false, err
 	}
 	overrides, err := loadCommanderOverrides(transaction)
 	if err != nil {
-		return err
+		return false, err
 	}
 	sightings, checkpoints, err := loadSightingsAndCheckpoints(transaction)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(sightings) == 0 && len(checkpoints) == 0 {
 		if _, deleteErr := transaction.Exec(`DELETE FROM commander_profiles`); deleteErr != nil {
-			return deleteErr
+			return false, deleteErr
 		}
 		return reconcileExpeditionCommandersFromAnchors(transaction, anchors)
 	}
@@ -78,20 +101,20 @@ func ResolveCommanders(transaction *sql.Tx) error {
 	baseGroups := buildResolverBaseGroups(sightings, checkpoints, overrides)
 	profiles, err := splitAllBaseGroups(transaction, baseGroups, overrides)
 	if err != nil {
-		return err
+		return false, err
 	}
 	surviving := applyProfileMergeOverrides(profiles, overrides)
 	if len(surviving) == 0 {
 		if _, deleteErr := transaction.Exec(`DELETE FROM commander_profiles`); deleteErr != nil {
-			return deleteErr
+			return false, deleteErr
 		}
 		return reconcileExpeditionCommandersFromAnchors(transaction, anchors)
 	}
 	if err := persistProfileShellsAndEventIDs(transaction, surviving); err != nil {
-		return err
+		return false, err
 	}
 	if err := finalizeProfilesAndAliases(transaction, surviving, existingEnabled, legacyEnabled, profilesWereEmpty); err != nil {
-		return err
+		return false, err
 	}
 	return reconcileExpeditionCommandersFromAnchors(transaction, anchors)
 }

@@ -293,7 +293,7 @@ func (app *App) ImportEDDiscoveryHistory(eddPath string) (int, error) {
 	if markError == nil {
 		uiTargets = uiTargets.Union(events.NewUITargetSet(events.UITargetSettings))
 	}
-	affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp, importResult.LatestTimestamp)
+	affectedTargets := app.publishIngestResult(importResult)
 	app.emitDataChanged(0, affectedTargets.Union(uiTargets))
 	if markError != nil {
 		return 0, fmt.Errorf("mark EDDiscovery history recovered: %w", markError)

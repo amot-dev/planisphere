@@ -11,6 +11,7 @@ import (
 
 	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
+	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
 )
@@ -272,6 +273,153 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 	if err != nil || statsAfterWipe.AllJournals.BodiesScanned != 0 {
 		testingContext.Fatalf("expected pre-wipe era:0 CareerCartographics evicted (BodiesScanned=0), got %+v err=%v",
 			statsAfterWipe.AllJournals, err)
+	}
+}
+
+func TestByteZeroBackfillAndStatisticsCareerWipeBusInvalidation(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	journalDir := testingContext.TempDir()
+	logFilename := "Journal.2026-04-10T100000.01.log"
+	logPath := filepath.Join(journalDir, logFilename)
+
+	initialLines := []string{
+		`{"timestamp":"2026-04-10T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-10T10:01:00Z","event":"LoadGame","Commander":"CMDR Heal","FID":"F410","Ship":"Mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-04-10T10:02:00Z","event":"Statistics","Exploration":{"Systems_Visited":50,"Total_Hyperspace_Jumps":45}}`,
+		`{"timestamp":"2026-04-10T10:05:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[25,0,0],"JumpDist":25.0}`,
+	}
+	if err := os.WriteFile(logPath, []byte(joinLines(initialLines)), 0o600); err != nil {
+		testingContext.Fatal(err)
+	}
+	if _, err := testApp.SetupConfigureJournals(journalDir); err != nil {
+		testingContext.Fatal(err)
+	}
+	if _, err := testApp.CompleteSetup(); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	// Disable CMDR Heal, then simulate an unattributed pre-header jump already stored in journal_events with byte_offset reset to 0.
+	if _, err := testApp.SetCommanderEnabled("live:f410:era:0", false); err != nil {
+		testingContext.Fatalf("SetCommanderEnabled(false): %v", err)
+	}
+	unattribLine := `{"timestamp":"2026-04-10T10:00:30Z","event":"FSDJump","StarSystem":"PreHeaderSys","SystemAddress":3003,"StarPos":[10,0,0],"JumpDist":10.0}`
+	rewrittenLines := []string{initialLines[0], unattribLine, initialLines[1], initialLines[2], initialLines[3]}
+	if err := os.WriteFile(logPath, []byte(joinLines(rewrittenLines)), 0o600); err != nil {
+		testingContext.Fatal(err)
+	}
+	parsedUnattrib, _, parseErr := journal.ParseLine([]byte(unattribLine), logFilename)
+	if parseErr != nil {
+		testingContext.Fatal(parseErr)
+	}
+	if _, err := testApp.db.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, fid, universe, profile_id, source_file, raw_json, ingested_at)
+		 VALUES (?, '2026-04-10T10:00:30Z', 'FSDJump', 'PreHeaderSys', 3003, NULL, '', 'live', 0, ?, ?, '2026-04-10T10:05:00Z')`,
+		parsedUnattrib.UID, logFilename, unattribLine,
+	); err != nil {
+		testingContext.Fatalf("seed byte-zero unattributed jump: %v", err)
+	}
+	if _, err := testApp.db.Exec(
+		`UPDATE ingested_journals SET byte_offset = 0, line_count = 0 WHERE file_name = ?`,
+		logFilename,
+	); err != nil {
+		testingContext.Fatalf("reset byte_offset to zero: %v", err)
+	}
+
+	// Warm caches while the unattributed jump is visible (profile_id=0 bypasses disabled CMDR Heal).
+	exp, err := testApp.CreateExpedition("Heal Check", "")
+	if err != nil {
+		testingContext.Fatal(err)
+	}
+	if _, err := testApp.SetCareerBaselineScope(settings.CareerScopeAllEnabled); err != nil {
+		testingContext.Fatal(err)
+	}
+	warmStatsBeforeHeal, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	if err != nil || warmStatsBeforeHeal.AllJournals.Jumps != 1 {
+		testingContext.Fatalf("expected 1 unattributed jump before byte-zero heal, got %+v err=%v", warmStatsBeforeHeal.AllJournals, err)
+	}
+	countsBeforeHeal, err := testApp.systemVisitCounts.CountsForSystems([]string{"PreHeaderSys"})
+	if err != nil || countsBeforeHeal["preheadersys"] != 1 {
+		testingContext.Fatalf("expected PreHeaderSys visit count 1 before byte-zero heal, got %v err=%v", countsBeforeHeal, err)
+	}
+	ledgerGenBefore := testApp.salesLedger.Generation()
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+
+	// RescanJournals from byte 0 inserts 0 new events while backfilling CMDR Heal onto PreHeaderSys.
+	if err := testApp.RescanJournals(); err != nil {
+		testingContext.Fatalf("RescanJournals byte-zero heal: %v", err)
+	}
+	healDomains := eventsRecorder.Domains()
+	for _, wantDomain := range []string{"settings", "stats", "plan", "ingest", "expeditions"} {
+		if !slices.Contains(healDomains, wantDomain) {
+			testingContext.Fatalf("expected byte-zero heal to emit %q domain, got %v", wantDomain, healDomains)
+		}
+	}
+	if testApp.salesLedger.Generation() <= ledgerGenBefore {
+		testingContext.Fatal("expected byte-zero heal to invalidate SalesLedger")
+	}
+	statsAfterHeal, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	if err != nil || statsAfterHeal.AllJournals.Jumps != 0 {
+		testingContext.Fatalf("expected healed jump on disabled commander excluded from AllJournals, got %+v err=%v", statsAfterHeal.AllJournals, err)
+	}
+	countsAfterHeal, err := testApp.systemVisitCounts.CountsForSystems([]string{"PreHeaderSys"})
+	if err != nil || countsAfterHeal["preheadersys"] != 0 {
+		testingContext.Fatalf("expected PreHeaderSys visit count 0 after byte-zero heal, got %v err=%v", countsAfterHeal, err)
+	}
+
+	// Re-enable CMDR Heal, warm projections, verify routine Statistics does NOT emit settings/plan, then verify Statistics career-wipe split DOES.
+	if _, err := testApp.SetCommanderEnabled("live:f410:era:0", true); err != nil {
+		testingContext.Fatal(err)
+	}
+	if _, err := testApp.GetSidebarStats(exp.ID, stats.Filter{}); err != nil {
+		testingContext.Fatal(err)
+	}
+	closedRevBeforeRoutine := testApp.timeRangeStats.ClosedWindowRevision()
+	eventsRecorder.Reset()
+
+	routineLine := `{"timestamp":"2026-04-10T10:10:00Z","event":"Statistics","Exploration":{"Systems_Visited":52,"Total_Hyperspace_Jumps":47}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(joinLines(rewrittenLines)+routineLine), 0o600); err != nil {
+		testingContext.Fatal(err)
+	}
+	routineRes, err := testApp.ingester.IngestFile(logPath)
+	if err != nil || routineRes.ProfilesChanged {
+		testingContext.Fatalf("routine Statistics IngestFile = (%+v, %v)", routineRes, err)
+	}
+	testApp.onJournalBatch(routineRes)
+	routineDomains := eventsRecorder.Domains()
+	if slices.Contains(routineDomains, "settings") || slices.Contains(routineDomains, "plan") || testApp.timeRangeStats.ClosedWindowRevision() != closedRevBeforeRoutine {
+		testingContext.Fatalf("expected routine Statistics not to trigger commander/plan invalidation, got domains=%v rev=%d->%d",
+			routineDomains, closedRevBeforeRoutine, testApp.timeRangeStats.ClosedWindowRevision())
+	}
+
+	eventsRecorder.Reset()
+	wipeLogPath := filepath.Join(journalDir, "Journal.2026-04-11T090000.01.log")
+	wipeSession := joinLines([]string{
+		`{"timestamp":"2026-04-11T09:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
+		`{"timestamp":"2026-04-11T09:00:01Z","event":"Commander","Name":"CMDR Heal","FID":"F410"}`,
+		`{"timestamp":"2026-04-11T09:00:02Z","event":"LoadGame","Commander":"CMDR Heal","FID":"F410","Ship":"SideWinder","Odyssey":true}`,
+		`{"timestamp":"2026-04-11T09:00:03Z","event":"Statistics","Exploration":{"Systems_Visited":1,"Total_Hyperspace_Jumps":0}}`,
+	})
+	if err := os.WriteFile(wipeLogPath, []byte(wipeSession), 0o600); err != nil {
+		testingContext.Fatal(err)
+	}
+	wipeRes, err := testApp.ingester.IngestFile(wipeLogPath)
+	if err != nil || !wipeRes.ProfilesChanged {
+		testingContext.Fatalf("Statistics wipe IngestFile = (%+v, %v), want ProfilesChanged=true", wipeRes, err)
+	}
+	testApp.onJournalBatch(wipeRes)
+	wipeDomains := eventsRecorder.Domains()
+	for _, wantDomain := range []string{"settings", "stats", "plan", "ingest", "expeditions"} {
+		if !slices.Contains(wipeDomains, wantDomain) {
+			testingContext.Fatalf("expected Statistics wipe split to emit %q domain, got %v", wantDomain, wipeDomains)
+		}
+	}
+	if testApp.timeRangeStats.ClosedWindowRevision() <= closedRevBeforeRoutine {
+		testingContext.Fatal("expected ClosedWindowRevision to advance on Statistics career-wipe split")
+	}
+	statsAfterStatsWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
+	if err != nil || statsAfterStatsWipe.AllJournals.Jumps != 0 {
+		testingContext.Fatalf("expected pre-wipe jumps archived and disabled after Statistics wipe split, got %+v err=%v",
+			statsAfterStatsWipe.AllJournals, err)
 	}
 }
 

@@ -50,6 +50,11 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 		testingContext.Errorf("expected ClosedWindowRevision %d after AppDatabaseSwitched, got %d (err=%v)",
 			initialClosedRev+1, switchedStatus.ClosedWindowRevision, switchedErr)
 	}
+
+	filterTargets := testApp.bus.PublishApp(events.AppCommanderFilterChanged)
+	if !filterTargets.Has(events.UITargetPlan) || !filterTargets.Has(events.UITargetSettings) || !filterTargets.Has(events.UITargetStats) {
+		testingContext.Fatalf("expected UITargetPlan, UITargetSettings, and UITargetStats on AppCommanderFilterChanged, got %v", filterTargets.Names())
+	}
 }
 
 func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingContext *testing.T) {

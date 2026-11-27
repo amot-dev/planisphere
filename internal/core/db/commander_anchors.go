@@ -172,21 +172,22 @@ func resolveProfileAnchorEventID(transaction *sql.Tx, profileID int64, startTime
 	return anchorEventID, err
 }
 
-func reconcileExpeditionCommandersFromAnchors(transaction *sql.Tx, anchors []expeditionCommanderAnchor) error {
+func reconcileExpeditionCommandersFromAnchors(transaction *sql.Tx, anchors []expeditionCommanderAnchor) (bool, error) {
 	if len(anchors) == 0 {
-		return nil
+		return false, nil
 	}
 	var latestProfileID int64
 	loadedLatest := false
+	anyChanged := false
 	for _, anchor := range anchors {
 		targetProfileID, err := lookupAnchorTargetProfileID(transaction, anchor)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if targetProfileID == 0 {
 			if !loadedLatest {
 				if latestProfileID, err = LatestCommanderProfileID(transaction); err != nil {
-					return err
+					return false, err
 				}
 				loadedLatest = true
 			}
@@ -197,11 +198,41 @@ func reconcileExpeditionCommandersFromAnchors(transaction *sql.Tx, anchors []exp
 				`UPDATE expeditions SET commander_profile_id = ? WHERE id = ?`,
 				targetProfileID, anchor.expeditionID,
 			); updateErr != nil {
-				return fmt.Errorf("update expedition %d commander_profile_id: %w", anchor.expeditionID, updateErr)
+				return false, fmt.Errorf("update expedition %d commander_profile_id: %w", anchor.expeditionID, updateErr)
 			}
+			anyChanged = true
 		}
 	}
-	return nil
+	return anyChanged, nil
+}
+
+type profileTopologySnapshot struct {
+	id, enabled           int64
+	eraIndex, isArchived  int
+	profileKey, universe  string
+	displayName, frontier string
+}
+
+func snapshotProfileTopology(transaction *sql.Tx) ([]profileTopologySnapshot, error) {
+	rows, err := transaction.Query(`
+		SELECT id, profile_key, display_name, fid, universe, era_index, is_archived_career, enabled
+		FROM commander_profiles ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot commander_profiles topology: %w", err)
+	}
+	defer rows.Close()
+	var topology []profileTopologySnapshot
+	for rows.Next() {
+		var item profileTopologySnapshot
+		if scanErr := rows.Scan(
+			&item.id, &item.profileKey, &item.displayName, &item.frontier,
+			&item.universe, &item.eraIndex, &item.isArchived, &item.enabled,
+		); scanErr != nil {
+			return nil, scanErr
+		}
+		topology = append(topology, item)
+	}
+	return topology, rows.Err()
 }
 
 func lookupAnchorTargetProfileID(transaction *sql.Tx, anchor expeditionCommanderAnchor) (int64, error) {

@@ -269,22 +269,24 @@ func (tracker *SessionTracker) ResolveTrailingRollover() error {
 
 // PrepareEvent updates session state, stamps commander/FID/universe onto parsedEvent,
 // and executes bounded pre-identity backfills without overwriting pre-wipe rows.
-func (tracker *SessionTracker) PrepareEvent(transaction *sql.Tx, parsedEvent *Event, onSighting func(commander, fid, timestamp string) error) (bool, error) {
+func (tracker *SessionTracker) PrepareEvent(transaction *sql.Tx, parsedEvent *Event, onSighting func(commander, fid, timestamp string) error) (int, error) {
 	if tracker.Part > 1 && !tracker.SeenHeaderOrLoad && !tracker.SeenIdentity && !tracker.InheritedRollover && !tracker.AttemptedRollover && tracker.LookupRollover != nil {
 		tracker.AttemptedRollover = true
 		rollover, err := tracker.LookupRollover(tracker.Part, parsedEvent.Timestamp)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		tracker.ApplyRollover(rollover)
 	}
-	if err := tracker.updateUniverseForEvent(transaction, parsedEvent); err != nil {
-		return false, err
+	universeBackfilled, err := tracker.updateUniverseForEvent(transaction, parsedEvent)
+	if err != nil {
+		return 0, err
 	}
 	parsedEvent.Universe = tracker.Universe
 
 	if parsedEvent.Type == EventClearSavedGame {
-		return tracker.applyClearSavedGameEvent(transaction, parsedEvent, onSighting)
+		wipeBackfilled, wipeErr := tracker.applyClearSavedGameEvent(transaction, parsedEvent, onSighting)
+		return universeBackfilled + wipeBackfilled, wipeErr
 	}
 	if parsedEvent.Commander != "" {
 		tracker.CurrentCommander = parsedEvent.Commander
@@ -293,9 +295,9 @@ func (tracker *SessionTracker) PrepareEvent(transaction *sql.Tx, parsedEvent *Ev
 		} else if tracker.CurrentFID != "" && parsedEvent.Type != EventNewCommander {
 			parsedEvent.FID = tracker.CurrentFID
 		}
-		didBackfill, err := tracker.flushIdentitySighting(transaction, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, onSighting)
+		identityBackfilled, flushErr := tracker.flushIdentitySighting(transaction, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, onSighting)
 		tracker.SeenIdentity = true
-		return didBackfill, err
+		return universeBackfilled + identityBackfilled, flushErr
 	}
 	if tracker.CurrentCommander != "" {
 		parsedEvent.Commander = tracker.CurrentCommander
@@ -307,23 +309,23 @@ func (tracker *SessionTracker) PrepareEvent(transaction *sql.Tx, parsedEvent *Ev
 	} else {
 		tracker.HasPostWipeUnattrib = true
 	}
-	return false, nil
+	return universeBackfilled, nil
 }
 
 func (tracker *SessionTracker) applyClearSavedGameEvent(
 	transaction *sql.Tx,
 	parsedEvent *Event,
 	onSighting func(commander, fid, timestamp string) error,
-) (bool, error) {
+) (int, error) {
 	if parsedEvent.Commander == "" {
 		parsedEvent.Commander = tracker.CurrentCommander
 	}
 	if parsedEvent.FID == "" {
 		parsedEvent.FID = tracker.CurrentFID
 	}
-	didBackfill, err := tracker.flushIdentitySighting(transaction, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, onSighting)
+	backfilledCount, err := tracker.flushIdentitySighting(transaction, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp, onSighting)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	tracker.SeenIdentity = true
 	tracker.HasPreIdentityUnattrib = false
@@ -331,36 +333,46 @@ func (tracker *SessionTracker) applyClearSavedGameEvent(
 	tracker.PostWipeAfterTimestamp = parsedEvent.Timestamp
 	tracker.CurrentCommander = ""
 	tracker.CurrentFID = ""
-	return didBackfill, nil
+	return backfilledCount, nil
 }
 
-func (tracker *SessionTracker) flushIdentitySighting(transaction *sql.Tx, commander, fid, timestamp string, onSighting func(string, string, string) error) (bool, error) {
+func (tracker *SessionTracker) flushIdentitySighting(transaction *sql.Tx, commander, fid, timestamp string, onSighting func(string, string, string) error) (int, error) {
 	if commander == "" {
-		return false, nil
+		return 0, nil
 	}
 	if onSighting != nil {
 		if err := onSighting(commander, fid, timestamp); err != nil {
-			return false, err
+			return 0, err
 		}
 	}
 	if !tracker.SeenIdentity && tracker.HasPreIdentityUnattrib {
-		if _, err := transaction.Exec(BackfillPreIdentityEventsSQL, commander, fid, tracker.Universe, tracker.FileName, timestamp, commander); err != nil {
-			return false, fmt.Errorf("backfill pre-identity commander for %s: %w", tracker.FileName, err)
+		execResult, err := transaction.Exec(BackfillPreIdentityEventsSQL, commander, fid, tracker.Universe, tracker.FileName, timestamp, commander)
+		if err != nil {
+			return 0, fmt.Errorf("backfill pre-identity commander for %s: %w", tracker.FileName, err)
+		}
+		rowsAffected, err := execResult.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("read pre-identity backfill count for %s: %w", tracker.FileName, err)
 		}
 		tracker.HasPreIdentityUnattrib = false
-		return true, nil
+		return int(rowsAffected), nil
 	}
 	if tracker.HasPostWipeUnattrib {
-		if _, err := transaction.Exec(backfillPostWipeEventsSQL, commander, fid, tracker.Universe, tracker.FileName, tracker.PostWipeAfterTimestamp, timestamp); err != nil {
-			return false, fmt.Errorf("backfill post-wipe commander for %s: %w", tracker.FileName, err)
+		execResult, err := transaction.Exec(backfillPostWipeEventsSQL, commander, fid, tracker.Universe, tracker.FileName, tracker.PostWipeAfterTimestamp, timestamp)
+		if err != nil {
+			return 0, fmt.Errorf("backfill post-wipe commander for %s: %w", tracker.FileName, err)
+		}
+		rowsAffected, err := execResult.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("read post-wipe backfill count for %s: %w", tracker.FileName, err)
 		}
 		tracker.HasPostWipeUnattrib = false
-		return true, nil
+		return int(rowsAffected), nil
 	}
-	return false, nil
+	return 0, nil
 }
 
-func (tracker *SessionTracker) updateUniverseForEvent(transaction *sql.Tx, parsedEvent *Event) error {
+func (tracker *SessionTracker) updateUniverseForEvent(transaction *sql.Tx, parsedEvent *Event) (int, error) {
 	if parsedEvent.Type == EventLoadGame && !tracker.SeenHeaderOrLoad {
 		lgVersion, lgBuild, lgModern := db.InspectLoadGameUniverseSignals(parsedEvent.Raw)
 		if lgVersion != "" {
@@ -373,41 +385,51 @@ func (tracker *SessionTracker) updateUniverseForEvent(transaction *sql.Tx, parse
 		tracker.Universe = db.ClassifyJournalUniverse(parsedEvent.Timestamp, tracker.GameVersion, tracker.Build, tracker.FileName, true, lgModern)
 		tracker.SeenHeaderOrLoad = true
 		if tracker.Universe != prevUniverse {
-			if _, err := transaction.Exec(`UPDATE journal_events SET universe = ? WHERE source_file = ? AND timestamp <= ? AND universe != ?`,
-				tracker.Universe, tracker.FileName, parsedEvent.Timestamp, tracker.Universe); err != nil {
-				return fmt.Errorf("backfill file universe for %s: %w", tracker.FileName, err)
+			execResult, err := transaction.Exec(`UPDATE journal_events SET universe = ? WHERE source_file = ? AND timestamp <= ? AND universe != ?`,
+				tracker.Universe, tracker.FileName, parsedEvent.Timestamp, tracker.Universe)
+			if err != nil {
+				return 0, fmt.Errorf("backfill file universe for %s: %w", tracker.FileName, err)
 			}
+			rowsAffected, err := execResult.RowsAffected()
+			if err != nil {
+				return 0, fmt.Errorf("read file universe backfill count for %s: %w", tracker.FileName, err)
+			}
+			return int(rowsAffected), nil
 		}
 	} else if !tracker.SeenHeaderOrLoad && !tracker.InheritedRollover {
 		tracker.Universe = db.ClassifyJournalUniverse(parsedEvent.Timestamp, "", "", tracker.FileName, false, false)
 	}
-	return nil
+	return 0, nil
 }
 
-func persistIngestedEvent(insertStmt, updateByteZeroStmt *sql.Stmt, parsedEvent *Event, fileName, ingestedAt string) (bool, bool, error) {
+func persistIngestedEvent(insertStmt, updateByteZeroStmt *sql.Stmt, parsedEvent *Event, fileName, ingestedAt string) (int64, bool, int, error) {
 	execResult, err := ExecJournalEventWithIdentity(insertStmt, parsedEvent, fileName, ingestedAt)
 	if err != nil {
-		return false, false, err
+		return 0, false, 0, err
 	}
 	rowsAffected, err := execResult.RowsAffected()
 	if err != nil {
-		return false, false, fmt.Errorf("read rows affected for %s: %w", fileName, err)
+		return 0, false, 0, fmt.Errorf("read rows affected for %s: %w", fileName, err)
 	}
 	if rowsAffected > 0 {
-		return true, false, nil
+		insertedID, idErr := execResult.LastInsertId()
+		if idErr != nil {
+			return 0, false, 0, fmt.Errorf("read last insert id for %s: %w", fileName, idErr)
+		}
+		return insertedID, true, 0, nil
 	}
 	if updateByteZeroStmt == nil {
-		return false, false, nil
+		return 0, false, 0, nil
 	}
 	updateResult, err := updateByteZeroStmt.Exec(NullStringOrNil(parsedEvent.Commander), parsedEvent.FID, parsedEvent.Universe, parsedEvent.UID)
 	if err != nil {
-		return false, false, err
+		return 0, false, 0, err
 	}
 	updatedRows, err := updateResult.RowsAffected()
 	if err != nil {
-		return false, false, fmt.Errorf("read updated rows for %s: %w", fileName, err)
+		return 0, false, 0, fmt.Errorf("read updated rows for %s: %w", fileName, err)
 	}
-	return false, updatedRows > 0, nil
+	return 0, false, int(updatedRows), nil
 }
 
 type lineIngestStatements struct {

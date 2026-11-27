@@ -446,7 +446,7 @@ func (app *App) lifecycle(expeditionID int64, label string, action func(targetDB
 	if err != nil || !applied {
 		return err
 	}
-	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged)
+	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
 	return nil
 }
 
@@ -454,15 +454,9 @@ func (app *App) lifecycle(expeditionID int64, label string, action func(targetDB
 // (ISO-8601 UTC), applies initialModeID when positive, and retroactively
 // replays history from that moment.
 func (app *App) StartExpedition(expeditionID int64, timestamp string, initialModeID int64) error {
-	applied, err := app.recordUndoableMutation(expeditionID, "Engage Expedition", func(targetDB *sql.DB) (bool, error) {
-		err := expedition.StartTx(targetDB, expeditionID, timestamp, initialModeID)
-		return err == nil, err
+	return app.lifecycle(expeditionID, "Engage Expedition", func(targetDB *sql.DB) error {
+		return expedition.StartTx(targetDB, expeditionID, timestamp, initialModeID)
 	})
-	if err != nil || !applied {
-		return err
-	}
-	app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
-	return nil
 }
 
 // CompleteExpedition locks end_timestamp to the final visited waypoint's last

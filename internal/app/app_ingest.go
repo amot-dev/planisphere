@@ -21,15 +21,15 @@ import (
 // re-evaluates active expeditions when new events are ingested, and returns
 // whether any new events were stored.
 func (app *App) runScan() bool {
-	hasNewEvents, didStartScan, affectedTargets := app.executeJournalScan(true)
+	hasChanges, didStartScan, affectedTargets := app.executeJournalScan(true)
 	if !didStartScan {
 		return false
 	}
 	app.emit(EventIngest, nil)
-	if hasNewEvents {
+	if hasChanges {
 		app.emitDataChanged(0, affectedTargets)
 	}
-	return hasNewEvents
+	return hasChanges
 }
 
 func (app *App) executeJournalScan(emitProgress bool) (bool, bool, events.UITargetSet) {
@@ -63,12 +63,12 @@ func (app *App) executeJournalScan(emitProgress bool) (bool, bool, events.UITarg
 	}
 	scanResult, scanError := ingester.ScanDir(scanContext, dir)
 	app.recordJournalScanOutcome(database, scanResult, scanError)
-	hasNewEvents := scanResult.NewEvents > 0
+	hasChanges := scanResult.HasChanges()
 	var affectedTargets events.UITargetSet
-	if hasNewEvents {
-		affectedTargets = app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp, scanResult.LatestTimestamp)
+	if hasChanges {
+		affectedTargets = app.publishIngestResult(scanResult)
 	}
-	return hasNewEvents, true, affectedTargets
+	return hasChanges, true, affectedTargets
 }
 
 func (app *App) recordJournalScanOutcome(database *sql.DB, scanResult journal.Result, scanError error) {
@@ -157,9 +157,9 @@ func (app *App) withExclusiveCommanderDB(mutation func() error) error {
 	return execErr
 }
 
-// onJournalBatch runs after the live tailer stored new events.
+// onJournalBatch runs after the live tailer stored new events or healed identities.
 func (app *App) onJournalBatch(scanResult journal.Result) {
-	affectedTargets := app.publishJournalBatch(scanResult.Events, scanResult.EarliestTimestamp, scanResult.LatestTimestamp)
+	affectedTargets := app.publishIngestResult(scanResult)
 	app.emitBackgroundDataChanged(0, affectedTargets)
 }
 
@@ -291,7 +291,7 @@ func (app *App) maybeCatchUpEDD() {
 		if settingError := settings.MarkEDDDisconnectsRecovered(database); settingError != nil {
 			log.Printf("persist edd catch-up marker: %v", settingError)
 		}
-		affectedTargets := app.publishJournalBatch(importResult.Events, importResult.EarliestTimestamp, importResult.LatestTimestamp)
+		affectedTargets := app.publishIngestResult(importResult)
 		if affectedTargets.IsEmpty() {
 			affectedTargets = events.NewUITargetSet(events.UITargetIngest)
 		}

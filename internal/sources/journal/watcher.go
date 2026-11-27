@@ -39,7 +39,7 @@ type Watcher struct {
 
 // NewWatcher creates a watcher initialized with reference.DefaultDebounceDelay. onBatch
 // is invoked (from the watcher goroutine) after every ingestion pass that
-// inserted new events.
+// inserted new events, backfilled commander identity, or changed commander profiles.
 func NewWatcher(ingester *Ingester, onBatch func(Result)) *Watcher {
 	watcher := &Watcher{
 		ingester:        ingester,
@@ -246,7 +246,7 @@ func (watcher *Watcher) run(ctx context.Context, dir string, done chan struct{})
 			}
 			total.merge(fileResult)
 		}
-		if total.NewEvents > 0 && watcher.onBatch != nil {
+		if total.HasChanges() && watcher.onBatch != nil {
 			watcher.onBatch(total)
 		}
 	}

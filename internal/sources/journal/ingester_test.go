@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"planisphere/internal/core/db"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/journaltest"
@@ -192,8 +194,12 @@ func TestReingestFromByteZeroBackfillsUnattributedEvents(t *testing.T) {
 		"2026-03-01T12:01:00Z",
 	)
 
-	if _, ingestError := ingester.IngestFile(logFile); ingestError != nil {
+	reingestResult, ingestError := ingester.IngestFile(logFile)
+	if ingestError != nil {
 		t.Fatalf("ingest file: %v", ingestError)
+	}
+	if reingestResult.NewEvents != 0 || reingestResult.CommandersBackfilled == 0 || !reingestResult.ProfilesChanged {
+		t.Fatalf("expected NewEvents=0 CommandersBackfilled>0 ProfilesChanged=true, got %+v", reingestResult)
 	}
 
 	var commanderName string
@@ -348,4 +354,194 @@ func TestIngestContinuedRolloverInheritsIdentityAndProfile(testingContext *testi
 	}
 	assertJump("Colonia", "CmdrRollover", "F707", "live", "live:f707:era:0")
 	assertJump("Sagittarius A*", "CmdrLegacyRoll", "F308", "legacy", "legacy:f308:era:0")
+}
+
+func appendJournalLines(testingContext *testing.T, logPath string, lines ...string) {
+	testingContext.Helper()
+	handle, openErr := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	if openErr != nil {
+		testingContext.Fatal(openErr)
+	}
+	if _, writeErr := handle.WriteString(strings.Join(lines, "\n") + "\n"); writeErr != nil {
+		_ = handle.Close()
+		testingContext.Fatal(writeErr)
+	}
+	if closeErr := handle.Close(); closeErr != nil {
+		testingContext.Fatal(closeErr)
+	}
+}
+
+func snapshotCommanderTablesState(testingContext *testing.T, conn *sql.DB) string {
+	testingContext.Helper()
+	var builder strings.Builder
+	queries := []string{
+		`SELECT id, event, COALESCE(commander, ''), fid, universe, profile_id FROM journal_events ORDER BY id ASC`,
+		`SELECT id, profile_key, display_name, fid, universe, era_index, is_archived_career, has_manual_override, enabled, COALESCE(first_seen, ''), COALESCE(last_seen, '') FROM commander_profiles ORDER BY id ASC`,
+		`SELECT profile_id, raw_name, fid, universe, start_timestamp, end_timestamp, event_count, is_current, source FROM commander_aliases ORDER BY profile_id ASC, raw_name ASC`,
+		`SELECT name, fid, enabled, COALESCE(first_seen, ''), COALESCE(last_seen, '') FROM commanders ORDER BY name ASC`,
+	}
+	for queryIdx, sqlQuery := range queries {
+		rows, err := conn.Query(sqlQuery)
+		if err != nil {
+			testingContext.Fatalf("snapshot query %d: %v", queryIdx, err)
+		}
+		cols, _ := rows.Columns()
+		rawVals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for colIdx := range rawVals {
+			ptrs[colIdx] = &rawVals[colIdx]
+		}
+		for rows.Next() {
+			if scanErr := rows.Scan(ptrs...); scanErr != nil {
+				_ = rows.Close()
+				testingContext.Fatal(scanErr)
+			}
+			for colIdx, val := range rawVals {
+				if colIdx > 0 {
+					builder.WriteByte('|')
+				}
+				if byteSlice, ok := val.([]byte); ok {
+					builder.Write(byteSlice)
+				} else {
+					builder.WriteString(fmt.Sprint(val))
+				}
+			}
+			builder.WriteByte('\n')
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			_ = rows.Close()
+			testingContext.Fatal(rowsErr)
+		}
+		_ = rows.Close()
+		builder.WriteString("---\n")
+	}
+	return builder.String()
+}
+
+func connRunResolveChanged(conn *sql.DB, changed *bool) error {
+	return db.WithTx(conn, func(transaction *sql.Tx) error {
+		var err error
+		*changed, err = db.ResolveCommandersChanged(transaction)
+		return err
+	})
+}
+
+func TestIngestFileLiveAppendFastPathEquivalenceAndFallbacks(testingContext *testing.T) {
+	conn := dbtest.OpenMemory(testingContext)
+	tempDir := testingContext.TempDir()
+	logPath := filepath.Join(tempDir, "Journal.2026-05-01T100000.01.log")
+	ingester := journal.NewIngester(conn)
+
+	appendJournalLines(testingContext, logPath,
+		`{"timestamp":"2026-05-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
+		`{"timestamp":"2026-05-01T10:00:01Z","event":"Commander","Name":"CmdrFast","FID":"F500"}`,
+		`{"timestamp":"2026-05-01T10:00:02Z","event":"LoadGame","Commander":"CmdrFast","FID":"F500","Ship":"Mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-05-01T10:00:03Z","event":"Statistics","Exploration":{"Systems_Visited":80,"Total_Hyperspace_Jumps":75}}`,
+		`{"timestamp":"2026-05-01T10:00:04Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+	)
+	initialRes, err := ingester.IngestFile(logPath)
+	if err != nil || initialRes.NewEvents != 4 || !initialRes.ProfilesChanged {
+		testingContext.Fatalf("initial IngestFile = (%+v, %v), want NewEvents=4 ProfilesChanged=true", initialRes, err)
+	}
+
+	// Single-event FSDJump and Scan live appends hit the O(added) fast path and match full ResolveCommanders across all 4 tables.
+	appendJournalLines(testingContext, logPath,
+		`{"timestamp":"2026-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,2,3],"JumpDist":4.3}`,
+	)
+	jumpRes, err := ingester.IngestFile(logPath)
+	if err != nil || jumpRes.NewEvents != 1 || jumpRes.CommandersBackfilled != 0 || jumpRes.ProfilesChanged {
+		testingContext.Fatalf("live FSDJump IngestFile = (%+v, %v)", jumpRes, err)
+	}
+	appendJournalLines(testingContext, logPath,
+		`{"timestamp":"2026-05-01T10:06:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Alpha Centauri A 1","BodyID":1,"StarSystem":"Alpha Centauri","SystemAddress":1002,"PlanetClass":"Rocky body"}`,
+	)
+	scanRes, err := ingester.IngestFile(logPath)
+	if err != nil || scanRes.NewEvents != 1 || scanRes.CommandersBackfilled != 0 || scanRes.ProfilesChanged {
+		testingContext.Fatalf("live Scan IngestFile = (%+v, %v)", scanRes, err)
+	}
+
+	stateAfterFastPath := snapshotCommanderTablesState(testingContext, conn)
+	var changedOnFullVerify bool
+	if verifyErr := connRunResolveChanged(conn, &changedOnFullVerify); verifyErr != nil {
+		testingContext.Fatalf("full ResolveCommandersChanged verification: %v", verifyErr)
+	}
+	stateAfterFullResolve := snapshotCommanderTablesState(testingContext, conn)
+	if changedOnFullVerify || stateAfterFastPath != stateAfterFullResolve {
+		testingContext.Fatalf("fast-path DB state diverged from full ResolveCommanders:\nfast:\n%s\nfull:\n%s", stateAfterFastPath, stateAfterFullResolve)
+	}
+
+	// Verify TryResolveLiveAppend directly reports matched=true on valid tip append and matched=false with an unbound expedition.
+	probeTx, beginErr := conn.Begin()
+	if beginErr != nil {
+		testingContext.Fatal(beginErr)
+	}
+	probeInsert, insErr := probeTx.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, commander, fid, universe, raw_json, ingested_at) VALUES ('probe-1', '2026-05-01T10:07:00Z', 'Scan', 'CmdrFast', 'F500', 'live', '{}', '2026-05-01T10:07:00Z')`,
+	)
+	if insErr != nil {
+		_ = probeTx.Rollback()
+		testingContext.Fatal(insErr)
+	}
+	probeID, _ := probeInsert.LastInsertId()
+	var probeBatch db.LiveAppendBatch
+	probeBatch.ObserveInserted(probeID, "Scan", "CmdrFast", "F500", "live", "2026-05-01T10:07:00Z")
+	if matched, fastErr := db.TryResolveLiveAppend(probeTx, probeBatch); fastErr != nil || !matched {
+		_ = probeTx.Rollback()
+		testingContext.Fatalf("expected TryResolveLiveAppend matched=true, got (%v, %v)", matched, fastErr)
+	}
+	if _, expErr := probeTx.Exec(`INSERT INTO expeditions (name, status, commander_profile_id, created_at, updated_at) VALUES ('Unbound', 'planning', 0, '2026-05-01T10:07:00Z', '2026-05-01T10:07:00Z')`); expErr != nil {
+		_ = probeTx.Rollback()
+		testingContext.Fatal(expErr)
+	}
+	if matchedUnbound, fastErr := db.TryResolveLiveAppend(probeTx, probeBatch); fastErr != nil || matchedUnbound {
+		_ = probeTx.Rollback()
+		testingContext.Fatalf("expected TryResolveLiveAppend matched=false with unbound expedition, got (%v, %v)", matchedUnbound, fastErr)
+	}
+	_ = probeTx.Rollback()
+
+	// Routine non-splitting Statistics falls back cleanly without flagging ProfilesChanged.
+	appendJournalLines(testingContext, logPath,
+		`{"timestamp":"2026-05-01T10:10:00Z","event":"Statistics","Exploration":{"Systems_Visited":82,"Total_Hyperspace_Jumps":76}}`,
+	)
+	routineStatsRes, err := ingester.IngestFile(logPath)
+	if err != nil || routineStatsRes.NewEvents != 1 || routineStatsRes.ProfilesChanged {
+		testingContext.Fatalf("routine Statistics IngestFile = (%+v, %v), want ProfilesChanged=false", routineStatsRes, err)
+	}
+
+	// Out-of-order historical timestamp (< last_seen) falls back cleanly and stamps profile_id accurately.
+	backfillPath := filepath.Join(tempDir, "Journal.2026-05-01T095000.01.log")
+	appendJournalLines(testingContext, backfillPath,
+		`{"timestamp":"2026-05-01T10:02:00Z","event":"LoadGame","Commander":"CmdrFast","FID":"F500","Ship":"Mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-05-01T10:02:30Z","event":"FSDJump","StarSystem":"Sirius","SystemAddress":1003,"StarPos":[3,4,5],"JumpDist":8.6}`,
+	)
+	outOfOrderRes, err := ingester.IngestFile(backfillPath)
+	if err != nil || outOfOrderRes.NewEvents != 2 || outOfOrderRes.ProfilesChanged {
+		testingContext.Fatalf("out-of-order IngestFile = (%+v, %v)", outOfOrderRes, err)
+	}
+
+	// Commander rename alias on same FID falls back to full ResolveCommanders and reports ProfilesChanged=true.
+	appendJournalLines(testingContext, logPath,
+		`{"timestamp":"2026-05-01T10:20:00Z","event":"LoadGame","Commander":"CmdrFastRenamed","FID":"F500","Ship":"Mandalay","Odyssey":true}`,
+	)
+	renameRes, err := ingester.IngestFile(logPath)
+	if err != nil || renameRes.NewEvents != 1 || !renameRes.ProfilesChanged {
+		testingContext.Fatalf("rename IngestFile = (%+v, %v), want ProfilesChanged=true", renameRes, err)
+	}
+
+	// Live Statistics career-wipe drop falls back to full ResolveCommanders, splits eras, and reports ProfilesChanged=true.
+	wipeLogPath := filepath.Join(tempDir, "Journal.2026-05-01T110000.01.log")
+	appendJournalLines(testingContext, wipeLogPath,
+		`{"timestamp":"2026-05-01T11:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
+		`{"timestamp":"2026-05-01T11:00:01Z","event":"Commander","Name":"CmdrFastRenamed","FID":"F500"}`,
+		`{"timestamp":"2026-05-01T11:00:02Z","event":"LoadGame","Commander":"CmdrFastRenamed","FID":"F500","Ship":"SideWinder","Odyssey":true}`,
+		`{"timestamp":"2026-05-01T11:00:03Z","event":"Statistics","Exploration":{"Systems_Visited":1,"Total_Hyperspace_Jumps":0}}`,
+	)
+	wipeRes, err := ingester.IngestFile(wipeLogPath)
+	if err != nil || wipeRes.NewEvents != 3 || !wipeRes.ProfilesChanged {
+		testingContext.Fatalf("Statistics career-wipe IngestFile = (%+v, %v), want NewEvents=3 ProfilesChanged=true", wipeRes, err)
+	}
+	var eraCount int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM commander_profiles WHERE fid = 'F500'`).Scan(&eraCount); err != nil || eraCount != 2 {
+		testingContext.Fatalf("expected 2 commander_profiles eras after Statistics wipe drop, got %d (err=%v)", eraCount, err)
+	}
 }

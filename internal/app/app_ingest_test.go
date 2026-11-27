@@ -211,8 +211,8 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("CompleteExpedition: %v", completeError)
 	}
 	sizeAfterComplete := testApp.timeRangeStats.CachedCount()
-	if sizeAfterComplete != 2 {
-		testingContext.Fatalf("expected CompleteExpedition to preserve prior cached windows, got %d entries", sizeAfterComplete)
+	if sizeAfterComplete != 1 {
+		testingContext.Fatalf("expected CompleteExpedition to evict mode-filtered entry while preserving unfiltered window, got %d entries", sizeAfterComplete)
 	}
 
 	completedSidebar, completedSidebarError := testApp.GetSidebarStats(expeditionID, stats.Filter{})
@@ -226,8 +226,59 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 		testingContext.Fatalf("expected completed expedition sidebar End=2026-01-02T00:00:00Z, got %q", completedSidebar.End)
 	}
 	sizeAfterCompletedQuery := testApp.timeRangeStats.CachedCount()
-	if sizeAfterCompletedQuery != 3 {
-		testingContext.Fatalf("expected completed bounds query to cache new entry alongside prior 2 windows, got %d entries", sizeAfterCompletedQuery)
+	if sizeAfterCompletedQuery != 2 {
+		testingContext.Fatalf("expected completed bounds query to cache new entry alongside preserved unfiltered window, got %d entries", sizeAfterCompletedQuery)
+	}
+
+	// Verify Complete -> Reopen mode-filtered cache invalidation when final waypoint DepartedAt changes.
+	if reopenError := testApp.ReopenExpedition(expeditionID); reopenError != nil {
+		testingContext.Fatalf("ReopenExpedition: %v", reopenError)
+	}
+	if modeErr := testApp.SetLegMode(secondRow.ID, 1, false); modeErr != nil {
+		testingContext.Fatalf("SetLegMode(1): %v", modeErr)
+	}
+	if activeModeErr := testApp.SetExpeditionFlightMode(expeditionID, 2); activeModeErr != nil {
+		testingContext.Fatalf("SetExpeditionFlightMode(2): %v", activeModeErr)
+	}
+	if _, execError := testApp.db.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
+		 VALUES ('ev-cache-key-post', '2026-01-03T00:00:00Z', 'FSDJump', 'Barnard''s Star', 1003, '{"timestamp":"2026-01-03T00:00:00Z","event":"FSDJump","StarSystem":"Barnard''s Star","SystemAddress":1003,"StarPos":[2,2,2],"JumpDist":6.0}', 'test.log', '2026-01-03T00:00:00Z')`,
+	); execError != nil {
+		testingContext.Fatalf("insert post-destination jump: %v", execError)
+	}
+	if _, reevalError := expedition.ReevaluateTx(testApp.db, expeditionID); reevalError != nil {
+		testingContext.Fatalf("ReevaluateTx post-destination: %v", reevalError)
+	}
+	modeOneFilter := stats.Filter{Enabled: true, Modes: []stats.ModeSelection{{ModeID: 1, Travel: true}}}
+	activeModeOneStats, activeErr := testApp.GetSidebarStats(expeditionID, modeOneFilter)
+	if activeErr != nil || activeModeOneStats.Live.Jumps != 1 {
+		testingContext.Fatalf("expected 1 Mode-1 jump while active (outbound jump in Mode 2), got %+v err=%v", activeModeOneStats.Live, activeErr)
+	}
+	if completeError := testApp.CompleteExpedition(expeditionID); completeError != nil {
+		testingContext.Fatalf("second CompleteExpedition: %v", completeError)
+	}
+	expRecord, getExpErr := expedition.Get(testApp.db, expeditionID)
+	if getExpErr != nil {
+		testingContext.Fatalf("expedition.Get: %v", getExpErr)
+	}
+	queryAfter, _, _, startErr := expedition.EffectiveStart(testApp.db, expRecord)
+	if startErr != nil {
+		testingContext.Fatalf("EffectiveStart: %v", startErr)
+	}
+	// While Completed, secondRow.DepartedAt is empty, so an open-ended Mode-1 query spans 9999-12-31 and counts both jumps.
+	completedOpenSummary, compOpenErr := testApp.timeRangeStats.Compute(
+		stats.Range{After: queryAfter, Until: ""},
+		&stats.Filter{Enabled: true, ExpeditionID: expeditionID, Modes: modeOneFilter.Modes, Scope: expRecord.ProfileScope()},
+	)
+	if compOpenErr != nil || completedOpenSummary.Metrics.Jumps != 2 {
+		testingContext.Fatalf("expected 2 jumps on open Mode-1 range while completed, got %+v err=%v", completedOpenSummary.Metrics, compOpenErr)
+	}
+	if reopenError := testApp.ReopenExpedition(expeditionID); reopenError != nil {
+		testingContext.Fatalf("second ReopenExpedition: %v", reopenError)
+	}
+	reopenedModeOneStats, reopenedErr := testApp.GetSidebarStats(expeditionID, modeOneFilter)
+	if reopenedErr != nil || reopenedModeOneStats.Live.Jumps != 1 {
+		testingContext.Fatalf("expected ReopenExpedition to evict stale open Mode-1 cache (want Jumps=1, got %d, err=%v)", reopenedModeOneStats.Live.Jumps, reopenedErr)
 	}
 }
 

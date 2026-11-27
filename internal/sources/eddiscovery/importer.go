@@ -96,15 +96,16 @@ type importedFileMeta struct {
 }
 
 type archiveImportAccumulator struct {
-	transaction       *sql.Tx
-	statements        *importStatements
-	commanderTrackers map[string]*commanderSightingTracker
-	filesByName       map[string]*importedFileMeta
-	orderedFiles      []*importedFileMeta
-	currentFile       *importedFileMeta
-	tracker           journal.SessionTracker
-	fallbackCommander string
-	ingestedAt        string
+	transaction          *sql.Tx
+	statements           *importStatements
+	commanderTrackers    map[string]*commanderSightingTracker
+	filesByName          map[string]*importedFileMeta
+	orderedFiles         []*importedFileMeta
+	currentFile          *importedFileMeta
+	tracker              journal.SessionTracker
+	fallbackCommander    string
+	ingestedAt           string
+	commandersBackfilled int
 }
 
 func newArchiveImportAccumulator(transaction *sql.Tx, statements *importStatements, ingestedAt string) *archiveImportAccumulator {
@@ -139,8 +140,12 @@ func (accumulator *archiveImportAccumulator) finishCurrentFile() error {
 
 	if !accumulator.tracker.SeenIdentity && !accumulator.tracker.InheritedRollover &&
 		accumulator.fallbackCommander != "" && meta.eventCount > 0 {
-		if _, err := accumulator.statements.backfillCommanderStmt.Exec(accumulator.fallbackCommander, meta.fileName); err != nil {
+		backfillRes, err := accumulator.statements.backfillCommanderStmt.Exec(accumulator.fallbackCommander, meta.fileName)
+		if err != nil {
 			return err
+		}
+		if affectedRows, rowsErr := backfillRes.RowsAffected(); rowsErr == nil {
+			accumulator.commandersBackfilled += int(affectedRows)
 		}
 		meta.lastCommander = accumulator.fallbackCommander
 		recordCommanderSighting(accumulator.commanderTrackers, accumulator.fallbackCommander, "", meta.firstTimestamp)
@@ -221,9 +226,11 @@ func (accumulator *archiveImportAccumulator) processEntry(rawFileName, rawFilePa
 	if !keepEvent {
 		return nil
 	}
-	if _, prepErr := accumulator.tracker.PrepareEvent(accumulator.transaction, &parsedEvent, nil); prepErr != nil {
+	backfilledCount, prepErr := accumulator.tracker.PrepareEvent(accumulator.transaction, &parsedEvent, nil)
+	if prepErr != nil {
 		return prepErr
 	}
+	accumulator.commandersBackfilled += backfilledCount
 	recordCommanderSighting(accumulator.commanderTrackers, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Timestamp)
 	if _, execError := journal.ExecJournalEventWithIdentity(accumulator.statements.insertEventStmt, &parsedEvent, normalizedFileName, accumulator.ingestedAt); execError != nil {
 		return execError
@@ -280,9 +287,12 @@ func (accumulator *archiveImportAccumulator) finalizeMetadata(transaction *sql.T
 			result.FilesUpdated++
 		}
 	}
-	if resolveError := db.ResolveCommanders(transaction); resolveError != nil {
+	result.CommandersBackfilled += accumulator.commandersBackfilled
+	profilesChanged, resolveError := db.ResolveCommandersChanged(transaction)
+	if resolveError != nil {
 		return fmt.Errorf("resolve commanders after EDDiscovery import: %w", resolveError)
 	}
+	result.ProfilesChanged = result.ProfilesChanged || profilesChanged
 	return db.AdvanceIngestWatermark(transaction, accumulator.ingestedAt)
 }
 

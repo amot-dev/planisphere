@@ -49,14 +49,22 @@ func (ingester *Ingester) WithExclusiveConn(operation func(conn *sql.DB) (Result
 
 // Result summarises an ingestion pass.
 type Result struct {
-	FilesScanned      int
-	FilesUpdated      int
-	LinesRead         int
-	NewEvents         int      // count of events actually inserted (not previously known)
-	Events            EventSet // set of newly inserted event types
-	EarliestTimestamp string   // earliest timestamp among newly inserted or backfilled events
-	LatestTimestamp   string   // latest timestamp among newly inserted or backfilled events
-	Errors            []string
+	FilesScanned         int
+	FilesUpdated         int
+	LinesRead            int
+	NewEvents            int      // count of events actually inserted (not previously known)
+	CommandersBackfilled int      // count of existing journal_events rows whose identity was backfilled
+	ProfilesChanged      bool     // whether commander profile topology or expedition bindings changed
+	Events               EventSet // set of newly inserted event types
+	EarliestTimestamp    string   // earliest timestamp among newly inserted or backfilled events
+	LatestTimestamp      string   // latest timestamp among newly inserted or backfilled events
+	Errors               []string
+}
+
+// HasChanges reports whether the ingestion pass inserted new events,
+// backfilled commander metadata on existing rows, or changed commander profiles.
+func (result Result) HasChanges() bool {
+	return result.NewEvents > 0 || result.CommandersBackfilled > 0 || result.ProfilesChanged
 }
 
 // ObserveTimestamp records timestamp when it expands the earliest or latest bounds seen in result.
@@ -77,6 +85,8 @@ func (result *Result) merge(other Result) {
 	result.FilesUpdated += other.FilesUpdated
 	result.LinesRead += other.LinesRead
 	result.NewEvents += other.NewEvents
+	result.CommandersBackfilled += other.CommandersBackfilled
+	result.ProfilesChanged = result.ProfilesChanged || other.ProfilesChanged
 	result.Events = result.Events.Union(other.Events)
 	result.ObserveTimestamp(other.EarliestTimestamp)
 	result.ObserveTimestamp(other.LatestTimestamp)
@@ -117,10 +127,16 @@ func (ingester *Ingester) loadAllTrackedOffsets() (map[string]int64, error) {
 	return trackedOffsets, nil
 }
 
-func (ingester *Ingester) resolveCommandersLocked() error {
+func (ingester *Ingester) resolveCommandersLocked() (bool, error) {
 	ingester.mu.Lock()
 	defer ingester.mu.Unlock()
-	return db.WithTx(ingester.conn, db.ResolveCommanders)
+	var profilesChanged bool
+	err := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
+		var resolveErr error
+		profilesChanged, resolveErr = db.ResolveCommandersChanged(transaction)
+		return resolveErr
+	})
+	return profilesChanged, err
 }
 
 // ScanDir ingests every journal file in dir (idempotent startup catch-up).
@@ -142,8 +158,10 @@ func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, erro
 		select {
 		case <-ctx.Done():
 			if anyShouldResolve {
-				if resolveErr := ingester.resolveCommandersLocked(); resolveErr != nil {
+				if profilesChanged, resolveErr := ingester.resolveCommandersLocked(); resolveErr != nil {
 					scanResult.Errors = append(scanResult.Errors, resolveErr.Error())
+				} else {
+					scanResult.ProfilesChanged = scanResult.ProfilesChanged || profilesChanged
 				}
 			}
 			return scanResult, ctx.Err()
@@ -163,9 +181,11 @@ func (ingester *Ingester) ScanDir(ctx context.Context, dir string) (Result, erro
 		scanResult.merge(fileResult)
 	}
 	if anyShouldResolve {
-		if resolveErr := ingester.resolveCommandersLocked(); resolveErr != nil {
+		profilesChanged, resolveErr := ingester.resolveCommandersLocked()
+		if resolveErr != nil {
 			return scanResult, resolveErr
 		}
+		scanResult.ProfilesChanged = scanResult.ProfilesChanged || profilesChanged
 	}
 	return scanResult, nil
 }
@@ -240,6 +260,7 @@ func ingestAppendedLines(
 	state *fileState,
 	newOffset *int64,
 	result *Result,
+	appendBatch *db.LiveAppendBatch,
 	ingestedAt string,
 ) (bool, error) {
 	tracker, initError := newTailingSessionTracker(transaction, fileName, state)
@@ -266,7 +287,7 @@ func ingestAppendedLines(
 		if len(bytes.TrimSpace(trimmedLine)) == 0 {
 			continue
 		}
-		lineMutated, lineErr := processAppendedJournalLine(&statements, &tracker, trimmedLine, fileName, state, result)
+		lineMutated, lineErr := processAppendedJournalLine(&statements, &tracker, trimmedLine, fileName, state, result, appendBatch)
 		if lineErr != nil {
 			return false, lineErr
 		}
@@ -285,6 +306,7 @@ func processAppendedJournalLine(
 	fileName string,
 	state *fileState,
 	result *Result,
+	appendBatch *db.LiveAppendBatch,
 ) (bool, error) {
 	state.lines++
 	result.LinesRead++
@@ -305,11 +327,13 @@ func processAppendedJournalLine(
 		_, err := statements.upsertCmdrStmt.Exec(commander, fid, timestamp, timestamp)
 		return err
 	}
-	didBackfill, prepEventError := tracker.PrepareEvent(statements.transaction, &parsedEvent, onSighting)
+	backfilledCount, prepEventError := tracker.PrepareEvent(statements.transaction, &parsedEvent, onSighting)
 	if prepEventError != nil {
 		return false, prepEventError
 	}
-	if didBackfill {
+	if backfilledCount > 0 {
+		result.CommandersBackfilled += backfilledCount
+		result.ObserveTimestamp(parsedEvent.Timestamp)
 		if state.first.Valid {
 			result.ObserveTimestamp(state.first.String)
 		}
@@ -317,14 +341,19 @@ func processAppendedJournalLine(
 			result.ObserveTimestamp(state.last.String)
 		}
 	}
-	inserted, mutated, storeErr := persistIngestedEvent(statements.insertEventStmt, statements.updateByteZeroStmt, &parsedEvent, fileName, statements.ingestedAt)
+	insertedID, inserted, updatedRows, storeErr := persistIngestedEvent(statements.insertEventStmt, statements.updateByteZeroStmt, &parsedEvent, fileName, statements.ingestedAt)
 	if storeErr != nil {
 		return false, storeErr
 	}
+	if updatedRows > 0 {
+		result.CommandersBackfilled += updatedRows
+		result.ObserveTimestamp(parsedEvent.Timestamp)
+	}
 	if inserted {
 		state.recordInsertedEvent(&parsedEvent, result)
+		appendBatch.ObserveInserted(insertedID, parsedEvent.Event, parsedEvent.Commander, parsedEvent.FID, parsedEvent.Universe, parsedEvent.Timestamp)
 	}
-	return didBackfill || inserted || mutated, nil
+	return backfilledCount > 0 || inserted || updatedRows > 0, nil
 }
 
 func (state *fileState) recordInsertedEvent(parsedEvent *Event, result *Result) {
@@ -412,8 +441,9 @@ func (ingester *Ingester) ingestFile(path string, resolveProfiles bool) (Result,
 	shouldResolve := false
 	txError := db.WithTx(ingester.conn, func(transaction *sql.Tx) error {
 		ingestedAt := reference.NowISO()
+		var appendBatch db.LiveAppendBatch
 		var lineError error
-		shouldResolve, lineError = ingestAppendedLines(transaction, reader, fileName, &state, &newOffset, &result, ingestedAt)
+		shouldResolve, lineError = ingestAppendedLines(transaction, reader, fileName, &state, &newOffset, &result, &appendBatch, ingestedAt)
 		if lineError != nil {
 			return lineError
 		}
@@ -421,7 +451,9 @@ func (ingester *Ingester) ingestFile(path string, resolveProfiles bool) (Result,
 			return saveError
 		}
 		if resolveProfiles && shouldResolve {
-			return db.ResolveCommanders(transaction)
+			var resolveErr error
+			result.ProfilesChanged, resolveErr = db.ResolveLiveAppendOrFull(transaction, appendBatch, result.CommandersBackfilled)
+			return resolveErr
 		}
 		return nil
 	})

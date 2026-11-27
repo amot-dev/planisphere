@@ -62,7 +62,13 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetPlan,
 		projection.TriggersFrom(app.systemArrivals, app.systemVisitCounts).
-			WithApp(events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppExpeditionModesChanged),
+			WithApp(
+				events.AppCommanderFilterChanged,
+				events.AppExpeditionPlanChanged,
+				events.AppExpeditionBoundsChanged,
+				events.AppModesChanged,
+				events.AppExpeditionModesChanged,
+			),
 	)
 	bus.SubscribeUI(
 		events.UITargetModes,
@@ -149,6 +155,23 @@ func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTime
 		targets = targets.Union(bus.PublishApp(events.AppCommanderFilterChanged))
 	}
 	return targets
+}
+
+func (app *App) publishIngestResult(ingestResult journal.Result) events.UITargetSet {
+	bus := app.currentBus()
+	if bus == nil {
+		return 0
+	}
+	if ingestResult.CommandersBackfilled == 0 && !ingestResult.ProfilesChanged {
+		return app.publishJournalBatch(ingestResult.Events, ingestResult.EarliestTimestamp, ingestResult.LatestTimestamp)
+	}
+	targets := bus.PublishJournalRange(ingestResult.Events, ingestResult.EarliestTimestamp, ingestResult.LatestTimestamp)
+	app.clearExportSnapshot()
+	return targets.Union(bus.PublishApp(
+		events.AppCommanderFilterChanged,
+		events.AppSettingsChanged,
+		events.AppExpeditionPlanChanged,
+	))
 }
 
 func (app *App) emitDataChanged(expeditionID int64, targets events.UITargetSet) {
