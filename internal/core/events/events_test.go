@@ -45,7 +45,7 @@ func TestAppEventEnumAndSetOperations(testingContext *testing.T) {
 	}
 }
 
-func TestUITargetEnumParseAndSetOperations(testingContext *testing.T) {
+func TestUITargetEnumAndSetOperations(testingContext *testing.T) {
 	seenNames := make(map[string]bool, uiTargetCount)
 	for index := UITarget(0); index < uiTargetCount; index++ {
 		targetName := index.String()
@@ -56,16 +56,8 @@ func TestUITargetEnumParseAndSetOperations(testingContext *testing.T) {
 			testingContext.Fatalf("duplicate UITarget name %q", targetName)
 		}
 		seenNames[targetName] = true
-
-		parsedTarget, found := ParseUITarget(" " + targetName + " ")
-		if !found || parsedTarget != index {
-			testingContext.Fatalf("ParseUITarget(%q) = (%v, %v), want (%v, true)", targetName, parsedTarget, found, index)
-		}
 	}
 
-	if _, found := ParseUITarget("unknown"); found {
-		testingContext.Fatalf("expected unknown UI target not to parse")
-	}
 	if invalidName := UITarget(250).String(); invalidName != "" {
 		testingContext.Fatalf("expected empty string for out-of-range UITarget, got %q", invalidName)
 	}

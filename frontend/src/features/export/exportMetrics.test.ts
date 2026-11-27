@@ -9,7 +9,6 @@ import {
   getExportDataIndex,
   getVisitedLegByRowId,
   getVisitedLegs,
-  getVisitedRegionByName,
   getVisitedRegions,
   resolveFormattedNetProfit,
   resolveTelemetryContext,
@@ -345,7 +344,6 @@ describe('exportMetrics', () => {
       getDistinctModesForScope(data, { kind: 'full' }),
     )
     expect(getVisitedLegByRowId(data, 3)?.rowView.row.systemName).toBe('Beta Crossing')
-    expect(getVisitedRegionByName(data, "Odin's Hold")?.legs).toHaveLength(1)
     expect(describeScope(data, { kind: 'leg', rowId: 3 })).toEqual({
       label: 'Leg #2 to #3',
       slug: 'wp3',

@@ -52,11 +52,6 @@ func ArchiveStatus(queryer db.Queryer) (Status, error) {
 	return status, nil
 }
 
-// FirstEventTimestamp returns the earliest ISO-8601 timestamp across enabled commanders.
-func FirstEventTimestamp(queryer db.Queryer) string {
-	return FirstEventTimestampScoped(queryer, ProfileScope{})
-}
-
 // FirstEventTimestampScoped returns the earliest ISO-8601 timestamp matching scope.
 func FirstEventTimestampScoped(queryer db.Queryer, scope ProfileScope) string {
 	var firstTimestamp sql.NullString

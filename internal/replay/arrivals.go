@@ -45,12 +45,6 @@ type ArrivalStayContext struct {
 	Commander     string
 }
 
-// QueryArrivalsInWindow queries chronological arrivals within [startTimestamp, endTimestamp]
-// across globally enabled profiles.
-func QueryArrivalsInWindow(queryer db.Queryer, startTimestamp, endTimestamp string) ([]Arrival, error) {
-	return QueryArrivalsInWindowScoped(queryer, startTimestamp, endTimestamp, ProfileScope{})
-}
-
 // QueryArrivalsInWindowScoped queries chronological arrivals within
 // [startTimestamp, endTimestamp] matching scope.
 func QueryArrivalsInWindowScoped(queryer db.Queryer, startTimestamp, endTimestamp string, scope ProfileScope) ([]Arrival, error) {
@@ -58,12 +52,6 @@ func QueryArrivalsInWindowScoped(queryer db.Queryer, startTimestamp, endTimestam
 		return loadArrivalsWhereScoped(queryer, scope, `timestamp >= ? AND timestamp <= ?`, startTimestamp, endTimestamp)
 	}
 	return loadArrivalsWhereScoped(queryer, scope, `timestamp >= ?`, startTimestamp)
-}
-
-// QuerySystemArrivalCandidates queries every recorded visit to systemName or
-// systemAddress across globally enabled profiles in reverse chronological order.
-func QuerySystemArrivalCandidates(queryer db.Queryer, systemName string, systemAddress int64) ([]Arrival, error) {
-	return QuerySystemArrivalCandidatesScoped(queryer, systemName, systemAddress, ProfileScope{})
 }
 
 // QuerySystemArrivalCandidatesScoped queries every recorded visit to systemName
@@ -136,13 +124,6 @@ func QueryLatestPlayerLocationScoped(queryer db.Queryer, scope ProfileScope) (*r
 	return &reference.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}, systemName.String, nil
 }
 
-// ResolveArrivalStayContext resolves the star system address and stay commander
-// for a waypoint arrival by visitEventUID first, falling back to visitedAt.
-func ResolveArrivalStayContext(queryer db.Queryer, visitEventUID, visitedAt, systemName string, systemAddress int64) (int64, string, error) {
-	stayContext, err := ResolveArrivalStayContextScoped(queryer, visitEventUID, visitedAt, systemName, systemAddress, ProfileScope{})
-	return stayContext.SystemAddress, stayContext.Commander, err
-}
-
 // ResolveArrivalStayContextScoped resolves the star system address, save-slot
 // ProfileID, and stay commander for a waypoint arrival within scope.
 func ResolveArrivalStayContextScoped(queryer db.Queryer, visitEventUID, visitedAt, systemName string, systemAddress int64, scope ProfileScope) (ArrivalStayContext, error) {
@@ -190,14 +171,6 @@ func ResolveArrivalStayContextScoped(queryer db.Queryer, visitEventUID, visitedA
 		arrivalAddress = systemAddress
 	}
 	return ArrivalStayContext{SystemAddress: arrivalAddress, ProfileID: stayProfileID, Commander: stayCommander}, nil
-}
-
-// QueryLastInSystemActivityTimestamp returns the latest non-multicrew exploration
-// activity timestamp (non-belt body Scan, planet SAAScanComplete, or ScanOrganic
-// Analyse) for the target system and stayCommander within (afterTimestamp, untilTimestamp],
-// or an empty string when none exist.
-func QueryLastInSystemActivityTimestamp(queryer db.Queryer, afterTimestamp, untilTimestamp, systemName string, systemAddress int64, stayCommander string) (string, error) {
-	return QueryLastInSystemActivityTimestampForStay(queryer, afterTimestamp, untilTimestamp, systemName, systemAddress, ArrivalStayContext{Commander: stayCommander}, ProfileScope{})
 }
 
 // QueryLastInSystemActivityTimestampForStay returns the latest non-multicrew

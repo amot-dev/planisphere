@@ -233,21 +233,6 @@ func NullStringOrNil(text string) any {
 	return text
 }
 
-// ExecJournalEvent executes a prepared journal_events insert statement using a
-// parsed event's columns and optional star position coordinates.
-func ExecJournalEvent(statement *sql.Stmt, parsedEvent *Event, sourceFile string, ingestedAt string) (sql.Result, error) {
-	var xCoord, yCoord, zCoord any
-	if parsedEvent.StarPos != nil {
-		xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
-	}
-	return statement.Exec(
-		parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event,
-		NullStringOrNil(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
-		NullStringOrNil(parsedEvent.BodyName), xCoord, yCoord, zCoord,
-		NullStringOrNil(parsedEvent.Commander), sourceFile, parsedEvent.Raw, ingestedAt,
-	)
-}
-
 func ingestAppendedLines(
 	transaction *sql.Tx,
 	reader *bufio.Reader,

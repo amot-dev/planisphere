@@ -186,12 +186,6 @@ func ToBodyScanWithPopulation(scanEvent *journal.ScanEvent, systemPopulation int
 	}
 }
 
-// SeedLoadGameBefore loads the latest LoadGame event at or before afterTimestamp
-// into state when replaying a bounded window.
-func SeedLoadGameBefore(queryer db.Queryer, afterTimestamp string, state *SessionState) error {
-	return SeedLoadGameBeforeScoped(queryer, afterTimestamp, state, ProfileScope{})
-}
-
 // SeedLoadGameBeforeScoped loads the latest LoadGame event matching scope at or
 // before afterTimestamp into state when replaying a bounded window.
 func SeedLoadGameBeforeScoped(queryer db.Queryer, afterTimestamp string, state *SessionState, scope ProfileScope) error {
@@ -212,13 +206,6 @@ func SeedLoadGameBeforeScoped(queryer db.Queryer, afterTimestamp string, state *
 	return nil
 }
 
-// PreloadSystemPopulations batch-loads the latest known Population up to
-// untilTimestamp for any system scanned, mapped, or sampled in loadedRows whose
-// arrival event occurred prior to the loaded time window.
-func PreloadSystemPopulations(queryer db.Queryer, afterTimestamp string, loadedRows []Row, untilTimestamp string, state *SessionState) error {
-	return PreloadSystemPopulationsScoped(queryer, afterTimestamp, loadedRows, untilTimestamp, state, ProfileScope{})
-}
-
 // PreloadSystemPopulationsScoped batch-loads the latest known Population up to
 // untilTimestamp matching scope when afterTimestamp is non-empty.
 func PreloadSystemPopulationsScoped(queryer db.Queryer, afterTimestamp string, loadedRows []Row, untilTimestamp string, state *SessionState, scope ProfileScope) error {
@@ -226,13 +213,6 @@ func PreloadSystemPopulationsScoped(queryer db.Queryer, afterTimestamp string, l
 		return nil
 	}
 	return PreloadSystemPopulationsForRowsScoped(queryer, loadedRows, untilTimestamp, state, scope)
-}
-
-// PreloadSystemPopulationsForRows batch-loads the latest known Population up to
-// untilTimestamp for every system scanned, mapped, or sampled in loadedRows that
-// does not have an accompanying arrival row in loadedRows.
-func PreloadSystemPopulationsForRows(queryer db.Queryer, loadedRows []Row, untilTimestamp string, state *SessionState) error {
-	return PreloadSystemPopulationsForRowsScoped(queryer, loadedRows, untilTimestamp, state, ProfileScope{})
 }
 
 // PreloadSystemPopulationsForRowsScoped batch-loads the latest known Population

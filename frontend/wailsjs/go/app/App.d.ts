@@ -35,8 +35,6 @@ export function CreateExpedition(arg1:string,arg2:string):Promise<expedition.Exp
 
 export function CreateExpeditionFromImport(arg1:string,arg2:string,arg3:string):Promise<expedition.Expedition>;
 
-export function CreateExpeditionWithWaypoints(arg1:string,arg2:string,arg3:Array<string>):Promise<expedition.Expedition>;
-
 export function CreateMode(arg1:string,arg2:string,arg3:string):Promise<modes.Mode>;
 
 export function DeleteExpedition(arg1:number):Promise<void>;
@@ -44,8 +42,6 @@ export function DeleteExpedition(arg1:number):Promise<void>;
 export function DeleteMode(arg1:number):Promise<void>;
 
 export function DeleteRow(arg1:number):Promise<void>;
-
-export function GetCarrierLastLocation():Promise<string>;
 
 export function GetExpeditionExportData(arg1:number):Promise<exporter.ExpeditionExport>;
 
@@ -91,11 +87,7 @@ export function ParseWaypointImport(arg1:string):Promise<expedition.ParsedWaypoi
 
 export function PickExportSavePath(arg1:string,arg2:string):Promise<string>;
 
-export function PlotCarrierRoute(arg1:string,arg2:string,arg3:number,arg4:string,arg5:number):Promise<expedition.CarrierRouteResult>;
-
 export function PrepareCarrierRoutePrompt(arg1:number,arg2:number):Promise<expedition.CarrierRoutePromptDefaults>;
-
-export function RecordCarrierJump(arg1:number,arg2:number,arg3:number):Promise<void>;
 
 export function RedoExpedition(arg1:number):Promise<app.UndoActionResult>;
 

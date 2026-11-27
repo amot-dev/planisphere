@@ -100,8 +100,8 @@ run: $(TARGET_BIN)
 	@echo "==> Running Planisphere..."
 	$(RUN_CMD)
 
-# Run full backend and frontend test suite
-test: test-backend test-frontend
+# Run full backend and frontend test suite and static dead-code checks
+test: test-backend test-frontend deadcode
 	@echo "==> All backend and frontend tests passed!"
 
 test-backend:
@@ -143,9 +143,14 @@ coverage-frontend: typecheck
 deadcode: deadcode-backend deadcode-frontend
 
 deadcode-backend:
-	@echo "==> Running Go backend dead-code analysis..."
-	@mkdir -p frontend/dist && touch frontend/dist/index.html
-	go tool deadcode -filter='^planisphere/' . ./scripts
+	@echo "==> Checking Go call-graph reachability..."
+	@mkdir -p frontend/dist
+	@touch frontend/dist/index.html
+	@dead_out=$$(go tool deadcode -filter='^planisphere/' . ./scripts) || exit $$?; \
+	if [ -n "$$dead_out" ]; then \
+		printf "%s\n" "$$dead_out"; \
+		exit 1; \
+	fi
 
 deadcode-frontend: install-frontend
 	@echo "==> Running frontend dead-code analysis..."

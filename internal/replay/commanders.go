@@ -53,12 +53,6 @@ type CommanderSession struct {
 	SystemName string `json:"systemName"`
 }
 
-// CareerStart returns the earliest active commander timestamp in ISO-8601 UTC
-// and Galactic Standard Time formats.
-func CareerStart(queryer db.Queryer) (string, string) {
-	return CareerStartScoped(queryer, ProfileScope{})
-}
-
 // CareerStartScoped returns the earliest career start timestamp for scope in
 // ISO-8601 UTC and Galactic Standard Time formats.
 func CareerStartScoped(queryer db.Queryer, scope ProfileScope) (string, string) {
@@ -176,12 +170,6 @@ func attachCommanderProfileAliases(queryer db.Queryer, profiles []Commander) err
 		}
 	}
 	return nil
-}
-
-// ListEnabledCommanderNames returns canonical display names of globally enabled
-// commander profiles ordered by first_seen without historic aliases.
-func ListEnabledCommanderNames(queryer db.Queryer) ([]string, error) {
-	return ListCommanderNamesForScope(queryer, ProfileScope{})
 }
 
 // ListCommanderNamesForScope returns deduplicated canonical display names for

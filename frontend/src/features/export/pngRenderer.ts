@@ -47,17 +47,6 @@ export function buildPngBundleFileName(
 }
 
 /**
- * Renders a single CartBlockItem to a crisp 2x DPI PNG base64 string (without
- * the data-URI prefix) using a shared offscreen DOM and canvas session helper.
- */
-export async function renderCartBlockToPngBase64(
-  exportData: ExpeditionExportData,
-  item: CartBlockItem,
-): Promise<string> {
-  return runWithPngRenderSession(exportData, (renderCard) => renderCard(item))
-}
-
-/**
  * Renders all queued cart items sequentially to 2x DPI PNG ExportBundleFile entries
  * using one shared offscreen host, stylesheet, XMLSerializer, and canvas across the batch.
  */

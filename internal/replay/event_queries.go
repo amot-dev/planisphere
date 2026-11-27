@@ -74,13 +74,6 @@ func commanderFilterPredicate(queryer db.Queryer, scope ProfileScope) string {
 	return ""
 }
 
-// LoadEvents queries persisted journal events matching eventSet within
-// (afterTimestamp, untilTimestamp] across globally enabled profiles in
-// chronological (timestamp, id) order.
-func LoadEvents(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet journal.EventSet) ([]Row, error) {
-	return LoadEventsScoped(queryer, afterTimestamp, untilTimestamp, eventSet, ProfileScope{})
-}
-
 // LoadEventsScoped queries persisted journal events matching eventSet and scope
 // within (afterTimestamp, untilTimestamp] in chronological (timestamp, id) order.
 func LoadEventsScoped(queryer db.Queryer, afterTimestamp, untilTimestamp string, eventSet journal.EventSet, scope ProfileScope) ([]Row, error) {

@@ -150,10 +150,10 @@ func (app *App) buildSeedWaypoints(systemNames []string) ([]expedition.SeedWaypo
 	return seedWaypoints, hasUnresolvedCoords
 }
 
-// CreateExpeditionWithWaypoints creates a planning-mode expedition pre-populated
+// createExpeditionWithWaypoints creates a planning-mode expedition pre-populated
 // with systemNames, resolves already-known coordinates and GEC POIs offline, makes
 // it active, and queues background EDSM lookups for any remaining unvisited systems.
-func (app *App) CreateExpeditionWithWaypoints(name, description string, systemNames []string) (expedition.Expedition, error) {
+func (app *App) createExpeditionWithWaypoints(name, description string, systemNames []string) (expedition.Expedition, error) {
 	var createdExpedition expedition.Expedition
 	var hasUnresolvedCoords bool
 
@@ -195,5 +195,5 @@ func (app *App) CreateExpeditionFromImport(name, description, rawImportText stri
 	if len(parsed.Systems) == 0 {
 		return expedition.Expedition{}, errors.New("no valid star systems found in waypoint import text")
 	}
-	return app.CreateExpeditionWithWaypoints(name, description, parsed.Systems)
+	return app.createExpeditionWithWaypoints(name, description, parsed.Systems)
 }

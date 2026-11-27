@@ -47,9 +47,9 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 	if listError != nil || len(commanders) != 2 {
 		testingContext.Fatalf("ListCommanders: len=%d err=%v", len(commanders), listError)
 	}
-	careerStart, _ := replay.CareerStart(databaseConnection)
+	careerStart, _ := replay.CareerStartScoped(databaseConnection, replay.ProfileScope{})
 	if careerStart != "2026-05-01T10:00:00Z" {
-		testingContext.Fatalf("CareerStart = %q, want 2026-05-01T10:00:00Z", careerStart)
+		testingContext.Fatalf("CareerStartScoped = %q, want 2026-05-01T10:00:00Z", careerStart)
 	}
 
 	if err := settings.SetCommanderEnabled(databaseConnection, "CmdrFirst", false); err != nil {
@@ -58,7 +58,7 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 	if _, err := databaseConnection.Exec(`UPDATE commander_profiles SET enabled = 0 WHERE display_name = 'CmdrFirst'`); err != nil {
 		testingContext.Fatal(err)
 	}
-	updatedStart, _ := replay.CareerStart(databaseConnection)
+	updatedStart, _ := replay.CareerStartScoped(databaseConnection, replay.ProfileScope{})
 	if updatedStart != "2026-05-02T10:00:00Z" {
 		testingContext.Fatalf("expected updated CareerStart 2026-05-02T10:00:00Z, got %q", updatedStart)
 	}
@@ -187,7 +187,7 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 	}
 
 	// Timeline and leg transitions remain hull-only (preserving baseline display),
-	// while QueryJumpTimestamps excludes Taxi and Multicrew FSDJump events.
+	// while QueryJumpTimestampsScoped excludes Taxi and Multicrew FSDJump events.
 	insertJournalRow(testingContext, databaseConnection, "2026-05-03T11:00:00Z", "FSDJump", "TaxiSys", "jump-taxi",
 		`{"timestamp":"2026-05-03T11:00:00Z","event":"FSDJump","StarSystem":"TaxiSys","JumpDist":12.0,"Taxi":true}`)
 	insertJournalRow(testingContext, databaseConnection, "2026-05-03T11:30:00Z", "FSDJump", "CrewSys", "jump-crew",
@@ -201,9 +201,9 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 	if timelineError != nil {
 		testingContext.Fatalf("Timeline: %v", timelineError)
 	}
-	jumpTimestamps, jumpQueryError := replay.QueryJumpTimestamps(databaseConnection, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z", nil)
+	jumpTimestamps, jumpQueryError := replay.QueryJumpTimestampsScoped(databaseConnection, "2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z", nil, replay.ProfileScope{})
 	if jumpQueryError != nil {
-		testingContext.Fatalf("QueryJumpTimestamps: %v", jumpQueryError)
+		testingContext.Fatalf("QueryJumpTimestampsScoped: %v", jumpQueryError)
 	}
 	if shuttleOnly := replay.ExtractShipsUsedOnLeg(timeline, jumpTimestamps, "2026-05-03T10:30:00Z", "2026-05-03T11:45:00Z"); len(shuttleOnly) != 0 {
 		testingContext.Fatalf("expected no vessels flown on shuttle/multicrew-only leg, got %+v", shuttleOnly)

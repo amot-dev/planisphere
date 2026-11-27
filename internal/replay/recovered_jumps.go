@@ -28,13 +28,6 @@ type RecoveredJump struct {
 	Commander        string
 }
 
-// ComputeRecoveredJumps reconstructs all crash-recovered hyperspace jumps and
-// offline or disconnected Fleet Carrier passenger jumps across globally enabled
-// commander profiles in chronological order.
-func ComputeRecoveredJumps(queryer db.Queryer) ([]RecoveredJump, error) {
-	return ComputeRecoveredJumpsScoped(queryer, ProfileScope{})
-}
-
 // ComputeRecoveredJumpsScoped reconstructs crash-recovered jumps matching scope.
 func ComputeRecoveredJumpsScoped(queryer db.Queryer, scope ProfileScope) ([]RecoveredJump, error) {
 	matcher, matcherError := LoadProfileMatcher(queryer, scope)
@@ -103,12 +96,6 @@ func compareRecoveredJumps(left, right RecoveredJump) int {
 		return timestampCmp
 	}
 	return strings.Compare(left.LocationEventUID, right.LocationEventUID)
-}
-
-// ComputeRecoveredJumpsInRange computes crash-recovered hyperspace jumps directly
-// against queryer for (afterTimestamp, untilTimestamp] across enabled profiles.
-func ComputeRecoveredJumpsInRange(queryer db.Queryer, afterTimestamp, untilTimestamp string) ([]RecoveredJump, error) {
-	return ComputeRecoveredJumpsInRangeScoped(queryer, afterTimestamp, untilTimestamp, ProfileScope{})
 }
 
 // ComputeRecoveredJumpsInRangeScoped computes crash-recovered jumps directly

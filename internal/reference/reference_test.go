@@ -16,14 +16,6 @@ func TestGalacticTimeConversion(t *testing.T) {
 	if galacticTime != expectedGalacticTime {
 		t.Fatalf("ToGalactic(%q) = %q, want %q", isoTimestamp, galacticTime, expectedGalacticTime)
 	}
-	convertedBack, conversionError := FromGalactic(galacticTime)
-	if conversionError != nil {
-		t.Fatalf("FromGalactic(%q) error: %v", galacticTime, conversionError)
-	}
-	expectedRoundedISO := "2026-01-18T19:42:00Z"
-	if convertedBack != expectedRoundedISO {
-		t.Fatalf("FromGalactic(%q) = %q, want %q", galacticTime, convertedBack, expectedRoundedISO)
-	}
 
 	roundedUpGalactic := ToGalactic("2026-01-18T19:42:45Z")
 	if roundedUpGalactic != "3312-01-18 19:43 UTC" {
@@ -36,10 +28,6 @@ func TestGalacticTimeConversion(t *testing.T) {
 	leapGalacticTime := ToGalactic(leapISOTimestamp)
 	if leapGalacticTime != "3314-02-29 08:15 UTC" {
 		t.Fatalf("ToGalactic leap day = %q", leapGalacticTime)
-	}
-	leapConvertedBack, leapError := FromGalactic(leapGalacticTime)
-	if leapError != nil || leapConvertedBack != leapISOTimestamp {
-		t.Fatalf("FromGalactic leap day = %q, %v", leapConvertedBack, leapError)
 	}
 }
 

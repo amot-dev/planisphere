@@ -329,10 +329,6 @@ func (app *App) lookupRowSystemInfo(targetDB *sql.DB, systemName string, online 
 	return resolvedInfo, lookupError, true
 }
 
-func (app *App) resolveRowSync(rowItem expedition.Row, online bool) (resolvedCoords bool, updated bool) {
-	return app.resolveRowSyncForDB(app.currentDB(), rowItem, online)
-}
-
 func (app *App) resolveRowSyncForDB(targetDB *sql.DB, rowItem expedition.Row, online bool) (resolvedCoords bool, updated bool) {
 	app.resolveMu.Lock()
 	if app.resolving[rowItem.ID] {

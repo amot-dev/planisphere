@@ -41,12 +41,6 @@ type ShipTransition struct {
 	To         string `json:"to"`
 }
 
-// QueryShipTimeline queries chronological player ship switches directly against
-// queryer for [startTimestamp, endTimestamp] across globally enabled profiles.
-func QueryShipTimeline(queryer db.Queryer, startTimestamp, endTimestamp string) ([]ShipSwitch, error) {
-	return QueryShipTimelineScoped(queryer, startTimestamp, endTimestamp, ProfileScope{})
-}
-
 // QueryShipTimelineScoped queries chronological player ship switches directly
 // against queryer for [startTimestamp, endTimestamp] matching scope.
 func QueryShipTimelineScoped(queryer db.Queryer, startTimestamp, endTimestamp string, scope ProfileScope) ([]ShipSwitch, error) {
@@ -75,17 +69,6 @@ func QueryShipTimelineScoped(queryer db.Queryer, startTimestamp, endTimestamp st
 	}
 	query += ` AND ` + scopePredicate + ` ORDER BY timestamp, id`
 	return appendQueriedShipSwitches(queryer, switches, query, queryArgs...)
-}
-
-// QueryJumpTimestamps loads chronological piloted hyperspace jump timestamps in
-// [afterTimestamp, untilTimestamp] across globally enabled profiles, excluding
-// Taxi and Multicrew FSDJump rows and merging remaining jumps with recovered.
-func QueryJumpTimestamps(
-	queryer db.Queryer,
-	afterTimestamp, untilTimestamp string,
-	recovered []RecoveredJump,
-) ([]string, error) {
-	return QueryJumpTimestampsScoped(queryer, afterTimestamp, untilTimestamp, recovered, ProfileScope{})
 }
 
 // QueryJumpTimestampsScoped loads chronological piloted hyperspace jump

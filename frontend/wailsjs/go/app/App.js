@@ -58,10 +58,6 @@ export function CreateExpeditionFromImport(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateExpeditionFromImport'](arg1, arg2, arg3);
 }
 
-export function CreateExpeditionWithWaypoints(arg1, arg2, arg3) {
-  return window['go']['app']['App']['CreateExpeditionWithWaypoints'](arg1, arg2, arg3);
-}
-
 export function CreateMode(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateMode'](arg1, arg2, arg3);
 }
@@ -76,10 +72,6 @@ export function DeleteMode(arg1) {
 
 export function DeleteRow(arg1) {
   return window['go']['app']['App']['DeleteRow'](arg1);
-}
-
-export function GetCarrierLastLocation() {
-  return window['go']['app']['App']['GetCarrierLastLocation']();
 }
 
 export function GetExpeditionExportData(arg1) {
@@ -170,16 +162,8 @@ export function PickExportSavePath(arg1, arg2) {
   return window['go']['app']['App']['PickExportSavePath'](arg1, arg2);
 }
 
-export function PlotCarrierRoute(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['PlotCarrierRoute'](arg1, arg2, arg3, arg4, arg5);
-}
-
 export function PrepareCarrierRoutePrompt(arg1, arg2) {
   return window['go']['app']['App']['PrepareCarrierRoutePrompt'](arg1, arg2);
-}
-
-export function RecordCarrierJump(arg1, arg2, arg3) {
-  return window['go']['app']['App']['RecordCarrierJump'](arg1, arg2, arg3);
 }
 
 export function RedoExpedition(arg1) {

@@ -59,7 +59,7 @@ func insertTestJournalEvent(testingContext *testing.T, testApp *App, timestamp, 
 		testingContext.Fatalf("insert %s journal event: %v", eventName, insertError)
 	}
 	if parsedEvent, ok := journal.ParseEventType(eventName); ok {
-		testApp.publishJournalEvents(journal.NewEventSet(parsedEvent))
+		testApp.publishJournalBatch(journal.NewEventSet(parsedEvent), "", "")
 	}
 }
 
@@ -158,59 +158,6 @@ func TestDatabaseHotSwapConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func TestResolveRowSync_ContextCancellation(t *testing.T) {
-	testApp := New()
-	ctx, cancel := context.WithCancel(context.Background())
-	testApp.ctx = ctx
-	testApp.cancel = cancel
-
-	// Fill semaphore so resolveRowSync has to wait
-	testApp.resolutionSemaphore <- struct{}{}
-
-	// Cancel context
-	cancel()
-
-	done := make(chan struct{})
-	go func() {
-		resolved, updated := testApp.resolveRowSync(expedition.Row{ID: 1, SystemName: "Sol"}, true)
-		if resolved || updated {
-			t.Errorf("expected false, false, got %v, %v", resolved, updated)
-		}
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// success: returned promptly due to ctx cancellation
-	case <-time.After(2 * time.Second):
-		t.Fatal("resolveRowSync blocked waiting for semaphore after context was cancelled")
-	}
-}
-
-func TestResolveRowSync_SemaphoreReleased(t *testing.T) {
-	testApp := New()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	testApp.ctx = ctx
-	testApp.cancel = cancel
-
-	// resolveRowSync with online=true, but resolver is nil
-	// Should acquire semaphore and release it via defer
-	resolved, updated := testApp.resolveRowSync(expedition.Row{ID: 1, SystemName: "Sol"}, true)
-	if resolved || updated {
-		t.Errorf("expected false, false on nil db/resolver, got %v, %v", resolved, updated)
-	}
-
-	// Verify semaphore is available (can acquire without blocking)
-	select {
-	case testApp.resolutionSemaphore <- struct{}{}:
-		// Semaphore token was successfully released!
-		<-testApp.resolutionSemaphore
-	default:
-		t.Fatal("semaphore was not released by resolveRowSync")
-	}
-}
-
 func TestMoveRow_NonexistentRow(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 
@@ -263,7 +210,7 @@ func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
 	}
 	waitGroup.Wait()
 
-	careerStart, _ := replay.CareerStart(testApp.db)
+	careerStart, _ := replay.CareerStartScoped(testApp.db, replay.ProfileScope{})
 	if careerStart != expectedCareerStart {
 		testingContext.Errorf("expected CareerStart %s, got %s", expectedCareerStart, careerStart)
 	}

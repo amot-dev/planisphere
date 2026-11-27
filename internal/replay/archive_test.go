@@ -25,6 +25,19 @@ func openReplayTestDB(testingContext *testing.T) *sql.DB {
 	return databaseConnection
 }
 
+func execJournalEvent(statement *sql.Stmt, parsedEvent *journal.Event, sourceFile string, ingestedAt string) (sql.Result, error) {
+	var xCoord, yCoord, zCoord any
+	if parsedEvent.StarPos != nil {
+		xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
+	}
+	return statement.Exec(
+		parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event,
+		journal.NullStringOrNil(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
+		journal.NullStringOrNil(parsedEvent.BodyName), xCoord, yCoord, zCoord,
+		journal.NullStringOrNil(parsedEvent.Commander), sourceFile, parsedEvent.Raw, ingestedAt,
+	)
+}
+
 func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
 	databaseConnection := openReplayTestDB(testingContext)
 
@@ -52,7 +65,7 @@ func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
 		} else {
 			parsedEvent.Commander = activeCommander
 		}
-		if _, execError := journal.ExecJournalEvent(statement, &parsedEvent, "Journal.test.log", "2026-01-01T00:05:00Z"); execError != nil {
+		if _, execError := execJournalEvent(statement, &parsedEvent, "Journal.test.log", "2026-01-01T00:05:00Z"); execError != nil {
 			testingContext.Fatalf("insert event: %v", execError)
 		}
 	}
@@ -63,9 +76,9 @@ func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
 	}
 
 	arrivalSet := journal.NewEventSet(journal.EventLocation, journal.EventFSDJump)
-	loadedRows, loadError := replay.LoadEvents(databaseConnection, "2026-01-01T00:01:00Z", "", arrivalSet)
+	loadedRows, loadError := replay.LoadEventsScoped(databaseConnection, "2026-01-01T00:01:00Z", "", arrivalSet, replay.ProfileScope{})
 	if loadError != nil {
-		testingContext.Fatalf("LoadEvents: %v", loadError)
+		testingContext.Fatalf("LoadEventsScoped: %v", loadError)
 	}
 	if len(loadedRows) != 1 || loadedRows[0].Type != journal.EventFSDJump || loadedRows[0].SystemName != "Alpha Centauri" || loadedRows[0].StarPos == nil {
 		testingContext.Fatalf("unexpected loadedRows: %+v", loadedRows)
@@ -79,7 +92,7 @@ func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
 		testingContext.Fatalf("expected latest enabled arrival Alpha Centauri, got %+v", latestRow)
 	}
 
-	emptyRows, emptyError := replay.LoadEvents(databaseConnection, "", "", journal.NewEventSet())
+	emptyRows, emptyError := replay.LoadEventsScoped(databaseConnection, "", "", journal.NewEventSet(), replay.ProfileScope{})
 	if emptyError != nil || len(emptyRows) != 0 {
 		testingContext.Fatalf("expected empty result for empty EventSet, got rows=%v err=%v", emptyRows, emptyError)
 	}
@@ -291,15 +304,15 @@ func TestMulticrewIgnoredAcrossArrivalsLocationAndVisitCounts(testingContext *te
 		testingContext.Fatalf("seed multicrew and taxi events: %v", execError)
 	}
 
-	windowArrivals, windowError := replay.QueryArrivalsInWindow(databaseConnection, "2026-06-01T09:00:00Z", "")
+	windowArrivals, windowError := replay.QueryArrivalsInWindowScoped(databaseConnection, "2026-06-01T09:00:00Z", "", replay.ProfileScope{})
 	if windowError != nil {
-		testingContext.Fatalf("QueryArrivalsInWindow: %v", windowError)
+		testingContext.Fatalf("QueryArrivalsInWindowScoped: %v", windowError)
 	}
 	if len(windowArrivals) != 2 || windowArrivals[0].SystemName != "Sol" || windowArrivals[1].SystemName != "Alpha Centauri" || windowArrivals[0].Commander != "CmdrA" {
 		testingContext.Fatalf("expected only physical Sol and Taxi Alpha Centauri arrivals, got %+v", windowArrivals)
 	}
 
-	beagleCandidates, candError := replay.QuerySystemArrivalCandidates(databaseConnection, "Beagle Point", 1004)
+	beagleCandidates, candError := replay.QuerySystemArrivalCandidatesScoped(databaseConnection, "Beagle Point", 1004, replay.ProfileScope{})
 	if candError != nil || len(beagleCandidates) != 0 {
 		testingContext.Fatalf("expected Multicrew Beagle Point excluded from StartCandidates, got %+v err=%v", beagleCandidates, candError)
 	}
@@ -309,19 +322,19 @@ func TestMulticrewIgnoredAcrossArrivalsLocationAndVisitCounts(testingContext *te
 		testingContext.Fatalf("expected latest physical location Alpha Centauri (4,0,0), got sys=%q pos=%+v err=%v", latestSys, latestPos, locError)
 	}
 
-	counts, countError := replay.QuerySystemVisitCounts(databaseConnection, []string{"sol", "alpha centauri", "colonia", "beagle point"}, nil)
+	counts, countError := replay.QuerySystemVisitCountsScoped(databaseConnection, []string{"sol", "alpha centauri", "colonia", "beagle point"}, nil, replay.ProfileScope{})
 	if countError != nil {
-		testingContext.Fatalf("QuerySystemVisitCounts: %v", countError)
+		testingContext.Fatalf("QuerySystemVisitCountsScoped: %v", countError)
 	}
 	if counts["sol"] != 1 || counts["alpha centauri"] != 1 || counts["colonia"] != 0 || counts["beagle point"] != 0 {
 		testingContext.Fatalf("expected multicrew systems to have 0 visits and taxi/sol 1 visit, got %+v", counts)
 	}
 }
 
-func TestListEnabledCommanderNames(testingContext *testing.T) {
+func TestListCommanderNamesForScopeLegacyFallback(testingContext *testing.T) {
 	databaseConnection := openReplayTestDB(testingContext)
 
-	emptyNames, emptyError := replay.ListEnabledCommanderNames(databaseConnection)
+	emptyNames, emptyError := replay.ListCommanderNamesForScope(databaseConnection, replay.ProfileScope{})
 	if emptyError != nil || emptyNames == nil || len(emptyNames) != 0 {
 		testingContext.Fatalf("expected non-nil empty slice when no commanders exist, got %v err=%v", emptyNames, emptyError)
 	}
@@ -336,14 +349,14 @@ func TestListEnabledCommanderNames(testingContext *testing.T) {
 	`); execError != nil {
 		testingContext.Fatalf("seed commanders: %v", execError)
 	}
-	// Dropping journal_events verifies ListEnabledCommanderNames skips event count queries.
+	// Dropping journal_events verifies ListCommanderNamesForScope skips event count queries.
 	if _, dropEventsError := databaseConnection.Exec(`DROP TABLE journal_events`); dropEventsError != nil {
 		testingContext.Fatalf("drop journal_events: %v", dropEventsError)
 	}
 
-	enabledNames, listError := replay.ListEnabledCommanderNames(databaseConnection)
+	enabledNames, listError := replay.ListCommanderNamesForScope(databaseConnection, replay.ProfileScope{})
 	if listError != nil {
-		testingContext.Fatalf("ListEnabledCommanderNames: %v", listError)
+		testingContext.Fatalf("ListCommanderNamesForScope: %v", listError)
 	}
 	if strings.Join(enabledNames, "|") != "CmdrAlpha|CmdrBravo|CmdrZulu" {
 		testingContext.Fatalf("unexpected enabled commander order: %v", enabledNames)
@@ -352,7 +365,7 @@ func TestListEnabledCommanderNames(testingContext *testing.T) {
 	if _, dropCmdrsError := databaseConnection.Exec(`DROP TABLE commanders`); dropCmdrsError != nil {
 		testingContext.Fatalf("drop commanders: %v", dropCmdrsError)
 	}
-	if _, missingTableError := replay.ListEnabledCommanderNames(databaseConnection); missingTableError == nil {
+	if _, missingTableError := replay.ListCommanderNamesForScope(databaseConnection, replay.ProfileScope{}); missingTableError == nil {
 		testingContext.Fatal("expected error when commanders table is missing")
 	}
 }

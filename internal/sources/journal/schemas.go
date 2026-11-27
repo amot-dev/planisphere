@@ -258,29 +258,6 @@ type DiedEvent struct {
 	Killers    []Attacker `json:"Killers"`
 }
 
-// IsOnFoot reports whether the death was an on-foot suit death.
-func (died DiedEvent) IsOnFoot() bool {
-	killerShip := strings.ToLower(died.KillerShip)
-	if strings.Contains(killerShip, "suit") || strings.Contains(killerShip, "humanoid") || strings.Contains(killerShip, "onfoot") {
-		return true
-	}
-	killerName := strings.ToLower(died.KillerName)
-	if strings.Contains(killerName, "humanoid") || strings.Contains(killerName, "onfoot") || strings.Contains(killerName, "falling") {
-		return true
-	}
-	for _, attacker := range died.Killers {
-		ship := strings.ToLower(attacker.Ship)
-		if strings.Contains(ship, "suit") || strings.Contains(ship, "humanoid") || strings.Contains(ship, "onfoot") {
-			return true
-		}
-		name := strings.ToLower(attacker.Name)
-		if strings.Contains(name, "humanoid") || strings.Contains(name, "onfoot") {
-			return true
-		}
-	}
-	return false
-}
-
 // ResurrectEvent is written when respawning after a death.
 type ResurrectEvent struct {
 	Timestamp string `json:"timestamp"`

@@ -11,8 +11,6 @@ import {
 import { reconcileModeFilter, useDomainLoaders } from './useDomainLoaders'
 import { useSyncPause } from './useSyncPause'
 
-export { reconcileModeFilter } from './useDomainLoaders'
-
 /**
  * isExpeditionExportEnabled checks whether export is available for the active
  * expedition, ignoring stale plan or sidebar telemetry from a previously

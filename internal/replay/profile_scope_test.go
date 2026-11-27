@@ -121,10 +121,10 @@ func TestListCommandersProfilesAliasesScopedNamesAndDateSessions(testingContext 
 		testingContext.Fatalf("unexpected aliases on active renamed profile: %+v", activeRenamed.Aliases)
 	}
 
-	// ListEnabledCommanderNames must return ONLY canonical display_name values and never historic alias CmdrOldHandle or disabled CmdrWiped.
-	enabledNames, namesErr := replay.ListEnabledCommanderNames(conn)
+	// ListCommanderNamesForScope with default ProfileScope must return ONLY canonical display_name values and never historic alias CmdrOldHandle or disabled CmdrWiped.
+	enabledNames, namesErr := replay.ListCommanderNamesForScope(conn, replay.ProfileScope{})
 	if namesErr != nil {
-		testingContext.Fatalf("ListEnabledCommanderNames: %v", namesErr)
+		testingContext.Fatalf("ListCommanderNamesForScope: %v", namesErr)
 	}
 	if !reflect.DeepEqual(enabledNames, []string{"CmdrNewHandle", "CmdrAltPilot"}) {
 		testingContext.Fatalf("expected canonical enabled names [CmdrNewHandle CmdrAltPilot], got %v", enabledNames)
@@ -136,7 +136,7 @@ func TestListCommandersProfilesAliasesScopedNamesAndDateSessions(testingContext 
 	if scopedNamesErr != nil || !reflect.DeepEqual(archivedNames, []string{"CmdrWiped"}) {
 		testingContext.Fatalf("expected [CmdrWiped] for archived scope, got %v err=%v", archivedNames, scopedNamesErr)
 	}
-	enabledStart, _ := replay.CareerStart(conn)
+	enabledStart, _ := replay.CareerStartScoped(conn, replay.ProfileScope{})
 	archivedStart, _ := replay.CareerStartScoped(conn, archivedScope)
 	if enabledStart != "2026-05-01T09:01:00Z" || archivedStart != "2026-05-01T08:00:00Z" {
 		testingContext.Fatalf("unexpected career starts: enabled=%q archived=%q", enabledStart, archivedStart)

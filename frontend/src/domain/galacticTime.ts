@@ -166,15 +166,3 @@ export function edsmSystemUrl(systemName: string): string {
   return `https://www.edsm.net/en/system?systemName=${encodeURIComponent(systemName.trim())}`
 }
 
-/**
- * Returns a direct EDAstro GEC entry URL when provided, falling back to a GEC system search URL.
- */
-export function edastroGecUrl(systemName: string, gecDirectUrl?: string): string {
-  if (gecDirectUrl) return gecDirectUrl
-  const query = systemName.trim()
-  if (query) {
-    return `https://edastro.com/gec/search?q=${encodeURIComponent(query)}`
-  }
-  return `https://edastro.com/gec`
-}
-

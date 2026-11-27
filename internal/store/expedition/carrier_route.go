@@ -119,23 +119,6 @@ func ClearActiveCarrierRouteIfPresent(queryer db.Queryer, expeditionID int64) (b
 	return true, nil
 }
 
-// RecordCarrierJumpAndSaveRouteTx atomically records a carrier jump and persists
-// the updated active carrier route state inside a single transaction.
-func RecordCarrierJumpAndSaveRouteTx(dbConn *sql.DB, expeditionID int64, distanceLy float64, tritium int, state ActiveCarrierRouteState) error {
-	if state.ExpeditionID == 0 {
-		state.ExpeditionID = expeditionID
-	}
-	if state.ExpeditionID != expeditionID {
-		return fmt.Errorf("carrier route expedition ID %d does not match %d", state.ExpeditionID, expeditionID)
-	}
-	return db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		if jumpError := RecordCarrierJump(transaction, expeditionID, distanceLy, tritium); jumpError != nil {
-			return jumpError
-		}
-		return SaveActiveCarrierRoute(transaction, state)
-	})
-}
-
 // IsManualMode reports whether the active carrier route is operating in manual
 // jump-logging mode (either explicitly toggled or holding zero plotted hops).
 func (state ActiveCarrierRouteState) IsManualMode() bool {

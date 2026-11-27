@@ -71,23 +71,6 @@ func (app *App) CancelCarrierRoutePlot() {
 	}
 }
 
-// GetCarrierLastLocation returns the system name of the most recent known Fleet Carrier location.
-func (app *App) GetCarrierLastLocation() (string, error) {
-	app.dbMu.RLock()
-	defer app.dbMu.RUnlock()
-	if readyError := app.ready(); readyError != nil {
-		return "", readyError
-	}
-	if app.carrierState == nil {
-		return "", nil
-	}
-	snapshot, snapshotError := app.carrierState.LatestStats()
-	if snapshotError != nil {
-		return "", snapshotError
-	}
-	return replay.QueryCarrierLastLocation(app.db, snapshot)
-}
-
 func (app *App) prepareCarrierRoutePromptLocked(targetDB *sql.DB, expeditionID, targetRowID int64) (CarrierRoutePromptDefaults, error) {
 	expeditionRecord, getError := expedition.Get(targetDB, expeditionID)
 	if getError != nil {
@@ -245,14 +228,4 @@ func executeCarrierRoutePlot(parentCtx context.Context, canonicalSource, canonic
 	routeResult.Jumps = mappedJumps
 	routeResult.TotalJumps = len(mappedJumps)
 	return routeResult
-}
-
-// PlotCarrierRoute queries the Spansh Fleet Carrier router for a path from source to destination,
-// falling back cleanly to manual mode on unknown systems, offline mode, or API timeouts.
-func (app *App) PlotCarrierRoute(source, destination string, capacityUsed int, carrierType string, depotTritium int) (CarrierRouteResult, error) {
-	app.dbMu.RLock()
-	app.waitStartupLocked()
-	canonicalSource, canonicalDest, resolvedDepot, parentCtx := app.resolveCarrierPlotInputsLocked(source, destination, depotTritium)
-	app.dbMu.RUnlock()
-	return executeCarrierRoutePlot(parentCtx, canonicalSource, canonicalDest, capacityUsed, carrierType, resolvedDepot), nil
 }

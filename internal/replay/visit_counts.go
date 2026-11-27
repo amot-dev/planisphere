@@ -12,17 +12,6 @@ func NormalizeSystemKey(systemName string) string {
 	return strings.ToLower(strings.Join(strings.Fields(systemName), " "))
 }
 
-// QuerySystemVisitCounts queries commander visit counts for missingNormalizedNames
-// against queryer across globally enabled profiles, adding any matching
-// crash-recovered jumps from recovered.
-func QuerySystemVisitCounts(
-	queryer db.Queryer,
-	missingNormalizedNames []string,
-	recovered []RecoveredJump,
-) (map[string]int, error) {
-	return QuerySystemVisitCountsScoped(queryer, missingNormalizedNames, recovered, ProfileScope{})
-}
-
 // QuerySystemVisitCountsScoped queries commander visit counts for
 // missingNormalizedNames matching scope against queryer, adding any matching
 // crash-recovered jumps from recovered.

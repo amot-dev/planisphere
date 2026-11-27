@@ -2,8 +2,6 @@
 // frontend UI refresh targets represented as zero-allocation bitmasks.
 package events
 
-import "strings"
-
 // AppEvent identifies an internal Planisphere state or configuration mutation.
 type AppEvent uint8
 
@@ -119,27 +117,12 @@ var uiTargetNames = [uiTargetCount]string{
 	UITargetExpeditions: "expeditions",
 }
 
-var uiTargetByName map[string]UITarget
-
-func init() {
-	uiTargetByName = make(map[string]UITarget, uiTargetCount)
-	for index := UITarget(0); index < uiTargetCount; index++ {
-		uiTargetByName[uiTargetNames[index]] = index
-	}
-}
-
 // String returns the serialized identifier of the UI refresh target.
 func (target UITarget) String() string {
 	if int(target) >= len(uiTargetNames) {
 		return ""
 	}
 	return uiTargetNames[target]
-}
-
-// ParseUITarget resolves a target name into its typed UITarget enum.
-func ParseUITarget(rawName string) (UITarget, bool) {
-	parsedTarget, found := uiTargetByName[strings.ToLower(strings.TrimSpace(rawName))]
-	return parsedTarget, found
 }
 
 // UITargetSet is a bitmask of UITarget values.

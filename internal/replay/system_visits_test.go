@@ -72,9 +72,9 @@ func TestQuerySystemVisitsScopedAndReconcilesWithVisitCounts(testingContext *tes
 		testingContext.Fatalf("expected nil visits for whitespace query, got %+v err=%v", emptyVisits, emptyError)
 	}
 
-	recoveredJumps, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	recoveredJumps, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+		testingContext.Fatalf("ComputeRecoveredJumpsScoped: %v", recoverError)
 	}
 	if len(recoveredJumps) != 1 || recoveredJumps[0].SystemName != "Colonia" {
 		testingContext.Fatalf("expected 1 recovered jump to Colonia, got %+v", recoveredJumps)
@@ -137,9 +137,9 @@ func TestQuerySystemVisitsScopedAndReconcilesWithVisitCounts(testingContext *tes
 	}
 
 	// Reconcile 1-to-1 with QuerySystemVisitCountsScoped across all systems.
-	visitCountsAll, countAllError := replay.QuerySystemVisitCounts(databaseConnection, []string{"colonia", "sol"}, recoveredJumps)
+	visitCountsAll, countAllError := replay.QuerySystemVisitCountsScoped(databaseConnection, []string{"colonia", "sol"}, recoveredJumps, replay.ProfileScope{})
 	if countAllError != nil {
-		testingContext.Fatalf("QuerySystemVisitCounts: %v", countAllError)
+		testingContext.Fatalf("QuerySystemVisitCountsScoped: %v", countAllError)
 	}
 	if visitCountsAll["colonia"] != len(coloniaAllVisits) || visitCountsAll["sol"] != len(solVisits) {
 		testingContext.Fatalf("visit count mismatch: counts=%+v, visits colonia=%d sol=%d", visitCountsAll, len(coloniaAllVisits), len(solVisits))

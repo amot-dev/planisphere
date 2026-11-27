@@ -235,7 +235,7 @@ func buildFixtureSidebarStats(
 		AllJournalsRealization: careerSummary.Realization,
 	}
 
-	if careerStart, careerStartGalactic := replay.CareerStart(database); careerStart != "" {
+	if careerStart, careerStartGalactic := replay.CareerStartScoped(database, replay.ProfileScope{}); careerStart != "" {
 		sidebar.CareerStart = careerStart
 		sidebar.CareerStartGalactic = careerStartGalactic
 		sidebar.CareerDuration = reference.Elapsed(careerStart, "")

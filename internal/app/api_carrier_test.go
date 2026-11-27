@@ -13,123 +13,6 @@ import (
 	"planisphere/internal/store/expedition"
 )
 
-func TestGetCarrierLastLocation(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-
-	// Initially no events
-	location, getLocationError := testApp.GetCarrierLastLocation()
-	if getLocationError != nil || location != "" {
-		testingContext.Fatalf("expected empty location, got '%s', err: %v", location, getLocationError)
-	}
-
-	// Old CarrierJump in System A
-	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:00:00Z", "CarrierJump", "uid1",
-		`{"event":"CarrierJump","StarSystem":"System A"}`)
-
-	location, getLocationError = testApp.GetCarrierLastLocation()
-	if getLocationError != nil || location != "System A" {
-		testingContext.Fatalf("expected System A from CarrierJump, got '%s'", location)
-	}
-
-	// CarrierStats identifying carrier ID 98765
-	insertTestJournalEvent(testingContext, testApp, "2026-01-01T01:00:00Z", "CarrierStats", "uid2",
-		`{"event":"CarrierStats","CarrierID":98765,"Callsign":"ABC-123"}`)
-
-	// Newer docking event on player's fleet carrier in System B
-	insertTestJournalEvent(testingContext, testApp, "2026-01-05T00:00:00Z", "Docked", "uid3",
-		`{"event":"Docked","StarSystem":"System B","StationType":"FleetCarrier","MarketID":98765,"StationName":"ABC-123"}`)
-
-	location, getLocationError = testApp.GetCarrierLastLocation()
-	if getLocationError != nil || location != "System B" {
-		testingContext.Fatalf("expected System B from newer Docked event, got '%s'", location)
-	}
-
-	// Even newer remote jump request to System C
-	insertTestJournalEvent(testingContext, testApp, "2026-01-10T00:00:00Z", "CarrierJumpRequest", "uid4",
-		`{"event":"CarrierJumpRequest","SystemName":"System C","CarrierID":98765}`)
-
-	location, getLocationError = testApp.GetCarrierLastLocation()
-	if getLocationError != nil || location != "System C" {
-		testingContext.Fatalf("expected System C from latest CarrierJumpRequest, got '%s'", location)
-	}
-}
-
-func TestRecordCarrierJump(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-
-	var emittedEvents []DataChanged
-	var emitMu sync.Mutex
-	testApp.emit = func(event string, data ...any) {
-		if event == EventDataChanged && len(data) > 0 {
-			if dataChangedEvent, ok := data[0].(DataChanged); ok {
-				emitMu.Lock()
-				emittedEvents = append(emittedEvents, dataChangedEvent)
-				emitMu.Unlock()
-			}
-		}
-	}
-
-	expeditionRecord, createError := testApp.CreateExpedition("Carrier Test", "Testing carrier jumps")
-	if createError != nil {
-		testingContext.Fatalf("failed to create expedition: %v", createError)
-	}
-
-	// Clear events from creation
-	emitMu.Lock()
-	emittedEvents = nil
-	emitMu.Unlock()
-
-	// Record a carrier jump of 498.5 Ly using 95t tritium
-	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 498.5, 95); err != nil {
-		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
-	}
-
-	// Verify emitted event domains include only stats and expeditions, not plan or full reloads
-	emitMu.Lock()
-	if len(emittedEvents) != 1 {
-		testingContext.Fatalf("expected 1 event, got %d", len(emittedEvents))
-	}
-	if !slices.Equal(emittedEvents[0].Domains, []string{"stats", "expeditions"}) {
-		testingContext.Errorf("expected domains [stats expeditions], got %v", emittedEvents[0].Domains)
-	}
-	if emittedEvents[0].ExpeditionID != expeditionRecord.ID {
-		testingContext.Errorf("expected expeditionID %d, got %d", expeditionRecord.ID, emittedEvents[0].ExpeditionID)
-	}
-	emitMu.Unlock()
-
-	// Verify adjustments were correctly written
-	planView, getPlanError := testApp.GetPlan(expeditionRecord.ID)
-	if getPlanError != nil {
-		testingContext.Fatalf("GetPlan failed: %v", getPlanError)
-	}
-	initialAdjustments := planView.Expedition.Adjustments
-	if initialAdjustments.CarrierJumps != 1 {
-		testingContext.Errorf("expected 1 carrier jump, got %d", initialAdjustments.CarrierJumps)
-	}
-	if initialAdjustments.CarrierDistanceLy != 498.5 {
-		testingContext.Errorf("expected 498.5 carrier distance, got %f", initialAdjustments.CarrierDistanceLy)
-	}
-	if initialAdjustments.TritiumUsed == nil || *initialAdjustments.TritiumUsed != 95 {
-		testingContext.Errorf("expected 95 tritium, got %v", initialAdjustments.TritiumUsed)
-	}
-
-	// Record a second carrier jump
-	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 120.0, 25); err != nil {
-		testingContext.Fatalf("second RecordCarrierJump failed: %v", err)
-	}
-	planView2, _ := testApp.GetPlan(expeditionRecord.ID)
-	updatedAdjustments := planView2.Expedition.Adjustments
-	if updatedAdjustments.CarrierJumps != 2 {
-		testingContext.Errorf("expected 2 carrier jumps, got %d", updatedAdjustments.CarrierJumps)
-	}
-	if updatedAdjustments.CarrierDistanceLy != 618.5 {
-		testingContext.Errorf("expected 618.5 carrier distance, got %f", updatedAdjustments.CarrierDistanceLy)
-	}
-	if updatedAdjustments.TritiumUsed == nil || *updatedAdjustments.TritiumUsed != 120 {
-		testingContext.Errorf("expected 120 tritium, got %v", updatedAdjustments.TritiumUsed)
-	}
-}
-
 func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	expeditionID := createAndStartExpedition(testingContext, testApp, "Stats Cache Test", "Sol")
@@ -167,9 +50,12 @@ func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
 		testingContext.Fatal("expected timeRangeStats to have at least 1 cached entry")
 	}
 
-	// Record carrier jump
-	if err := testApp.RecordCarrierJump(expeditionID, 500.0, 100); err != nil {
-		testingContext.Fatalf("RecordCarrierJump failed: %v", err)
+	// Record carrier jump via manual carrier route RPC flow
+	if _, err := testApp.OpenManualCarrierRoute(expeditionID); err != nil {
+		testingContext.Fatalf("OpenManualCarrierRoute failed: %v", err)
+	}
+	if _, err := testApp.LogManualCarrierJump(expeditionID, 500.0, 100); err != nil {
+		testingContext.Fatalf("LogManualCarrierJump failed: %v", err)
 	}
 
 	// timeRangeStats should NOT have been cleared because AppAdjustmentsChanged preserves cached journal telemetry
@@ -275,14 +161,17 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 	if _, reevalErr := expedition.ReevaluateTx(testApp.db, expeditionRecord.ID); reevalErr != nil {
 		testingContext.Fatalf("ReevaluateTx failed: %v", reevalErr)
 	}
+	if _, err := testApp.OpenManualCarrierRoute(expeditionRecord.ID); err != nil {
+		testingContext.Fatalf("OpenManualCarrierRoute failed: %v", err)
+	}
+	if _, err := testApp.LogManualCarrierJump(expeditionRecord.ID, 490.0, 80); err != nil {
+		testingContext.Fatalf("first LogManualCarrierJump failed: %v", err)
+	}
+	if err := testApp.CompleteCarrierRouteArrival(expeditionRecord.ID, 0, 410.0, 70); err != nil {
+		testingContext.Fatalf("CompleteCarrierRouteArrival failed: %v", err)
+	}
 	if err := expedition.CompleteTx(testApp.db, expeditionRecord.ID); err != nil {
 		testingContext.Fatalf("Complete failed: %v", err)
-	}
-	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 490.0, 80); err != nil {
-		testingContext.Fatalf("first RecordCarrierJump failed: %v", err)
-	}
-	if err := testApp.RecordCarrierJump(expeditionRecord.ID, 410.0, 70); err != nil {
-		testingContext.Fatalf("second RecordCarrierJump failed: %v", err)
 	}
 
 	completedSidebar, err := testApp.GetSidebarStats(expeditionRecord.ID, stats.Filter{})
@@ -313,9 +202,9 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	insertTestJournalEvent(testingContext, testApp, "2026-02-01T09:05:00Z", "Location", "loc-player",
 		`{"timestamp":"2026-02-01T09:05:00Z","event":"Location","StarSystem":"Shinrarta Dezhra","SystemAddress":3932277478106,"StarPos":[55.7,17.6,27.1]}`)
 
-	expOne, err := testApp.CreateExpeditionWithWaypoints("Carrier Prompt One", "", []string{"Sol", "Rohini", "Colonia"})
+	expOne, err := testApp.createExpeditionWithWaypoints("Carrier Prompt One", "", []string{"Sol", "Rohini", "Colonia"})
 	if err != nil {
-		testingContext.Fatalf("CreateExpeditionWithWaypoints: %v", err)
+		testingContext.Fatalf("createExpeditionWithWaypoints: %v", err)
 	}
 	if err := testApp.UpdateExpeditionCarrierConfig(expOne.ID, "squadron", 0); err != nil {
 		testingContext.Fatalf("UpdateExpeditionCarrierConfig: %v", err)
@@ -399,9 +288,9 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 
 	// Non-cancellation Spansh errors fall back to ManualMode: true, ClearActiveCarrierRouteWithUndo emits plan domain,
 	// and CompleteCarrierRouteArrival with targetRowID=0 resolves the next unarrived FC stop inside the tx.
-	activeExp, err := testApp.CreateExpeditionWithWaypoints("Arrival Zero Target", "", []string{"Sol", "Beagle Point"})
+	activeExp, err := testApp.createExpeditionWithWaypoints("Arrival Zero Target", "", []string{"Sol", "Beagle Point"})
 	if err != nil {
-		testingContext.Fatalf("CreateExpeditionWithWaypoints activeExp: %v", err)
+		testingContext.Fatalf("createExpeditionWithWaypoints activeExp: %v", err)
 	}
 	activePlan, _ := testApp.GetPlan(activeExp.ID)
 	beagleStopID := activePlan.Rows[1].Row.ID

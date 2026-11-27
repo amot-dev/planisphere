@@ -133,10 +133,6 @@ func (app *App) currentBus() *projection.Bus {
 	return bus
 }
 
-func (app *App) publishJournalEvents(journalEvents journal.EventSet) events.UITargetSet {
-	return app.publishJournalBatch(journalEvents, "", "")
-}
-
 var careerWipeJournalEvents = journal.NewEventSet(
 	journal.EventClearSavedGame,
 	journal.EventNewCommander,

@@ -296,19 +296,3 @@ func (app *App) CompleteCarrierRouteArrival(expeditionID int64, targetRowID int6
 	}
 	return nil
 }
-
-// RecordCarrierJump logs a single completed expedition carrier jump into the
-// expedition's manual carrier adjustments.
-func (app *App) RecordCarrierJump(expeditionID int64, distanceLy float64, tritium int) error {
-	applied, err := app.recordUndoableMutation(expeditionID, "Log Carrier Jump", func(targetDB *sql.DB) (bool, error) {
-		err := expedition.RecordCarrierJump(targetDB, expeditionID, distanceLy, tritium)
-		return err == nil, err
-	})
-	if err != nil {
-		return err
-	}
-	if applied {
-		app.publishApp(expeditionID, events.AppAdjustmentsChanged)
-	}
-	return nil
-}

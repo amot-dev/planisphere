@@ -215,9 +215,9 @@ func TestRecoveredJumpsRejections(testingContext *testing.T) {
 		testingContext.Fatal(scanError)
 	}
 
-	recovered, recoverError := replay.ComputeRecoveredJumpsInRange(databaseConnection, "", "")
+	recovered, recoverError := replay.ComputeRecoveredJumpsInRangeScoped(databaseConnection, "", "", replay.ProfileScope{})
 	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumpsInRange: %v", recoverError)
+		testingContext.Fatalf("ComputeRecoveredJumpsInRangeScoped: %v", recoverError)
 	}
 	if len(recovered) != 0 {
 		testingContext.Fatalf("expected all non-jump Location transitions to be rejected, got %+v", recovered)
@@ -268,9 +268,9 @@ func TestRecoveredJumpsMultiCommanderIsolation(testingContext *testing.T) {
 		testingContext.Fatal(scanError)
 	}
 
-	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+		testingContext.Fatalf("ComputeRecoveredJumpsScoped: %v", recoverError)
 	}
 	if len(recovered) != 1 {
 		testingContext.Fatalf("expected 1 recovered jump for CmdrExplorer, got %d: %+v", len(recovered), recovered)
@@ -317,9 +317,9 @@ func TestRecoveredCarrierJumpsContinuousStayAndOnFootConcourse(testingContext *t
 		testingContext.Fatal(scanError)
 	}
 
-	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+		testingContext.Fatalf("ComputeRecoveredJumpsScoped: %v", recoverError)
 	}
 	expectedHops := []struct {
 		systemName string
@@ -385,9 +385,9 @@ func TestRecoveredCarrierJumpsRejections(testingContext *testing.T) {
 		testingContext.Fatal(scanError)
 	}
 
-	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+		testingContext.Fatalf("ComputeRecoveredJumpsScoped: %v", recoverError)
 	}
 	if len(recovered) != 0 {
 		testingContext.Fatalf("expected all invalid carrier Location transitions to be rejected, got %+v", recovered)

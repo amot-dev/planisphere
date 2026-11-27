@@ -23,7 +23,6 @@ import { buildHighlightsViewModel } from './exportViewModels'
 import {
   buildPngBundleFileName,
   buildSvgForeignObjectDocument,
-  renderCartBlockToPngBase64,
   renderCartToPngFiles,
 } from './pngRenderer'
 
@@ -193,17 +192,22 @@ describe('export visual blocks and PNG SVG serializer', () => {
 
     try {
       toDataURLSpy.mockReturnValueOnce('data:,')
-      await expect(renderCartBlockToPngBase64(data, quickItems[0])).rejects.toThrow(
+      await expect(renderCartToPngFiles(data, [quickItems[0]])).rejects.toThrow(
         'Canvas PNG export failed or exceeded maximum dimensions',
       )
 
       toDataURLSpy.mockReturnValueOnce('data:image/png;base64,')
-      await expect(renderCartBlockToPngBase64(data, quickItems[0])).rejects.toThrow(
+      await expect(renderCartToPngFiles(data, [quickItems[0]])).rejects.toThrow(
         'Canvas PNG export failed or exceeded maximum dimensions',
       )
 
       toDataURLSpy.mockReturnValueOnce('data:image/png;base64,iVBORw0KGgo=')
-      await expect(renderCartBlockToPngBase64(data, quickItems[0])).resolves.toBe('iVBORw0KGgo=')
+      await expect(renderCartToPngFiles(data, [quickItems[0]])).resolves.toEqual([
+        {
+          name: 'images/01-full-expedition-summary.png',
+          contentBase64: 'iVBORw0KGgo=',
+        },
+      ])
     } finally {
       globalThis.Image = originalImage
       getContextSpy.mockRestore()

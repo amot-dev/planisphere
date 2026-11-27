@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  edastroGecUrl,
   edsmSystemUrl,
   formatCredits,
   formatEfficiencyBonusLabel,
@@ -26,18 +25,12 @@ describe('Galactic Standard Time (+1286 years)', () => {
     expect(gst).toBe('3314-02-29 08:15 UTC')
   })
 
-  it('builds external system URLs for Inara, EDSM, and EDAstro GEC', () => {
+  it('builds external system URLs for Inara and EDSM', () => {
     expect(inaraSystemUrl('Sagittarius A*')).toBe(
       'https://inara.cz/elite/starsystem/?search=Sagittarius%20A*',
     )
     expect(edsmSystemUrl('Beagle Point')).toBe(
       'https://www.edsm.net/en/system?systemName=Beagle%20Point',
-    )
-    expect(edastroGecUrl('Sol', 'https://edastro.com/gec/view/10')).toBe(
-      'https://edastro.com/gec/view/10',
-    )
-    expect(edastroGecUrl('Sol')).toBe(
-      'https://edastro.com/gec/search?q=Sol',
     )
   })
 

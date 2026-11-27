@@ -72,16 +72,6 @@ export function getVisitedRegions(exportData: ExpeditionExportData): VisitedRegi
   return getExportDataIndex(exportData).visitedRegions
 }
 
-/** Looks up a visited Galactic Region summary by region name in O(1). */
-export function getVisitedRegionByName(
-  exportData: ExpeditionExportData,
-  regionName: string | undefined,
-): VisitedRegionSummary | undefined {
-  return regionName != null
-    ? getExportDataIndex(exportData).visitedRegionByName.get(regionName)
-    : undefined
-}
-
 /** Returns the distinct active flight modes spanning the requested scope in O(1). */
 export function getDistinctModesForScope(
   exportData: ExpeditionExportData,

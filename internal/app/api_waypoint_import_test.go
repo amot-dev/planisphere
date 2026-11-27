@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,13 +59,13 @@ func TestCreateExpeditionWithWaypointsOfflineResolutionAndGEC(testingContext *te
 		testingContext.Fatalf("reload GEC catalog: %v", reloadError)
 	}
 
-	createdExpedition, createError := testApp.CreateExpeditionWithWaypoints(
+	createdExpedition, createError := testApp.createExpeditionWithWaypoints(
 		"Historical Import",
 		"Imported from list",
 		[]string{"  sol  ", "omega sector ve-q b5-15", "   ", "SOL"},
 	)
 	if createError != nil {
-		testingContext.Fatalf("CreateExpeditionWithWaypoints: %v", createError)
+		testingContext.Fatalf("createExpeditionWithWaypoints: %v", createError)
 	}
 	if settings.ActiveExpeditionID(testApp.db) != createdExpedition.ID {
 		testingContext.Fatalf("expected active expedition ID %d, got %d", createdExpedition.ID, settings.ActiveExpeditionID(testApp.db))
@@ -407,7 +408,7 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 
 func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) {
 	// Verify typed-nil (*sql.DB)(nil) safety on system query and canonical name helpers,
-	// and on PlotCarrierRoute when startup completed with app.db == nil.
+	// and on PrepareCarrierRoutePrompt when startup completed with app.db == nil.
 	var typedNilDB *sql.DB
 	if coords, coordsErr := replay.QueryJournalSystemCoords(typedNilDB, "Sol"); coordsErr != nil || coords != nil {
 		testingContext.Fatalf("expected nil result for typed-nil *sql.DB in QueryJournalSystemCoords, got %+v err=%v", coords, coordsErr)
@@ -416,9 +417,8 @@ func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) 
 		testingContext.Fatalf("expected trimmed fallback for typed-nil *sql.DB in CanonicalSystemName, got %q", gotCanonical)
 	}
 	uninitializedApp := New()
-	uninitializedPlot, uninitErr := uninitializedApp.PlotCarrierRoute("Sol", "sol", 5000, "player", 0)
-	if uninitErr != nil || !uninitializedPlot.ManualMode {
-		testingContext.Fatalf("expected manual fallback on nil-db PlotCarrierRoute, got %+v err=%v", uninitializedPlot, uninitErr)
+	if _, uninitErr := uninitializedApp.PrepareCarrierRoutePrompt(1, 0); !errors.Is(uninitErr, errorNotReady) {
+		testingContext.Fatalf("expected errorNotReady on nil-db PrepareCarrierRoutePrompt, got %v", uninitErr)
 	}
 
 	temporaryDirectory := testingContext.TempDir()
@@ -453,7 +453,7 @@ func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) 
 				case 1:
 					_, _ = raceApp.GetSettings()
 				case 2:
-					_, _ = raceApp.PlotCarrierRoute("Sol", "sol", 5000, "player", 0)
+					_, _ = raceApp.PrepareCarrierRoutePrompt(1, 0)
 				case 3:
 					_ = raceApp.OpenURL("ftp://invalid-scheme")
 				}
@@ -518,7 +518,7 @@ func TestAsyncResolutionVisitedAddressMatchEmitsStatsDomain(testingContext *test
 	if _, execErr := testApp.db.Exec(`INSERT INTO journal_events (event_uid,timestamp,event,system_name,system_address,star_x,star_y,star_z,raw_json,ingested_at) VALUES ('addr-sol','2026-03-01T10:00:00Z','Location','Sol',10477373803,0,0,0,'{}','2026-03-01T10:00:00Z'),('addr-col','2026-03-01T11:00:00Z','FSDJump','Colonia',3238296097059,-9530.5,-910.28125,19808.125,'{}','2026-03-01T11:00:00Z'); INSERT INTO system_cache (name_key,system_name,system_address,edsm_id,x,y,z,source,fetched_at) VALUES ('eol prou rs-t d3-94','Eol Prou RS-T d3-94',3238296097059,43805,-9530.5,-910.28125,19808.125,'edsm','2026-03-01T10:00:00Z')`); execErr != nil {
 		testingContext.Fatalf("seed resolution fixtures: %v", execErr)
 	}
-	createdExp, createErr := testApp.CreateExpeditionWithWaypoints("Address Visit", "", []string{"Sol"})
+	createdExp, createErr := testApp.createExpeditionWithWaypoints("Address Visit", "", []string{"Sol"})
 	addedRow, addErr := testApp.AddRow(createdExp.ID, 0, expedition.RowWaypoint, 0)
 	if createErr != nil || addErr != nil || testApp.StartExpedition(createdExp.ID, "2026-03-01T10:00:00Z", 0) != nil {
 		testingContext.Fatalf("prepare active expedition: createErr=%v addErr=%v", createErr, addErr)

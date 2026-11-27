@@ -14,6 +14,9 @@
     "wailsjs/**"
   ],
   "ignoreExportsUsedInFile": true,
+  "rules": {
+    "duplicates": "off"
+  },
   "vite": {
     "entry": [
       "src/**/!(live_frontend_profile).test.{ts,tsx}"

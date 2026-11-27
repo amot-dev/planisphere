@@ -480,20 +480,20 @@ func TestComputeRecoversOfflineAndCrashedCarrierPassengerJumps(testingContext *t
 
 	// Recovered carrier jumps must count toward system visit counts (StartSys visited via FSDJump + offline carrier return = 2)
 	// while remaining excluded from piloted ship jump timestamps used for vessels flown.
-	recovered, recoverError := replay.ComputeRecoveredJumps(databaseConnection)
+	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumps: %v", recoverError)
+		testingContext.Fatalf("ComputeRecoveredJumpsScoped: %v", recoverError)
 	}
-	visitCounts, visitError := replay.QuerySystemVisitCounts(databaseConnection, []string{"startsys"}, recovered)
+	visitCounts, visitError := replay.QuerySystemVisitCountsScoped(databaseConnection, []string{"startsys"}, recovered, replay.ProfileScope{})
 	if visitError != nil {
-		testingContext.Fatalf("QuerySystemVisitCounts: %v", visitError)
+		testingContext.Fatalf("QuerySystemVisitCountsScoped: %v", visitError)
 	}
 	if visitCounts["startsys"] != 2 {
 		testingContext.Fatalf("expected StartSys visit count 2 (FSDJump + offline carrier return), got %d", visitCounts["startsys"])
 	}
-	pilotedTimestamps, jumpQueryError := replay.QueryJumpTimestamps(databaseConnection, "2026-11-23T22:01:00Z", "2026-11-24T02:00:00Z", recovered)
+	pilotedTimestamps, jumpQueryError := replay.QueryJumpTimestampsScoped(databaseConnection, "2026-11-23T22:01:00Z", "2026-11-24T02:00:00Z", recovered, replay.ProfileScope{})
 	if jumpQueryError != nil {
-		testingContext.Fatalf("QueryJumpTimestamps: %v", jumpQueryError)
+		testingContext.Fatalf("QueryJumpTimestampsScoped: %v", jumpQueryError)
 	}
 	if len(pilotedTimestamps) != 0 {
 		testingContext.Fatalf("expected recovered carrier jump excluded from piloted jump timestamps, got %v", pilotedTimestamps)

@@ -1,12 +1,6 @@
 export { app, expedition, exporter, modes, realization, replay, stats } from '../../wailsjs/go/models'
 
 /**
- * UiSyncDomain identifies a targeted frontend refresh domain emitted in
- * backend data:changed event payloads.
- */
-export type UiSyncDomain = 'ingest' | 'stats' | 'plan' | 'modes' | 'settings' | 'expeditions'
-
-/**
  * DataChangedPayload matches the Go app.DataChanged payload emitted on Wails
  * data:changed runtime notifications.
  */

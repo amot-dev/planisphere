@@ -6,7 +6,6 @@ package reference
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -97,37 +96,6 @@ func ToGalactic(isoTimestamp string) string {
 func TimeToGalactic(sourceTime time.Time) string {
 	roundedTime := sourceTime.UTC().Round(time.Minute)
 	return fmt.Sprintf("%04d-%s%s", roundedTime.Year()+GalacticYearOffset, roundedTime.Format("01-02 15:04"), GalacticLayoutSuffix)
-}
-
-// FromGalactic converts "3312-01-18 19:42 UTC" (the " UTC" suffix, the
-// seconds and the time part are optional; a "T" separator is accepted) back
-// into a real ISO-8601 UTC timestamp ("2026-01-18T19:42:00Z").
-func FromGalactic(galacticTimeString string) (string, error) {
-	cleanedString := strings.TrimSpace(galacticTimeString)
-	cleanedString = strings.TrimSuffix(cleanedString, "UTC")
-	cleanedString = strings.TrimSpace(cleanedString)
-	cleanedString = strings.Replace(cleanedString, "T", " ", 1)
-	cleanedString = strings.TrimSuffix(cleanedString, "Z")
-	if len(cleanedString) < 10 || cleanedString[4] != '-' {
-		return "", fmt.Errorf("invalid galactic timestamp %q", galacticTimeString)
-	}
-	parsedYear, parseYearError := strconv.Atoi(cleanedString[:4])
-	if parseYearError != nil {
-		return "", fmt.Errorf("invalid galactic year in %q", galacticTimeString)
-	}
-	realYear := parsedYear - GalacticYearOffset
-	if realYear < 1 {
-		return "", fmt.Errorf("galactic year %d out of range", parsedYear)
-	}
-	restString := cleanedString[4:] // "-01-18 19:42:10"
-	layoutPatterns := []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"}
-	candidate := fmt.Sprintf("%04d%s", realYear, restString)
-	for _, layoutPattern := range layoutPatterns {
-		if parsedTime, parseError := time.Parse(layoutPattern, candidate); parseError == nil {
-			return FormatISO(parsedTime), nil
-		}
-	}
-	return "", fmt.Errorf("invalid galactic timestamp %q", galacticTimeString)
 }
 
 // DurationLabel renders an elapsed duration with hours and minutes, including years if >= 365 days.
