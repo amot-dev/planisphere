@@ -29,6 +29,7 @@ func (builder *ledgerBuilder) recordSingleCartoSale(rawJSON string) {
 	builder.seenSales[saleKey] = true
 
 	totalCrewWage := builder.wageMatcher.claimWage(sellEvent.Timestamp)
+	builder.noteSaleTimestamp(sellEvent.Timestamp)
 	carrierTariff := reference.CarrierCartographicsTariff(builder.session.IsDockedOnFleetCarrier(), sellEvent.BaseValue, sellEvent.Bonus)
 	soldSystemSet := buildNormalizedSet(sellEvent.Systems)
 	matchedRecords := builder.claimSoldCartoRecords(soldSystemSet, sellEvent.Timestamp)
@@ -81,6 +82,7 @@ func (builder *ledgerBuilder) recordMultiCartoSale(rawJSON string) {
 	builder.seenSales[saleKey] = true
 
 	totalCrewWage := builder.wageMatcher.claimWage(multiSellEvent.Timestamp)
+	builder.noteSaleTimestamp(multiSellEvent.Timestamp)
 	carrierTariff := reference.CarrierCartographicsTariff(builder.session.IsDockedOnFleetCarrier(), multiSellEvent.BaseValue, multiSellEvent.Bonus)
 	soldSystemSet := make(map[string]bool, len(multiSellEvent.Discovered))
 	for _, discoveredEntry := range multiSellEvent.Discovered {
@@ -130,8 +132,8 @@ func (builder *ledgerBuilder) claimSoldSystems(soldSystemSet map[string]bool, sa
 		remainingRecords := systemRecords[:0]
 		for _, candidateRecord := range systemRecords {
 			if candidateRecord.status == "pending" && candidateRecord.timestamp <= saleTimestamp {
-				matchedRecords = append(matchedRecords, candidateRecord)
 				builder.markCartoRecordSold(candidateRecord)
+				matchedRecords = append(matchedRecords, builder.ledger.ensureMutableRecord(candidateRecord))
 			} else if candidateRecord.status == "pending" {
 				remainingRecords = append(remainingRecords, candidateRecord)
 			}
@@ -149,8 +151,8 @@ func (builder *ledgerBuilder) claimAllPendingCarto(saleTimestamp string) []*scan
 	matchedRecords := make([]*scanRecord, 0, len(builder.unsoldCarto))
 	for _, candidateRecord := range builder.unsoldCarto {
 		if candidateRecord.status == "pending" && candidateRecord.timestamp <= saleTimestamp {
-			matchedRecords = append(matchedRecords, candidateRecord)
 			builder.markCartoRecordSold(candidateRecord)
+			matchedRecords = append(matchedRecords, builder.ledger.ensureMutableRecord(candidateRecord))
 		}
 	}
 	if len(builder.unsoldCarto) == 0 {

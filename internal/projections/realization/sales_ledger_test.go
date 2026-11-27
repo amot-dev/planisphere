@@ -2,12 +2,15 @@ package realization_test
 
 import (
 	"database/sql"
+	"fmt"
+	"sync"
 	"testing"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/replay"
+	replayreal "planisphere/internal/replay/realization"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/journaltest"
@@ -189,5 +192,147 @@ func TestSalesLedgerPerProfileIsolationAndDisabledScope(testingContext *testing.
 	}
 	if prof3Breakdown.TotalRealized != 95054000 || prof3Breakdown.PendingValue != 0 || salesLedger.Generation() != genBeforeArchived {
 		testingContext.Fatalf("expected disabled archived Profile 3 breakdown TotalRealized=95054000 from warm ledger, got %+v", prof3Breakdown)
+	}
+}
+
+func TestSalesLedgerDatabaseSwitchResetAndConcurrentRaceSafety(testingContext *testing.T) {
+	databaseConnection := dbtest.OpenMemory(testingContext)
+
+	// Seed multiple initial rows so lastEventID > 1 before testing full-state reset on AppDatabaseSwitched and Invalidate.
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-06-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"OldSysA","SystemAddress":6001,"BodyID":1,"BodyName":"OldSysA 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-06-01T10:01:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"OldSysB","SystemAddress":6002,"BodyID":1,"BodyName":"OldSysB 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-06-01T10:02:00Z","event":"MultiSellExplorationData","BaseValue":2000000,"Bonus":0,"TotalEarnings":2000000,"Discovered":[{"SystemName":"OldSysA","NumBodies":1},{"SystemName":"OldSysB","NumBodies":1}]}`,
+	)
+
+	eventBus := projection.NewBus()
+	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	if salesLedger.Name() != "SalesLedger" {
+		testingContext.Fatalf("unexpected projection name %q", salesLedger.Name())
+	}
+	initialBreakdown, initErr := salesLedger.Breakdown("", "", nil)
+	if initErr != nil || initialBreakdown.TotalRealized != 2000000 {
+		testingContext.Fatalf("initial Breakdown: %+v err=%v", initialBreakdown, initErr)
+	}
+
+	// Simulate switching to a smaller archive (primary keys reset to 1) via AppDatabaseSwitched.
+	if _, err := databaseConnection.Exec(`DELETE FROM journal_events; DELETE FROM sqlite_sequence WHERE name = 'journal_events'`); err != nil {
+		testingContext.Fatalf("reset journal_events sequence: %v", err)
+	}
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-06-02T09:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":7001,"Body":1}`,
+	)
+	eventBus.PublishApp(events.AppDatabaseSwitched)
+
+	switchedBreakdown, switchErr := salesLedger.Breakdown("", "", nil)
+	if switchErr != nil || switchedBreakdown.TotalRealized != 0 || switchedBreakdown.PendingValue != 19010800 {
+		testingContext.Fatalf("expected cold rebuild after AppDatabaseSwitched, got %+v err=%v", switchedBreakdown, switchErr)
+	}
+
+	// Direct Invalidate must also discard retained watermark state.
+	if _, err := databaseConnection.Exec(`DELETE FROM journal_events; DELETE FROM sqlite_sequence WHERE name = 'journal_events'`); err != nil {
+		testingContext.Fatalf("reset journal_events for direct Invalidate: %v", err)
+	}
+	salesLedger.Invalidate()
+	clearedBreakdown, clearErr := salesLedger.Breakdown("", "", nil)
+	if clearErr != nil || clearedBreakdown != (realization.Breakdown{}) {
+		testingContext.Fatalf("expected empty ledger after direct Invalidate, got %+v err=%v", clearedBreakdown, clearErr)
+	}
+
+	// Concurrent readers (Get, BreakdownScoped, OrganicSaleDetails) racing with live journal appends and invalidations.
+	var readerGroup sync.WaitGroup
+	stopReaders := make(chan struct{})
+	readerErrors := make(chan error, 8)
+	scopeProf1 := replay.NewProfileScope([]int64{1})
+
+	for worker := 0; worker < 4; worker++ {
+		readerGroup.Add(1)
+		go func() {
+			defer readerGroup.Done()
+			for {
+				select {
+				case <-stopReaders:
+					return
+				default:
+				}
+				snapshot, getErr := salesLedger.Get()
+				if getErr != nil {
+					select {
+					case readerErrors <- getErr:
+					default:
+					}
+					return
+				}
+				_ = snapshot.Breakdown("", "", nil)
+				if _, scopedErr := salesLedger.BreakdownScoped("", "", scopeProf1, nil); scopedErr != nil {
+					select {
+					case readerErrors <- scopedErr:
+					default:
+					}
+					return
+				}
+				if _, _, detailsErr := salesLedger.OrganicSaleDetails("probe-uid"); detailsErr != nil {
+					select {
+					case readerErrors <- detailsErr:
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+
+	for step := 1; step <= 25; step++ {
+		tsScan := fmt.Sprintf("2026-06-03T10:%02d:00Z", step)
+		tsMap := fmt.Sprintf("2026-06-03T10:%02d:10Z", step)
+		tsOrg := fmt.Sprintf("2026-06-03T10:%02d:20Z", step)
+		tsAction := fmt.Sprintf("2026-06-03T10:%02d:30Z", step)
+		sysAddr := int64(8000 + step)
+
+		insertScopedLedgerEvent(testingContext, databaseConnection, 1, "CmdrRace", tsScan, "Scan",
+			fmt.Sprintf(`{"timestamp":%q,"event":"Scan","ScanType":"Detailed","StarSystem":"RaceSys %d","SystemAddress":%d,"BodyID":1,"BodyName":"RaceSys %d A","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`, tsScan, step, sysAddr, step))
+		eventBus.PublishJournal(journal.NewEventSet(journal.EventScan))
+
+		insertScopedLedgerEvent(testingContext, databaseConnection, 1, "CmdrRace", tsMap, "SAAScanComplete",
+			fmt.Sprintf(`{"timestamp":%q,"event":"SAAScanComplete","SystemAddress":%d,"BodyID":1,"BodyName":"RaceSys %d A","ProbesUsed":4,"EfficiencyTarget":6}`, tsMap, sysAddr, step))
+		eventBus.PublishJournal(journal.NewEventSet(journal.EventSAAScanComplete))
+
+		insertScopedLedgerEvent(testingContext, databaseConnection, 1, "CmdrRace", tsOrg, "ScanOrganic",
+			fmt.Sprintf(`{"timestamp":%q,"event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":%d,"Body":1}`, tsOrg, sysAddr))
+		eventBus.PublishJournal(journal.NewEventSet(journal.EventScanOrganic))
+
+		if step%3 == 0 {
+			insertScopedLedgerEvent(testingContext, databaseConnection, 1, "CmdrRace", tsAction, "Resurrect",
+				fmt.Sprintf(`{"timestamp":%q,"event":"Resurrect","Option":"rebuy","Cost":100000,"Bankrupt":false}`, tsAction))
+			eventBus.PublishJournal(journal.NewEventSet(journal.EventResurrect))
+		} else {
+			insertScopedLedgerEvent(testingContext, databaseConnection, 1, "CmdrRace", tsAction, "SellOrganicData",
+				fmt.Sprintf(`{"timestamp":%q,"event":"SellOrganicData","MarketID":555,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`, tsAction))
+			eventBus.PublishJournal(journal.NewEventSet(journal.EventSellOrganicData))
+		}
+	}
+
+	close(stopReaders)
+	readerGroup.Wait()
+	select {
+	case workerErr := <-readerErrors:
+		testingContext.Fatalf("concurrent reader failed: %v", workerErr)
+	default:
+	}
+
+	finalIncremental, finalErr := salesLedger.BreakdownScoped("", "", scopeProf1, nil)
+	if finalErr != nil {
+		testingContext.Fatalf("final BreakdownScoped: %v", finalErr)
+	}
+	expectedFullLedger, fullBuildErr := replayreal.BuildLedger(databaseConnection, true)
+	if fullBuildErr != nil {
+		testingContext.Fatalf("full BuildLedger: %v", fullBuildErr)
+	}
+	if expectedBreakdown := expectedFullLedger.BreakdownForScope("", "", scopeProf1, nil); finalIncremental != expectedBreakdown {
+		testingContext.Fatalf("concurrent incremental parity mismatch: got=%+v want=%+v", finalIncremental, expectedBreakdown)
 	}
 }

@@ -73,6 +73,7 @@ type bodyKey struct {
 }
 
 type scanRecord struct {
+	ledgerIndex          int
 	profileID            int64
 	nocaseCommander      string
 	eventUID             string
@@ -120,13 +121,66 @@ type unattributedSale struct {
 	carrierTariffLoss int64
 }
 
+const (
+	ledgerPageShift = 10
+	ledgerPageSize  = 1 << ledgerPageShift
+)
+
 // Ledger tracks all scans and their final realization outcomes across all
 // commander save-slot profiles in the archive.
 type Ledger struct {
-	records           []*scanRecord
-	organicSales      map[string]OrganicSaleOutcome
-	unattributedSales []unattributedSale
-	enabledActors     replay.EnabledProfileMatcher
+	recordPages          [][]*scanRecord
+	recordCount          int
+	organicSales         map[string]OrganicSaleOutcome
+	unattributedSales    []unattributedSale
+	enabledActors        replay.EnabledProfileMatcher
+	publishedRecordCount int
+	pageCloned           []bool
+	organicSalesCloned   bool
+}
+
+func (ledger *Ledger) recordAt(recordIndex int) *scanRecord {
+	return ledger.recordPages[recordIndex>>ledgerPageShift][recordIndex&(ledgerPageSize-1)]
+}
+
+func (ledger *Ledger) clonePage(pageIndex int) {
+	existingPage := ledger.recordPages[pageIndex]
+	clonedPage := make([]*scanRecord, len(existingPage), ledgerPageSize)
+	copy(clonedPage, existingPage)
+	ledger.recordPages[pageIndex] = clonedPage
+	ledger.pageCloned[pageIndex] = true
+}
+
+func (ledger *Ledger) appendRecord(scanEntry *scanRecord) {
+	recordIndex := ledger.recordCount
+	scanEntry.ledgerIndex = recordIndex
+	pageIndex := recordIndex >> ledgerPageShift
+	if recordIndex&(ledgerPageSize-1) == 0 {
+		ledger.recordPages = append(ledger.recordPages, make([]*scanRecord, 0, ledgerPageSize))
+		ledger.pageCloned = append(ledger.pageCloned, true)
+	} else if !ledger.pageCloned[pageIndex] {
+		ledger.clonePage(pageIndex)
+	}
+	ledger.recordPages[pageIndex] = append(ledger.recordPages[pageIndex], scanEntry)
+	ledger.recordCount = recordIndex + 1
+}
+
+func (ledger *Ledger) ensureMutableRecord(record *scanRecord) *scanRecord {
+	if record.ledgerIndex >= ledger.publishedRecordCount {
+		return record
+	}
+	pageIndex := record.ledgerIndex >> ledgerPageShift
+	slotIndex := record.ledgerIndex & (ledgerPageSize - 1)
+	if !ledger.pageCloned[pageIndex] {
+		ledger.clonePage(pageIndex)
+	}
+	copiedRecord := *record
+	ledger.recordPages[pageIndex][slotIndex] = &copiedRecord
+	return &copiedRecord
+}
+
+func (ledger *Ledger) sealSnapshot() {
+	ledger.unattributedSales = ledger.unattributedSales[:len(ledger.unattributedSales):len(ledger.unattributedSales)]
 }
 
 // OrganicSaleDetails returns realized Vista Genomics sale metadata for a
@@ -170,44 +224,52 @@ func (ledger *Ledger) BreakdownForScope(
 		allowActor = ledger.enabledActors.Matches
 	}
 	var breakdown Breakdown
-	accumulateRealizedRecords(&breakdown, ledger.records, afterTimestamp, untilTimestamp, allowActor, allowDiscovery)
+	ledger.accumulateRealizedRecords(&breakdown, afterTimestamp, untilTimestamp, allowActor, allowDiscovery)
 	accumulateUnattributedSales(&breakdown, ledger.unattributedSales, afterTimestamp, untilTimestamp, allowActor, allowDiscovery)
 	return breakdown
 }
 
-func accumulateRealizedRecords(
+func (ledger *Ledger) accumulateRealizedRecords(
 	breakdown *Breakdown,
-	records []*scanRecord,
 	after, until string,
 	allowActor func(int64, string) bool,
 	allowDiscovery func(string) bool,
 ) {
-	firstRecordIndex := sort.Search(len(records), func(recordIndex int) bool {
-		return records[recordIndex].timestamp > after
+	firstRecordIndex := sort.Search(ledger.recordCount, func(recordIndex int) bool {
+		return ledger.recordAt(recordIndex).timestamp > after
 	})
-	for recordIndex := firstRecordIndex; recordIndex < len(records); recordIndex++ {
-		scanEntry := records[recordIndex]
-		if scanEntry.timestamp > until {
-			break
+	if firstRecordIndex >= ledger.recordCount {
+		return
+	}
+	startPage := firstRecordIndex >> ledgerPageShift
+	startSlot := firstRecordIndex & (ledgerPageSize - 1)
+	for pageIndex := startPage; pageIndex < len(ledger.recordPages); pageIndex++ {
+		if pageIndex > startPage {
+			startSlot = 0
 		}
-		if allowActor != nil && !allowActor(scanEntry.profileID, scanEntry.nocaseCommander) {
-			continue
-		}
-		if allowDiscovery != nil && !allowDiscovery(scanEntry.timestamp) {
-			continue
-		}
-		if scanEntry.isOrganic {
-			breakdown.OrganicLostDeath += scanEntry.deathLoss
-			breakdown.OrganicStolen += scanEntry.stolenLoss
-		} else {
-			breakdown.CartoLostDeath += scanEntry.deathLoss
-			breakdown.CartoStolen += scanEntry.stolenLoss
-		}
-		breakdown.TotalRealized += scanEntry.actualNet
-		breakdown.CarrierTariffLoss += scanEntry.carrierTariffLoss
-		breakdown.NpcCrewLoss += scanEntry.crewLoss
-		if scanEntry.status == "pending" {
-			breakdown.PendingValue += scanEntry.theoreticalTotal
+		for _, scanEntry := range ledger.recordPages[pageIndex][startSlot:] {
+			if scanEntry.timestamp > until {
+				return
+			}
+			if allowActor != nil && !allowActor(scanEntry.profileID, scanEntry.nocaseCommander) {
+				continue
+			}
+			if allowDiscovery != nil && !allowDiscovery(scanEntry.timestamp) {
+				continue
+			}
+			if scanEntry.isOrganic {
+				breakdown.OrganicLostDeath += scanEntry.deathLoss
+				breakdown.OrganicStolen += scanEntry.stolenLoss
+			} else {
+				breakdown.CartoLostDeath += scanEntry.deathLoss
+				breakdown.CartoStolen += scanEntry.stolenLoss
+			}
+			breakdown.TotalRealized += scanEntry.actualNet
+			breakdown.CarrierTariffLoss += scanEntry.carrierTariffLoss
+			breakdown.NpcCrewLoss += scanEntry.crewLoss
+			if scanEntry.status == "pending" {
+				breakdown.PendingValue += scanEntry.theoreticalTotal
+			}
 		}
 	}
 }

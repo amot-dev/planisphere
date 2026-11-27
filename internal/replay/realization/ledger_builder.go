@@ -2,7 +2,9 @@ package realization
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
+	"sync"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
@@ -31,6 +33,8 @@ type ledgerBuilder struct {
 	nocaseCommander     string
 	session             *replay.SessionState
 	wageMatcher         *crewWageMatcher
+	hasPriorSale        bool
+	lastSaleUnixSeconds int64
 	scans               map[bodyKey]*journal.ScanEvent
 	unsoldCarto         map[bodyKey]*scanRecord
 	unsoldCartoBySystem map[string][]*scanRecord
@@ -38,6 +42,28 @@ type ledgerBuilder struct {
 	soldMapped          map[bodyKey]bool
 	unsoldOrganic       []*scanRecord
 	seenSales           map[saleDedupKey]bool
+}
+
+// LedgerState retains chronological per-actor replay state and a primary-key
+// watermark so monotonic live journal appends can advance the realization
+// ledger incrementally without replaying full archive history.
+type LedgerState struct {
+	mu                    sync.Mutex
+	consumed              bool
+	hasUnresolvedProfiles bool
+	defaultOdyssey        bool
+	lastEventID           int64
+	lastTimestamp         string
+	actors                map[actorKey]*ledgerBuilder
+	ledger                *Ledger
+}
+
+// Ledger returns the immutable realization ledger snapshot at the current watermark.
+func (state *LedgerState) Ledger() *Ledger {
+	if state == nil {
+		return nil
+	}
+	return state.ledger
 }
 
 func actorKeyForRow(row replay.Row) actorKey {
@@ -56,6 +82,16 @@ func LoadEnabledActorSet(queryer db.Queryer) (replay.EnabledProfileMatcher, erro
 // BuildLedger constructs the full chronological lifecycle realization ledger
 // across all commander save-slot profiles from queryer.
 func BuildLedger(queryer db.Queryer, defaultOdyssey bool) (*Ledger, error) {
+	state, buildError := BuildLedgerState(queryer, defaultOdyssey)
+	if buildError != nil {
+		return nil, buildError
+	}
+	return state.Ledger(), nil
+}
+
+// BuildLedgerState constructs the full chronological realization ledger and
+// retains per-actor replay state and primary-key watermark for incremental advances.
+func BuildLedgerState(queryer db.Queryer, defaultOdyssey bool) (*LedgerState, error) {
 	enabledActors, actorErr := LoadEnabledActorSet(queryer)
 	if actorErr != nil {
 		return nil, actorErr
@@ -65,33 +101,140 @@ func BuildLedger(queryer db.Queryer, defaultOdyssey bool) (*Ledger, error) {
 		return nil, loadError
 	}
 
+	estimatedPages := (len(loadedEvents)/2 + ledgerPageSize - 1) >> ledgerPageShift
 	sharedLedger := &Ledger{
-		records:       make([]*scanRecord, 0, len(loadedEvents)/2),
-		organicSales:  make(map[string]OrganicSaleOutcome),
-		enabledActors: enabledActors,
+		recordPages:        make([][]*scanRecord, 0, estimatedPages),
+		pageCloned:         make([]bool, 0, estimatedPages),
+		organicSales:       make(map[string]OrganicSaleOutcome),
+		enabledActors:      enabledActors,
+		organicSalesCloned: true,
 	}
 	if len(loadedEvents) == 0 {
-		return sharedLedger, nil
+		sharedLedger.sealSnapshot()
+		return &LedgerState{
+			defaultOdyssey: defaultOdyssey,
+			actors:         make(map[actorKey]*ledgerBuilder),
+			ledger:         sharedLedger,
+		}, nil
 	}
 
 	wageMatchers, countsByActor := buildActorWageMatchersAndCounts(loadedEvents)
 	actors := make(map[actorKey]*ledgerBuilder, len(countsByActor))
+	lastEventID, lastTimestamp, hasUnresolved := applyEventsToActors(sharedLedger, actors, loadedEvents, defaultOdyssey, countsByActor, wageMatchers)
+	sharedLedger.sealSnapshot()
+	return &LedgerState{
+		hasUnresolvedProfiles: hasUnresolved,
+		defaultOdyssey:        defaultOdyssey,
+		lastEventID:           lastEventID,
+		lastTimestamp:         lastTimestamp,
+		actors:                actors,
+		ledger:                sharedLedger,
+	}, nil
+}
+
+// Advance incrementally applies newly appended journal events after state's
+// primary-key watermark, falling back to BuildLedgerState when unresolved
+// commander profiles, historical backfills, or split crew-wage flushes require full replay.
+func (state *LedgerState) Advance(queryer db.Queryer) (*LedgerState, error) {
+	if state == nil {
+		return BuildLedgerState(queryer, true)
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.consumed || state.hasUnresolvedProfiles {
+		return BuildLedgerState(queryer, state.defaultOdyssey)
+	}
+
+	newEvents, loadError := replay.LoadEventsAllProfilesAfterID(queryer, state.lastEventID, SalesLedgerReplayEvents)
+	if loadError != nil {
+		return nil, loadError
+	}
+	if len(newEvents) == 0 {
+		return state, nil
+	}
+	for _, journalEvent := range newEvents {
+		if journalEvent.Timestamp < state.lastTimestamp {
+			return BuildLedgerState(queryer, state.defaultOdyssey)
+		}
+	}
+	batchWageMatchers, countsByActor, canIncrement := prepareIncrementalWages(newEvents, state.actors)
+	if !canIncrement {
+		return BuildLedgerState(queryer, state.defaultOdyssey)
+	}
+	enabledActors, actorErr := LoadEnabledActorSet(queryer)
+	if actorErr != nil {
+		return nil, actorErr
+	}
+
+	state.consumed = true
+	clonedPages := slices.Clone(state.ledger.recordPages)
+	nextLedger := &Ledger{
+		recordPages:          clonedPages,
+		recordCount:          state.ledger.recordCount,
+		organicSales:         state.ledger.organicSales,
+		unattributedSales:    state.ledger.unattributedSales,
+		enabledActors:        enabledActors,
+		publishedRecordCount: state.ledger.recordCount,
+		pageCloned:           make([]bool, len(clonedPages)),
+	}
+	for actor, existingBuilder := range state.actors {
+		existingBuilder.ledger = nextLedger
+		if extraWages := batchWageMatchers[actor]; extraWages != nil {
+			existingBuilder.wageMatcher.wageEvents = append(existingBuilder.wageMatcher.wageEvents, extraWages.wageEvents...)
+		}
+	}
+	maxEventID, maxTimestamp, hasUnresolved := applyEventsToActors(nextLedger, state.actors, newEvents, state.defaultOdyssey, countsByActor, batchWageMatchers)
+	nextLedger.sealSnapshot()
+	return &LedgerState{
+		hasUnresolvedProfiles: hasUnresolved,
+		defaultOdyssey:        state.defaultOdyssey,
+		lastEventID:           max(state.lastEventID, maxEventID),
+		lastTimestamp:         max(state.lastTimestamp, maxTimestamp),
+		actors:                state.actors,
+		ledger:                nextLedger,
+	}, nil
+}
+
+func applyEventsToActors(
+	sharedLedger *Ledger,
+	actors map[actorKey]*ledgerBuilder,
+	eventsToApply []replay.Row,
+	defaultOdyssey bool,
+	countsByActor map[actorKey]int,
+	wageMatchers map[actorKey]*crewWageMatcher,
+) (int64, string, bool) {
 	var cachedKey actorKey
 	var cachedBuilder *ledgerBuilder
+	var maxEventID int64
+	var maxTimestamp string
+	var hasUnresolvedProfiles bool
 
-	for _, journalEvent := range loadedEvents {
+	for _, journalEvent := range eventsToApply {
+		if journalEvent.ID > maxEventID {
+			maxEventID = journalEvent.ID
+		}
+		if journalEvent.Timestamp > maxTimestamp {
+			maxTimestamp = journalEvent.Timestamp
+		}
+		if journalEvent.ProfileID == 0 && strings.TrimSpace(journalEvent.Commander) != "" {
+			hasUnresolvedProfiles = true
+		}
 		key := actorKeyForRow(journalEvent)
 		if cachedBuilder == nil || key != cachedKey {
 			cachedKey = key
 			cachedBuilder = actors[key]
 			if cachedBuilder == nil {
-				cachedBuilder = newActorLedgerBuilder(sharedLedger, key, defaultOdyssey, countsByActor[key], wageMatchers[key])
+				var actorWages *crewWageMatcher
+				if wageMatchers != nil {
+					actorWages = wageMatchers[key]
+				}
+				cachedBuilder = newActorLedgerBuilder(sharedLedger, key, defaultOdyssey, countsByActor[key], actorWages)
 				actors[key] = cachedBuilder
 			}
 		}
 		cachedBuilder.processEvent(journalEvent)
 	}
-	return sharedLedger, nil
+	return maxEventID, maxTimestamp, hasUnresolvedProfiles
 }
 
 func newActorLedgerBuilder(
@@ -175,6 +318,7 @@ func (builder *ledgerBuilder) recordCartoScan(journalEvent replay.Row) {
 
 	if existingEntry := builder.unsoldCarto[key]; existingEntry != nil && existingEntry.status == "pending" {
 		if !existingEntry.hasScan {
+			existingEntry = builder.mutableCartoRecord(key, existingEntry)
 			existingEntry.theoreticalBase += estimatedBodyValue.Base
 			existingEntry.theoreticalBonus += estimatedBodyValue.Bonus
 			existingEntry.theoreticalTotal += estimatedBodyValue.Total
@@ -206,7 +350,7 @@ func (builder *ledgerBuilder) recordCartoScan(journalEvent replay.Row) {
 	}
 	builder.unsoldCarto[key] = scanEntry
 	builder.unsoldCartoBySystem[normalizedSystemName] = append(builder.unsoldCartoBySystem[normalizedSystemName], scanEntry)
-	builder.ledger.records = append(builder.ledger.records, scanEntry)
+	builder.ledger.appendRecord(scanEntry)
 }
 
 func (builder *ledgerBuilder) recordCartoMapping(journalEvent replay.Row) {
@@ -237,6 +381,7 @@ func (builder *ledgerBuilder) recordCartoMapping(journalEvent replay.Row) {
 	expectedFirstMapped := reference.CanExpectFirstMapped(systemPopulation, parentScan.WasDiscovered, parentScan.WasMapped)
 
 	if existingEntry != nil && existingEntry.status == "pending" {
+		existingEntry = builder.mutableCartoRecord(key, existingEntry)
 		existingEntry.theoreticalBase += mappingIncrement.Base
 		existingEntry.theoreticalBonus += mappingIncrement.Bonus
 		existingEntry.theoreticalTotal += mappingIncrement.Total
@@ -269,7 +414,32 @@ func (builder *ledgerBuilder) recordCartoMapping(journalEvent replay.Row) {
 	}
 	builder.unsoldCarto[key] = scanEntry
 	builder.unsoldCartoBySystem[normalizedSystemName] = append(builder.unsoldCartoBySystem[normalizedSystemName], scanEntry)
-	builder.ledger.records = append(builder.ledger.records, scanEntry)
+	builder.ledger.appendRecord(scanEntry)
+}
+
+func (builder *ledgerBuilder) mutableCartoRecord(key bodyKey, record *scanRecord) *scanRecord {
+	mutableRecord := builder.ledger.ensureMutableRecord(record)
+	if mutableRecord == record {
+		return record
+	}
+	builder.unsoldCarto[key] = mutableRecord
+	systemRecords := builder.unsoldCartoBySystem[record.normalizedStarSystem]
+	for index, candidate := range systemRecords {
+		if candidate == record {
+			systemRecords[index] = mutableRecord
+			break
+		}
+	}
+	return mutableRecord
+}
+
+func (builder *ledgerBuilder) noteSaleTimestamp(saleTimestamp string) {
+	if unixSeconds, parsedOk := parseUnixSeconds(saleTimestamp); parsedOk {
+		if !builder.hasPriorSale || unixSeconds > builder.lastSaleUnixSeconds {
+			builder.hasPriorSale = true
+			builder.lastSaleUnixSeconds = unixSeconds
+		}
+	}
 }
 
 func (builder *ledgerBuilder) recordOrganicScan(journalEvent replay.Row) {
@@ -313,5 +483,5 @@ func (builder *ledgerBuilder) recordOrganicScan(journalEvent replay.Row) {
 		status:             "pending",
 	}
 	builder.unsoldOrganic = append(builder.unsoldOrganic, scanEntry)
-	builder.ledger.records = append(builder.ledger.records, scanEntry)
+	builder.ledger.appendRecord(scanEntry)
 }

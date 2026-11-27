@@ -3,6 +3,7 @@ package realization
 import (
 	"cmp"
 	"encoding/json"
+	"maps"
 	"slices"
 	"sort"
 
@@ -20,6 +21,46 @@ type parsedWageEvent struct {
 
 type crewWageMatcher struct {
 	wageEvents []parsedWageEvent
+}
+
+func prepareIncrementalWages(
+	newEvents []replay.Row,
+	existingActors map[actorKey]*ledgerBuilder,
+) (map[actorKey]*crewWageMatcher, map[actorKey]int, bool) {
+	matchers, counts := buildActorWageMatchersAndCounts(newEvents)
+	hasSaleInBatch := make(map[actorKey]bool, 2)
+	hasWageRow := false
+	for _, journalEvent := range newEvents {
+		switch journalEvent.Type {
+		case journal.EventSellExplorationData, journal.EventMultiSellExplorationData, journal.EventSellOrganicData:
+			hasSaleInBatch[actorKeyForRow(journalEvent)] = true
+		case journal.EventNpcCrewPaidWage:
+			hasWageRow = true
+		}
+	}
+	if !hasWageRow {
+		return nil, counts, true
+	}
+	for _, journalEvent := range newEvents {
+		if journalEvent.Type == journal.EventNpcCrewPaidWage && !hasSaleInBatch[actorKeyForRow(journalEvent)] {
+			return nil, nil, false
+		}
+	}
+	for actor, batchMatcher := range matchers {
+		existingBuilder := existingActors[actor]
+		if existingBuilder == nil || len(batchMatcher.wageEvents) == 0 {
+			continue
+		}
+		earliestBatchWageUnix := batchMatcher.wageEvents[0].unixSeconds
+		if existingBuilder.hasPriorSale && earliestBatchWageUnix-5 <= existingBuilder.lastSaleUnixSeconds {
+			return nil, nil, false
+		}
+		if existingWages := existingBuilder.wageMatcher.wageEvents; len(existingWages) > 0 &&
+			earliestBatchWageUnix < existingWages[len(existingWages)-1].unixSeconds {
+			return nil, nil, false
+		}
+	}
+	return matchers, counts, true
 }
 
 // buildActorWageMatchersAndCounts indexes NpcCrewPaidWage events and total
@@ -115,6 +156,7 @@ func (builder *ledgerBuilder) recordOrganicSale(rawJSON string) {
 
 	totalSaleGross := totalSaleValue + totalSaleBonus
 	totalCrewWage := builder.wageMatcher.claimWage(sellOrganicEvent.Timestamp)
+	builder.noteSaleTimestamp(sellOrganicEvent.Timestamp)
 	var allocatedEventCrew int64
 
 	for itemIndex, bioItem := range sellOrganicEvent.BioData {
@@ -302,7 +344,8 @@ func allocateOrganicBatchPayout(
 	batchSize := int64(len(claimedIndices))
 	var allocatedBase, allocatedBonus, allocatedCrew int64
 	for batchPosition, recordIndex := range claimedIndices {
-		matchedRecord := unsoldRecords[recordIndex]
+		matchedRecord := ledger.ensureMutableRecord(unsoldRecords[recordIndex])
+		unsoldRecords[recordIndex] = matchedRecord
 		shareBase := bioItem.Value / batchSize
 		shareBonus := bioItem.Bonus / batchSize
 		shareCrew := itemCrewWage / batchSize
@@ -331,6 +374,10 @@ func finalizeSoldOrganicRecord(
 	matchedRecord.actualNet = (shareBase + shareBonus) - shareCrew
 
 	if matchedRecord.eventUID != "" {
+		if !ledger.organicSalesCloned {
+			ledger.organicSales = maps.Clone(ledger.organicSales)
+			ledger.organicSalesCloned = true
+		}
 		ledger.organicSales[matchedRecord.eventUID] = OrganicSaleOutcome{
 			SaleTimestamp: sellEvent.Timestamp,
 			SaleMarketID:  sellEvent.MarketID,

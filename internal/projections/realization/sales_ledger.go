@@ -4,6 +4,7 @@ package realization
 
 import (
 	"database/sql"
+	"sync"
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
@@ -42,45 +43,150 @@ type Breakdown = replayreal.Breakdown
 // OrganicSaleOutcome records the resolved first-logged status for one ScanOrganic event UID.
 type OrganicSaleOutcome = replayreal.OrganicSaleOutcome
 
-// SalesLedger caches the chronological settlement ledger over persisted journal events.
+// SalesLedger caches the chronological settlement ledger over persisted journal
+// events, retaining incremental replay state across journal-only invalidations.
 type SalesLedger struct {
-	ledger *projection.Cache[*Ledger]
+	dbConn   *sql.DB
+	triggers projection.Triggers
+
+	buildMu sync.Mutex
+
+	mu              sync.Mutex
+	cached          *Ledger
+	state           *replayreal.LedgerState
+	valid           bool
+	generation      uint64
+	resetGeneration uint64
 }
+
+var _ projection.SelectiveProjection = (*SalesLedger)(nil)
 
 // NewSalesLedger creates a SalesLedger projection and registers it on bus.
 func NewSalesLedger(dbConn *sql.DB, bus *projection.Bus) *SalesLedger {
-	triggers := projection.Triggers{
-		Journal: salesLedgerJournalEvents,
-		App:     salesLedgerAppEvents,
+	salesLedger := &SalesLedger{
+		dbConn: dbConn,
+		triggers: projection.Triggers{
+			Journal: salesLedgerJournalEvents,
+			App:     salesLedgerAppEvents,
+		},
 	}
-	return &SalesLedger{
-		ledger: projection.NewCache[*Ledger](bus, "SalesLedger", triggers, func() (*Ledger, error) {
-			if dbConn == nil {
-				return &Ledger{}, nil
-			}
-			return replayreal.BuildLedger(dbConn, true)
-		}),
+	if bus != nil {
+		bus.Register(salesLedger)
 	}
+	return salesLedger
+}
+
+// Name returns the projection's diagnostic name.
+func (salesLedger *SalesLedger) Name() string {
+	return "SalesLedger"
 }
 
 // Triggers reports the journal and app events that invalidate SalesLedger.
 func (salesLedger *SalesLedger) Triggers() projection.Triggers {
-	return salesLedger.ledger.Triggers()
+	return salesLedger.triggers
 }
 
-// Get returns the cached all-time realization ledger.
+// Invalidate clears both the cached ledger snapshot and the retained replay
+// watermark so the next Get performs a full cold rebuild.
+func (salesLedger *SalesLedger) Invalidate() {
+	salesLedger.mu.Lock()
+	defer salesLedger.mu.Unlock()
+	salesLedger.cached = nil
+	salesLedger.state = nil
+	salesLedger.valid = false
+	salesLedger.generation++
+	salesLedger.resetGeneration++
+}
+
+// InvalidateObserved retains incremental replay state across journal-only
+// invalidations while clearing state on application-level filter or database resets.
+func (salesLedger *SalesLedger) InvalidateObserved(observed projection.Triggers) {
+	salesLedger.mu.Lock()
+	defer salesLedger.mu.Unlock()
+	salesLedger.cached = nil
+	salesLedger.valid = false
+	salesLedger.generation++
+	if !observed.App.IsEmpty() {
+		salesLedger.state = nil
+		salesLedger.resetGeneration++
+	}
+}
+
+// Get returns the cached all-time realization ledger, advancing from the
+// retained primary-key watermark after journal-only invalidations.
 func (salesLedger *SalesLedger) Get() (*Ledger, error) {
-	return salesLedger.ledger.Get()
+	if cachedLedger, _, _, _, ok := salesLedger.snapshotState(); ok {
+		return cachedLedger, nil
+	}
+	salesLedger.buildMu.Lock()
+	defer salesLedger.buildMu.Unlock()
+
+	cachedLedger, priorState, capturedGeneration, capturedResetGeneration, ok := salesLedger.snapshotState()
+	if ok {
+		return cachedLedger, nil
+	}
+	if salesLedger.dbConn == nil {
+		return salesLedger.commitState(nil, &Ledger{}, capturedGeneration, capturedResetGeneration), nil
+	}
+	var nextState *replayreal.LedgerState
+	var buildError error
+	if priorState != nil {
+		nextState, buildError = priorState.Advance(salesLedger.dbConn)
+	} else {
+		nextState, buildError = replayreal.BuildLedgerState(salesLedger.dbConn, true)
+	}
+	if buildError != nil {
+		return nil, buildError
+	}
+	return salesLedger.commitState(nextState, nextState.Ledger(), capturedGeneration, capturedResetGeneration), nil
+}
+
+func (salesLedger *SalesLedger) snapshotState() (*Ledger, *replayreal.LedgerState, uint64, uint64, bool) {
+	salesLedger.mu.Lock()
+	defer salesLedger.mu.Unlock()
+	if salesLedger.valid {
+		return salesLedger.cached, nil, 0, 0, true
+	}
+	return nil, salesLedger.state, salesLedger.generation, salesLedger.resetGeneration, false
+}
+
+func (salesLedger *SalesLedger) commitState(
+	nextState *replayreal.LedgerState,
+	nextLedger *Ledger,
+	capturedGeneration, capturedResetGeneration uint64,
+) *Ledger {
+	salesLedger.mu.Lock()
+	defer salesLedger.mu.Unlock()
+	if salesLedger.resetGeneration != capturedResetGeneration {
+		if salesLedger.valid {
+			return salesLedger.cached
+		}
+		return nextLedger
+	}
+	if nextState != nil {
+		salesLedger.state = nextState
+	}
+	if !salesLedger.valid && salesLedger.generation == capturedGeneration {
+		salesLedger.cached = nextLedger
+		salesLedger.valid = true
+	} else if salesLedger.valid {
+		return salesLedger.cached
+	}
+	return nextLedger
 }
 
 // IsValid reports whether the SalesLedger currently holds a warm cached value.
 func (salesLedger *SalesLedger) IsValid() bool {
-	return salesLedger.ledger.IsValid()
+	salesLedger.mu.Lock()
+	defer salesLedger.mu.Unlock()
+	return salesLedger.valid
 }
 
 // Generation returns the monotonically increasing invalidation generation counter.
 func (salesLedger *SalesLedger) Generation() uint64 {
-	return salesLedger.ledger.Generation()
+	salesLedger.mu.Lock()
+	defer salesLedger.mu.Unlock()
+	return salesLedger.generation
 }
 
 // Breakdown computes the aggregated realization breakdown across

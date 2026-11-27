@@ -16,6 +16,7 @@ func (builder *ledgerBuilder) recordResurrect(rawJSON string) {
 
 	for _, organicRecord := range builder.unsoldOrganic {
 		if organicRecord.status == "pending" {
+			organicRecord = builder.ledger.ensureMutableRecord(organicRecord)
 			organicRecord.status = "lost_death"
 			organicRecord.deathLoss = organicRecord.theoreticalTotal
 		}
@@ -25,6 +26,7 @@ func (builder *ledgerBuilder) recordResurrect(rawJSON string) {
 	if isShipDestructionResurrect(resurrectEvent) {
 		for _, cartoRecord := range builder.unsoldCarto {
 			if cartoRecord.status == "pending" {
+				cartoRecord = builder.ledger.ensureMutableRecord(cartoRecord)
 				cartoRecord.status = "lost_death"
 				cartoRecord.deathLoss = cartoRecord.theoreticalTotal
 			}

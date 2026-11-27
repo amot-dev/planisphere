@@ -86,6 +86,21 @@ func LoadEventsAllProfiles(queryer db.Queryer, afterTimestamp, untilTimestamp st
 	return loadEventsWithPredicate(queryer, afterTimestamp, untilTimestamp, eventSet, "")
 }
 
+// LoadEventsAllProfilesAfterID queries persisted journal events matching eventSet
+// with primary key id > afterID across all enabled and disabled profiles in
+// chronological (timestamp, id) order.
+func LoadEventsAllProfilesAfterID(queryer db.Queryer, afterID int64, eventSet journal.EventSet) ([]Row, error) {
+	if eventSet.IsEmpty() {
+		return nil, nil
+	}
+	// Unary +event and +timestamp keep SQLite on SEARCH journal_events USING INTEGER PRIMARY KEY (rowid>?)
+	// so live tail reads never scan idx_journal_events_event_ts or idx_journal_events_ts across history.
+	query := selectJournalRowColumnsSQL + `
+		FROM journal_events WHERE id > ? AND +event IN (` + journal.FormatSQLInClause(eventSet) + `)
+		ORDER BY +timestamp, id`
+	return queryJournalRows(queryer, 16, query, afterID)
+}
+
 func loadEventsWithPredicate(
 	queryer db.Queryer,
 	afterTimestamp, untilTimestamp string,
@@ -109,14 +124,17 @@ func loadEventsWithPredicate(
 	query := selectJournalRowColumnsSQL + `
 		FROM journal_events WHERE ` + eventColumn + ` IN (` + journal.FormatSQLInClause(eventSet) + `) AND timestamp > ? AND timestamp <= ?` +
 		filterClause + ` ORDER BY timestamp, id`
+	return queryJournalRows(queryer, 256, query, afterTimestamp, untilTimestamp)
+}
 
-	rows, queryError := queryer.Query(query, afterTimestamp, untilTimestamp)
+func queryJournalRows(queryer db.Queryer, initialCapacity int, query string, args ...any) ([]Row, error) {
+	rows, queryError := queryer.Query(query, args...)
 	if queryError != nil {
 		return nil, fmt.Errorf("query journal events: %w", queryError)
 	}
 	defer rows.Close()
 
-	loadedRows := make([]Row, 0, 256)
+	loadedRows := make([]Row, 0, initialCapacity)
 	for rows.Next() {
 		rowItem, scanError := scanJournalRow(rows)
 		if scanError != nil {
