@@ -20,7 +20,6 @@ export interface SettingsModalProps {
   modesState: app.ModesState | null
   eddProgress?: EddImportProgress | null
   onClose: () => void
-  onOpenSetupWizard?: () => void
 }
 
 /**
@@ -34,7 +33,6 @@ export function SettingsModal({
   modesState,
   eddProgress,
   onClose,
-  onOpenSetupWizard,
 }: SettingsModalProps) {
   const [error, setError] = useState('')
   const [flightModesBusy, setFlightModesBusy] = useState(false)
@@ -94,22 +92,6 @@ export function SettingsModal({
         settings={settings}
         onSetError={setError}
       />
-
-      {onOpenSetupWizard && (
-        <div className="flex items-center justify-between pt-2 border-t border-ed-border">
-          <span className="text-[11px] text-ed-text-muted">
-            Need to change your SQLite database file path or re-run initial onboarding?
-          </span>
-          <button
-            type="button"
-            disabled={isBusy}
-            onClick={onOpenSetupWizard}
-            className="ed-btn"
-          >
-            RUN SETUP WIZARD...
-          </button>
-        </div>
-      )}
     </ModalShell>
   )
 }

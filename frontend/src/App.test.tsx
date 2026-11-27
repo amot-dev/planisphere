@@ -231,12 +231,15 @@ describe('App top-level shell orchestration', () => {
 
     expect(mounted.container.textContent).toContain('Deep Core Run')
 
-    // Open SettingsModal via CONFIG, surface and dismiss an RPC error banner, then open SetupWizard and close it.
+    // Open SettingsModal via CONFIG, surface and dismiss an RPC error banner, and close it.
     await act(async () => {
       mounted.findButtonByText('CONFIG').click()
       await Promise.resolve()
     })
-    expect(mounted.container.querySelector('[aria-label="Terminal Configuration"]')).not.toBeNull()
+    const settingsDialog = mounted.container.querySelector(
+      '[aria-label="Terminal Configuration"]',
+    ) as HTMLElement
+    expect(settingsDialog).not.toBeNull()
 
     await act(async () => {
       mounted.findButtonByText('BROWSE...', { index: 0 }).click()
@@ -251,13 +254,7 @@ describe('App top-level shell orchestration', () => {
     expect(mounted.container.textContent).not.toContain('journal directory inaccessible')
 
     act(() => {
-      mounted.findButtonByText('RUN SETUP WIZARD...').click()
-    })
-    expect(mounted.container.querySelector('[aria-label="Planisphere Setup"]')).not.toBeNull()
-    act(() => {
-      ;(
-        mounted.container.querySelector('button[title="Close setup wizard"]') as HTMLButtonElement
-      ).click()
+      ;(settingsDialog.querySelector('button') as HTMLButtonElement).click()
     })
     expect(mounted.container.querySelector('[role="dialog"]')).toBeNull()
 

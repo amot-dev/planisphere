@@ -17,7 +17,6 @@ export interface SetupWizardProps {
   ingestStatus: app.IngestStatus | null
   eddProgress?: EddImportProgress | null
   onComplete: () => void
-  onClose?: () => void
 }
 
 const TOTAL_STEPS = 4
@@ -38,7 +37,6 @@ export function SetupWizardModal({
   ingestStatus: initialIngest,
   eddProgress,
   onComplete,
-  onClose,
 }: SetupWizardProps) {
   const [eddBusy, setEddBusy] = useState<boolean>(false)
   const wizard = useSetupWizard(initialSettings, initialIngest, { eddBusy, setEddBusy }, onComplete)
@@ -49,15 +47,6 @@ export function SetupWizardModal({
       badge={`v${APP_VERSION}`}
       subtitle={STEP_TITLES[wizard.step]}
       maxWidth="max-w-lg"
-      onClose={
-        onClose
-          ? () => {
-              if (!wizard.isBusy) onClose()
-            }
-          : undefined
-      }
-      closeDisabled={wizard.isBusy}
-      closeTitle="Close setup wizard"
       headerLeading={<div className="w-2 h-4 bg-ed-amber" />}
       bodyClassName="p-5 space-y-4 text-xs min-h-[310px] max-h-[70vh] overflow-y-auto"
       footer={

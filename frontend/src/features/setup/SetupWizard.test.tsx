@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { app } from '../../api/models'
 import { makeSettings } from '../../test/fixtures'
 import { mountTestRoot } from '../../test/render'
@@ -8,7 +8,7 @@ import { installWailsAppMock } from '../../test/wailsMock'
 import { SetupWizardModal } from './SetupWizard'
 
 describe('SetupWizardModal async edge safety', () => {
-  it('rolls back onlineLookups when SetOnlineLookups rejects and blocks Back, close, and checkboxes during GEC sync', async () => {
+  it('omits modal close control, rolls back onlineLookups when SetOnlineLookups rejects, and blocks Back and checkboxes during GEC sync', async () => {
     const initialSettings = makeSettings({
       dbPath: '/tmp/planisphere.db',
       defaultDbPath: '/tmp/planisphere.db',
@@ -35,15 +35,16 @@ describe('SetupWizardModal async edge safety', () => {
         }),
     })
 
-    const onClose = vi.fn()
     const mounted = mountTestRoot(
       createElement(SetupWizardModal, {
         settings: initialSettings,
         ingestStatus: initialIngest,
         onComplete: () => {},
-        onClose,
       }),
     )
+
+    const headerBar = mounted.container.querySelector('[role="dialog"] > div') as HTMLElement
+    expect(headerBar.querySelector('button')).toBeNull()
 
     await act(async () => {
       mounted.findButtonByText('NEXT').click()
@@ -67,21 +68,15 @@ describe('SetupWizardModal async edge safety', () => {
     expect(mounted.container.textContent).toContain('settings write failed')
 
     act(() => mounted.findButtonByText('SYNC CATALOG NOW').click())
-    const closeHeaderButton = mounted.container.querySelector(
-      'button[title="Close setup wizard"]',
-    ) as HTMLButtonElement
     expect(mounted.findButtonByText('SYNCING...').disabled).toBe(true)
     expect(mounted.findButtonByText('BACK').disabled).toBe(true)
-    expect(closeHeaderButton.disabled).toBe(true)
     expect(checkboxes()[0].disabled).toBe(true)
     expect(checkboxes()[1].disabled).toBe(true)
 
     act(() => {
       mounted.findButtonByText('BACK').click()
-      closeHeaderButton.click()
     })
     expect(mounted.container.textContent).toContain('Step 4 of 4')
-    expect(onClose).not.toHaveBeenCalled()
 
     mounted.unmount()
     await act(async () => {

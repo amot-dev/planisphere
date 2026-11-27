@@ -45,7 +45,7 @@ export default function App() {
   } = useBackendSync()
 
   const [activeModal, setActiveModal] = useState<
-    null | 'start' | 'settings' | 'expeditions' | 'setup' | 'export'
+    null | 'start' | 'settings' | 'expeditions' | 'export'
   >(null)
 
   const [sidebarCollapsed, toggleSidebarCollapsed] = useLocalStorageBoolean(
@@ -208,20 +208,6 @@ export default function App() {
           modesState={modesState}
           eddProgress={eddProgress}
           onClose={() => setActiveModal(null)}
-          onOpenSetupWizard={() => setActiveModal('setup')}
-        />
-      )}
-
-      {activeModal === 'setup' && (
-        <SetupWizardModal
-          settings={settings}
-          ingestStatus={ingest}
-          eddProgress={eddProgress}
-          onClose={() => setActiveModal(null)}
-          onComplete={() => {
-            setActiveModal(null)
-            refreshAll()
-          }}
         />
       )}
 

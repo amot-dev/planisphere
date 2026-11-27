@@ -8,9 +8,8 @@ import { installWailsAppMock } from '../../test/wailsMock'
 import { SettingsModal } from './SettingsModal'
 
 describe('SettingsModal', () => {
-  it('renders all configuration sections, triggers close and setup wizard callbacks, and disables dismissal while busy', () => {
+  it('renders all configuration sections, triggers close callback, and disables dismissal while busy', () => {
     const onClose = vi.fn()
-    const onOpenSetupWizard = vi.fn()
     const settings = makeSettings({
       dbPath: '/data/planisphere.db',
       journalDir: '/journals',
@@ -32,7 +31,6 @@ describe('SettingsModal', () => {
         modesState,
         eddProgress: null,
         onClose,
-        onOpenSetupWizard,
       }),
     )
 
@@ -46,16 +44,15 @@ describe('SettingsModal', () => {
     expect(renderedText).toContain('Fleet Carrier Cost Valuation')
     expect(renderedText).toContain('Historical Journal Import (EDDiscovery)')
     expect(renderedText).toContain('Online Services')
+    expect(mounted.queryButtonByText('RUN SETUP WIZARD...')).toBeNull()
 
     const headerCloseButton = dialog.querySelector('button') as HTMLButtonElement
     act(() => {
       headerCloseButton.click()
-      mounted.findButtonByText('RUN SETUP WIZARD...').click()
     })
     expect(onClose).toHaveBeenCalledTimes(1)
-    expect(onOpenSetupWizard).toHaveBeenCalledTimes(1)
 
-    // Active EDDiscovery import or journal scanning disables modal close and setup wizard launch.
+    // Active EDDiscovery import or journal scanning disables modal dismissal.
     const activeEddProgress: EddImportProgress = {
       active: true,
       stage: 'Importing events',
@@ -76,7 +73,6 @@ describe('SettingsModal', () => {
     const updatedDialog = mounted.container.querySelector('[role="dialog"]') as HTMLElement
     const updatedCloseButton = updatedDialog.querySelector('button') as HTMLButtonElement
     expect(updatedCloseButton.disabled).toBe(true)
-    expect(mounted.queryButtonByText('RUN SETUP WIZARD...')).toBeNull()
   })
 
   it('surfaces and clears error banners propagated from child configuration sections', async () => {

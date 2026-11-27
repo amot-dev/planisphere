@@ -140,6 +140,7 @@ Planisphere builds from source as a native desktop binary using Go, Wails, and R
 
 Everything in Planisphere lives in a local SQLite database on your machine: your journals, routes, and cached coordinates stay local and work offline. Planisphere never modifies your game files.
 
+- **Database Location:** Choose where `planisphere.db` is stored during first-launch setup. To move or repoint your database later while Planisphere is closed, you can update `"dbPath"` in `bootstrap.json` (`~/.config/Planisphere/bootstrap.json` on Linux, `%APPDATA%\Planisphere\bootstrap.json` on Windows, or `~/Library/Application Support/Planisphere/bootstrap.json` on macOS).
 - **Journal Directory:** Point Planisphere to your Elite Dangerous journal directory on first launch. It ingests your existing `Journal.*.log` files and watches the folder for live events while you fly.
 - **Optional EDDiscovery Backfill:** If your older raw journal files have been purged or archived, Planisphere can recover past flight history from an existing EDDiscovery database (`EDDUser.sqlite`) during setup or later in Config.
 
