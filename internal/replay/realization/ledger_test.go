@@ -339,3 +339,26 @@ func TestRealizationCrewWageWindowAndBinarySearchBounds(testingContext *testing.
 		testingContext.Errorf("expected NpcCrewLoss 30,000 from wage events within 5-second window, got %d", breakdown.NpcCrewLoss)
 	}
 }
+
+func TestRealizationClaimAllPendingCartoWhenSystemsOmitted(testingContext *testing.T) {
+	databaseConnection := dbtest.OpenMemory(testingContext)
+
+	// Legacy or partial sale records with empty Systems or Discovered arrays claim all pending cartography up to saleTimestamp.
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"LegacyAlpha","SystemAddress":7101,"BodyID":1,"BodyName":"LegacyAlpha 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":true,"WasMapped":true}`,
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"SAAScanComplete","SystemAddress":7101,"BodyID":1,"BodyName":"LegacyAlpha 1","ProbesUsed":5,"EfficiencyTarget":6}`,
+		`{"timestamp":"2026-03-01T10:30:00Z","event":"SellExplorationData","Systems":[],"Discovered":[],"BaseValue":420000,"Bonus":0,"TotalEarnings":420000}`,
+		`{"timestamp":"2026-03-01T11:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"LegacyBeta","SystemAddress":7102,"BodyID":1,"BodyName":"LegacyBeta 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":true,"WasMapped":true}`,
+		`{"timestamp":"2026-03-01T11:30:00Z","event":"MultiSellExplorationData","BaseValue":880000,"Bonus":20000,"TotalEarnings":900000,"Discovered":[]}`,
+	)
+
+	breakdown := mustBuildLedger(testingContext, databaseConnection).Breakdown("2026-03-01T09:00:00Z", "2026-03-01T12:00:00Z", nil)
+	if breakdown.PendingValue != 0 {
+		testingContext.Fatalf("expected PendingValue 0 after empty-system sales claimed pending scans, got %d", breakdown.PendingValue)
+	}
+	if breakdown.TotalRealized != 1320000 {
+		testingContext.Fatalf("expected TotalRealized 1,320,000 across both sales, got %d", breakdown.TotalRealized)
+	}
+}

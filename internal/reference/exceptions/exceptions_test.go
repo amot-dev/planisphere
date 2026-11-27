@@ -69,6 +69,63 @@ func TestEvaluateOrganicExceptions(t *testing.T) {
 			},
 			want: reference.ScanValue{Base: 119037, Bonus: 0, Total: 119037},
 		},
+		{
+			name: "missing effective timestamp skips era rule and falls back to Update 14 pricing",
+			context: OrganicContext{
+				SpeciesCodex:     "$Codex_Ent_Stratum_07_Name;",
+				SpeciesLocalised: "Stratum Tectonicas",
+				FirstLogged:      false,
+			},
+			want: reference.ScanValue{Base: 19010800, Bonus: 0, Total: 19010800},
+		},
+		{
+			name: "post-Update-7 pre-Update-14 Tubus Rosarium uses rebalanced 171900 Cr tier",
+			context: OrganicContext{
+				ScanTimestamp:    "2022-02-14T12:00:00Z",
+				SpeciesCodex:     "$Codex_Ent_Tubus_04_Name;",
+				SpeciesLocalised: "Tubus Rosarium",
+				FirstLogged:      false,
+			},
+			want: reference.ScanValue{Base: 171900, Bonus: 0, Total: 171900},
+		},
+		{
+			name: "pre-Update-14 unknown numbered species falls back to stripped genus prefix",
+			context: OrganicContext{
+				ScanTimestamp: "2022-05-01T10:00:00Z",
+				SpeciesCodex:  "$Codex_Ent_Stratum_99_Name;",
+				FirstLogged:   false,
+			},
+			want: reference.ScanValue{Base: 102500, Bonus: 0, Total: 102500},
+		},
+		{
+			name: "pre-Update-14 non-numbered codex key falls back to direct genus map",
+			context: OrganicContext{
+				ScanTimestamp: "2022-05-01T10:00:00Z",
+				SpeciesCodex:  "$Codex_Ent_Vents_Name;",
+				FirstLogged:   true,
+			},
+			want: reference.ScanValue{Base: 117900, Bonus: 117900, Total: 235800},
+		},
+		{
+			name: "pre-Update-14 unrecognized species key falls back to GenusCodex suffix trim",
+			context: OrganicContext{
+				ScanTimestamp: "2022-05-01T10:00:00Z",
+				SpeciesCodex:  "$Codex_Ent_MysteryBio_Alpha_Name;",
+				GenusCodex:    "$Codex_Ent_Cone_Genus_Name;",
+				FirstLogged:   false,
+			},
+			want: reference.ScanValue{Base: 108900, Bonus: 0, Total: 108900},
+		},
+		{
+			name: "pre-Update-14 completely unknown species and genus returns zero value",
+			context: OrganicContext{
+				ScanTimestamp: "2022-05-01T10:00:00Z",
+				SpeciesCodex:  "$Codex_Ent_UnknownBio_01_Name;",
+				GenusCodex:    "$Codex_Ent_UnknownBio_Genus_Name;",
+				FirstLogged:   true,
+			},
+			want: reference.ScanValue{},
+		},
 	}
 
 	for _, testCase := range testCases {

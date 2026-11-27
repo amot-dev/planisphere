@@ -75,6 +75,7 @@ type capturedAppEvents struct {
 	mutex           sync.Mutex
 	eventNames      []string
 	dataChanges     []DataChanged
+	eddProgress     []EDDImportProgress
 	pendingStates   []bool
 	pendingTrueChan chan struct{}
 }
@@ -93,6 +94,12 @@ func captureAppEvents(testingContext *testing.T, targetApp *App) *capturedAppEve
 			if len(payload) > 0 {
 				if dataChanged, ok := payload[0].(DataChanged); ok {
 					recorder.dataChanges = append(recorder.dataChanges, dataChanged)
+				}
+			}
+		case EventEDDProgress:
+			if len(payload) > 0 {
+				if progress, ok := payload[0].(EDDImportProgress); ok {
+					recorder.eddProgress = append(recorder.eddProgress, progress)
 				}
 			}
 		case EventSyncPending:
@@ -117,6 +124,7 @@ func (recorder *capturedAppEvents) Reset() {
 	defer recorder.mutex.Unlock()
 	recorder.eventNames = nil
 	recorder.dataChanges = nil
+	recorder.eddProgress = nil
 	recorder.pendingStates = nil
 }
 
@@ -130,6 +138,12 @@ func (recorder *capturedAppEvents) DataChanges() []DataChanged {
 	recorder.mutex.Lock()
 	defer recorder.mutex.Unlock()
 	return append([]DataChanged(nil), recorder.dataChanges...)
+}
+
+func (recorder *capturedAppEvents) EDDProgress() []EDDImportProgress {
+	recorder.mutex.Lock()
+	defer recorder.mutex.Unlock()
+	return append([]EDDImportProgress(nil), recorder.eddProgress...)
 }
 
 func (recorder *capturedAppEvents) Domains() []string {
@@ -160,6 +174,7 @@ func (recorder *capturedAppEvents) TakeDataChanges() []DataChanged {
 	changes := append([]DataChanged(nil), recorder.dataChanges...)
 	recorder.eventNames = nil
 	recorder.dataChanges = nil
+	recorder.eddProgress = nil
 	recorder.pendingStates = nil
 	return changes
 }
@@ -171,6 +186,7 @@ func (recorder *capturedAppEvents) TakeAll() ([]DataChanged, []bool) {
 	pending := append([]bool(nil), recorder.pendingStates...)
 	recorder.eventNames = nil
 	recorder.dataChanges = nil
+	recorder.eddProgress = nil
 	recorder.pendingStates = nil
 	return changes, pending
 }

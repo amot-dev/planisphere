@@ -2,6 +2,7 @@ package replay_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"planisphere/internal/core/projection"
@@ -14,6 +15,13 @@ func TestProfileScopeNormalizationSQLAndWindowCacheKeys(testingContext *testing.
 	var defaultScope replay.ProfileScope
 	if !defaultScope.IsAllEnabled() || defaultScope.CacheKeySuffix() != "" {
 		testingContext.Fatalf("expected zero ProfileScope to be AllEnabled with empty suffix, got %+v suffix=%q", defaultScope, defaultScope.CacheKeySuffix())
+	}
+	aliasedAllEnabledSQL := defaultScope.SQLPredicate("je")
+	if !strings.Contains(aliasedAllEnabledSQL, "je.profile_id") || !strings.Contains(aliasedAllEnabledSQL, "je.commander") {
+		testingContext.Fatalf("expected commanderFilterForTableAlias predicate for AllEnabled scope, got %q", aliasedAllEnabledSQL)
+	}
+	if gotFolded := replay.SqliteNocaseKey("Cmdr_ALPHA-9"); gotFolded != "cmdr_alpha-9" {
+		testingContext.Fatalf("SqliteNocaseKey = %q, want cmdr_alpha-9", gotFolded)
 	}
 
 	selectedScope := replay.NewProfileScope([]int64{3, 0, 1, 3, -4})
@@ -114,6 +122,13 @@ func TestListCommandersProfilesAliasesScopedNamesAndDateSessions(testingContext 
 	archivedStart, _ := replay.CareerStartScoped(conn, archivedScope)
 	if enabledStart != "2026-05-01T09:01:00Z" || archivedStart != "2026-05-01T08:00:00Z" {
 		testingContext.Fatalf("unexpected career starts: enabled=%q archived=%q", enabledStart, archivedStart)
+	}
+
+	// Verify table-aliased AllEnabled SQL predicate executes against SQLite and excludes archived disabled Era 0 events (3 of 12 total).
+	var aliasedEnabledEvents int
+	aliasedQuery := `SELECT COUNT(*) FROM journal_events je WHERE ` + (replay.ProfileScope{}).SQLPredicate("je")
+	if queryErr := conn.QueryRow(aliasedQuery).Scan(&aliasedEnabledEvents); queryErr != nil || aliasedEnabledEvents != 9 {
+		testingContext.Fatalf("expected 9 enabled events from table-aliased SQLPredicate, got %d err=%v", aliasedEnabledEvents, queryErr)
 	}
 
 	// ListCommanderLoadGamesOnDate returns chronological sessions for that profile on 2026-05-02 only.

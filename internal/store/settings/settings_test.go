@@ -300,3 +300,67 @@ func TestSingleAliasManualEraMergeUnmergesCleanlyWithoutBogusUnmergeRule(testing
 		testingContext.Fatalf("expected 0 unmerge rules, got %d (err=%v)", unmergeRuleCount, err)
 	}
 }
+
+func TestEDDRecoveryStateProgressionAndMetadataSettings(testingContext *testing.T) {
+	if nilRec, nilDisc, nilPath := settings.EDDRecoveryState(nil); nilRec || nilDisc || nilPath != "" {
+		testingContext.Fatalf("expected zero EDDRecoveryState for nil queryer, got (%v, %v, %q)", nilRec, nilDisc, nilPath)
+	}
+
+	dbConn := dbtest.OpenMemory(testingContext)
+	recovered, disconnectsDone, eddPath := settings.EDDRecoveryState(dbConn)
+	if recovered || disconnectsDone || eddPath != "" {
+		testingContext.Fatalf("expected initial EDDRecoveryState (false, false, empty), got (%v, %v, %q)", recovered, disconnectsDone, eddPath)
+	}
+
+	if err := settings.MarkEDDDisconnectsRecovered(dbConn); err != nil {
+		testingContext.Fatalf("MarkEDDDisconnectsRecovered: %v", err)
+	}
+	recovered, disconnectsDone, eddPath = settings.EDDRecoveryState(dbConn)
+	if recovered || !disconnectsDone || eddPath != "" {
+		testingContext.Fatalf("expected disconnectsDone=true before full recovery, got (%v, %v, %q)", recovered, disconnectsDone, eddPath)
+	}
+
+	if err := settings.Set(dbConn, "edd_history_disconnects_v7", "0"); err != nil {
+		testingContext.Fatalf("reset disconnects key: %v", err)
+	}
+	const savedEDDPath = "/tmp/test-edd/EDDUser.sqlite"
+	if err := settings.MarkEDDRecovered(dbConn, savedEDDPath); err != nil {
+		testingContext.Fatalf("MarkEDDRecovered: %v", err)
+	}
+	recovered, disconnectsDone, eddPath = settings.EDDRecoveryState(dbConn)
+	if !recovered || !disconnectsDone || eddPath != savedEDDPath {
+		testingContext.Fatalf("expected full EDDRecoveryState (true, true, %q), got (%v, %v, %q)", savedEDDPath, recovered, disconnectsDone, eddPath)
+	}
+
+	// Verify direct round-trips for remaining typed settings helpers.
+	if gotDir := settings.JournalDir(dbConn, "/default/journals"); gotDir != "/default/journals" {
+		testingContext.Fatalf("expected default JournalDir, got %q", gotDir)
+	}
+	if err := settings.SetJournalDir(dbConn, "/custom/journals"); err != nil || settings.JournalDir(dbConn, "/default") != "/custom/journals" {
+		testingContext.Fatalf("SetJournalDir/JournalDir round-trip failed: %v", err)
+	}
+	if !settings.OnlineLookups(dbConn) {
+		testingContext.Fatal("expected OnlineLookups default true")
+	}
+	if err := settings.SetOnlineLookups(dbConn, false); err != nil || settings.OnlineLookups(dbConn) {
+		testingContext.Fatalf("SetOnlineLookups(false) failed: %v", err)
+	}
+	if err := settings.SetActiveExpeditionID(dbConn, 42); err != nil || settings.ActiveExpeditionID(dbConn) != 42 {
+		testingContext.Fatalf("SetActiveExpeditionID(42) failed: %v", err)
+	}
+	if err := settings.SetActiveExpeditionID(dbConn, 0); err != nil || settings.ActiveExpeditionID(dbConn) != 0 {
+		testingContext.Fatalf("SetActiveExpeditionID(0) clear failed: %v", err)
+	}
+	if settings.SetupCompleted(dbConn) {
+		testingContext.Fatal("expected SetupCompleted default false")
+	}
+	if err := settings.SetSetupCompleted(dbConn, true); err != nil || !settings.SetupCompleted(dbConn) {
+		testingContext.Fatalf("SetSetupCompleted(true) failed: %v", err)
+	}
+	if err := settings.SetLastScanAt(dbConn, "2026-05-01T10:00:00Z"); err != nil || settings.LastScanAt(dbConn) != "2026-05-01T10:00:00Z" {
+		testingContext.Fatalf("LastScanAt round-trip failed: %v", err)
+	}
+	if err := settings.SetGECFetchedAt(dbConn, "2026-05-01T11:00:00Z"); err != nil || settings.GECFetchedAt(dbConn) != "2026-05-01T11:00:00Z" {
+		testingContext.Fatalf("GECFetchedAt round-trip failed: %v", err)
+	}
+}

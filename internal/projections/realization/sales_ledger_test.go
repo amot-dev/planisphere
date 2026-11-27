@@ -16,18 +16,22 @@ import (
 func TestSalesLedgerCachingAndBusInvalidation(testingContext *testing.T) {
 	databaseConnection := dbtest.OpenMemory(testingContext)
 
+	rawOrganicScan := `{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`
 	journaltest.InsertParsedLines(
 		testingContext,
 		databaseConnection,
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`,
+		rawOrganicScan,
 	)
 
 	eventBus := projection.NewBus()
 	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
+	if !salesLedger.Triggers().Journal.Has(journal.EventSellOrganicData) || salesLedger.Triggers().Journal.Has(journal.EventFSDJump) || salesLedger.IsValid() {
+		testingContext.Fatalf("unexpected cold SalesLedger state: triggers=%v valid=%v", salesLedger.Triggers(), salesLedger.IsValid())
+	}
 
 	firstResult, firstError := salesLedger.Breakdown("2026-03-01T09:00:00Z", "2026-03-01T11:00:00Z", nil)
-	if firstError != nil {
-		testingContext.Fatalf("first Breakdown failed: %v", firstError)
+	if firstError != nil || !salesLedger.IsValid() {
+		testingContext.Fatalf("first Breakdown failed: valid=%v err=%v", salesLedger.IsValid(), firstError)
 	}
 	if firstResult.PendingValue <= 0 {
 		testingContext.Fatalf("expected positive PendingValue, got %d", firstResult.PendingValue)
@@ -70,6 +74,17 @@ func TestSalesLedgerCachingAndBusInvalidation(testingContext *testing.T) {
 	}
 	if refreshedResult.PendingValue != 0 || refreshedResult.TotalRealized != 95054000 {
 		testingContext.Fatalf("unexpected refreshed breakdown: %+v", refreshedResult)
+	}
+	var organicScanUID string
+	if scanUIDErr := databaseConnection.QueryRow(`SELECT event_uid FROM journal_events WHERE event = 'ScanOrganic' LIMIT 1`).Scan(&organicScanUID); scanUIDErr != nil {
+		testingContext.Fatalf("query ScanOrganic event_uid: %v", scanUIDErr)
+	}
+	saleOutcome, outcomeFound, outcomeErr := salesLedger.OrganicSaleDetails(organicScanUID)
+	if outcomeErr != nil || !outcomeFound || !saleOutcome.BonusRealized || saleOutcome.SaleMarketID != 123 || saleOutcome.SaleTimestamp != "2026-03-01T12:00:00Z" {
+		testingContext.Fatalf("unexpected OrganicSaleDetails: outcome=%+v found=%v err=%v", saleOutcome, outcomeFound, outcomeErr)
+	}
+	if _, missingFound, missingErr := salesLedger.OrganicSaleDetails("nonexistent-uid"); missingErr != nil || missingFound {
+		testingContext.Fatalf("expected missing OrganicSaleDetails to return false, got found=%v err=%v", missingFound, missingErr)
 	}
 
 	// Publishing AppCommanderFilterChanged also invalidates the cached ledger.

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"slices"
@@ -67,6 +68,24 @@ func TestExternalLinksSettings(testingContext *testing.T) {
 	}
 }
 
+func waitForWatcherActive(testingContext *testing.T, testApp *App) IngestStatus {
+	testingContext.Helper()
+	var lastStatus IngestStatus
+	for attempt := 0; attempt < 50; attempt++ {
+		status, statusErr := testApp.GetIngestStatus()
+		if statusErr != nil {
+			testingContext.Fatalf("GetIngestStatus: %v", statusErr)
+		}
+		lastStatus = status
+		if status.WatcherActive {
+			return status
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	testingContext.Fatalf("expected live journal watcher to become active, last status: %+v", lastStatus)
+	return lastStatus
+}
+
 func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	journalDirectory := testingContext.TempDir()
@@ -82,21 +101,7 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	if setupError != nil || initialStatus.EventsStored != 1 {
 		testingContext.Fatalf("SetupConfigureJournals initial: status=%+v err=%v", initialStatus, setupError)
 	}
-	watcherStarted := false
-	for attempt := 0; attempt < 50; attempt++ {
-		status, statusErr := testApp.GetIngestStatus()
-		if statusErr != nil {
-			testingContext.Fatalf("GetIngestStatus: %v", statusErr)
-		}
-		if status.WatcherActive {
-			watcherStarted = true
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if !watcherStarted {
-		testingContext.Fatalf("expected live journal watcher to become active after SetupConfigureJournals")
-	}
+	waitForWatcherActive(testingContext, testApp)
 	if preSetupEvents := eventsRecorder.EventNames(); len(preSetupEvents) != 0 {
 		testingContext.Fatalf("expected 0 redundant emissions during pre-completion setup scan, got %v", preSetupEvents)
 	}
@@ -112,5 +117,111 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	if !slices.Equal(emittedEventNames, []string{EventDataChanged}) || len(emittedChanges) != 1 ||
 		!slices.Contains(emittedChanges[0].Domains, "ingest") || !slices.Contains(emittedChanges[0].Domains, "settings") {
 		testingContext.Fatalf("expected 1 post-setup DataChanged event with ingest and settings, got events=%v changes=%+v", emittedEventNames, emittedChanges)
+	}
+}
+
+func createMinimalEDDSQLite(testingContext *testing.T, entries [][2]string) string {
+	testingContext.Helper()
+	eddPath := filepath.Join(testingContext.TempDir(), "EDDUser.sqlite")
+	eddConn, openErr := sql.Open("sqlite", eddPath)
+	if openErr != nil {
+		testingContext.Fatalf("open temp EDD sqlite: %v", openErr)
+	}
+	defer eddConn.Close()
+
+	if _, schemaErr := eddConn.Exec(`
+		CREATE TABLE TravelLogUnit (Id INTEGER PRIMARY KEY, Name TEXT, Path TEXT);
+		CREATE TABLE JournalEntries (Id INTEGER PRIMARY KEY, TravelLogId INTEGER, EventType TEXT, EventData TEXT);
+		INSERT INTO TravelLogUnit (Id, Name, Path) VALUES (1, 'Journal.2026-03-01T000000.01.log', '/journals/Journal.2026-03-01T000000.01.log');
+	`); schemaErr != nil {
+		testingContext.Fatalf("seed EDD schema: %v", schemaErr)
+	}
+	for index, entry := range entries {
+		if _, insertErr := eddConn.Exec(
+			`INSERT INTO JournalEntries (Id, TravelLogId, EventType, EventData) VALUES (?, 1, ?, ?)`,
+			index+1, entry[0], entry[1],
+		); insertErr != nil {
+			testingContext.Fatalf("insert EDD entry %d: %v", index, insertErr)
+		}
+	}
+	if closeErr := eddConn.Close(); closeErr != nil {
+		testingContext.Fatalf("close temp EDD sqlite: %v", closeErr)
+	}
+	return eddPath
+}
+
+func TestSetCommanderEnabledSetJournalDirAndImportEDDiscoveryHistory(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	if err := settings.SetSetupCompleted(testApp.db, true); err != nil {
+		testingContext.Fatalf("SetSetupCompleted: %v", err)
+	}
+
+	if _, badDirErr := testApp.SetJournalDir(filepath.Join(testingContext.TempDir(), "missing-dir")); badDirErr == nil {
+		testingContext.Fatal("expected SetJournalDir to reject non-existent directory")
+	}
+
+	journalDirectory := testingContext.TempDir()
+	journalContent := `{"timestamp":"2026-03-01T08:00:00Z","event":"LoadGame","Commander":"CmdrToggle","FID":"F888","Ship":"Mandalay","Odyssey":true}` + "\n" +
+		`{"timestamp":"2026-03-01T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}` + "\n"
+	if err := os.WriteFile(filepath.Join(journalDirectory, "Journal.2026-03-01T080000.01.log"), []byte(journalContent), 0o600); err != nil {
+		testingContext.Fatalf("write journal file: %v", err)
+	}
+
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+	dirSettings, setDirErr := testApp.SetJournalDir(journalDirectory)
+	if setDirErr != nil || dirSettings.JournalDir != journalDirectory {
+		testingContext.Fatalf("SetJournalDir = (%+v, %v)", dirSettings, setDirErr)
+	}
+	testApp.backgroundWg.Wait()
+	if !slices.Contains(eventsRecorder.Domains(), "settings") {
+		testingContext.Fatalf("expected SetJournalDir to emit settings domain, got %v", eventsRecorder.Domains())
+	}
+	ingestStatus := waitForWatcherActive(testingContext, testApp)
+	if ingestStatus.EventsStored != 2 {
+		testingContext.Fatalf("expected scanAndStartWatcher to store 2 events, got %+v", ingestStatus)
+	}
+
+	loadedSettings, getSettingsErr := testApp.GetSettings()
+	if getSettingsErr != nil || len(loadedSettings.Commanders) != 1 || !loadedSettings.Commanders[0].Enabled {
+		testingContext.Fatalf("expected 1 enabled commander after scan, got %+v err=%v", loadedSettings.Commanders, getSettingsErr)
+	}
+	eventsRecorder.Reset()
+
+	toggledSettings, toggleErr := testApp.SetCommanderEnabled(loadedSettings.Commanders[0].ProfileKey, false)
+	if toggleErr != nil || len(toggledSettings.Commanders) != 1 || toggledSettings.Commanders[0].Enabled {
+		testingContext.Fatalf("SetCommanderEnabled(false) = (%+v, %v)", toggledSettings.Commanders, toggleErr)
+	}
+	toggleDomains := eventsRecorder.Domains()
+	for _, expectedDomain := range []string{"ingest", "stats", "plan", "settings"} {
+		if !slices.Contains(toggleDomains, expectedDomain) {
+			testingContext.Fatalf("expected SetCommanderEnabled to emit %q domain, got %v", expectedDomain, toggleDomains)
+		}
+	}
+
+	eddPath := createMinimalEDDSQLite(testingContext, [][2]string{
+		{"Fileheader", `{"timestamp":"2026-03-02T09:00:00Z","event":"Fileheader","part":1,"Odyssey":true}`},
+		{"LoadGame", `{"timestamp":"2026-03-02T09:00:05Z","event":"LoadGame","Commander":"CmdrEDD","FID":"F999","Ship":"Anaconda"}`},
+		{"FSDJump", `{"timestamp":"2026-03-02T09:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":2002,"StarPos":[67.5,-119.4,24.8],"JumpDist":139.4}`},
+	})
+	eventsRecorder.Reset()
+
+	linesRead, importErr := testApp.ImportEDDiscoveryHistory(eddPath)
+	if importErr != nil || linesRead != 3 {
+		testingContext.Fatalf("ImportEDDiscoveryHistory = (%d, %v), want 3 lines", linesRead, importErr)
+	}
+
+	progressEvents := eventsRecorder.EDDProgress()
+	sawActive := slices.ContainsFunc(progressEvents, func(item EDDImportProgress) bool { return item.Active })
+	sawFinalInactive := len(progressEvents) > 0 && !progressEvents[len(progressEvents)-1].Active
+	observedDomains := eventsRecorder.Domains()
+	if !sawActive || !sawFinalInactive {
+		testingContext.Fatalf("expected active and final inactive EDDImportProgress events, got %+v", progressEvents)
+	}
+	if !slices.Contains(observedDomains, "ingest") || !slices.Contains(observedDomains, "settings") {
+		testingContext.Fatalf("expected ImportEDDiscoveryHistory to emit ingest and settings domains, got %v", observedDomains)
+	}
+	recovered, disconnectsDone, savedPath := settings.EDDRecoveryState(testApp.db)
+	if !recovered || !disconnectsDone || savedPath != eddPath {
+		testingContext.Fatalf("unexpected persisted EDDRecoveryState: (%v, %v, %q)", recovered, disconnectsDone, savedPath)
 	}
 }

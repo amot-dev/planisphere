@@ -31,6 +31,11 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 	eventBus := projection.NewBus()
 	systemArrivals := projections.NewSystemArrivals(databaseConnection, eventBus)
 	shipHistory := projections.NewShipHistory(databaseConnection, eventBus)
+	visitCounts := projections.NewSystemVisitCounts(databaseConnection, eventBus, nil)
+	if !systemArrivals.Triggers().Journal.Has(journal.EventFSDJump) || !shipHistory.Triggers().Journal.Has(journal.EventShipyardSwap) || !visitCounts.Triggers().Journal.Has(journal.EventLocation) {
+		testingContext.Fatalf("unexpected projection triggers: arrivals=%v ship=%v visits=%v",
+			systemArrivals.Triggers(), shipHistory.Triggers(), visitCounts.Triggers())
+	}
 	if initialArrivals, initErr := systemArrivals.InWindow("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z"); initErr != nil || len(initialArrivals) != 1 {
 		testingContext.Fatalf("expected 1 warm arrival before commander filter change, got %+v err=%v", initialArrivals, initErr)
 	}
@@ -45,8 +50,12 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 		testingContext.Fatalf("expected 0 default arrivals after disabling CmdrFirst, got %+v err=%v", filteredArrivals, filteredErr)
 	}
 
-	// Explicit ProfileScope on disabled CmdrFirst still resolves its arrivals and ship timeline.
+	// Explicit ProfileScope on disabled CmdrFirst still resolves its arrivals, visit counts, and ship timeline.
 	firstScope := replay.NewProfileScope([]int64{firstProfileID})
+	scopedCounts, scopedCountsErr := visitCounts.CountsForSystemsScoped([]string{"Sol", "Missing"}, firstScope)
+	if scopedCountsErr != nil || scopedCounts["sol"] != 1 || scopedCounts["missing"] != 0 {
+		testingContext.Fatalf("unexpected scoped visit counts for disabled CmdrFirst: %+v err=%v", scopedCounts, scopedCountsErr)
+	}
 	scopedArrivals, scopedArrErr := systemArrivals.InWindowScoped("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z", firstScope)
 	if scopedArrErr != nil || len(scopedArrivals) != 1 || scopedArrivals[0].SystemName != "Sol" || scopedArrivals[0].ProfileID != firstProfileID {
 		testingContext.Fatalf("unexpected scoped arrivals for disabled CmdrFirst: %+v err=%v", scopedArrivals, scopedArrErr)
@@ -195,6 +204,10 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	databaseConnection := dbtest.OpenMemory(testingContext)
 	eventBus := projection.NewBus()
 	carrierState := projections.NewCarrierState(databaseConnection, eventBus)
+	if !carrierState.Triggers().Journal.Has(journal.EventCarrierStats) || carrierState.IsValid() || carrierState.Generation() != 0 {
+		testingContext.Fatalf("unexpected cold CarrierState contract: triggers=%v valid=%v gen=%d",
+			carrierState.Triggers(), carrierState.IsValid(), carrierState.Generation())
+	}
 
 	// Without any CarrierStats, unlabelled Location matches Location/CarrierJump consistently.
 	journaltest.InsertParsedLines(
@@ -203,9 +216,10 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 		`{"timestamp":"2026-05-01T09:00:00Z","event":"CarrierJump","StarSystem":"OriginSys"}`,
 	)
 	initialSnapshot, snapshotError := carrierState.LatestStats()
-	if snapshotError != nil {
-		testingContext.Fatalf("initial LatestStats: %v", snapshotError)
+	if snapshotError != nil || !carrierState.IsValid() {
+		testingContext.Fatalf("initial LatestStats: valid=%v err=%v", carrierState.IsValid(), snapshotError)
 	}
+	genBeforeStats := carrierState.Generation()
 	initialLoc, initialErr := replay.QueryCarrierLastLocation(databaseConnection, initialSnapshot)
 	if initialErr != nil || initialLoc != "OriginSys" {
 		testingContext.Fatalf("initial LastLocation = %q err=%v, want OriginSys", initialLoc, initialErr)
@@ -224,8 +238,8 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	)
 
 	ownedSnapshot, ownedSnapshotError := carrierState.LatestStats()
-	if ownedSnapshotError != nil || !ownedSnapshot.Found {
-		testingContext.Fatalf("LatestStats after CarrierStats: snapshot=%+v err=%v", ownedSnapshot, ownedSnapshotError)
+	if ownedSnapshotError != nil || !ownedSnapshot.Found || carrierState.Generation() <= genBeforeStats {
+		testingContext.Fatalf("LatestStats after CarrierStats: snapshot=%+v gen=%d err=%v", ownedSnapshot, carrierState.Generation(), ownedSnapshotError)
 	}
 	lastLoc, locError := replay.QueryCarrierLastLocation(databaseConnection, ownedSnapshot)
 	if locError != nil || lastLoc != "OwnedCarrierSys" {

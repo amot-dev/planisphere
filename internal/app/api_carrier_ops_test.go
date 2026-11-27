@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"planisphere/internal/sources/spansh"
@@ -302,5 +303,65 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 	}
 	if restoredRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID); restoredRoute == nil || restoredRoute.ManualLegJumps != 1 {
 		testingContext.Fatalf("expected manual route restored with 1 jump after undoing clear, got %+v", restoredRoute)
+	}
+}
+
+func TestSwitchCarrierRouteToManualAndSaveDraftInputs(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	originalSpanshQuery := querySpanshCarrierRoute
+	testingContext.Cleanup(func() { querySpanshCarrierRoute = originalSpanshQuery })
+	querySpanshCarrierRoute = func(_ context.Context, _, _ string, _, depotTritium int) ([]spansh.RouteJump, error) {
+		return []spansh.RouteJump{
+			{SystemName: "Midway", DistanceLy: 480.5, TritiumUsed: 90, FuelInTank: depotTritium},
+			{SystemName: "Colonia", DistanceLy: 420.0, TritiumUsed: 80, FuelInTank: depotTritium},
+		}, nil
+	}
+
+	createdExp, createErr := testApp.createExpeditionWithWaypoints("Manual Switch Test", "", []string{"Sol", "Colonia"})
+	if createErr != nil {
+		testingContext.Fatalf("createExpeditionWithWaypoints: %v", createErr)
+	}
+	plan := mustGetPlan(testingContext, testApp, createdExp.ID)
+	fcStop := true
+	stopRowID := plan.Rows[1].Row.ID
+	if err := testApp.UpdateRow(expedition.RowPatch{ID: stopRowID, FCStop: &fcStop}); err != nil {
+		testingContext.Fatalf("UpdateRow FCStop: %v", err)
+	}
+	if _, startErr := testApp.StartCarrierRoute(createdExp.ID, stopRowID, "Sol", "Colonia", 5000, "player", 800); startErr != nil {
+		testingContext.Fatalf("StartCarrierRoute: %v", startErr)
+	}
+
+	testApp.backgroundWg.Wait()
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+
+	manualState, switchErr := testApp.SwitchCarrierRouteToManual(createdExp.ID)
+	if switchErr != nil || manualState == nil || !manualState.ManualMode ||
+		manualState.ManualDistanceInput != "480.5" || manualState.ManualTritiumInput != "90" {
+		testingContext.Fatalf("SwitchCarrierRouteToManual = (%+v, %v), want ManualMode with seeded hop inputs", manualState, switchErr)
+	}
+	switchChanges := eventsRecorder.TakeDataChanges()
+	if len(switchChanges) != 1 || switchChanges[0].ExpeditionID != createdExp.ID || !slices.Contains(switchChanges[0].Domains, "plan") {
+		testingContext.Fatalf("expected SwitchCarrierRouteToManual to emit plan DataChanged for %d, got %+v", createdExp.ID, switchChanges)
+	}
+
+	if draftErr := testApp.SaveCarrierManualDraftInputs(createdExp.ID, "412.25", "76"); draftErr != nil {
+		testingContext.Fatalf("SaveCarrierManualDraftInputs: %v", draftErr)
+	}
+	if draftChanges := eventsRecorder.TakeDataChanges(); len(draftChanges) != 0 {
+		testingContext.Fatalf("expected SaveCarrierManualDraftInputs not to emit DataChanged spam, got %+v", draftChanges)
+	}
+	persistedDraft := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID)
+	if persistedDraft == nil || persistedDraft.ManualDistanceInput != "412.25" || persistedDraft.ManualTritiumInput != "76" {
+		testingContext.Fatalf("expected persisted draft inputs (412.25, 76), got %+v", persistedDraft)
+	}
+
+	// Undo must immediately revert SwitchCarrierRouteToManual rather than draft keystrokes.
+	undoSwitch, undoErr := testApp.UndoExpedition(createdExp.ID)
+	if undoErr != nil || !undoSwitch.Applied || undoSwitch.Label != "Switch Carrier Route to Manual Mode" {
+		testingContext.Fatalf("Undo SwitchCarrierRouteToManual: res=%+v err=%v", undoSwitch, undoErr)
+	}
+	revertedRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID)
+	if revertedRoute == nil || revertedRoute.ManualMode {
+		testingContext.Fatalf("expected route reverted to Spansh mode after undo, got %+v", revertedRoute)
 	}
 }

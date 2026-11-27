@@ -3,6 +3,8 @@ package db_test
 import (
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"planisphere/internal/core/db"
@@ -31,6 +33,65 @@ func TestDefaultPath(t *testing.T) {
 	}
 	if defaultPath == "" {
 		t.Fatalf("expected non-empty default path")
+	}
+}
+
+func TestConfiguredDatabasePathResolutionAndFallback(testingContext *testing.T) {
+	isolatedRoot := testingContext.TempDir()
+	homeDir := filepath.Join(isolatedRoot, "home")
+	xdgConfigDir := filepath.Join(isolatedRoot, "xdg-config")
+	xdgDataDir := filepath.Join(isolatedRoot, "xdg-data")
+	appDataDir := filepath.Join(isolatedRoot, "appdata")
+	localAppDataDir := filepath.Join(isolatedRoot, "localappdata")
+	for _, dirPath := range []string{homeDir, xdgConfigDir, xdgDataDir, appDataDir, localAppDataDir} {
+		if mkdirError := os.MkdirAll(dirPath, 0o755); mkdirError != nil {
+			testingContext.Fatalf("mkdir %s: %v", dirPath, mkdirError)
+		}
+	}
+	testingContext.Setenv("HOME", homeDir)
+	testingContext.Setenv("XDG_CONFIG_HOME", xdgConfigDir)
+	testingContext.Setenv("XDG_DATA_HOME", xdgDataDir)
+	testingContext.Setenv("APPDATA", appDataDir)
+	testingContext.Setenv("LOCALAPPDATA", localAppDataDir)
+
+	expectedDefaultPath, defaultError := db.DefaultPath()
+	if defaultError != nil {
+		testingContext.Fatalf("DefaultPath in isolated env: %v", defaultError)
+	}
+
+	// Missing bootstrap.json falls back to DefaultPath.
+	initialResolved, initialError := db.ResolveConfiguredPath()
+	if initialError != nil || initialResolved != expectedDefaultPath {
+		testingContext.Fatalf("ResolveConfiguredPath missing bootstrap = (%q, %v), want %q", initialResolved, initialError, expectedDefaultPath)
+	}
+
+	// Custom configured path round-trips with whitespace trimmed and cleaned.
+	customDatabasePath := filepath.Join(isolatedRoot, "custom-dir", "commander.sqlite")
+	if saveError := db.SaveConfiguredPath("  " + customDatabasePath + "  "); saveError != nil {
+		testingContext.Fatalf("SaveConfiguredPath custom: %v", saveError)
+	}
+	configuredResolved, configuredError := db.ResolveConfiguredPath()
+	if configuredError != nil || configuredResolved != customDatabasePath {
+		testingContext.Fatalf("ResolveConfiguredPath custom = (%q, %v), want %q", configuredResolved, configuredError, customDatabasePath)
+	}
+
+	// Blank dbPath in bootstrap.json falls back to DefaultPath, including when XDG_DATA_HOME is unset.
+	testingContext.Setenv("XDG_DATA_HOME", "")
+	homeFallbackDefault, homeDefaultError := db.DefaultPath()
+	if homeDefaultError != nil || homeFallbackDefault == "" {
+		testingContext.Fatalf("DefaultPath without XDG_DATA_HOME = (%q, %v)", homeFallbackDefault, homeDefaultError)
+	}
+	userConfigDir, configDirError := os.UserConfigDir()
+	if configDirError != nil {
+		testingContext.Fatalf("UserConfigDir: %v", configDirError)
+	}
+	bootstrapPath := filepath.Join(userConfigDir, db.AppDirName, "bootstrap.json")
+	if writeBlankErr := os.WriteFile(bootstrapPath, []byte(`{"dbPath":"   "}`), 0o644); writeBlankErr != nil {
+		testingContext.Fatalf("write blank bootstrap.json: %v", writeBlankErr)
+	}
+	blankResolved, blankError := db.ResolveConfiguredPath()
+	if blankError != nil || blankResolved != homeFallbackDefault {
+		testingContext.Fatalf("ResolveConfiguredPath blank = (%q, %v), want %q", blankResolved, blankError, homeFallbackDefault)
 	}
 }
 

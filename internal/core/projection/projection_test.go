@@ -37,6 +37,16 @@ func TestTriggersCompositionAndMatching(testingContext *testing.T) {
 	bus := NewBus()
 	firstCache := NewCache(bus, "scans", scanTriggers, func() (int, error) { return 1, nil })
 	secondCache := NewCache(bus, "arrivals", arrivalTriggers, func() (int, error) { return 2, nil })
+	if firstCache.Name() != "scans" || firstCache.IsValid() || firstCache.Generation() != 0 {
+		testingContext.Fatalf("unexpected cold Cache metadata: name=%q valid=%v gen=%d", firstCache.Name(), firstCache.IsValid(), firstCache.Generation())
+	}
+	if _, getErr := firstCache.Get(); getErr != nil || !firstCache.IsValid() {
+		testingContext.Fatalf("expected warm firstCache after Get, valid=%v err=%v", firstCache.IsValid(), getErr)
+	}
+	firstCache.Invalidate()
+	if firstCache.IsValid() || firstCache.Generation() != 1 {
+		testingContext.Fatalf("expected invalidated firstCache with generation 1, valid=%v gen=%d", firstCache.IsValid(), firstCache.Generation())
+	}
 	combined := TriggersFrom(firstCache, nil, secondCache).
 		WithApp(events.AppSettingsChanged).
 		WithJournal(testEventCarrierStats)
@@ -94,6 +104,9 @@ func TestCacheABAGenerationSafetyOnInvalidate(testingContext *testing.T) {
 
 func TestKeyedCacheGetOrLoadGetManyOrLoadAndABASafety(testingContext *testing.T) {
 	keyed := NewKeyedCache[string, int](nil, "keyed", Triggers{})
+	if keyed.Name() != "keyed" || keyed.Generation() != 0 {
+		testingContext.Fatalf("unexpected cold KeyedCache metadata: name=%q gen=%d", keyed.Name(), keyed.Generation())
+	}
 
 	firstValue, firstError := keyed.GetOrLoad("alpha", func() (int, error) { return 10, nil })
 	if firstError != nil || firstValue != 10 {
@@ -147,6 +160,12 @@ func TestKeyedCacheGetOrLoadGetManyOrLoadAndABASafety(testingContext *testing.T)
 	refreshed, refreshError := keyed.GetOrLoad("delta", func() (int, error) { return 123, nil })
 	if refreshError != nil || refreshed != 123 {
 		testingContext.Fatalf("expected fresh value 123 after Invalidate, got %d (err=%v)", refreshed, refreshError)
+	}
+	_, _ = keyed.GetOrLoad("keep", func() (int, error) { return 7, nil })
+	genBeforeWhere := keyed.Generation()
+	keyed.InvalidateWhere(func(key string) bool { return key == "delta" })
+	if keyed.Len() != 1 || keyed.Generation() != genBeforeWhere+1 {
+		testingContext.Fatalf("expected InvalidateWhere to keep 1 entry and advance generation, len=%d gen=%d", keyed.Len(), keyed.Generation())
 	}
 }
 

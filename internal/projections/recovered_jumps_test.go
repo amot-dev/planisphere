@@ -37,7 +37,14 @@ func TestRecoveredJumpsProjectionCachingInvalidationAndScoping(testingContext *t
 
 	eventBus := projection.NewBus()
 	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
+	if !recoveredJumps.Triggers().Journal.Has(journal.EventLocation) || recoveredJumps.Triggers().Journal.Has(journal.EventFSDJump) {
+		testingContext.Fatalf("unexpected RecoveredJumps triggers: %v", recoveredJumps.Triggers())
+	}
 
+	allInitial, allErr := recoveredJumps.All()
+	if allErr != nil || len(allInitial) != 1 || allInitial[0].SystemName != "HopOne" {
+		testingContext.Fatalf("All() = %+v err=%v, want 1 HopOne jump", allInitial, allErr)
+	}
 	initialRecovered, recoverError := recoveredJumps.InRange("", "")
 	if recoverError != nil {
 		testingContext.Fatalf("InRange: %v", recoverError)

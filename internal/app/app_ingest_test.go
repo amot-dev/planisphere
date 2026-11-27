@@ -1,9 +1,12 @@
 package app
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -225,5 +228,106 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	sizeAfterCompletedQuery := testApp.timeRangeStats.CachedCount()
 	if sizeAfterCompletedQuery != 3 {
 		testingContext.Fatalf("expected completed bounds query to cache new entry alongside prior 2 windows, got %d entries", sizeAfterCompletedQuery)
+	}
+}
+
+type ingestRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (transport ingestRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+func TestRefreshGEC(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+
+	originalTransport := http.DefaultTransport
+	testingContext.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+	})
+	http.DefaultTransport = ingestRoundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		payload := `[{"id":1,"source":"GEC","type":"Historical","name":"Cradle of Humanity","galMapSearch":"Sol","coordinates":[0,0,0]}]`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(payload)),
+		}, nil
+	})
+
+	createdExp, createErr := testApp.createExpeditionWithWaypoints("GEC Backfill", "", []string{"Sol"})
+	if createErr != nil {
+		testingContext.Fatalf("createExpeditionWithWaypoints: %v", createErr)
+	}
+	testApp.backgroundWg.Wait()
+
+	// Verify in-flight RefreshGEC guard and uninitialized GEC catalog error handling.
+	testApp.gecRefreshing.Store(true)
+	_, busyErr := testApp.RefreshGEC()
+	testApp.gecRefreshing.Store(false)
+	if busyErr == nil || !strings.Contains(busyErr.Error(), "already in progress") {
+		testingContext.Fatalf("expected concurrent RefreshGEC error, got %v", busyErr)
+	}
+
+	savedCatalog := testApp.gec
+	testApp.gec = nil
+	_, nilCatalogErr := testApp.RefreshGEC()
+	testApp.gec = savedCatalog
+	if nilCatalogErr == nil || !strings.Contains(nilCatalogErr.Error(), "not initialized") {
+		testingContext.Fatalf("expected nil readyGECCatalog error, got %v", nilCatalogErr)
+	}
+
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+	importedCount, refreshErr := testApp.RefreshGEC()
+	if refreshErr != nil || importedCount != 1 {
+		testingContext.Fatalf("RefreshGEC() = (%d, %v), want (1, nil)", importedCount, refreshErr)
+	}
+	refreshDomains := eventsRecorder.Domains()
+	for _, expectedDomain := range []string{"plan", "expeditions", "settings"} {
+		if !slices.Contains(refreshDomains, expectedDomain) {
+			testingContext.Fatalf("expected RefreshGEC to emit %q domain, got %v", expectedDomain, refreshDomains)
+		}
+	}
+	loadedSettings, settingsErr := testApp.GetSettings()
+	if settingsErr != nil || loadedSettings.GECCount != 1 || loadedSettings.GECFetchedAt == "" {
+		testingContext.Fatalf("unexpected settings after RefreshGEC: count=%d fetchedAt=%q err=%v",
+			loadedSettings.GECCount, loadedSettings.GECFetchedAt, settingsErr)
+	}
+	refreshedPlan := mustGetPlan(testingContext, testApp, createdExp.ID)
+	if refreshedPlan.Rows[0].Row.POIName != "Cradle of Humanity" {
+		testingContext.Fatalf("expected RefreshGEC to backfill Sol POIName, got %q", refreshedPlan.Rows[0].Row.POIName)
+	}
+}
+
+func TestMaybeCatchUpEDD(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+
+	eddPath := createMinimalEDDSQLite(testingContext, [][2]string{
+		{"Fileheader", `{"timestamp":"2026-04-01T10:00:00Z","event":"Fileheader","part":1,"Odyssey":true}`},
+		{"Location", `{"timestamp":"2026-04-01T10:01:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":3230,"StarPos":[-9530.5,-910.28,19808.13]}`},
+	})
+	if err := settings.Set(testApp.db, "edd_history_recovered_v1", "1"); err != nil {
+		testingContext.Fatal(err)
+	}
+	if err := settings.Set(testApp.db, "edd_db_path", eddPath); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+	testApp.maybeCatchUpEDD()
+
+	progressEvents := eventsRecorder.EDDProgress()
+	domainsAfterCatchUp := eventsRecorder.Domains()
+	if len(progressEvents) == 0 || !slices.Contains(domainsAfterCatchUp, "ingest") {
+		testingContext.Fatalf("expected maybeCatchUpEDD to emit progress and ingest domain, got progress=%d domains=%v",
+			len(progressEvents), domainsAfterCatchUp)
+	}
+	if _, disconnectsDone, _ := settings.EDDRecoveryState(testApp.db); !disconnectsDone {
+		testingContext.Fatal("expected maybeCatchUpEDD to mark disconnectsDone=true")
+	}
+
+	// Second invocation is an immediate no-op once disconnectsDone is persisted.
+	eventsRecorder.Reset()
+	testApp.maybeCatchUpEDD()
+	if repeatedDomains := eventsRecorder.Domains(); len(repeatedDomains) != 0 {
+		testingContext.Fatalf("expected second maybeCatchUpEDD call to be a no-op, got domains=%v", repeatedDomains)
 	}
 }

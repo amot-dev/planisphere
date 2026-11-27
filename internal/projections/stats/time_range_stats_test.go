@@ -381,3 +381,34 @@ func TestTimeRangeStatsIsolatesScopedProfilesAndPreservesUnfilteredScopeKeys(tes
 		testingContext.Fatalf("expected AppExpeditionModesChanged to preserve both unfiltered scoped '|all|prof:...' keys (want 2), got %d", timeRangeStats.CachedCount())
 	}
 }
+
+func TestTimeRangeSectionDirectComputeMatchesCompositeSummary(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T19:10:00Z","event":"FSDJump","StarSystem":"SubSys","SystemAddress":3003,"StarPos":[40,0,0],"JumpDist":40.0}`,
+		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"SubSys","SystemAddress":3003,"BodyID":1,"BodyName":"SubSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":3003,"Body":1}`,
+	}
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
+	timeRangeStats := harness.timeRangeStats
+	window := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
+
+	travelMetrics, travelErr := timeRangeStats.Travel().Compute(window, nil)
+	cartoMetrics, cartoErr := timeRangeStats.Cartographics().Compute(window, nil)
+	exoMetrics, exoErr := timeRangeStats.Exobiology().Compute(window, nil)
+	realizationMetrics, realErr := timeRangeStats.Realization().Compute(window, nil)
+	if travelErr != nil || cartoErr != nil || exoErr != nil || realErr != nil {
+		testingContext.Fatalf("direct section Compute errors: travel=%v carto=%v exo=%v real=%v", travelErr, cartoErr, exoErr, realErr)
+	}
+	composite, compositeErr := timeRangeStats.Compute(window, nil)
+	if compositeErr != nil {
+		testingContext.Fatalf("composite Compute: %v", compositeErr)
+	}
+	if travelMetrics.Jumps != 1 || travelMetrics.Jumps != composite.Metrics.Jumps ||
+		cartoMetrics.BodiesScanned != 1 || cartoMetrics.ScanValueTotal != composite.Metrics.ScanValueTotal ||
+		exoMetrics.OrganicSamples != 1 || exoMetrics.OrganicValueTotal != composite.Metrics.OrganicValueTotal ||
+		realizationMetrics != composite.Realization {
+		testingContext.Fatalf("section Compute mismatch against composite: travel=%+v carto=%+v exo=%+v real=%+v composite=%+v",
+			travelMetrics, cartoMetrics, exoMetrics, realizationMetrics, composite)
+	}
+}

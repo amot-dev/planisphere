@@ -1,11 +1,23 @@
 package gec_test
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/version"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (transport roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
 
 func TestGECandGMPCombinedImport(t *testing.T) {
 	dbConn := dbtest.OpenMemory(t)
@@ -72,5 +84,79 @@ func TestGECandGMPCombinedImport(t *testing.T) {
 	}
 	if gmpMatch[0].Name != "Cupid's Arrow" || gmpMatch[0].Source != "GMP" {
 		t.Errorf("unexpected GMP entry: %+v", gmpMatch[0])
+	}
+}
+
+func TestCatalogRefresh(testingContext *testing.T) {
+	refreshCases := []struct {
+		name        string
+		roundTrip   roundTripFunc
+		wantCount   int
+		wantErrText string
+	}{
+		{
+			name: "200 OK imports and reloads in-memory lookup",
+			roundTrip: func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != gec.CombinedURL {
+					testingContext.Errorf("request URL = %q, want %q", request.URL.String(), gec.CombinedURL)
+				}
+				if gotAgent := request.Header.Get("User-Agent"); gotAgent != version.UserAgent {
+					testingContext.Errorf("User-Agent = %q, want %q", gotAgent, version.UserAgent)
+				}
+				payload := `[{"id":101,"source":"GEC","type":"Nebula","name":"Veil West","galMapSearch":"Veil West Sector DL-Y d68","id64":2345678901,"coordinates":[-1300,-150,-260]}]`
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(payload)),
+				}, nil
+			},
+			wantCount: 1,
+		},
+		{
+			name: "non-200 HTTP response returns status error",
+			roundTrip: func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusBadGateway,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("gateway failure")),
+				}, nil
+			},
+			wantErrText: "GEC download: HTTP 502",
+		},
+		{
+			name: "transport failure wraps download error",
+			roundTrip: func(_ *http.Request) (*http.Response, error) {
+				return nil, errors.New("connection refused")
+			},
+			wantErrText: "GEC download failed",
+		},
+	}
+
+	for _, testCase := range refreshCases {
+		testingContext.Run(testCase.name, func(subContext *testing.T) {
+			originalTransport := http.DefaultTransport
+			subContext.Cleanup(func() {
+				http.DefaultTransport = originalTransport
+			})
+			http.DefaultTransport = testCase.roundTrip
+
+			dbConn := dbtest.OpenMemory(subContext)
+			catalogInstance := gec.NewCatalog(dbConn)
+
+			importedCount, refreshError := catalogInstance.Refresh(context.Background())
+			if testCase.wantErrText != "" {
+				if refreshError == nil || !strings.Contains(refreshError.Error(), testCase.wantErrText) {
+					subContext.Fatalf("expected error containing %q, got count=%d err=%v", testCase.wantErrText, importedCount, refreshError)
+				}
+				return
+			}
+			if refreshError != nil || importedCount != testCase.wantCount || catalogInstance.Count() != testCase.wantCount {
+				subContext.Fatalf("Refresh() = (%d, %v), count=%d, want %d", importedCount, refreshError, catalogInstance.Count(), testCase.wantCount)
+			}
+			byAddr := catalogInstance.Lookup("Unmatched Name", 2345678901)
+			if len(byAddr) != 1 || byAddr[0].Name != "Veil West" || byAddr[0].URL != "https://edastro.com/gec/view/101" {
+				subContext.Fatalf("unexpected reloaded address lookup after Refresh: %+v", byAddr)
+			}
+		})
 	}
 }
