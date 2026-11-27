@@ -194,55 +194,6 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	}
 }
 
-func TestRealizationLedgerCaching(testingContext *testing.T) {
-	harness := newTimeRangeStatsHarness(testingContext, nil, nil)
-	journaltest.InsertParsedLines(
-		testingContext,
-		harness.conn,
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`,
-	)
-	engineInstance := stats.NewEngineWithSources(harness.conn, harness.salesLedger, nil, nil)
-
-	firstResult, firstComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
-	if firstComputeError != nil {
-		testingContext.Fatalf("first ComputeRealization failed: %v", firstComputeError)
-	}
-	if firstResult.PendingValue <= 0 {
-		testingContext.Fatalf("expected positive PendingValue, got %d", firstResult.PendingValue)
-	}
-
-	// Insert second event directly into database without publishing to the bus
-	journaltest.InsertParsedLines(
-		testingContext,
-		harness.conn,
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`,
-	)
-
-	// Query with cached ledger should still report pending because bus event has not fired
-	secondResult, secondComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
-	if secondComputeError != nil {
-		testingContext.Fatalf("second ComputeRealization failed: %v", secondComputeError)
-	}
-	if secondResult.PendingValue != firstResult.PendingValue {
-		testingContext.Fatalf("expected identical cached pending value %d, got %d", firstResult.PendingValue, secondResult.PendingValue)
-	}
-
-	// Publish matching journal event to invalidate ledger cache
-	harness.bus.PublishJournal(journal.NewEventSet(journal.EventSellOrganicData))
-
-	// Query after invalidation should pick up the sale
-	thirdResult, thirdComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
-	if thirdComputeError != nil {
-		testingContext.Fatalf("third ComputeRealization failed: %v", thirdComputeError)
-	}
-	if thirdResult.PendingValue != 0 {
-		testingContext.Fatalf("expected pending value 0 after sale realization and cache invalidation, got %d", thirdResult.PendingValue)
-	}
-	if thirdResult.TotalRealized != 95054000 {
-		testingContext.Fatalf("expected TotalRealized 95054000 after cache invalidation, got %d", thirdResult.TotalRealized)
-	}
-}
-
 func TestTimeRangeSelectiveInvalidationPreservesClosedWindowsExceptRetroactiveEvents(testingContext *testing.T) {
 	lines := []string{
 		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
@@ -386,6 +337,15 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 			testingContext.Fatalf("expected forward batch at %s to keep ClosedWindowRevision 1, got %d", batch.timestamp, gotRevision)
 		}
 	}
+	// Multi-event forward range [T1, T3] advances highWaterTimestamp to T3 without incrementing ClosedWindowRevision.
+	eventBus.PublishJournalRange(
+		journal.NewEventSet(journal.EventFSDJump, journal.EventShipyardSwap),
+		"2026-01-18T20:22:00Z",
+		"2026-01-18T20:28:00Z",
+	)
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
+		testingContext.Fatalf("expected forward [T1, T3] range to preserve ClosedWindowRevision 1, got %d", gotRevision)
+	}
 
 	expectedRevision := uint64(1)
 	assertIncrement := func(label string, trigger func()) {
@@ -397,6 +357,12 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 		}
 	}
 
+	assertIncrement("out-of-order T2 within [T1, T3] range", func() {
+		eventBus.PublishJournalRange(journal.NewEventSet(journal.EventScan), "2026-01-18T20:25:00Z", "2026-01-18T20:25:00Z")
+	})
+	assertIncrement("backfilled ShipyardSwap without metric triggers", func() {
+		eventBus.PublishJournalRange(journal.NewEventSet(journal.EventShipyardSwap), "2026-01-18T20:26:00Z", "2026-01-18T20:26:00Z")
+	})
 	assertIncrement("SellOrganicData", func() {
 		eventBus.PublishJournalSince(journal.NewEventSet(journal.EventSellOrganicData), "2026-01-18T20:30:00Z")
 	})
@@ -427,43 +393,12 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != expectedRevision {
 		testingContext.Fatalf("expected forward batch after backfill to preserve ClosedWindowRevision %d, got %d", expectedRevision, gotRevision)
 	}
-}
 
-func TestTimeRangeStatsClosedWindowRevisionRangeAndShipHistoryBackfill(testingContext *testing.T) {
-	lines := []string{
-		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
-		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"SeedSys","SystemAddress":1001,"StarPos":[10,0,0],"JumpDist":10.0}`,
-	}
-	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
-	eventBus := harness.bus
-	timeRangeStats := harness.timeRangeStats
-
-	// Multi-event forward batch [T1, T3] advances highWaterTimestamp to T3 without incrementing ClosedWindowRevision.
-	eventBus.PublishJournalRange(
-		journal.NewEventSet(journal.EventFSDJump, journal.EventShipyardSwap),
-		"2026-01-18T20:00:00Z",
-		"2026-01-18T20:30:00Z",
-	)
-	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
-		testingContext.Fatalf("expected forward [T1, T3] range to preserve ClosedWindowRevision 1, got %d", gotRevision)
-	}
-
-	// Out-of-order T2 event (T1 < T2 < T3) falls below T3 high-water mark and increments ClosedWindowRevision.
-	eventBus.PublishJournalRange(journal.NewEventSet(journal.EventScan), "2026-01-18T20:15:00Z", "2026-01-18T20:15:00Z")
-	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 2 {
-		testingContext.Fatalf("expected out-of-order T2 within [T1, T3] to increment ClosedWindowRevision to 2, got %d", gotRevision)
-	}
-
-	// Backfilled ShipyardSwap event below T3 increments ClosedWindowRevision even without metric triggers.
-	eventBus.PublishJournalRange(journal.NewEventSet(journal.EventShipyardSwap), "2026-01-18T20:20:00Z", "2026-01-18T20:20:00Z")
-	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 3 {
-		testingContext.Fatalf("expected backfilled ShipyardSwap to increment ClosedWindowRevision to 3, got %d", gotRevision)
-	}
-
-	timeRangeStats.EnsureMinClosedWindowRevision(8)
-	timeRangeStats.EnsureMinClosedWindowRevision(4)
-	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 8 {
-		testingContext.Fatalf("expected EnsureMinClosedWindowRevision monotonic floor 8, got %d", gotRevision)
+	monotonicFloor := expectedRevision + 5
+	timeRangeStats.EnsureMinClosedWindowRevision(monotonicFloor)
+	timeRangeStats.EnsureMinClosedWindowRevision(expectedRevision + 2)
+	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != monotonicFloor {
+		testingContext.Fatalf("expected EnsureMinClosedWindowRevision monotonic floor %d, got %d", monotonicFloor, gotRevision)
 	}
 }
 

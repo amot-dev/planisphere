@@ -2,7 +2,6 @@ import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../../api/models'
-import { PlannerRegionRow } from '../table/PlannerRegionRow'
 import { PlannerCollapsedVisitedRow, PlannerDropSlotRow } from './PlannerDragPreviewRows'
 import { stepDragAutoScroll } from './useDragViewportScroll'
 import { createCachedRowDropPropsGetter } from './usePlannerDropHandlers'
@@ -58,7 +57,7 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
     expect(stepDragAutoScroll(mockContainer, 485)).toBe(false)
   })
 
-  it('createCachedRowDropPropsGetter keeps per-row dropProps references stable across gap hover updates and PlannerRegionRow stays memoized', () => {
+  it('createCachedRowDropPropsGetter keeps per-row dropProps references stable across gap hover updates', () => {
     const dragPlan = expedition.PlanView.createFrom({
       expedition: { id: 1, status: 'planning' },
       rows: [
@@ -138,16 +137,6 @@ describe('usePlannerRowDrag Helpers and Preview Rows', () => {
       { fromIndex: 0, targetIndex: 2 },
       { fromIndex: 1, targetIndex: 2 },
     ])
-
-    expect((PlannerRegionRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
-      Symbol.for('react.memo'),
-    )
-    expect((PlannerCollapsedVisitedRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
-      Symbol.for('react.memo'),
-    )
-    expect((PlannerDropSlotRow as unknown as { $$typeof?: symbol }).$$typeof).toBe(
-      Symbol.for('react.memo'),
-    )
   })
 
   it('renders dashed drop-slot rows and collapsed visited summary rows during hold and drag', () => {

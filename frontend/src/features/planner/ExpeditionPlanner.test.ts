@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 import { expedition } from '../../api/models'
 import { makeMode } from '../../test/fixtures'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
-import { StartExpeditionModal } from './lifecycle/StartExpeditionModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
 
 describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
@@ -123,40 +122,30 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).not.toMatch(/data-row-id="401"[^>]*data-last-visited="true"/)
   })
 
-  it('renders safely when plan has empty rows array', () => {
-    const mockPlan = expedition.PlanView.createFrom({
-      expedition: {
-        id: 2,
-        name: 'Empty Survey',
-        description: '',
-        status: 'planning',
-        createdAt: '3310-01-01T00:00:00Z',
-        updatedAt: '3310-01-01T00:00:00Z',
-      },
-      rows: [],
-      modes: [],
-      visitedWaypointCount: 0,
-      waypointCount: 0,
-      activeRowId: 0,
-    })
-
-    const html = renderPlanner(mockPlan)
-
-    expect(html).toContain('Empty Survey')
-    expect(html).toContain('ADD WAYPOINT')
-  })
-
-  it('renders safely when plan.rows is null or missing', () => {
-    const mockPlan = expedition.PlanView.createFrom({
-      expedition: {
-        id: 3,
-        name: 'Null Rows Survey',
-        description: '',
-        status: 'planning',
-        createdAt: '3310-01-01T00:00:00Z',
-        updatedAt: '3310-01-01T00:00:00Z',
-      },
+  it.each([
+    {
+      caseLabel: 'empty rows array',
+      expeditionId: 2,
+      expeditionName: 'Empty Survey',
+      rows: [] as expedition.RowView[],
+    },
+    {
+      caseLabel: 'null rows',
+      expeditionId: 3,
+      expeditionName: 'Null Rows Survey',
       rows: null as unknown as expedition.RowView[],
+    },
+  ])('renders safely when plan has $caseLabel', ({ expeditionId, expeditionName, rows }) => {
+    const mockPlan = expedition.PlanView.createFrom({
+      expedition: {
+        id: expeditionId,
+        name: expeditionName,
+        description: '',
+        status: 'planning',
+        createdAt: '3310-01-01T00:00:00Z',
+        updatedAt: '3310-01-01T00:00:00Z',
+      },
+      rows,
       modes: [],
       visitedWaypointCount: 0,
       waypointCount: 0,
@@ -165,7 +154,8 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
 
     const html = renderPlanner(mockPlan)
 
-    expect(html).toContain('Null Rows Survey')
+    expect(html).toContain(expeditionName)
+    expect(html).toContain('ADD WAYPOINT')
   })
 
   it('renders completed expedition with Reopen action and Completed Route summary', () => {
@@ -396,14 +386,6 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(html).not.toContain('PLANNED ROUTE:')
     expect(html).not.toContain('COMPLETED ROUTE:')
 
-    // WP2 (next waypoint) shows player distance (2.1 Ly) with player location tooltip:
-    expect(html).toContain('2.1 Ly')
-    expect(html).toContain('Estimated straight-line distance from player location (Interim Sol System)')
-
-    // WP3 (subsequent waypoint) shows distance from previous waypoint (6.0 Ly):
-    expect(html).toContain('6.0 Ly')
-    expect(html).toContain('Estimated straight-line distance from previous waypoint')
-
     // With only Waypoint #1 visited (visitedWaypointCount: 1), Complete button is disabled until Waypoint #2 is visited:
     expect(html).toContain(
       'disabled="" title="Waypoint #2 not visited yet — complete requires at least 2 visited waypoints (or delete expedition in Expeditions)"',
@@ -442,25 +424,5 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
     expect(carrierRouteOpenHeaderHtml).toContain(
       'disabled="" title="Close or finish the active Fleet Carrier route before completing the expedition"',
     )
-    expect(carrierRouteOpenHeaderHtml).toContain('opacity-40 cursor-not-allowed hover:bg-transparent')
-
-    const startModalHtml = renderToString(
-      createElement(StartExpeditionModal, {
-        expeditionId: 1,
-        modesList: [
-          makeMode({ id: 1, name: 'Exploration', color: '#00B3FF' }),
-          makeMode({ id: 3, name: 'Travel', color: '#FF7100' }),
-        ],
-        initialModeId: 3,
-        onClose: () => {},
-      }),
-    )
-    expect(startModalHtml).toContain('Engage Expedition')
-    expect(startModalHtml).not.toContain('Lock Waypoint #1 Arrival')
-    expect(startModalHtml).not.toContain('Custom Timestamp')
-    expect(startModalHtml).not.toContain('Arm and Wait for First Arrival')
-    expect(startModalHtml).toContain('Flight Mode')
-    expect(startModalHtml).toContain('first departure from Waypoint #1')
-    expect(startModalHtml).toContain('applies to any systems already visited')
   })
 })

@@ -18,126 +18,100 @@ func TestCarrierJumpPassengerDistanceRespectsModeFilter(t *testing.T) {
 		`{"timestamp":"2026-01-18T19:10:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"CarrierJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[0,0,100]}`,
 		`{"timestamp":"2026-01-18T19:50:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1003,"StarPos":[0,0,106],"JumpDist":6.0}`,
+		`{"timestamp":"2026-01-18T20:10:00Z","event":"CarrierJump","StarSystem":"System1","SystemAddress":1004,"StarPos":[0,0,206]}`,
+		`{"timestamp":"2026-01-18T20:30:00Z","event":"CarrierJump","StarSystem":"System2","SystemAddress":1005,"StarPos":[0,0,406]}`,
 	}
 	conn := seedStatsDB(t, lines...)
 
 	defaultModes := expeditiontest.LookupDefaultModes(t, conn)
-	expModeID := defaultModes.Exploration
-	fallbackModeID := defaultModes.Fallback
-
-	engine := newEngineWithModeLookup(conn, func(timestamp string) int64 {
-		if timestamp >= "2026-01-18T19:20:00Z" && timestamp < "2026-01-18T20:00:00Z" {
-			return expModeID
-		}
-		return fallbackModeID
-	})
-
-	// Seeded window starting after Location ("19:20:00Z") must still resolve previous StarPos ([0,0,0]) for CarrierJump.
-	unfiltered, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:20:00Z"}, nil)
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	if unfiltered.CarrierPassengerLy != 100.0 {
-		t.Fatalf("expected 100.0 carrier passenger Ly, got %.1f", unfiltered.CarrierPassengerLy)
-	}
-	if unfiltered.ShipDistanceLy != 6.0 {
-		t.Fatalf("expected 6.0 ship distance Ly, got %.1f", unfiltered.ShipDistanceLy)
-	}
-	if unfiltered.DistanceLy != 106.0 {
-		t.Fatalf("expected 106.0 total distance Ly, got %.1f", unfiltered.DistanceLy)
-	}
-
-	filtered, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
-		Enabled: true,
-		Modes: []stats.ModeSelection{
-			{ModeID: expModeID, Travel: false, Discovery: true},
-		},
-	})
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	if filtered.CarrierPassengerLy != 0 || filtered.ShipDistanceLy != 0 || filtered.DistanceLy != 0 || filtered.Jumps != 0 {
-		t.Fatalf("expected travel metrics filtered to 0 when Travel=false: %+v", filtered)
-	}
-
-	filteredTravelOn, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T19:00:00Z"}, &stats.Filter{
-		Enabled: true,
-		Modes: []stats.ModeSelection{
-			{ModeID: expModeID, Travel: true, Discovery: true},
-		},
-	})
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	if filteredTravelOn.CarrierPassengerLy != 100.0 || filteredTravelOn.DistanceLy != 106.0 {
-		t.Fatalf("unexpected metrics with Travel=true: %+v", filteredTravelOn)
-	}
-}
-
-func TestCarrierPassengerDistanceSpanningDifferentModes(t *testing.T) {
-	lines := []string{
-		`{"timestamp":"2026-01-18T20:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
-		`{"timestamp":"2026-01-18T20:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-		`{"timestamp":"2026-01-18T20:10:00Z","event":"CarrierJump","StarSystem":"System1","SystemAddress":1002,"StarPos":[0,0,100]}`,
-		`{"timestamp":"2026-01-18T20:30:00Z","event":"CarrierJump","StarSystem":"System2","SystemAddress":1003,"StarPos":[0,0,300]}`,
-	}
-	conn := seedStatsDB(t, lines...)
-
-	defaultModes := expeditiontest.LookupDefaultModes(t, conn)
-	modeA := defaultModes.Exploration
-	modeB := defaultModes.Tourism
+	explorationModeID := defaultModes.Exploration
+	tourismModeID := defaultModes.Tourism
 	fallbackModeID := defaultModes.Fallback
 
 	engine := newEngineWithModeLookup(conn, func(timestamp string) int64 {
 		switch {
-		case timestamp >= "2026-01-18T20:08:00Z" && timestamp < "2026-01-18T20:20:00Z":
-			return modeA
+		case timestamp >= "2026-01-18T19:20:00Z" && timestamp < "2026-01-18T20:20:00Z":
+			return explorationModeID
 		case timestamp >= "2026-01-18T20:20:00Z" && timestamp < "2026-01-18T20:40:00Z":
-			return modeB
+			return tourismModeID
 		default:
 			return fallbackModeID
 		}
 	})
-	computeResult, computeError := engine.ComputeTravel(stats.Range{After: "2026-01-18T20:00:00Z"}, &stats.Filter{
-		Enabled: true,
-		Modes: []stats.ModeSelection{
-			{ModeID: modeA, Travel: false, Discovery: true},
-			{ModeID: modeB, Travel: true, Discovery: true},
+
+	testCases := []struct {
+		name              string
+		window            stats.Range
+		filter            *stats.Filter
+		expectedPassenger float64
+		expectedShip      float64
+		expectedTotal     float64
+		expectedJumps     int
+	}{
+		{
+			name:              "unfiltered window resolves pre-window StarPos baseline",
+			window:            stats.Range{After: "2026-01-18T19:20:00Z", Until: "2026-01-18T20:00:00Z"},
+			filter:            nil,
+			expectedPassenger: 100.0,
+			expectedShip:      6.0,
+			expectedTotal:     106.0,
+			expectedJumps:     1,
 		},
-	})
-	if computeError != nil {
-		t.Fatal(computeError)
+		{
+			name:   "mode filter with Travel false excludes carrier passenger and ship travel",
+			window: stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"},
+			filter: &stats.Filter{
+				Enabled: true,
+				Modes:   []stats.ModeSelection{{ModeID: explorationModeID, Travel: false, Discovery: true}},
+			},
+			expectedPassenger: 0,
+			expectedShip:      0,
+			expectedTotal:     0,
+			expectedJumps:     0,
+		},
+		{
+			name:   "mode filter with Travel true retains carrier passenger and ship travel",
+			window: stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"},
+			filter: &stats.Filter{
+				Enabled: true,
+				Modes:   []stats.ModeSelection{{ModeID: explorationModeID, Travel: true, Discovery: true}},
+			},
+			expectedPassenger: 100.0,
+			expectedShip:      6.0,
+			expectedTotal:     106.0,
+			expectedJumps:     1,
+		},
+		{
+			name:   "spanning modes measures included carrier jump from excluded carrier jump StarPos",
+			window: stats.Range{After: "2026-01-18T20:00:00Z"},
+			filter: &stats.Filter{
+				Enabled: true,
+				Modes: []stats.ModeSelection{
+					{ModeID: explorationModeID, Travel: false, Discovery: true},
+					{ModeID: tourismModeID, Travel: true, Discovery: true},
+				},
+			},
+			expectedPassenger: 200.0,
+			expectedShip:      0,
+			expectedTotal:     200.0,
+			expectedJumps:     0,
+		},
 	}
 
-	if computeResult.CarrierPassengerLy != 200.0 {
-		t.Fatalf("expected 200.0 carrier passenger Ly, got %.1f", computeResult.CarrierPassengerLy)
-	}
-	if computeResult.DistanceLy != 200.0 {
-		t.Fatalf("expected 200.0 total distance Ly, got %.1f", computeResult.DistanceLy)
-	}
-}
-
-func TestPreloadScansForMappedBodies(t *testing.T) {
-	lines := []string{
-		`{"timestamp":"2026-01-18T18:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
-		`{"timestamp":"2026-01-18T18:05:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Test Planet 1","BodyID":5,"StarSystem":"TestSys","SystemAddress":9999,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
-		`{"timestamp":"2026-01-18T19:30:00Z","event":"SAAScanComplete","BodyName":"Test Planet 1","BodyID":5,"SystemAddress":9999,"ProbesUsed":4,"EfficiencyTarget":6}`,
-	}
-	conn := seedStatsDB(t, lines...)
-
-	engine := newEngineWithModes(conn)
-	mappedMetrics, computeError := engine.ComputeCartographics(stats.Range{After: "2026-01-18T19:00:00Z"}, nil)
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	if mappedMetrics.BodiesMapped != 1 {
-		t.Fatalf("expected 1 body mapped, got %d", mappedMetrics.BodiesMapped)
-	}
-	if mappedMetrics.FirstMapped != 1 {
-		t.Fatalf("expected 1 first mapped, got %d", mappedMetrics.FirstMapped)
-	}
-	if mappedMetrics.ScanValueTotal == 0 {
-		t.Fatalf("expected positive scan value total from preloaded scan, got %d", mappedMetrics.ScanValueTotal)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(subTest *testing.T) {
+			computed, computeError := engine.ComputeTravel(testCase.window, testCase.filter)
+			if computeError != nil {
+				subTest.Fatalf("ComputeTravel: %v", computeError)
+			}
+			if computed.CarrierPassengerLy != testCase.expectedPassenger ||
+				computed.ShipDistanceLy != testCase.expectedShip ||
+				computed.DistanceLy != testCase.expectedTotal ||
+				computed.Jumps != testCase.expectedJumps {
+				subTest.Fatalf("got %+v, want passenger=%.1f ship=%.1f total=%.1f jumps=%d",
+					computed, testCase.expectedPassenger, testCase.expectedShip, testCase.expectedTotal, testCase.expectedJumps)
+			}
+		})
 	}
 }
 
@@ -181,6 +155,8 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 		databaseConnection,
 		`{"timestamp":"2026-05-01T11:10:00Z","event":"SAAScanComplete","BodyName":"FutureScan 1","BodyID":4,"SystemAddress":7002,"ProbesUsed":4,"EfficiencyTarget":6}`,
 		`{"timestamp":"2026-05-01T11:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"FutureScan 1","BodyID":4,"StarSystem":"FutureScan","SystemAddress":7002,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-05-01T12:05:00Z","event":"Scan","ScanType":"Detailed","BodyName":"PreloadSys 1","BodyID":5,"StarSystem":"PreloadSys","SystemAddress":9999,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-05-01T12:30:00Z","event":"SAAScanComplete","BodyName":"PreloadSys 1","BodyID":5,"SystemAddress":9999,"ProbesUsed":4,"EfficiencyTarget":6}`,
 	)
 
 	futureScanWindow := stats.Range{After: "2026-05-01T11:00:00Z", Until: "2026-05-01T12:00:00Z"}
@@ -191,6 +167,16 @@ func TestPrepareComputeScansOrderingAndRangeBounds(testingContext *testing.T) {
 	if futureScanMetrics.FirstMapped != 0 || futureScanMetrics.ScanValueTotal != expectedScanOnly.Total {
 		testingContext.Fatalf("expected future scan not to preload for earlier mapping (FirstMapped=0, ScanValueTotal=%d), got FirstMapped=%d ScanValueTotal=%d",
 			expectedScanOnly.Total, futureScanMetrics.FirstMapped, futureScanMetrics.ScanValueTotal)
+	}
+
+	preloadedMappingWindow := stats.Range{After: "2026-05-01T12:15:00Z", Until: "2026-05-01T12:45:00Z"}
+	preloadedMetrics, preloadedError := engineInstance.ComputeCartographics(preloadedMappingWindow, nil)
+	if preloadedError != nil {
+		testingContext.Fatalf("Compute preloaded mapping range failed: %v", preloadedError)
+	}
+	if preloadedMetrics.BodiesMapped != 1 || preloadedMetrics.FirstMapped != 1 || preloadedMetrics.ScanValueTotal != expectedMapping.Total {
+		testingContext.Fatalf("expected pre-window scan preloaded for mapped body (BodiesMapped=1, FirstMapped=1, ScanValueTotal=%d), got %+v",
+			expectedMapping.Total, preloadedMetrics)
 	}
 }
 

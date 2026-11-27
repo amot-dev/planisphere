@@ -208,12 +208,13 @@ func TestDetailsBatchParityAndEffectiveStartFromRows(testingContext *testing.T) 
 
 	// Leg 2 (Alpha Leg): single-hull fast path (Mandalay).
 	// Leg 3 (Beta Carrier): 0 piloted jumps via CarrierJump (ShipsUsed stays empty).
-	// Leg 4 (Gamma Swap): multi-ship leg (Mandalay jump, ShipyardSwap to Anaconda, Anaconda jump).
+	// Leg 4 (Gamma Swap): multi-ship leg (Mandalay jump, unjumped Krait Phantom swap, ShipyardSwap to Anaconda, Anaconda jump).
 	// Leg 5 (Delta Current): departed Gamma Swap into open space with Cobra Mk III jump (VisitCurrent).
 	journaltest.InsertParsedLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-02-01T09:00:00Z","event":"FSDJump","StarSystem":"Alpha Leg","SystemAddress":2002,"StarPos":[40,0,0],"JumpDist":40.0}`,
 		`{"timestamp":"2026-02-01T10:00:00Z","event":"CarrierJump","StarSystem":"Beta Carrier","SystemAddress":3003,"StarPos":[540,0,0]}`,
 		`{"timestamp":"2026-02-01T11:00:00Z","event":"FSDJump","StarSystem":"Mid Swap","SystemAddress":4001,"StarPos":[570,0,0],"JumpDist":30.0}`,
+		`{"timestamp":"2026-02-01T11:05:00Z","event":"ShipyardSwap","ShipType":"krait_phantom","ShipType_Localised":"Krait Phantom","ShipID":4}`,
 		`{"timestamp":"2026-02-01T11:10:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}`,
 		`{"timestamp":"2026-02-01T11:20:00Z","event":"FSDJump","StarSystem":"Gamma Swap","SystemAddress":4004,"StarPos":[620,0,0],"JumpDist":50.0}`,
 		`{"timestamp":"2026-02-01T11:25:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Gamma Swap","SystemAddress":4004,"BodyID":1,"BodyName":"Gamma Swap 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,

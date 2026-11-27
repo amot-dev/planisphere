@@ -1,11 +1,12 @@
+// @vitest-environment happy-dom
+import { act, createElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { createElement, type ErrorInfo, type ReactElement } from 'react'
-import { renderToString } from 'react-dom/server'
+import { mountTestRoot } from '../../test/render'
 import { ErrorBoundary } from './ErrorBoundary'
 
 describe('ErrorBoundary', () => {
-  it('renders children when no error is thrown', () => {
-    const html = renderToString(
+  it('renders children normally when no error is thrown', () => {
+    const mounted = mountTestRoot(
       createElement(
         ErrorBoundary,
         { fallbackTitle: 'Test Error' },
@@ -13,63 +14,58 @@ describe('ErrorBoundary', () => {
       ),
     )
 
-    expect(html).toContain('Operational Child Content')
-    expect(html).toContain('id="child-content"')
-    expect(html).not.toContain('SUBSYSTEM EXCEPTION')
+    expect(mounted.container.querySelector('#child-content')?.textContent).toBe(
+      'Operational Child Content',
+    )
+    expect(mounted.container.textContent).not.toContain('SUBSYSTEM EXCEPTION')
   })
 
-  it('updates state via getDerivedStateFromError', () => {
-    const error = new Error('Simulated reactor breach')
-    const state = ErrorBoundary.getDerivedStateFromError(error)
+  it('catches child render errors, renders fallback HUD UI with console logging, and recovers on DISMISS AND RETRY', () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let shouldThrow = true
 
-    expect(state.hasError).toBe(true)
-    expect(state.error).toBe(error)
-    expect(state.errorInfo).toBeNull()
-  })
-
-  it('renders fallback error HUD UI when in error state', () => {
-    const boundary = new ErrorBoundary({
-      children: createElement('div', null, 'child'),
-      fallbackTitle: 'Subsystem Sensor Malfunction',
-    })
-
-    const testError = new Error('Critical telemetry failure')
-    const errorInfo: ErrorInfo = { componentStack: ' at WaypointTable\n at App' }
-    boundary.state = {
-      hasError: true,
-      error: testError,
-      errorInfo,
+    function ThrowingChild() {
+      if (shouldThrow) {
+        throw new Error('Critical telemetry failure')
+      }
+      return createElement('div', { id: 'recovered-child' }, 'Operational Child Content')
     }
 
-    const rendered = boundary.render()
-    const html = renderToString(rendered as ReactElement)
-
-    expect(html).toContain('SUBSYSTEM EXCEPTION')
-    expect(html).toContain('Subsystem Sensor Malfunction')
-    expect(html).toContain('Critical telemetry failure')
-    expect(html).toContain('REBOOT PLANISPHERE')
-    expect(html).toContain('DISMISS AND RETRY')
-  })
-
-  it('logs caught errors to console via componentDidCatch', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      const boundary = new ErrorBoundary({
-        children: createElement('div', null, 'child'),
+      const mounted = mountTestRoot(
+        createElement(
+          ErrorBoundary,
+          { fallbackTitle: 'Subsystem Sensor Malfunction' },
+          createElement(ThrowingChild),
+        ),
+      )
+
+      const fallbackText = mounted.container.textContent ?? ''
+      expect(fallbackText).toContain('SUBSYSTEM EXCEPTION')
+      expect(fallbackText).toContain('Subsystem Sensor Malfunction')
+      expect(fallbackText).toContain('Critical telemetry failure')
+      expect(mounted.findButtonByText('REBOOT PLANISPHERE')).toBeTruthy()
+
+      const loggedCall = consoleErrorSpy.mock.calls.find(
+        (callArgs) =>
+          typeof callArgs[0] === 'string' &&
+          callArgs[0].includes('[TerminalErrorBoundary caught error]'),
+      )
+      expect(loggedCall).toBeDefined()
+      expect((loggedCall?.[1] as Error).message).toBe('Critical telemetry failure')
+      expect(typeof (loggedCall?.[2] as { componentStack?: string })?.componentStack).toBe('string')
+
+      shouldThrow = false
+      act(() => {
+        mounted.findButtonByText('DISMISS AND RETRY').click()
       })
 
-      const testError = new Error('Test log error')
-      const testInfo = { componentStack: 'stack trace' }
-
-      boundary.componentDidCatch(testError, testInfo)
-
-      expect(spy).toHaveBeenCalledWith(
-        expect.stringContaining('[TerminalErrorBoundary caught error]'),
-        testError,
-        testInfo,
+      expect(mounted.container.querySelector('#recovered-child')?.textContent).toBe(
+        'Operational Child Content',
       )
+      expect(mounted.container.textContent).not.toContain('SUBSYSTEM EXCEPTION')
     } finally {
-      spy.mockRestore()
+      consoleErrorSpy.mockRestore()
     }
   })
 })

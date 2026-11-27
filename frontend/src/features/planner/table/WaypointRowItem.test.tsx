@@ -14,9 +14,9 @@ const defaultRowHandlers = makeWaypointRowHandlers()
 const makeWaypointRow = makeRowView
 const renderRowItem = renderWaypointRowHtml
 
-describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () => {
-  it('renders visited row with uniform h-7 (28px) elements, align-top cells, and inset shadow left border', () => {
-    const html = renderRowItem({
+describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
+  it('renders single-row textarea and colors waypoint left borders by flight mode, current leg, and muted origin', () => {
+    const visitedLegHtml = renderRowItem({
       rowView: makeWaypointRow({
         row: {
           id: 11,
@@ -33,56 +33,16 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       isLocked: true,
       lastVisitedIndex: 10,
     })
+    expect(visitedLegHtml).toContain('style="border-left-color:#FF7100"')
+    expect(visitedLegHtml).toContain('rows="1"')
+    expect(visitedLegHtml).not.toContain('rows="2"')
 
-    expect(html).toContain('align-top')
-    expect(html).toContain('py-1.5')
-    expect(html).toContain('style="border-left-color:#FF7100"')
-    expect(html).toContain('border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]')
-    expect(html).toContain('h-7 flex items-center justify-center')
-    expect(html).toContain(
-      'h-7 flex items-center justify-end font-mono-tabular font-bold text-ed-amber text-xs leading-5',
-    )
-    expect(html).toContain(
-      'w-full h-7 flex items-center font-mono-tabular font-bold text-ed-text-main px-1.5 py-[3px] border border-transparent select-text cursor-text truncate text-xs leading-5',
-    )
-    expect(html).toContain('h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap')
-    expect(html).toContain(
-      'h-7 flex items-center gap-1.5 whitespace-nowrap font-mono-tabular text-[10px] leading-5',
-    )
-    expect(html).toContain('h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap')
-    expect(html).toContain('min-h-[28px]')
-    expect(html).toContain('py-[3px]')
-    expect(html).toContain('rows="1"')
-    expect(html).not.toContain('rows="2"')
-  })
-
-  it('renders unvisited row with matching h-7 (28px) elements and input box model', () => {
-    const html = renderRowItem({
-      rowView: makeWaypointRow({
-        row: { id: 17, systemName: 'LFT 509', poiName: 'Outpost', notes: '' },
-        number: 17,
-        visitState: 'future',
-        distFromPrevLy: 42.5,
-      }),
-      index: 16,
-      lastVisitedIndex: 10,
-    })
-
-    expect(html).toContain('w-full h-7 bg-transparent px-1.5 py-[3px] border border-transparent')
-    expect(html).toContain('h-7 flex items-center whitespace-nowrap font-mono-tabular text-[11px]')
-    expect(html).toContain('h-7 inline-flex items-center justify-end gap-1 whitespace-nowrap')
-  })
-
-  it('colors waypoint left borders by flight mode, extends to current leg, and uses muted neutral on origin', () => {
     const originRowHtml = renderRowItem({
       rowView: makeWaypointRow({ number: 1, visitState: 'visited' }),
       index: 0,
       lastVisitedIndex: 1,
     })
     expect(originRowHtml).toContain('style="border-left-color:#3d2816"')
-    expect(originRowHtml).toContain(
-      'border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]',
-    )
 
     const currentLegRowHtml = renderRowItem({
       rowView: makeWaypointRow({
@@ -97,9 +57,6 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       lastVisitedIndex: 1,
     })
     expect(currentLegRowHtml).toContain('style="border-left-color:#00E5A3"')
-    expect(currentLegRowHtml).toContain(
-      'border-l-2 shadow-[inset_0_-1px_0_0_var(--color-ed-border-subtle)]',
-    )
 
     const futureRowHtml = renderRowItem({
       rowView: makeWaypointRow({
@@ -111,7 +68,7 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
       index: 3,
       lastVisitedIndex: 1,
     })
-    expect(futureRowHtml).not.toContain('border-l-2')
+    expect(futureRowHtml).not.toContain('border-left-color')
   })
 
   it('supports collapsible columns: hides notes or carrier stop when toggled off', () => {
@@ -177,56 +134,31 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
     expect(planningHtml).toContain('Estimated straight-line distance from previous waypoint')
   })
 
-  it('renders CoordStatusIndicator tooltip, search highlight attribute, and per-row copy feedback', () => {
-    const edsmRowHtml = renderRowItem({
+  it('renders search highlight attribute and per-row copy feedback', () => {
+    const highlightedRowHtml = renderRowItem({
       rowView: makeWaypointRow({
-        row: {
-          id: 30,
-          systemName: 'Beagle Point',
-          hasCoords: true,
-          coordsSource: 'edsm',
-          x: -1111.6,
-          y: -134.2,
-          z: 65269.8,
-        },
+        row: { id: 30, systemName: 'Beagle Point' },
         number: 1,
-        detectedRegion: 'The Abyss',
-        visitCount: 0,
         visitState: 'future',
       }),
       isSearchHighlighted: true,
       isSystemCopied: false,
     })
-    expect(edsmRowHtml).toContain(
-      'title="The Abyss (-1111.6, -134.2, 65269.8) via EDSM (Never Visited)"',
-    )
-    expect(edsmRowHtml).toContain('data-search-highlighted="true"')
-    expect(edsmRowHtml).toMatch(/Copy [^"]*Beagle Point[^"]* to clipboard/)
+    expect(highlightedRowHtml).toContain('data-search-highlighted="true"')
+    expect(highlightedRowHtml).toMatch(/Copy [^"]*Beagle Point[^"]* to clipboard/)
 
     const draggedCopiedHtml = renderRowItem({
       rowView: makeWaypointRow({
-        row: {
-          id: 31,
-          systemName: 'Sol',
-          hasCoords: true,
-          coordsSource: 'journal',
-          x: 0,
-          y: 0,
-          z: 0,
-        },
+        row: { id: 31, systemName: 'Sol' },
         number: 2,
-        detectedRegion: 'Inner Orion Spur',
-        visitCount: 3,
         visitState: 'visited',
       }),
       isBeingDragged: true,
       isSearchHighlighted: true,
       isSystemCopied: true,
     })
-    expect(draggedCopiedHtml).toContain('title="Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)"')
     expect(draggedCopiedHtml).not.toContain('data-search-highlighted="true"')
     expect(draggedCopiedHtml).toMatch(/Copied [^"]*Sol[^"]*!/)
-    expect(draggedCopiedHtml).toContain('text-ed-cyan')
   })
 
   it('locks star system on visited rows while keeping manipulation controls on N > 1 and locking Origin #1', () => {

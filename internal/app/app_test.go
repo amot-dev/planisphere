@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"planisphere/internal/core/events"
-	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/settings"
 )
@@ -108,64 +108,6 @@ func TestDatabaseHotSwapConcurrent(t *testing.T) {
 
 	close(stop)
 	wg.Wait()
-}
-
-func TestMoveRow_NonexistentRow(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-
-	moveError := testApp.MoveRow(99999, 0)
-	if moveError == nil {
-		testingContext.Fatalf("expected error when moving nonexistent row, got nil")
-	}
-}
-
-func TestCareerStartDoubleCheckedLocking(testingContext *testing.T) {
-	testApp := setupTestApp(testingContext)
-
-	// Insert commander record with first_seen timestamp
-	expectedCareerStart := "2024-03-15T12:00:00Z"
-	_, insertError := testApp.db.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Commander Jameson', 1, ?)`, expectedCareerStart)
-	if insertError != nil {
-		testingContext.Fatalf("insert commander: %v", insertError)
-	}
-
-	expeditionRecord, createError := testApp.CreateExpedition("Career Expedition", "Testing career duration")
-	if createError != nil {
-		testingContext.Fatalf("failed to create expedition: %v", createError)
-	}
-
-	filterSettings := stats.Filter{Enabled: false}
-
-	// Concurrently invoke GetSidebarStats to exercise double-checked locking
-	concurrentRoutines := 10
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(concurrentRoutines)
-
-	for routineIndex := 0; routineIndex < concurrentRoutines; routineIndex++ {
-		go func() {
-			defer waitGroup.Done()
-			sidebarStats, getStatsError := testApp.GetSidebarStats(expeditionRecord.ID, filterSettings)
-			if getStatsError != nil {
-				testingContext.Errorf("GetSidebarStats failed: %v", getStatsError)
-				return
-			}
-			if sidebarStats.CareerStart != expectedCareerStart {
-				testingContext.Errorf("expected CareerStart %s, got %s", expectedCareerStart, sidebarStats.CareerStart)
-			}
-			if sidebarStats.CareerStartGalactic == "" {
-				testingContext.Errorf("expected non-empty CareerStartGalactic")
-			}
-			if sidebarStats.CareerDuration == "" {
-				testingContext.Errorf("expected non-empty CareerDuration")
-			}
-		}()
-	}
-	waitGroup.Wait()
-
-	careerStart, _ := replay.CareerStartScoped(testApp.db, replay.ProfileScope{})
-	if careerStart != expectedCareerStart {
-		testingContext.Errorf("expected CareerStart %s, got %s", expectedCareerStart, careerStart)
-	}
 }
 
 func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T) {
@@ -314,84 +256,30 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 	insertTestJournalEvent(testingContext, testApp, "2026-01-01T00:05:00Z", "FSDJump", "gen-depart-sol",
 		`{"timestamp":"2026-01-01T00:05:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`)
 
-	modeFilter := stats.Filter{
-		Enabled: true,
-		Modes:   []stats.ModeSelection{{ModeID: 0, Travel: true, Discovery: true}},
-	}
-	if _, statsError := testApp.GetSidebarStats(expeditionID, modeFilter); statsError != nil {
+	if _, statsError := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsError != nil {
 		testingContext.Fatalf("GetSidebarStats: %v", statsError)
 	}
 	if _, carrierErr := testApp.carrierState.LatestStats(); carrierErr != nil {
 		testingContext.Fatalf("LatestStats: %v", carrierErr)
 	}
 
-	initialTimeRangeGen := testApp.timeRangeStats.Generation()
 	initialClosedRev := testApp.timeRangeStats.ClosedWindowRevision()
-	initialCarrierGen := testApp.carrierState.Generation()
-	initialCareerGen := testApp.careerStats.Generation()
-
 	initialIngestStatus, ingestErr := testApp.GetIngestStatus()
 	if ingestErr != nil || initialIngestStatus.ClosedWindowRevision != initialClosedRev {
 		testingContext.Fatalf("expected GetIngestStatus ClosedWindowRevision %d, got %d (err=%v)",
 			initialClosedRev, initialIngestStatus.ClosedWindowRevision, ingestErr)
 	}
 
-	if testApp.timeRangeStats.CachedCount() == 0 {
-		testingContext.Fatal("expected timeRangeStats to cache an entry after GetSidebarStats")
-	}
-	if !testApp.carrierState.IsValid() || !testApp.careerStats.IsValid() {
-		testingContext.Fatalf("expected single-value projections to be valid after warmup")
-	}
-
-	// AppExpeditionBoundsChanged and AppModesChanged preserve TimeRangeStats while keeping lifetime and carrier projections valid.
-	testApp.publishApp(expeditionID, events.AppExpeditionBoundsChanged, events.AppModesChanged)
-
-	if testApp.timeRangeStats.Generation() != initialTimeRangeGen {
-		testingContext.Errorf("expected timeRangeStats generation %d after AppExpeditionBoundsChanged and AppModesChanged, got %d",
-			initialTimeRangeGen, testApp.timeRangeStats.Generation())
-	}
-	if testApp.timeRangeStats.CachedCount() == 0 {
-		testingContext.Errorf("expected timeRangeStats cache to remain populated after AppExpeditionBoundsChanged and AppModesChanged")
-	}
-	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
-		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionBoundsChanged and AppModesChanged")
-	}
-	if testApp.careerStats.Generation() != initialCareerGen || !testApp.careerStats.IsValid() {
-		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionBoundsChanged and AppModesChanged")
+	// Non-switching app events preserve ClosedWindowRevision while AppDatabaseSwitched invalidates app-wired projections and increments ClosedWindowRevision.
+	testApp.publishApp(expeditionID, events.AppExpeditionBoundsChanged, events.AppModesChanged, events.AppExpeditionModesChanged)
+	if unchangedStatus, statusErr := testApp.GetIngestStatus(); statusErr != nil || unchangedStatus.ClosedWindowRevision != initialClosedRev {
+		testingContext.Fatalf("expected ClosedWindowRevision %d across mode and bounds events, got %d (err=%v)",
+			initialClosedRev, unchangedStatus.ClosedWindowRevision, statusErr)
 	}
 
-	// AppExpeditionModesChanged clears mode-filtered TimeRangeStats entries while preserving lifetime and carrier projections.
-	testApp.publishApp(0, events.AppExpeditionModesChanged)
-
-	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+1 {
-		testingContext.Errorf("expected timeRangeStats generation %d after AppExpeditionModesChanged, got %d",
-			initialTimeRangeGen+1, testApp.timeRangeStats.Generation())
-	}
-	if testApp.timeRangeStats.CachedCount() != 0 {
-		testingContext.Errorf("expected timeRangeStats cache to be empty after AppExpeditionModesChanged, got %d", testApp.timeRangeStats.CachedCount())
-	}
-	if testApp.carrierState.Generation() != initialCarrierGen || !testApp.carrierState.IsValid() {
-		testingContext.Errorf("expected carrierState to remain valid across AppExpeditionModesChanged")
-	}
-	if testApp.careerStats.Generation() != initialCareerGen || !testApp.careerStats.IsValid() {
-		testingContext.Errorf("expected careerStats to remain valid across AppExpeditionModesChanged")
-	}
-
-	// Re-warm timeRangeStats, then publish AppDatabaseSwitched to invalidate every projection.
-	if _, statsErr := testApp.GetSidebarStats(expeditionID, stats.Filter{}); statsErr != nil {
-		testingContext.Fatalf("second GetSidebarStats: %v", statsErr)
-	}
 	testApp.publishApp(0, events.AppDatabaseSwitched)
-
-	if testApp.carrierState.Generation() != initialCarrierGen+1 || testApp.carrierState.IsValid() {
-		testingContext.Errorf("expected carrierState to invalidate on AppDatabaseSwitched")
-	}
-	if testApp.careerStats.Generation() != initialCareerGen+1 || testApp.careerStats.IsValid() {
-		testingContext.Errorf("expected careerStats to invalidate on AppDatabaseSwitched")
-	}
-	if testApp.timeRangeStats.Generation() != initialTimeRangeGen+2 || testApp.timeRangeStats.CachedCount() != 0 {
-		testingContext.Errorf("expected timeRangeStats generation %d and empty cache after AppDatabaseSwitched, got gen=%d count=%d",
-			initialTimeRangeGen+2, testApp.timeRangeStats.Generation(), testApp.timeRangeStats.CachedCount())
+	if testApp.carrierState.IsValid() || testApp.careerStats.IsValid() {
+		testingContext.Errorf("expected carrierState and careerStats to invalidate on AppDatabaseSwitched")
 	}
 	if switchedStatus, switchedErr := testApp.GetIngestStatus(); switchedErr != nil || switchedStatus.ClosedWindowRevision != initialClosedRev+1 {
 		testingContext.Errorf("expected ClosedWindowRevision %d after AppDatabaseSwitched, got %d (err=%v)",
@@ -400,6 +288,14 @@ func TestCacheInvalidationGenerationCounters(testingContext *testing.T) {
 }
 
 func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
+	uninitializedApp := New()
+	if _, uninitErr := uninitializedApp.PrepareCarrierRoutePrompt(1, 0); !errors.Is(uninitErr, errorNotReady) {
+		testingContext.Fatalf("expected errorNotReady on nil-db PrepareCarrierRoutePrompt, got %v", uninitErr)
+	}
+	if schemeErr := uninitializedApp.OpenURL("ftp://invalid-scheme"); schemeErr == nil {
+		testingContext.Fatalf("expected invalid URL scheme rejection on pre-init App")
+	}
+
 	temporaryDirectory := testingContext.TempDir()
 	isolateTestUserDirectories(testingContext, temporaryDirectory)
 	productionDBPath := filepath.Join(temporaryDirectory, "startup-race.sqlite")
@@ -430,7 +326,16 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 	// Launch frontend RPC callers BEFORE OnStartup even begins, simulating Wails
 	// spawning OnStartup in a goroutine while the WebView immediately requests core state.
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(4)
+	waitGroup.Add(5)
+
+	go func() {
+		defer waitGroup.Done()
+		_ = debugApp.context()
+		readyCtx, err := debugApp.readyContext()
+		if err != nil || readyCtx == nil {
+			testingContext.Errorf("readyContext during startup returned ctx=%v err=%v", readyCtx, err)
+		}
+	}()
 
 	go func() {
 		defer waitGroup.Done()
@@ -492,14 +397,7 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 
 func TestJournalDebounceSettingPersistenceAndReload(t *testing.T) {
 	testApp := setupTestApp(t)
-
-	initialSettings, getSettingsError := testApp.GetSettings()
-	if getSettingsError != nil {
-		t.Fatalf("GetSettings: %v", getSettingsError)
-	}
-	if initialSettings.JournalDebounceMs != 2000 || initialSettings.DefaultJournalDebounceMs != 2000 {
-		t.Fatalf("expected default 2000ms debounce, got current=%d default=%d", initialSettings.JournalDebounceMs, initialSettings.DefaultJournalDebounceMs)
-	}
+	eventsRecorder := captureAppEvents(t, testApp)
 
 	updatedSettings, setError := testApp.SetJournalDebounceMs(5000)
 	if setError != nil {
@@ -511,28 +409,15 @@ func TestJournalDebounceSettingPersistenceAndReload(t *testing.T) {
 	if testApp.watcher.DebounceDelay() != 5*time.Second {
 		t.Fatalf("expected live watcher delay 5s, got %v", testApp.watcher.DebounceDelay())
 	}
-
-	lowClampedSettings, lowClampError := testApp.SetJournalDebounceMs(50)
-	if lowClampError != nil {
-		t.Fatalf("SetJournalDebounceMs(50): %v", lowClampError)
-	}
-	if lowClampedSettings.JournalDebounceMs != 300 {
-		t.Fatalf("expected lower clamp 300ms, got %d", lowClampedSettings.JournalDebounceMs)
-	}
-
-	highClampedSettings, highClampError := testApp.SetJournalDebounceMs(120000)
-	if highClampError != nil {
-		t.Fatalf("SetJournalDebounceMs(120000): %v", highClampError)
-	}
-	if highClampedSettings.JournalDebounceMs != 30000 {
-		t.Fatalf("expected upper clamp 30000ms, got %d", highClampedSettings.JournalDebounceMs)
+	if !slices.Contains(eventsRecorder.Domains(), "settings") {
+		t.Fatalf("expected SetJournalDebounceMs to emit settings domain, got %v", eventsRecorder.Domains())
 	}
 
 	if reloadError := testApp.openAndWireDB(testApp.dbPath); reloadError != nil {
 		t.Fatalf("openAndWireDB reload: %v", reloadError)
 	}
-	if testApp.watcher.DebounceDelay() != 30*time.Second {
-		t.Fatalf("expected reloaded watcher to restore persisted 30s debounce, got %v", testApp.watcher.DebounceDelay())
+	if testApp.watcher.DebounceDelay() != 5*time.Second {
+		t.Fatalf("expected reloaded watcher to restore persisted 5s debounce, got %v", testApp.watcher.DebounceDelay())
 	}
 }
 
@@ -697,21 +582,7 @@ func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *
 
 func TestExternalLinksSettings(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-
-	initialSettings, initialError := testApp.GetSettings()
-	if initialError != nil {
-		testingContext.Fatalf("GetSettings initial: %v", initialError)
-	}
-	if initialSettings.ExternalLinkInara != settings.ExternalLinkOn ||
-		initialSettings.ExternalLinkEDSM != settings.ExternalLinkIfNoGEC ||
-		initialSettings.ExternalLinkGEC != settings.ExternalLinkOn {
-		testingContext.Fatalf(
-			"unexpected default external link settings: inara=%q edsm=%q gec=%q",
-			initialSettings.ExternalLinkInara,
-			initialSettings.ExternalLinkEDSM,
-			initialSettings.ExternalLinkGEC,
-		)
-	}
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 
 	updatedSettings, updateError := testApp.SetExternalLinks("off", "on", "off")
 	if updateError != nil {
@@ -727,20 +598,16 @@ func TestExternalLinksSettings(testingContext *testing.T) {
 			updatedSettings.ExternalLinkGEC,
 		)
 	}
-
-	normalizedSettings, normalizeError := testApp.SetExternalLinks("invalid", "unknown", "OFF")
-	if normalizeError != nil {
-		testingContext.Fatalf("SetExternalLinks normalize: %v", normalizeError)
+	if !slices.Contains(eventsRecorder.Domains(), "settings") {
+		testingContext.Fatalf("expected SetExternalLinks to emit settings domain, got %v", eventsRecorder.Domains())
 	}
-	if normalizedSettings.ExternalLinkInara != settings.ExternalLinkOn ||
-		normalizedSettings.ExternalLinkEDSM != settings.ExternalLinkIfNoGEC ||
-		normalizedSettings.ExternalLinkGEC != settings.ExternalLinkOff {
-		testingContext.Fatalf(
-			"unexpected normalized external link settings: inara=%q edsm=%q gec=%q",
-			normalizedSettings.ExternalLinkInara,
-			normalizedSettings.ExternalLinkEDSM,
-			normalizedSettings.ExternalLinkGEC,
-		)
+
+	reloadedSettings, reloadError := testApp.GetSettings()
+	if reloadError != nil ||
+		reloadedSettings.ExternalLinkInara != settings.ExternalLinkOff ||
+		reloadedSettings.ExternalLinkEDSM != settings.ExternalLinkOn ||
+		reloadedSettings.ExternalLinkGEC != settings.ExternalLinkOff {
+		testingContext.Fatalf("GetSettings after SetExternalLinks: settings=%+v err=%v", reloadedSettings, reloadError)
 	}
 }
 

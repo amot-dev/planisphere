@@ -109,6 +109,10 @@ func TestResolveLocalBatchEnrichmentFallbackChunkingAndCmdrFilter(testingContext
 	}
 
 	// Verify CanonicalSystemName callback delegation and cache/raw fallbacks.
+	var typedNilDB *sql.DB
+	if gotNilDB := edsm.CanonicalSystemName(typedNilDB, "  Sol ", nil); gotNilDB != "Sol" {
+		testingContext.Fatalf("expected trimmed fallback for typed-nil *sql.DB in CanonicalSystemName, got %q", gotNilDB)
+	}
 	canonicalLookup := func(name string) (string, error) {
 		return replay.QueryCanonicalSystemName(databaseConnection, name)
 	}

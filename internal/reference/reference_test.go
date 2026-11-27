@@ -194,27 +194,25 @@ func TestBonusEligibilityPredicates(t *testing.T) {
 }
 
 func TestCarrierTritiumCost(t *testing.T) {
-	// 500 Ly jump at empty load (used=0, fuel=1000): round(5 + 500*(26000)/200000) = round(5 + 65) = 70
-	calculatedCost := CarrierTritiumCost(500, 0, 1000)
-	if calculatedCost != 70 {
-		t.Fatalf("CarrierTritiumCost(500, 0, 1000) = %d, want 70", calculatedCost)
+	tritiumCases := []struct {
+		distanceLy     float64
+		usedCapacity   int
+		depotTritium   int
+		expectedTonnes int
+	}{
+		// 500 Ly jump at empty load (used=0, fuel=1000): round(5 + 500*26000/200000) = 70
+		{distanceLy: 500, usedCapacity: 0, depotTritium: 1000, expectedTonnes: 70},
+		// In-game verified case: 5 + 495.27 * 34366 / 200000 = 90.102... -> 90 tonnes
+		{distanceLy: 495.27, usedCapacity: 8548, depotTritium: 818, expectedTonnes: 90},
+		// Nearest-integer rounding: 5 + 494.89 * 34548 / 200000 = 90.487... -> 90 tonnes
+		{distanceLy: 494.89, usedCapacity: 8548, depotTritium: 1000, expectedTonnes: 90},
 	}
-
-	// In-game verified case: NGC 7789 Sector MH-W b31-0 -> Slegoae NS-U d2-2 is 495.27ly,
-	// with capacity 8,548 tonnes and 818 tonnes depot fuel.
-	// Mass = 25000 + 8548 + 818 = 34366
-	// 5 + 495.27 * 34366 / 200000 = 90.102... -> round = 90 tonnes (Elite Dangerous in-game cost)
-	inGameCost := CarrierTritiumCost(495.27, 8548, 818)
-	if inGameCost != 90 {
-		t.Fatalf("CarrierTritiumCost(495.27, 8548, 818) = %d, want 90", inGameCost)
-	}
-
-	// 494.89 Ly jump with 8,548 tonnes used capacity and 1,000-ton depot:
-	// Mass = 25000 + 8548 + 1000 = 34548
-	// 5 + 494.89 * 34548 / 200000 = 90.487... -> round = 90 tonnes (overriding Spansh's 89t truncated estimate)
-	gameCost := CarrierTritiumCost(494.89, 8548, 1000)
-	if gameCost != 90 {
-		t.Fatalf("CarrierTritiumCost(494.89, 8548, 1000) = %d, want 90", gameCost)
+	for _, testCase := range tritiumCases {
+		gotTonnes := CarrierTritiumCost(testCase.distanceLy, testCase.usedCapacity, testCase.depotTritium)
+		if gotTonnes != testCase.expectedTonnes {
+			t.Errorf("CarrierTritiumCost(%.2f, %d, %d) = %d, want %d",
+				testCase.distanceLy, testCase.usedCapacity, testCase.depotTritium, gotTonnes, testCase.expectedTonnes)
+		}
 	}
 }
 
@@ -226,21 +224,24 @@ func TestDistance(testingContext *testing.T) {
 
 func TestCarrierProratedUpkeep(t *testing.T) {
 	nowUTC := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
-
-	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "2026-01-08T00:00:00Z", 0, nowUTC); got != 0 {
-		t.Fatalf("expected 0 upkeep when weeklyUpkeep is 0, got %d", got)
+	upkeepCases := []struct {
+		startTimestamp  string
+		endTimestamp    string
+		weeklyUpkeep    int64
+		expectedCredits int64
+	}{
+		{startTimestamp: "2026-01-01T00:00:00Z", endTimestamp: "2026-01-08T00:00:00Z", weeklyUpkeep: 0, expectedCredits: 0},
+		{startTimestamp: "", endTimestamp: "2026-01-08T00:00:00Z", weeklyUpkeep: 14_000_000, expectedCredits: 0},
+		{startTimestamp: "2026-01-01T00:00:00Z", endTimestamp: "2026-01-08T00:00:00Z", weeklyUpkeep: 14_000_000, expectedCredits: 14_000_000},
+		{startTimestamp: "2026-01-01T00:00:00Z", endTimestamp: "", weeklyUpkeep: 14_000_000, expectedCredits: 28_000_000},
+		{startTimestamp: "2026-01-01T00:00:00Z", endTimestamp: "2026-01-11T00:00:00Z", weeklyUpkeep: 7_000_000, expectedCredits: 10_000_000},
 	}
-	if got := CarrierProratedUpkeep("", "2026-01-08T00:00:00Z", 14_000_000, nowUTC); got != 0 {
-		t.Fatalf("expected 0 upkeep when startTimestamp is empty, got %d", got)
-	}
-	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "2026-01-08T00:00:00Z", 14_000_000, nowUTC); got != 14_000_000 {
-		t.Fatalf("expected 14000000 for 7-day completed expedition, got %d", got)
-	}
-	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "", 14_000_000, nowUTC); got != 28_000_000 {
-		t.Fatalf("expected 28000000 for 14-day active expedition at nowUTC, got %d", got)
-	}
-	if got := CarrierProratedUpkeep("2026-01-01T00:00:00Z", "2026-01-11T00:00:00Z", 7_000_000, nowUTC); got != 10_000_000 {
-		t.Fatalf("expected 10000000 for 10-day expedition at 7M/wk, got %d", got)
+	for _, testCase := range upkeepCases {
+		gotCredits := CarrierProratedUpkeep(testCase.startTimestamp, testCase.endTimestamp, testCase.weeklyUpkeep, nowUTC)
+		if gotCredits != testCase.expectedCredits {
+			t.Errorf("CarrierProratedUpkeep(%q, %q, %d) = %d, want %d",
+				testCase.startTimestamp, testCase.endTimestamp, testCase.weeklyUpkeep, gotCredits, testCase.expectedCredits)
+		}
 	}
 }
 

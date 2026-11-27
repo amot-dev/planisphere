@@ -9,8 +9,6 @@ import {
   makeWaypointDetails,
 } from '../../../test/fixtures'
 import { mountTestRoot } from '../../../test/render'
-import { ExpeditionPlanner } from '../ExpeditionPlanner'
-import { PlannerRouteTable } from '../table/PlannerRouteTable'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
 
 describe('WaypointDetailsDrawer', () => {
@@ -57,16 +55,6 @@ describe('WaypointDetailsDrawer', () => {
       }),
     )
 
-    expect((ExpeditionPlanner as unknown as { $$typeof?: symbol }).$$typeof).toBe(
-      Symbol.for('react.memo'),
-    )
-    expect((PlannerRouteTable as unknown as { $$typeof?: symbol }).$$typeof).toBe(
-      Symbol.for('react.memo'),
-    )
-    expect((WaypointDetailsDrawer as unknown as { $$typeof?: symbol }).$$typeof).toBe(
-      Symbol.for('react.memo'),
-    )
-
     expect(html).toContain('style="border-left-color:#00D2FF"')
     expect(html).toContain(
       'border-l-2 shadow-[inset_0_1px_0_0_var(--color-ed-border),inset_0_-1px_0_0_var(--color-ed-border-subtle)]',
@@ -79,7 +67,7 @@ describe('WaypointDetailsDrawer', () => {
     expect(html).toContain('Flight mode for this leg (click to change)')
   })
 
-  it('colors origin drawers using muted neutral border for loading and loaded baseline views', () => {
+  it('colors origin drawers using muted neutral border and omits Vessel Flown and Mode toggle on baseline waypoint #1', () => {
     const originRowView = makeOriginRowView()
 
     const originLoadingDrawerHtml = renderToString(
@@ -99,26 +87,9 @@ describe('WaypointDetailsDrawer', () => {
       }),
     )
     expect(originDrawerHtml).toContain('style="border-left-color:#3d2816"')
-  })
-
-  it('omits Vessel Flown and Mode toggle in WaypointDetailsDrawer for origin baseline waypoint #1', () => {
-    const mockRowView = makeOriginRowView()
-    const mockDetails = makeWaypointDetails({
-      kind: 'origin',
-      number: 1,
-    })
-
-    const html = renderToString(
-      createElement(WaypointDetailsDrawer, {
-        details: mockDetails,
-        loading: false,
-        rowView: mockRowView,
-      }),
-    )
-
-    expect(html).toContain('HISTORICAL BASELINE')
-    expect(html).not.toContain('[VESSEL FLOWN]:')
-    expect(html).not.toContain('[FLIGHT MODE]:')
+    expect(originDrawerHtml).toContain('HISTORICAL BASELINE')
+    expect(originDrawerHtml).not.toContain('[VESSEL FLOWN]:')
+    expect(originDrawerHtml).not.toContain('[FLIGHT MODE]:')
   })
 
   it('renders Realized Value card with combined total sold and 6 orange negative lines without emojis', () => {

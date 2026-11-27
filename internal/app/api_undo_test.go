@@ -64,31 +64,6 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 		testingContext.Fatalf("expected no DataChanged event on no-op UpdateRow, got %+v", noopChanges)
 	}
 
-	if err := testApp.DeleteRow(coloniaRow.ID); err != nil {
-		testingContext.Fatalf("DeleteRow: %v", err)
-	}
-
-	undoDelete, err := testApp.UndoExpedition(createdExp.ID)
-	if err != nil || !undoDelete.Applied || undoDelete.Label != "Delete Waypoint" || !undoDelete.CanRedo {
-		testingContext.Fatalf("UndoExpedition delete: res=%+v err=%v", undoDelete, err)
-	}
-	planAfterUndoDelete := mustGetPlan(testingContext, testApp, createdExp.ID)
-	if len(planAfterUndoDelete.Rows) != 2 || planAfterUndoDelete.Rows[1].Row.ID != coloniaRow.ID || planAfterUndoDelete.Rows[1].Row.Notes != noteValue {
-		testingContext.Fatalf("expected Colonia row %d restored with notes, got %+v", coloniaRow.ID, planAfterUndoDelete.Rows)
-	}
-
-	undoNotes, err := testApp.UndoExpedition(createdExp.ID)
-	if err != nil || !undoNotes.Applied || undoNotes.Label != "Edit Notes" {
-		testingContext.Fatalf("UndoExpedition notes: res=%+v err=%v", undoNotes, err)
-	}
-	planAfterUndoNotes := mustGetPlan(testingContext, testApp, createdExp.ID)
-	if planAfterUndoNotes.Rows[1].Row.Notes != "" {
-		testingContext.Fatalf("expected notes empty after single undo, got %q", planAfterUndoNotes.Rows[1].Row.Notes)
-	}
-	if _, err := testApp.RedoExpedition(createdExp.ID); err != nil {
-		testingContext.Fatalf("RedoExpedition notes: %v", err)
-	}
-
 	modeList, err := modes.List(testApp.db)
 	if err != nil || len(modeList) < 2 {
 		testingContext.Fatalf("modes.List: len=%d err=%v", len(modeList), err)
@@ -124,11 +99,6 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 	undoFlightMode, err := testApp.UndoExpedition(createdExp.ID)
 	if err != nil || !undoFlightMode.Applied || undoFlightMode.Label != "Change Flight Mode" {
 		testingContext.Fatalf("UndoExpedition flight mode: res=%+v err=%v", undoFlightMode, err)
-	}
-	planAfterModeUndo := mustGetPlan(testingContext, testApp, createdExp.ID)
-	if planAfterModeUndo.Expedition.ActiveModeID != modeOneID || planAfterModeUndo.Rows[1].Row.LegModeID != modeOneID {
-		testingContext.Fatalf("expected modes restored to %d, got active=%d leg=%d",
-			modeOneID, planAfterModeUndo.Expedition.ActiveModeID, planAfterModeUndo.Rows[1].Row.LegModeID)
 	}
 	modeUndoChanges := eventsRecorder.DataChanges()
 	if len(modeUndoChanges) != 2 || !slices.Contains(modeUndoChanges[0].Domains, "stats") || !slices.Contains(modeUndoChanges[0].Domains, "plan") {

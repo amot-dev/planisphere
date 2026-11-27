@@ -3,96 +3,89 @@ import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { PlannerConfirmModal } from './PlannerConfirmModal'
 
+type ConfirmState = Parameters<typeof PlannerConfirmModal>[0]['confirmState']
+
 describe('PlannerConfirmModal', () => {
-  it('renders delete visited, reset carrier arrival on move, and manual state-repair override modals', () => {
-    const deleteVisitedHtml = renderToString(
+  it.each<{
+    caseLabel: string
+    confirmState: ConfirmState
+    expectedText: string[]
+  }>([
+    {
+      caseLabel: 'delete visited waypoint',
+      confirmState: {
+        kind: 'delete_waypoint',
+        rowId: 12,
+        waypointNumber: 2,
+        systemName: 'Alpha Centauri',
+        visitedAtGalactic: '3312-01-10 10:00 UTC',
+        isArrivedFcStop: false,
+      },
+      expectedText: ['Delete Visited Waypoint', '3312-01-10 10:00 UTC', 'DELETE WAYPOINT'],
+    },
+    {
+      caseLabel: 'delete arrived carrier stop',
+      confirmState: {
+        kind: 'delete_waypoint',
+        rowId: 14,
+        waypointNumber: 3,
+        systemName: 'Colonia',
+        isArrivedFcStop: true,
+      },
+      expectedText: ['Delete Arrived Carrier Stop', 'ARRIVED', 'DELETE WAYPOINT'],
+    },
+    {
+      caseLabel: 'delete visited and arrived carrier stop',
+      confirmState: {
+        kind: 'delete_waypoint',
+        rowId: 16,
+        waypointNumber: 4,
+        systemName: 'Sagittarius A*',
+        visitedAtGalactic: '3312-02-01 18:00 UTC',
+        isArrivedFcStop: true,
+      },
+      expectedText: ['Delete Visited Carrier Stop', '3312-02-01 18:00 UTC', 'ARRIVED'],
+    },
+    {
+      caseLabel: 'reset carrier arrival on move',
+      confirmState: {
+        kind: 'move_reset_fc',
+        rowId: 15,
+        fromIndex: 1,
+        toIndex: 4,
+        waypointNumber: 3,
+        systemName: 'Colonia',
+      },
+      expectedText: ['Reset Fleet Carrier Arrival', 'MOVE AND RESET TO PENDING'],
+    },
+    {
+      caseLabel: 'manual state-repair carrier arrival override',
+      confirmState: {
+        kind: 'override_fc_arrival',
+        rowId: 18,
+        waypointNumber: 4,
+        systemName: 'Rohini',
+        targetArrived: true,
+        cascadedCount: 2,
+      },
+      expectedText: [
+        'Override Fleet Carrier Arrival Status',
+        'Manual State Repair Override',
+        '2 preceding pending carrier stops will also be marked ARRIVED',
+        'MARK AS ARRIVED',
+      ],
+    },
+  ])('renders $caseLabel confirmation modal', ({ confirmState, expectedText }) => {
+    const renderedHtml = renderToString(
       createElement(PlannerConfirmModal, {
-        confirmState: {
-          kind: 'delete_waypoint',
-          rowId: 12,
-          waypointNumber: 2,
-          systemName: 'Alpha Centauri',
-          visitedAtGalactic: '3312-01-10 10:00 UTC',
-          isArrivedFcStop: false,
-        },
+        confirmState,
         onConfirm: () => {},
         onCancel: () => {},
       }),
     )
-    expect(deleteVisitedHtml).toContain('Delete Visited Waypoint')
-    expect(deleteVisitedHtml).toContain('3312-01-10 10:00 UTC')
-    expect(deleteVisitedHtml).toContain('DELETE WAYPOINT')
-
-    const deleteArrivedFcHtml = renderToString(
-      createElement(PlannerConfirmModal, {
-        confirmState: {
-          kind: 'delete_waypoint',
-          rowId: 14,
-          waypointNumber: 3,
-          systemName: 'Colonia',
-          isArrivedFcStop: true,
-        },
-        onConfirm: () => {},
-        onCancel: () => {},
-      }),
-    )
-    expect(deleteArrivedFcHtml).toContain('Delete Arrived Carrier Stop')
-    expect(deleteArrivedFcHtml).toContain('ARRIVED')
-    expect(deleteArrivedFcHtml).toContain('DELETE WAYPOINT')
-
-    const deleteVisitedAndArrivedFcHtml = renderToString(
-      createElement(PlannerConfirmModal, {
-        confirmState: {
-          kind: 'delete_waypoint',
-          rowId: 16,
-          waypointNumber: 4,
-          systemName: 'Sagittarius A*',
-          visitedAtGalactic: '3312-02-01 18:00 UTC',
-          isArrivedFcStop: true,
-        },
-        onConfirm: () => {},
-        onCancel: () => {},
-      }),
-    )
-    expect(deleteVisitedAndArrivedFcHtml).toContain('Delete Visited Carrier Stop')
-    expect(deleteVisitedAndArrivedFcHtml).toContain('3312-02-01 18:00 UTC')
-    expect(deleteVisitedAndArrivedFcHtml).toContain('ARRIVED')
-
-    const moveResetFcHtml = renderToString(
-      createElement(PlannerConfirmModal, {
-        confirmState: {
-          kind: 'move_reset_fc',
-          rowId: 15,
-          fromIndex: 1,
-          toIndex: 4,
-          waypointNumber: 3,
-          systemName: 'Colonia',
-        },
-        onConfirm: () => {},
-        onCancel: () => {},
-      }),
-    )
-    expect(moveResetFcHtml).toContain('Reset Fleet Carrier Arrival')
-    expect(moveResetFcHtml).toContain('MOVE AND RESET TO PENDING')
-
-    const overrideFcHtml = renderToString(
-      createElement(PlannerConfirmModal, {
-        confirmState: {
-          kind: 'override_fc_arrival',
-          rowId: 18,
-          waypointNumber: 4,
-          systemName: 'Rohini',
-          targetArrived: true,
-          cascadedCount: 2,
-        },
-        onConfirm: () => {},
-        onCancel: () => {},
-      }),
-    )
-    expect(overrideFcHtml).toContain('Override Fleet Carrier Arrival Status')
-    expect(overrideFcHtml).toContain('Manual State Repair Override')
-    expect(overrideFcHtml).toContain('2 preceding pending carrier stops will also be marked ARRIVED')
-    expect(overrideFcHtml).toContain('MARK AS ARRIVED')
+    for (const expectedSubstring of expectedText) {
+      expect(renderedHtml).toContain(expectedSubstring)
+    }
   })
 })
 

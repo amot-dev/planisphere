@@ -1,11 +1,10 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { app, replay } from '../../api/models'
 import { makeSettings } from '../../test/fixtures'
 import { mountTestRoot, setFormControlValue } from '../../test/render'
 import { installWailsAppMock } from '../../test/wailsMock'
-import { CommandersOnlineStep } from '../setup/CommandersOnlineStep'
 import { CommandersSection } from './CommandersSection'
 
 const multiCommanderSettings = () =>
@@ -245,26 +244,5 @@ describe('CommandersSection and CommanderManageModal', () => {
     // Re-rendering with live:f100:era:0 restored on a later rescan must not reopen the modal.
     view.rerender(createElement(CommandersSection, { settings: initial, onSetError: () => {} }))
     expect(view.container.textContent).not.toContain('Manage CMDR Rookie')
-  })
-
-  it('passes profileKey and renders badges and alias counts in CommandersOnlineStep', () => {
-    const onToggleCommander = vi.fn()
-    const view = mountTestRoot(
-      createElement(CommandersOnlineStep, {
-        localSettings: multiCommanderSettings(),
-        onlineLookups: true,
-        gecBusy: false,
-        gecSyncedCount: 100,
-        isBusy: false,
-        onToggleCommander,
-        onToggleOnline: () => {},
-        onSyncGecNow: () => {},
-      }),
-    )
-    expect(view.container.textContent).toContain('LEGACY 3.8')
-    expect(view.container.textContent).toContain('1,100 events')
-    const firstCheckbox = view.container.querySelector('input[type="checkbox"]') as HTMLInputElement
-    act(() => firstCheckbox.click())
-    expect(onToggleCommander).toHaveBeenCalledWith('live:f100:era:1', false)
   })
 })

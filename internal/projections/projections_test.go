@@ -3,6 +3,7 @@ package projections_test
 import (
 	"testing"
 
+	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/replay"
@@ -22,33 +23,32 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 		`{"timestamp":"2026-05-02T10:00:00Z","event":"LoadGame","Commander":"CmdrSecond","FID":"F2","Ship":"Anaconda"}`,
 	)
 
-	commanders, listError := replay.ListCommanders(databaseConnection)
-	if listError != nil || len(commanders) != 2 {
-		testingContext.Fatalf("ListCommanders: len=%d err=%v", len(commanders), listError)
+	var firstProfileID int64
+	if scanErr := databaseConnection.QueryRow(`SELECT id FROM commander_profiles WHERE display_name = 'CmdrFirst'`).Scan(&firstProfileID); scanErr != nil {
+		testingContext.Fatalf("lookup CmdrFirst profile ID: %v", scanErr)
 	}
-	careerStart, _ := replay.CareerStartScoped(databaseConnection, replay.ProfileScope{})
-	if careerStart != "2026-05-01T10:00:00Z" {
-		testingContext.Fatalf("CareerStartScoped = %q, want 2026-05-01T10:00:00Z", careerStart)
+
+	eventBus := projection.NewBus()
+	systemArrivals := projections.NewSystemArrivals(databaseConnection, eventBus)
+	shipHistory := projections.NewShipHistory(databaseConnection, eventBus)
+	if initialArrivals, initErr := systemArrivals.InWindow("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z"); initErr != nil || len(initialArrivals) != 1 {
+		testingContext.Fatalf("expected 1 warm arrival before commander filter change, got %+v err=%v", initialArrivals, initErr)
 	}
 
 	if err := settings.SetCommanderEnabled(databaseConnection, "CmdrFirst", false); err != nil {
 		testingContext.Fatal(err)
 	}
-	if _, err := databaseConnection.Exec(`UPDATE commander_profiles SET enabled = 0 WHERE display_name = 'CmdrFirst'`); err != nil {
-		testingContext.Fatal(err)
-	}
-	updatedStart, _ := replay.CareerStartScoped(databaseConnection, replay.ProfileScope{})
-	if updatedStart != "2026-05-02T10:00:00Z" {
-		testingContext.Fatalf("expected updated CareerStart 2026-05-02T10:00:00Z, got %q", updatedStart)
+	eventBus.PublishApp(events.AppCommanderFilterChanged)
+
+	filteredArrivals, filteredErr := systemArrivals.InWindow("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z")
+	if filteredErr != nil || len(filteredArrivals) != 0 {
+		testingContext.Fatalf("expected 0 default arrivals after disabling CmdrFirst, got %+v err=%v", filteredArrivals, filteredErr)
 	}
 
 	// Explicit ProfileScope on disabled CmdrFirst still resolves its arrivals and ship timeline.
-	eventBus := projection.NewBus()
-	systemArrivals := projections.NewSystemArrivals(databaseConnection, eventBus)
-	shipHistory := projections.NewShipHistory(databaseConnection, eventBus)
-	firstScope := replay.NewProfileScope([]int64{commanders[0].ID})
+	firstScope := replay.NewProfileScope([]int64{firstProfileID})
 	scopedArrivals, scopedArrErr := systemArrivals.InWindowScoped("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z", firstScope)
-	if scopedArrErr != nil || len(scopedArrivals) != 1 || scopedArrivals[0].SystemName != "Sol" || scopedArrivals[0].ProfileID != commanders[0].ID {
+	if scopedArrErr != nil || len(scopedArrivals) != 1 || scopedArrivals[0].SystemName != "Sol" || scopedArrivals[0].ProfileID != firstProfileID {
 		testingContext.Fatalf("unexpected scoped arrivals for disabled CmdrFirst: %+v err=%v", scopedArrivals, scopedArrErr)
 	}
 	scopedTimeline, scopedShipErr := shipHistory.TimelineScoped("2026-05-01T00:00:00Z", "2026-05-03T00:00:00Z", firstScope)

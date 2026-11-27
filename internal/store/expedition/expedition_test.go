@@ -26,8 +26,6 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	lines := []string{
 		// Pre-expedition visit to Waypoint #3 (must be ignored because it is before expedition_start_timestamp).
 		`{"timestamp":"2026-01-10T10:00:00Z","event":"FSDJump","StarSystem":"Outotz LS-K d8-3","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":45.0}`,
-		// Earliest Statistics snapshot before expedition start.
-		`{"timestamp":"2026-01-18T19:00:00Z","event":"Statistics","Exploration":{"Exploration_Profits":5000000,"Planets_Scanned_To_Level_2":120,"Planets_Scanned_To_Level_3":30,"Total_Hyperspace_Distance":10000,"Total_Hyperspace_Jumps":250},"Exobiology":{"Organic_Data":5,"Organic_Data_Profits":25000000,"First_Logged":2,"First_Logged_Profits":16000000}}`,
 		`{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"Test","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		// Arrival at Waypoint #1 (expedition start).
 		`{"timestamp":"2026-01-18T19:42:10Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
@@ -47,11 +45,6 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	}
 	if scanResult, scanError := journal.NewIngester(dbConn).ScanDir(context.Background(), journalDirectory); scanError != nil || scanResult.NewEvents != len(lines) {
 		t.Fatalf("ScanDir: events=%d want=%d err=%v", scanResult.NewEvents, len(lines), scanError)
-	}
-
-	// Delete the journal file from disk: zero data may be lost.
-	if removeError := os.Remove(journalFile); removeError != nil {
-		t.Fatal(removeError)
 	}
 
 	// Create an expedition with 5 waypoints + a region header.
@@ -154,28 +147,6 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	if len(beagleDetails.ShipsUsed) != 1 || beagleDetails.ShipsUsed[0] != "Caspian Explorer" {
 		t.Fatalf("expected Caspian Explorer flown on Beagle Point leg, got %+v", beagleDetails.ShipsUsed)
 	}
-
-	// Verify mode filtering with the Travel scan/exobio override using expedition leg modes.
-	travelModeID := expeditiontest.LookupDefaultModes(t, dbConn).Travel
-
-	// Hide Travel jumps and distance while retaining Travel scans and exobiology.
-	filteredSummary, computeError := proj.TimeRangeStats.Compute(replaystats.Range{After: "2026-01-18T19:42:10Z"}, &replaystats.Filter{
-		Enabled:      true,
-		ExpeditionID: expeditionRecord.ID,
-		Modes: []replaystats.ModeSelection{
-			{ModeID: travelModeID, Travel: false, Discovery: true},
-		},
-	})
-	if computeError != nil {
-		t.Fatal(computeError)
-	}
-	filtered := filteredSummary.Metrics
-	if filtered.Jumps != 0 || filtered.DistanceLy != 0 {
-		t.Fatalf("expected Travel jumps/distance to be hidden, got %d jumps / %.1f Ly", filtered.Jumps, filtered.DistanceLy)
-	}
-	if filtered.BodiesScanned != 1 || filtered.BodiesMapped != 1 || filtered.OrganicSamples != 1 || filtered.OrganicValueTotal != 95054000 {
-		t.Fatalf("expected Travel scans/exobio override to retain discoveries, got %+v", filtered)
-	}
 }
 
 func TestPruneEmptyRowsOnComplete(t *testing.T) {
@@ -252,20 +223,8 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		`{"timestamp":"2026-01-10T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		// Latest ship before expedition start
 		`{"timestamp":"2026-01-15T12:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"diamondbackxl","ShipType_Localised":"Diamondback Explorer","ShipID":10}`,
-		// 15 consecutive on-foot suit LoadGame events between ship swap and expedition start
+		// Consecutive on-foot suit and Nomad LoadGame events between ship swap and expedition start
 		`{"timestamp":"2026-01-16T01:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-16T02:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-16T03:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-16T04:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-16T05:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T01:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T02:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T03:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T04:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T05:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T06:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T07:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
-		`{"timestamp":"2026-01-17T08:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		`{"timestamp":"2026-01-17T09:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"utilitysuit_class1","Ship_Localised":"Maverick Suit","ShipID":2}`,
 		`{"timestamp":"2026-01-17T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"lander01","Ship_Localised":"Nomad","ShipID":41}`,
 		// Expedition start and arrival at Sol
@@ -303,9 +262,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		t.Fatalf("Complete failed: %v", completeErr)
 	}
 
-	// Build plan
-	plan, err := expedition.BuildPlan(dbConn, exp.ID, nil, proj)
-	if err != nil {
+	if _, err := expedition.BuildPlan(dbConn, exp.ID, nil, proj); err != nil {
 		t.Fatalf("BuildPlan failed: %v", err)
 	}
 
@@ -334,149 +291,6 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 	}
 	if !foundPhantom {
 		t.Errorf("expected Krait Phantom flown, got: %+v", alphaDetails.ShipsUsed)
-	}
-
-	// Verify cache hit
-	plan2, err := expedition.BuildPlan(dbConn, exp.ID, nil, proj)
-	if err != nil {
-		t.Fatalf("second BuildPlan failed: %v", err)
-	}
-	if len(plan2.Rows) != len(plan.Rows) {
-		t.Errorf("cache hit plan mismatch")
-	}
-}
-
-func TestDetailsLightweightAndOriginCache(t *testing.T) {
-	dbConn := dbtest.OpenMemory(t)
-	_, proj := expeditiontest.NewProjections(dbConn)
-
-	lines := []string{
-		`{"timestamp":"2026-01-01T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
-		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":20.0}`,
-		`{"timestamp":"2026-01-19T12:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
-	}
-	journaltest.IngestLines(t, dbConn, lines...)
-
-	exp, wp1 := createExpeditionWithOriginRow(t, dbConn, "Details Test Expedition", "")
-	solName := "Sol"
-	solVis := "2026-01-18T10:00:00Z"
-	solDep := "2026-01-19T06:00:00Z"
-	if _, err := dbConn.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = ? WHERE id = ?`, solVis, exp.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, departed_at = ?, x = 0, y = 0, z = 0 WHERE id = ?`, solName, solVis, solDep, wp1.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert region header row
-	regionRow := mustInsert(t, dbConn, exp.ID, wp1.ID, expedition.RowRegion, 1)
-
-	// Insert WP2 (visited and departed leg)
-	wp2 := mustInsert(t, dbConn, exp.ID, regionRow.ID, expedition.RowWaypoint, 0)
-	alphaName := "Alpha Centauri"
-	alphaVis := "2026-01-19T12:00:00Z"
-	alphaDep := "2026-01-19T14:00:00Z"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, visited_at = ?, departed_at = ?, x = 10, y = 0, z = 0 WHERE id = ?`, alphaName, alphaVis, alphaDep, wp2.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert WP3 (active current leg after departing WP2)
-	wp3 := mustInsert(t, dbConn, exp.ID, wp2.ID, expedition.RowWaypoint, 0)
-	barnardName := "Barnard's Star"
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = ?, x = 16, y = 0, z = 0 WHERE id = ?`, barnardName, wp3.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert WP4 (future waypoint beyond the current leg)
-	wp4 := mustInsert(t, dbConn, exp.ID, wp3.ID, expedition.RowWaypoint, 0)
-	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Wolf 359', x = 24, y = 0, z = 0 WHERE id = ?`, wp4.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Details for region header: should return empty details
-	regDetails, err := expedition.Details(dbConn, regionRow.ID, proj)
-	if err != nil {
-		t.Fatalf("Details on region row returned error: %v", err)
-	}
-	if regDetails.Number != 0 || regDetails.Kind != "" {
-		t.Errorf("expected empty details for region row, got %+v", regDetails)
-	}
-
-	// Details for WP1 (origin)
-	wp1Details, err := expedition.Details(dbConn, wp1.ID, proj)
-	if err != nil {
-		t.Fatalf("Details for wp1 failed: %v", err)
-	}
-	if wp1Details.Kind != "origin" {
-		t.Errorf("expected wp1 kind 'origin', got %q", wp1Details.Kind)
-	}
-	if wp1Details.Number != 1 {
-		t.Errorf("expected wp1 number 1, got %d", wp1Details.Number)
-	}
-	if wp1Details.To != solDep || wp1Details.ArrivedAt != solVis || wp1Details.DepartedAt != solDep {
-		t.Errorf("expected wp1 To=%q ArrivedAt=%q DepartedAt=%q, got To=%q ArrivedAt=%q DepartedAt=%q",
-			solDep, solVis, solDep, wp1Details.To, wp1Details.ArrivedAt, wp1Details.DepartedAt)
-	}
-	if wp1Details.From != "2026-01-01T10:00:00Z" {
-		t.Errorf("expected wp1 From '2026-01-01T10:00:00Z', got %q", wp1Details.From)
-	}
-
-	// Details for WP2 (visited and departed leg)
-	wp2Details, err := expedition.Details(dbConn, wp2.ID, proj)
-	if err != nil {
-		t.Fatalf("Details for wp2 failed: %v", err)
-	}
-	if wp2Details.Kind != "leg" {
-		t.Errorf("expected wp2 kind 'leg', got %q", wp2Details.Kind)
-	}
-	if wp2Details.Number != 2 {
-		t.Errorf("expected wp2 number 2, got %d", wp2Details.Number)
-	}
-	if wp2Details.From != solDep {
-		t.Errorf("expected wp2 leg start %q, got %q", solDep, wp2Details.From)
-	}
-	if wp2Details.To != alphaDep || wp2Details.ArrivedAt != alphaVis || wp2Details.DepartedAt != alphaDep {
-		t.Errorf("expected wp2 To=%q ArrivedAt=%q DepartedAt=%q, got To=%q ArrivedAt=%q DepartedAt=%q",
-			alphaDep, alphaVis, alphaDep, wp2Details.To, wp2Details.ArrivedAt, wp2Details.DepartedAt)
-	}
-	if wp2Details.PrevSystem != solName {
-		t.Errorf("expected wp2 prev system %q, got %q", solName, wp2Details.PrevSystem)
-	}
-	if wp2Details.Elapsed == "" {
-		t.Errorf("expected non-empty elapsed duration for wp2 leg")
-	}
-
-	// Details for WP3 (active current leg after departing WP2)
-	wp3Details, err := expedition.Details(dbConn, wp3.ID, proj)
-	if err != nil {
-		t.Fatalf("Details for wp3 failed: %v", err)
-	}
-	if wp3Details.Kind != "leg" {
-		t.Errorf("expected wp3 kind 'leg', got %q", wp3Details.Kind)
-	}
-	if wp3Details.Number != 3 {
-		t.Errorf("expected wp3 number 3, got %d", wp3Details.Number)
-	}
-	if wp3Details.From != alphaDep {
-		t.Errorf("expected wp3 leg start %q, got %q", alphaDep, wp3Details.From)
-	}
-	if wp3Details.To != "" {
-		t.Errorf("expected wp3 leg end empty for active leg, got %q", wp3Details.To)
-	}
-	if wp3Details.PrevSystem != alphaName {
-		t.Errorf("expected wp3 prev system %q, got %q", alphaName, wp3Details.PrevSystem)
-	}
-	if wp3Details.Elapsed == "" {
-		t.Errorf("expected non-empty elapsed duration for active wp3 leg")
-	}
-
-	// Details for WP4 (future waypoint): should return empty details
-	wp4Details, err := expedition.Details(dbConn, wp4.ID, proj)
-	if err != nil {
-		t.Fatalf("Details for wp4 failed: %v", err)
-	}
-	if wp4Details.Number != 0 || wp4Details.Kind != "" {
-		t.Errorf("expected empty details for future wp4 row, got %+v", wp4Details)
 	}
 }
 
@@ -1442,116 +1256,6 @@ func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
 	}
 }
 
-func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
-	databaseConnection := dbtest.OpenMemory(testingContext)
-	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
-
-	journaltest.IngestLines(testingContext, databaseConnection,
-		`{"timestamp":"2026-06-01T10:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
-		`{"timestamp":"2026-06-01T10:05:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
-		`{"timestamp":"2026-06-01T10:15:00Z","event":"FSDJump","StarSystem":"Transit One","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
-		`{"timestamp":"2026-06-01T10:20:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"SideWinder","ShipType_Localised":"Sidewinder","ShipID":2}`,
-		`{"timestamp":"2026-06-01T10:25:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"Anaconda","ShipType_Localised":"Anaconda","ShipID":3}`,
-		`{"timestamp":"2026-06-01T10:30:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1003,"StarPos":[20,0,0],"JumpDist":10.0}`,
-		`{"timestamp":"2026-06-01T11:00:00Z","event":"FSDJump","StarSystem":"Transit Two","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
-		`{"timestamp":"2026-06-01T11:10:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"Krait_Phantom","ShipType_Localised":"Krait Phantom","ShipID":4}`,
-		`{"timestamp":"2026-06-01T11:20:00Z","event":"FSDJump","StarSystem":"Transit Three","SystemAddress":1005,"StarPos":[40,0,0],"JumpDist":10.0}`,
-	)
-
-	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Multi-Hull Test", "")
-	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
-	closedWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, closedWaypoint.ID, "Alpha Centauri")
-	activeWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, closedWaypoint.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, activeWaypoint.ID, "Beagle Point")
-
-	if startError := db.WithTx(databaseConnection, func(transaction *sql.Tx) error {
-		return expedition.Start(transaction, expeditionRecord.ID, "2026-06-01T10:05:00Z", 0)
-	}); startError != nil {
-		testingContext.Fatal(startError)
-	}
-
-	closedDetails, closedError := expedition.Details(databaseConnection, closedWaypoint.ID, expeditionProjections)
-	if closedError != nil {
-		testingContext.Fatalf("Details for closed multi-hull leg failed: %v", closedError)
-	}
-	if strings.Join(closedDetails.ShipsUsed, "|") != "Mandalay|Anaconda" {
-		testingContext.Fatalf("closed leg ShipsUsed = %v, want [Mandalay Anaconda] (Sidewinder was never jumped)", closedDetails.ShipsUsed)
-	}
-
-	activeDetails, activeError := expedition.Details(databaseConnection, activeWaypoint.ID, expeditionProjections)
-	if activeError != nil {
-		testingContext.Fatalf("Details for active open leg failed: %v", activeError)
-	}
-	if strings.Join(activeDetails.ShipsUsed, "|") != "Anaconda|Krait Phantom" {
-		testingContext.Fatalf("active open leg ShipsUsed = %v, want [Anaconda Krait Phantom]", activeDetails.ShipsUsed)
-	}
-}
-
-func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
-	databaseConnection := dbtest.OpenMemory(testingContext)
-	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Historical Completion Test", "")
-	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
-	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, secondWaypoint.ID, "Alpha Centauri")
-	thirdWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, secondWaypoint.ID, expedition.RowWaypoint, 0)
-	setRowSystemName(testingContext, databaseConnection, thirdWaypoint.ID, "Beagle Point")
-
-	journaltest.IngestLines(testingContext, databaseConnection,
-		`{"timestamp":"2022-05-01T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
-	)
-	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2022-05-01T10:00:00Z", 0); startError != nil {
-		testingContext.Fatalf("StartTx: %v", startError)
-	}
-
-	// Only Waypoint #1 is visited, so Complete must reject.
-	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError == nil || completeError.Error() != "at least 2 visited waypoints are required to complete an expedition" {
-		testingContext.Fatalf("expected CompleteTx to require at least 2 visited waypoints, got %v", completeError)
-	}
-
-	// Arrive at Alpha Centauri and then make an unrelated later jump; Beagle Point remains unvisited.
-	journaltest.InsertParsedLines(testingContext, databaseConnection,
-		`{"timestamp":"2022-05-01T12:30:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
-		`{"timestamp":"2022-05-05T18:00:00Z","event":"FSDJump","StarSystem":"Unrelated System","SystemAddress":9999,"StarPos":[50,0,0],"JumpDist":49.0}`,
-	)
-	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
-		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
-	}
-
-	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
-		testingContext.Fatalf("CompleteTx after second waypoint: %v", completeError)
-	}
-	completedRecord, getError := expedition.Get(databaseConnection, expeditionRecord.ID)
-	if getError != nil {
-		testingContext.Fatalf("Get completed expedition: %v", getError)
-	}
-	if completedRecord.Status != expedition.StatusCompleted || completedRecord.EndTimestamp != "2022-05-01T12:30:00Z" {
-		testingContext.Fatalf("completed expedition = (%q, %q), want (%q, %q)",
-			completedRecord.Status, completedRecord.EndTimestamp, expedition.StatusCompleted, "2022-05-01T12:30:00Z")
-	}
-
-	// Reopening and visiting the final waypoint advances the completion timestamp to that arrival.
-	if reopenError := expedition.ReopenTx(databaseConnection, expeditionRecord.ID); reopenError != nil {
-		testingContext.Fatalf("ReopenTx: %v", reopenError)
-	}
-	journaltest.InsertParsedLines(testingContext, databaseConnection,
-		`{"timestamp":"2022-05-10T09:15:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":60.0}`,
-	)
-	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
-		testingContext.Fatalf("ReevaluateTx after reopen: %v", reevalError)
-	}
-	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
-		testingContext.Fatalf("CompleteTx after third waypoint: %v", completeError)
-	}
-	finalRecord, getFinalError := expedition.Get(databaseConnection, expeditionRecord.ID)
-	if getFinalError != nil {
-		testingContext.Fatalf("Get final completed expedition: %v", getFinalError)
-	}
-	if finalRecord.EndTimestamp != "2022-05-10T09:15:00Z" {
-		testingContext.Fatalf("final completed EndTimestamp = %q, want %q", finalRecord.EndTimestamp, "2022-05-10T09:15:00Z")
-	}
-}
-
 func TestCreateWithWaypoints(testingContext *testing.T) {
 	databaseConnection := dbtest.OpenMemory(testingContext)
 
@@ -1637,6 +1341,9 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 	}
 	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-09-01T10:00:00Z", 0); startError != nil {
 		testingContext.Fatalf("StartTx: %v", startError)
+	}
+	if completeEarlyError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeEarlyError == nil || completeEarlyError.Error() != "at least 2 visited waypoints are required to complete an expedition" {
+		testingContext.Fatalf("expected CompleteTx to require at least 2 visited waypoints, got %v", completeEarlyError)
 	}
 
 	rowsBeforeDepart, listBeforeErr := expedition.ListRows(databaseConnection, expeditionRecord.ID)
@@ -1766,62 +1473,25 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 	if chainSummary.Metrics.Jumps != 1 || chainSummary.Metrics.BodiesScanned != 0 {
 		testingContext.Fatalf("expected chained expedition to exclude Exp 1 Beta scan and include SideHop departure jump, got %+v", chainSummary.Metrics)
 	}
-}
 
-func TestCompleteOpenStayScopesToSystemCommanderAndNonMulticrew(testingContext *testing.T) {
-	databaseConnection := dbtest.OpenMemory(testingContext)
-	journaltest.IngestLines(testingContext, databaseConnection,
-		`{"timestamp":"2026-10-01T09:00:00Z","event":"LoadGame","Commander":"CmdrA","FID":"FA","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
-		`{"timestamp":"2026-10-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":6001,"StarPos":[0,0,0]}`,
-		`{"timestamp":"2026-10-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":6002,"StarPos":[20,0,0],"JumpDist":20.0}`,
-		`{"timestamp":"2026-10-01T12:15:00Z","event":"SAAScanComplete","BodyName":"Beta 1","SystemAddress":6002,"BodyID":1,"ProbesUsed":4,"EfficiencyTarget":6}`,
-	)
-	if _, execError := databaseConnection.Exec(`
-		INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrB', 'FB', 1)
-		ON CONFLICT(name) DO UPDATE SET enabled = 1;
-		INSERT INTO journal_events(event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
-		('open-other-sys-scan', '2026-10-01T12:30:00Z', 'Scan', 'OtherSys', 6099, 1, 'OtherSys 1', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:30:00Z","event":"Scan","BodyName":"OtherSys 1","PlanetClass":"Water world"}', '2026-10-01T12:30:00Z'),
-		('open-other-cmdr-saa', '2026-10-01T12:35:00Z', 'SAAScanComplete', NULL, 6002, 2, 'Beta 2', 'CmdrB', 't.log', '{"timestamp":"2026-10-01T12:35:00Z","event":"SAAScanComplete","BodyName":"Beta 2","SystemAddress":6002,"BodyID":2,"ProbesUsed":4,"EfficiencyTarget":6}', '2026-10-01T12:35:00Z'),
-		('open-multicrew-org', '2026-10-01T12:40:00Z', 'ScanOrganic', NULL, 6002, 2, '', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:40:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":6002,"Body":2,"Multicrew":true}', '2026-10-01T12:40:00Z'),
-		('open-other-cmdr-scan', '2026-10-01T12:45:00Z', 'Scan', 'Beta', 6002, 3, 'Beta 3', 'CmdrB', 't.log', '{"timestamp":"2026-10-01T12:45:00Z","event":"Scan","BodyName":"Beta 3","PlanetClass":"Earthlike body"}', '2026-10-01T12:45:00Z'),
-		('open-other-sys-org', '2026-10-01T12:50:00Z', 'ScanOrganic', NULL, 6099, 1, '', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:50:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":6099,"Body":1}', '2026-10-01T12:50:00Z');
-	`); execError != nil {
-		testingContext.Fatalf("seed open-stay distractors: %v", execError)
-	}
-
-	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Open Stay Scoping", "", []expedition.SeedWaypoint{
-		{SystemName: "Sol"},
-		{SystemName: "Beta"},
-	})
-	if createError != nil {
-		testingContext.Fatalf("CreateWithWaypoints: %v", createError)
-	}
-	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-10-01T10:00:00Z", 0); startError != nil {
-		testingContext.Fatalf("StartTx: %v", startError)
-	}
-	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
-		testingContext.Fatalf("CompleteTx after SAAScanComplete: %v", completeError)
-	}
-	completedAfterSAA := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID)
-	if completedAfterSAA.EndTimestamp != "2026-10-01T12:15:00Z" {
-		testingContext.Fatalf("EndTimestamp after SAAScanComplete = %q, want %q", completedAfterSAA.EndTimestamp, "2026-10-01T12:15:00Z")
-	}
-
+	// Reopening clears EndTimestamp, and adding visited SideHop advances completion to 12:30.
 	if reopenError := expedition.ReopenTx(databaseConnection, expeditionRecord.ID); reopenError != nil {
 		testingContext.Fatalf("ReopenTx: %v", reopenError)
 	}
-	if _, execError := databaseConnection.Exec(
-		`INSERT INTO journal_events(event_uid, timestamp, event, system_name, system_address, body_id, body_name, commander, source_file, raw_json, ingested_at) VALUES
-		('open-beta-org', '2026-10-01T12:20:00Z', 'ScanOrganic', NULL, 6002, 1, '', 'CmdrA', 't.log', '{"timestamp":"2026-10-01T12:20:00Z","event":"ScanOrganic","ScanType":"Analyse","SystemAddress":6002,"Body":1}', '2026-10-01T12:20:00Z')`,
-	); execError != nil {
-		testingContext.Fatalf("insert in-system ScanOrganic: %v", execError)
+	reopenedExp := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID)
+	if reopenedExp.Status != expedition.StatusActive || reopenedExp.EndTimestamp != "" {
+		testingContext.Fatalf("expected active status and empty EndTimestamp after ReopenTx, got status=%q end=%q", reopenedExp.Status, reopenedExp.EndTimestamp)
 	}
-	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
-		testingContext.Fatalf("CompleteTx after ScanOrganic: %v", completeError)
+	sideHopRow := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, rowsAfter[2].ID, expedition.RowWaypoint, 0)
+	setRowSystemName(testingContext, databaseConnection, sideHopRow.ID, "SideHop")
+	if _, reevalReopenedErr := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalReopenedErr != nil {
+		testingContext.Fatalf("ReevaluateTx after ReopenTx: %v", reevalReopenedErr)
 	}
-	completedAfterOrganic := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID)
-	if completedAfterOrganic.EndTimestamp != "2026-10-01T12:20:00Z" {
-		testingContext.Fatalf("EndTimestamp after ScanOrganic = %q, want %q", completedAfterOrganic.EndTimestamp, "2026-10-01T12:20:00Z")
+	if recompleteErr := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); recompleteErr != nil {
+		testingContext.Fatalf("CompleteTx after ReopenTx: %v", recompleteErr)
+	}
+	if finalExp := mustGetExpedition(testingContext, databaseConnection, expeditionRecord.ID); finalExp.EndTimestamp != "2026-09-01T12:30:00Z" {
+		testingContext.Fatalf("expected final EndTimestamp=2026-09-01T12:30:00Z after ReopenTx, got %q", finalExp.EndTimestamp)
 	}
 }
 

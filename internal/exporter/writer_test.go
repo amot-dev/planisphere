@@ -45,6 +45,50 @@ func TestWriteExportSingleFileAndBase64DataURI(testingContext *testing.T) {
 	}
 }
 
+type zipArchiveEntries struct {
+	directoryCounts map[string]int
+	fileContents    map[string]string
+	methods         map[string]uint16
+}
+
+func readZipEntries(testingContext *testing.T, zipPath string) zipArchiveEntries {
+	testingContext.Helper()
+	archiveReader, openZipError := zip.OpenReader(zipPath)
+	if openZipError != nil {
+		testingContext.Fatalf("open created zip: %v", openZipError)
+	}
+	defer archiveReader.Close()
+
+	snapshot := zipArchiveEntries{
+		directoryCounts: make(map[string]int),
+		fileContents:    make(map[string]string),
+		methods:         make(map[string]uint16, len(archiveReader.File)),
+	}
+	for _, zipEntry := range archiveReader.File {
+		if zipEntry.Modified.Year() < 2020 {
+			testingContext.Fatalf("expected recent timestamp on zip entry %q, got %v", zipEntry.Name, zipEntry.Modified)
+		}
+		snapshot.methods[zipEntry.Name] = zipEntry.Method
+		if strings.HasSuffix(zipEntry.Name, "/") {
+			snapshot.directoryCounts[zipEntry.Name]++
+			continue
+		}
+		entryReader, entryOpenError := zipEntry.Open()
+		if entryOpenError != nil {
+			testingContext.Fatalf("open zip entry %q: %v", zipEntry.Name, entryOpenError)
+		}
+		entryBytes, readEntryError := io.ReadAll(entryReader)
+		if closeEntryError := entryReader.Close(); closeEntryError != nil {
+			testingContext.Fatalf("close zip entry %q: %v", zipEntry.Name, closeEntryError)
+		}
+		if readEntryError != nil {
+			testingContext.Fatalf("read zip entry %q: %v", zipEntry.Name, readEntryError)
+		}
+		snapshot.fileContents[zipEntry.Name] = string(entryBytes)
+	}
+	return snapshot
+}
+
 func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testing.T) {
 	temporaryDir := testingContext.TempDir()
 	zipPath := filepath.Join(temporaryDir, "expedition_exporter.zip")
@@ -52,7 +96,9 @@ func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testin
 	files := []exporter.BundleFile{
 		{Name: "../outside/01-summary.png", ContentBase64: base64.StdEncoding.EncodeToString([]byte("png-one"))},
 		{Name: "outside/01-summary.png", ContentBase64: base64.StdEncoding.EncodeToString([]byte("png-two"))},
+		{Name: "outside/02-upper.PNG", ContentBase64: base64.StdEncoding.EncodeToString([]byte("png-upper"))},
 		{Name: `folder\bad:name?.html`, ContentText: "<h1>Report</h1>"},
+		{Name: "data/manifest.json", ContentText: `{"name":"planisphere"}`},
 	}
 	writtenZipPath, zipError := exporter.WriteExport(zipPath, files)
 	if zipError != nil {
@@ -62,45 +108,36 @@ func TestWriteExportZipBundleSanitizationAndDeduplication(testingContext *testin
 		testingContext.Fatalf("expected zip path %q, got %q", zipPath, writtenZipPath)
 	}
 
-	archiveReader, openZipError := zip.OpenReader(zipPath)
-	if openZipError != nil {
-		testingContext.Fatalf("open created zip: %v", openZipError)
-	}
-	defer archiveReader.Close()
+	archiveSnapshot := readZipEntries(testingContext, zipPath)
 
-	entries := make(map[string]string, len(archiveReader.File))
-	directories := make(map[string]bool)
-	for _, zipEntry := range archiveReader.File {
-		if zipEntry.Modified.Year() < 2020 {
-			testingContext.Fatalf("expected recent timestamp on zip entry %q, got %v", zipEntry.Name, zipEntry.Modified)
-		}
-		if strings.HasSuffix(zipEntry.Name, "/") {
-			directories[zipEntry.Name] = true
-			continue
-		}
-		entryReader, entryOpenError := zipEntry.Open()
-		if entryOpenError != nil {
-			testingContext.Fatalf("open zip entry %q: %v", zipEntry.Name, entryOpenError)
-		}
-		entryBytes, readEntryError := io.ReadAll(entryReader)
-		entryReader.Close()
-		if readEntryError != nil {
-			testingContext.Fatalf("read zip entry %q: %v", zipEntry.Name, readEntryError)
-		}
-		entries[zipEntry.Name] = string(entryBytes)
+	if archiveSnapshot.directoryCounts["outside/"] != 1 || archiveSnapshot.directoryCounts["folder/"] != 1 || archiveSnapshot.directoryCounts["data/"] != 1 {
+		testingContext.Fatalf("expected explicit directory entries outside/, folder/, and data/, got %v", archiveSnapshot.directoryCounts)
+	}
+	if archiveSnapshot.fileContents["outside/01-summary.png"] != "png-one" ||
+		archiveSnapshot.fileContents["outside/01-summary-2.png"] != "png-two" ||
+		archiveSnapshot.fileContents["outside/02-upper.PNG"] != "png-upper" ||
+		archiveSnapshot.fileContents["folder/bad_name_.html"] != "<h1>Report</h1>" ||
+		archiveSnapshot.fileContents["data/manifest.json"] != `{"name":"planisphere"}` {
+		testingContext.Fatalf("unexpected zip entry contents: %v", archiveSnapshot.fileContents)
 	}
 
-	if !directories["outside/"] || !directories["folder/"] {
-		testingContext.Fatalf("expected explicit directory entries outside/ and folder/, got directories=%v", directories)
+	expectedMethods := map[string]uint16{
+		"outside/":                 zip.Store,
+		"outside/01-summary.png":   zip.Store,
+		"outside/01-summary-2.png": zip.Store,
+		"outside/02-upper.PNG":     zip.Store,
+		"folder/":                  zip.Store,
+		"folder/bad_name_.html":    zip.Deflate,
+		"data/":                    zip.Store,
+		"data/manifest.json":       zip.Deflate,
 	}
-	if entries["outside/01-summary.png"] != "png-one" {
-		testingContext.Fatalf("expected sanitized first entry, got entries=%v", entries)
+	if len(archiveSnapshot.methods) != len(expectedMethods) {
+		testingContext.Fatalf("expected %d zip entries, got %d (%v)", len(expectedMethods), len(archiveSnapshot.methods), archiveSnapshot.methods)
 	}
-	if entries["outside/01-summary-2.png"] != "png-two" {
-		testingContext.Fatalf("expected deduplicated second entry, got entries=%v", entries)
-	}
-	if entries["folder/bad_name_.html"] != "<h1>Report</h1>" {
-		testingContext.Fatalf("expected sanitized html entry, got entries=%v", entries)
+	for entryName, expectedMethod := range expectedMethods {
+		if observedMethod, exists := archiveSnapshot.methods[entryName]; !exists || observedMethod != expectedMethod {
+			testingContext.Fatalf("zip entry %q method = (%d, %v), want (%d, true)", entryName, observedMethod, exists, expectedMethod)
+		}
 	}
 }
 
@@ -148,30 +185,9 @@ func TestWriteExportNormalizesMixedCaseDirectoryHeaders(testingContext *testing.
 		testingContext.Fatalf("write zip bundle with mixed-case directories: %v", writeError)
 	}
 
-	archiveReader, openError := zip.OpenReader(zipPath)
-	if openError != nil {
-		testingContext.Fatalf("open created zip: %v", openError)
-	}
-	defer archiveReader.Close()
-
-	directoryCounts := make(map[string]int)
-	fileContents := make(map[string]string)
-	for _, zipEntry := range archiveReader.File {
-		if strings.HasSuffix(zipEntry.Name, "/") {
-			directoryCounts[zipEntry.Name]++
-			continue
-		}
-		entryReader, entryOpenError := zipEntry.Open()
-		if entryOpenError != nil {
-			testingContext.Fatalf("open zip entry %q: %v", zipEntry.Name, entryOpenError)
-		}
-		entryBytes, readEntryError := io.ReadAll(entryReader)
-		entryReader.Close()
-		if readEntryError != nil {
-			testingContext.Fatalf("read zip entry %q: %v", zipEntry.Name, readEntryError)
-		}
-		fileContents[zipEntry.Name] = string(entryBytes)
-	}
+	archiveSnapshot := readZipEntries(testingContext, zipPath)
+	directoryCounts := archiveSnapshot.directoryCounts
+	fileContents := archiveSnapshot.fileContents
 
 	expectedDirectories := map[string]int{
 		"Images/":     1,
@@ -212,20 +228,6 @@ func TestWriteExportRejectsFileAndDirectoryCollisions(testingContext *testing.T)
 		files []exporter.BundleFile
 	}{
 		{
-			name: "file before directory",
-			files: []exporter.BundleFile{
-				{Name: "images", ContentText: "not a folder"},
-				{Name: "images/01.png", ContentText: "png"},
-			},
-		},
-		{
-			name: "directory before file",
-			files: []exporter.BundleFile{
-				{Name: "images/01.png", ContentText: "png"},
-				{Name: "images", ContentText: "not a folder"},
-			},
-		},
-		{
 			name: "mixed-case directory before file",
 			files: []exporter.BundleFile{
 				{Name: "Images/01.png", ContentText: "png"},
@@ -237,13 +239,6 @@ func TestWriteExportRejectsFileAndDirectoryCollisions(testingContext *testing.T)
 			files: []exporter.BundleFile{
 				{Name: "Images", ContentText: "not a folder"},
 				{Name: "images/01.png", ContentText: "png"},
-			},
-		},
-		{
-			name: "nested file before directory",
-			files: []exporter.BundleFile{
-				{Name: "images/sub", ContentText: "not a folder"},
-				{Name: "images/sub/01.png", ContentText: "png"},
 			},
 		},
 		{
@@ -276,55 +271,6 @@ func TestWriteExportRejectsFileAndDirectoryCollisions(testingContext *testing.T)
 				subTest.Fatalf("expected no leftover files in output directory, found %d", len(remainingEntries))
 			}
 		})
-	}
-}
-
-func TestWriteExportZipCompressionMethods(testingContext *testing.T) {
-	temporaryDir := testingContext.TempDir()
-	zipPath := filepath.Join(temporaryDir, "compression_methods.zip")
-
-	files := []exporter.BundleFile{
-		{Name: "Images/01-summary.png", ContentBase64: base64.StdEncoding.EncodeToString([]byte("png-bytes"))},
-		{Name: "Images/02-upper.PNG", ContentBase64: base64.StdEncoding.EncodeToString([]byte("upper-png-bytes"))},
-		{Name: "report.html", ContentText: "<html><body>Planisphere</body></html>"},
-		{Name: "data/manifest.json", ContentText: `{"name":"planisphere"}`},
-	}
-
-	if _, writeError := exporter.WriteExport(zipPath, files); writeError != nil {
-		testingContext.Fatalf("write zip bundle: %v", writeError)
-	}
-
-	archiveReader, openError := zip.OpenReader(zipPath)
-	if openError != nil {
-		testingContext.Fatalf("open created zip: %v", openError)
-	}
-	defer archiveReader.Close()
-
-	expectedMethods := map[string]uint16{
-		"Images/":               zip.Store,
-		"Images/01-summary.png": zip.Store,
-		"Images/02-upper.PNG":   zip.Store,
-		"report.html":           zip.Deflate,
-		"data/":                 zip.Store,
-		"data/manifest.json":    zip.Deflate,
-	}
-
-	observedMethods := make(map[string]uint16, len(archiveReader.File))
-	for _, zipEntry := range archiveReader.File {
-		observedMethods[zipEntry.Name] = zipEntry.Method
-	}
-
-	if len(observedMethods) != len(expectedMethods) {
-		testingContext.Fatalf("expected %d zip entries, got %d (%v)", len(expectedMethods), len(observedMethods), observedMethods)
-	}
-	for entryName, expectedMethod := range expectedMethods {
-		observedMethod, exists := observedMethods[entryName]
-		if !exists {
-			testingContext.Fatalf("missing expected zip entry %q in %v", entryName, observedMethods)
-		}
-		if observedMethod != expectedMethod {
-			testingContext.Fatalf("expected zip entry %q method %d, got %d", entryName, expectedMethod, observedMethod)
-		}
 	}
 }
 

@@ -1,22 +1,17 @@
 package app
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"planisphere/internal/reference"
-	"planisphere/internal/replay"
 	"planisphere/internal/sources/edsm"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
@@ -391,80 +386,6 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 		!slices.Contains(emittedChanges[0].Domains, "ingest") || !slices.Contains(emittedChanges[0].Domains, "settings") {
 		testingContext.Fatalf("expected 1 post-setup DataChanged event with ingest and settings, got events=%v changes=%+v", emittedEventNames, emittedChanges)
 	}
-}
-
-func TestConcurrentAppContextAndRPCsDuringInitialize(testingContext *testing.T) {
-	// Verify typed-nil (*sql.DB)(nil) safety on system query and canonical name helpers,
-	// and on PrepareCarrierRoutePrompt when startup completed with app.db == nil.
-	var typedNilDB *sql.DB
-	if coords, coordsErr := replay.QueryJournalSystemCoords(typedNilDB, "Sol"); coordsErr != nil || coords != nil {
-		testingContext.Fatalf("expected nil result for typed-nil *sql.DB in QueryJournalSystemCoords, got %+v err=%v", coords, coordsErr)
-	}
-	if gotCanonical := edsm.CanonicalSystemName(typedNilDB, "  Sol ", nil); gotCanonical != "Sol" {
-		testingContext.Fatalf("expected trimmed fallback for typed-nil *sql.DB in CanonicalSystemName, got %q", gotCanonical)
-	}
-	uninitializedApp := New()
-	if _, uninitErr := uninitializedApp.PrepareCarrierRoutePrompt(1, 0); !errors.Is(uninitErr, errorNotReady) {
-		testingContext.Fatalf("expected errorNotReady on nil-db PrepareCarrierRoutePrompt, got %v", uninitErr)
-	}
-
-	temporaryDirectory := testingContext.TempDir()
-	databasePath := filepath.Join(temporaryDirectory, "ctx-race.sqlite")
-	seedDatabaseWithExpedition(testingContext, databasePath, "Concurrent Init Route", "")
-
-	raceApp := New()
-	raceApp.debugMode = false
-	_ = StartupHook(raceApp)
-	onShutdown := ShutdownHook(raceApp)
-
-	appContext, cancelApp := context.WithCancel(context.Background())
-	defer cancelApp()
-	defer onShutdown(appContext)
-
-	var workers sync.WaitGroup
-	stopReaders := make(chan struct{})
-	for workerIndex := 0; workerIndex < 4; workerIndex++ {
-		workers.Add(1)
-		go func(index int) {
-			defer workers.Done()
-			for {
-				select {
-				case <-stopReaders:
-					return
-				default:
-				}
-				_ = raceApp.context()
-				switch index % 4 {
-				case 0:
-					_, _ = raceApp.readyContext()
-				case 1:
-					_, _ = raceApp.GetSettings()
-				case 2:
-					_, _ = raceApp.PrepareCarrierRoutePrompt(1, 0)
-				case 3:
-					_ = raceApp.OpenURL("ftp://invalid-scheme")
-				}
-				time.Sleep(time.Millisecond)
-			}
-		}(workerIndex)
-	}
-
-	time.Sleep(10 * time.Millisecond)
-	if initError := raceApp.initialize(appContext, databasePath); initError != nil {
-		close(stopReaders)
-		workers.Wait()
-		testingContext.Fatalf("initialize: %v", initError)
-	}
-	raceApp.markStartupComplete()
-
-	readyCtx, readyErr := raceApp.readyContext()
-	if readyErr != nil || readyCtx == nil {
-		close(stopReaders)
-		workers.Wait()
-		testingContext.Fatalf("expected non-nil readyContext after initialize, got ctx=%v err=%v", readyCtx, readyErr)
-	}
-	close(stopReaders)
-	workers.Wait()
 }
 
 func TestOnlineResolutionAbortsAcrossDatabaseSwitch(testingContext *testing.T) {

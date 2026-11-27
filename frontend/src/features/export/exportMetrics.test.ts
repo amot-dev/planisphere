@@ -333,6 +333,39 @@ describe('exportMetrics', () => {
     for (const scopeContext of nonCombinedScopes) {
       expect(resolveFormattedNetProfit(scopeContext)).toBeNull()
     }
+
+    const shipOnlyMetrics = {
+      ...baseData.expedition.metrics,
+      carrierJumps: 0,
+      carrierDistanceLy: 0,
+      tritiumUsed: 0,
+    }
+    const shipOnlyNoneCarrierData = buildSampleExportData({
+      expedition: { metrics: shipOnlyMetrics, realization: baseData.expedition.realization },
+      carrierCost: {
+        ...baseData.carrierCost,
+        carrierType: 'none',
+        weeklyUpkeep: 0,
+        tritiumPrice: 0,
+        tritiumCost: 0,
+        jumpCost: 0,
+        upkeepCost: 0,
+        totalCost: 0,
+        totalEstimated: false,
+      },
+    })
+    const shipOnlyNullCarrierData = buildSampleExportData({
+      expedition: { metrics: shipOnlyMetrics, realization: baseData.expedition.realization },
+      carrierCost: null as unknown as typeof baseData.carrierCost,
+    })
+    const nullCarrierContext = resolveTelemetryContext(shipOnlyNullCarrierData, { kind: 'full' })
+    expect(nullCarrierContext.derived.netProfitAfterCarrierCost).toBeNull()
+    for (const shipOnlyData of [shipOnlyNoneCarrierData, shipOnlyNullCarrierData]) {
+      expect(resolveFormattedNetProfit(resolveTelemetryContext(shipOnlyData, { kind: 'full' }))).toEqual({
+        text: '155,000,000 Cr',
+        isNegative: false,
+      })
+    }
   })
 
   it('caches ExportDataIndex in a WeakMap per exportData reference and early-exits achievable Details metrics', () => {

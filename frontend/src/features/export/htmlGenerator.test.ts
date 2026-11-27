@@ -56,10 +56,6 @@ describe('htmlGenerator', () => {
     expect(html).toContain('<div class="kpi-grid kpi-grid-top cols-4">')
     expect(html).toContain('<div class="kpi-grid kpi-grid-bottom cols-4">')
     expect(html).toContain('<div class="strip-bar strip-bar-bottom">')
-    expect(html).toContain('.strip-bar-bottom{border-top:1px solid #2e1f12;border-bottom:none}')
-    expect(html).not.toContain('style="padding-bottom:10px"')
-    expect(html).not.toContain('style="padding-top:0"')
-    expect(html).not.toContain('style="border-top:1px solid #2e1f12"')
     expect(html).toContain('NET PROFIT: <strong class="mono cyan">~129,000,000 Cr</strong>')
     expect(html).toContain('<section id="section-2" class="card" style="border-left:3px solid #00D2FF">')
     expect(html).toContain('<section id="section-6" class="card" style="border-left:3px solid #00D2FF">')
@@ -114,7 +110,6 @@ describe('htmlGenerator', () => {
     expect(html).not.toContain('~26,000,000 Cr')
     expect(html).not.toContain('~129,000,000 Cr')
 
-    expect(html).toContain('.empty-banner{padding:24px 18px;text-align:center;font-size:11px;color:#a6907c}')
     expect(html).toContain('<div class="empty-banner mono">Select at least one applicable data point to preview and add this block</div>')
     expect(html).toContain('<div class="empty-banner mono">Select at least one highlight card with recorded expedition data</div>')
     expect(html).toContain('<div>0 TROPHY CARDS</div>')
@@ -125,90 +120,6 @@ describe('htmlGenerator', () => {
     expect(html).not.toContain('javascript:alert(1)')
     expect(html).toContain('border-left:3px solid #FF7100')
     expect(html).toContain('border-left:3px solid #3d2816')
-  })
-
-  it('omits Summary NET PROFIT strip outside Full Expedition Combined and keeps it for ship-only full expeditions', () => {
-    const baseData = buildSampleExportData()
-    const nonCombinedItems = [
-      ...expandConfigToCartItems(baseData, { kind: 'summary', scope: { kind: 'baseline' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-base'),
-      ...expandConfigToCartItems(baseData, { kind: 'summary', scope: { kind: 'leg', rowId: 2 }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-leg'),
-      ...expandConfigToCartItems(baseData, { kind: 'summary', scope: { kind: 'region', regionName: 'Inner Orion Spur' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-reg'),
-      ...expandConfigToCartItems(baseData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', careerDiff: 'hide' }, 'sum-sep'),
-    ]
-    const nonCombinedHtml = generateSelfContainedHtmlReport(baseData, nonCombinedItems)
-    expect(nonCombinedHtml).not.toContain('NET PROFIT:')
-
-    const shipOnlyMetrics = {
-      ...baseData.expedition.metrics,
-      carrierJumps: 0,
-      carrierDistanceLy: 0,
-      tritiumUsed: 0,
-    }
-    const shipOnlyDatasets = [
-      buildSampleExportData({
-        expedition: { metrics: shipOnlyMetrics, realization: baseData.expedition.realization },
-        carrierCost: {
-          ...baseData.carrierCost,
-          carrierType: 'none',
-          weeklyUpkeep: 0,
-          tritiumPrice: 0,
-          tritiumCost: 0,
-          jumpCost: 0,
-          upkeepCost: 0,
-          totalCost: 0,
-          totalEstimated: false,
-        },
-      }),
-      buildSampleExportData({
-        expedition: { metrics: shipOnlyMetrics, realization: baseData.expedition.realization },
-        carrierCost: null as unknown as typeof baseData.carrierCost,
-      }),
-    ]
-    for (const [index, shipOnlyData] of shipOnlyDatasets.entries()) {
-      const shipOnlyCart = expandConfigToCartItems(
-        shipOnlyData,
-        { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' },
-        `sum-ship-${index}`,
-      )
-      const shipOnlyHtml = generateSelfContainedHtmlReport(shipOnlyData, shipOnlyCart)
-      expect(shipOnlyHtml).toContain('NET PROFIT: <strong class="mono cyan">155,000,000 Cr</strong>')
-    }
-  })
-
-  it('renders Details tilde parity and danger styling with -~ prefix for negative net profit in HTML', () => {
-    const baseData = buildSampleExportData()
-
-    const negativeEstimatedData = buildSampleExportData({
-      expedition: {
-        metrics: baseData.expedition.metrics,
-        realization: { ...baseData.expedition.realization, totalRealized: 10_000_000 },
-      },
-    })
-    const negativeExactData = buildSampleExportData({
-      expedition: {
-        metrics: baseData.expedition.metrics,
-        realization: { ...baseData.expedition.realization, totalRealized: 10_000_000 },
-      },
-      carrierCost: { ...baseData.carrierCost, totalEstimated: false },
-    })
-
-    const negativeCart = [
-      ...expandConfigToCartItems(negativeEstimatedData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-neg'),
-      ...expandConfigToCartItems(negativeEstimatedData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] }, 'det-neg'),
-    ]
-
-    const negativeEstimatedHtml = generateSelfContainedHtmlReport(negativeEstimatedData, negativeCart)
-    expect(negativeEstimatedHtml).toContain('NET PROFIT: <strong class="mono danger">-~16,000,000 Cr</strong>')
-    expect(negativeEstimatedHtml).toContain('<div class="kpi-val mono danger">-~16,000,000 Cr</div>')
-    expect(negativeEstimatedHtml).not.toContain('~-')
-    expect(negativeEstimatedHtml).not.toContain('mono cyan">-~16,000,000 Cr')
-    expect(negativeEstimatedHtml).not.toContain('kpi-val mono amber">-~16,000,000 Cr')
-
-    const negativeExactHtml = generateSelfContainedHtmlReport(negativeExactData, negativeCart)
-    expect(negativeExactHtml).toContain('NET PROFIT: <strong class="mono danger">-16,000,000 Cr</strong>')
-    expect(negativeExactHtml).toContain('<div class="kpi-val mono danger">-16,000,000 Cr</div>')
-    expect(negativeExactHtml).not.toContain('mono cyan">-16,000,000 Cr')
-    expect(negativeExactHtml).not.toContain('kpi-val mono amber">-16,000,000 Cr')
   })
 })
 

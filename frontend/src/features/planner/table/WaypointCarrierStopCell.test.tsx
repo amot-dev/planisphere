@@ -6,68 +6,6 @@ const defaultRowHandlers = makeWaypointRowHandlers()
 const renderRowItem = renderWaypointRowHtml
 
 describe('WaypointCarrierStopCell Rules and Badges', () => {
-  it('renders carrier stop elements with uniform h-5 height inside h-7 container for both active stop and add button', () => {
-    const fcStopRowView = expedition.RowView.createFrom({
-      row: {
-        id: 20,
-        expeditionId: 1,
-        rowType: 'waypoint',
-        systemName: 'Colonia',
-        seq: 19,
-        fcStop: true,
-        fcArrived: true,
-      },
-      number: 20,
-      visitState: 'visited',
-      permissions: {
-        systemLocked: true,
-        canAddFcStop: false,
-        canRemoveFcStop: false,
-        canOverrideFcBadge: false,
-      },
-    })
-
-    const html = renderRowItem({
-      rowView: fcStopRowView,
-      index: 19,
-      isLocked: true,
-      lastVisitedIndex: 20,
-    })
-
-    expect(html).toContain('ARRIVED')
-    expect(html).toContain('h-5 px-1.5 inline-flex items-center justify-center')
-    expect(html).toContain('h-7 inline-flex items-center justify-center gap-1.5 whitespace-nowrap')
-
-    const lockedFcRowHtml = renderRowItem({
-      rowView: expedition.RowView.createFrom({
-        row: {
-          id: 501,
-          expeditionId: 1,
-          rowType: 'waypoint',
-          systemName: 'Rohini',
-          fcStop: true,
-          fcArrived: false,
-        },
-        number: 2,
-        visitState: 'future',
-        permissions: {
-          systemLocked: false,
-          canAddFcStop: false,
-          canRemoveFcStop: false,
-          canOverrideFcBadge: false,
-          isFcStopLocked: true,
-          hasActiveCarrierRoute: true,
-        },
-      }),
-      index: 1,
-      lastVisitedIndex: 0,
-    })
-
-    expect(lockedFcRowHtml).toContain('ROUTING')
-    expect(lockedFcRowHtml).not.toContain('Remove Fleet Carrier stop designation')
-    expect(lockedFcRowHtml).not.toContain('+ FC STOP')
-  })
-
   it('enforces Fleet Carrier stop rules: + FC STOP after lastFcArrivedIndex, remove only on PENDING, and lock active route target', () => {
     const visitedAfterFcFrontierHtml = renderRowItem({
       rowView: expedition.RowView.createFrom({

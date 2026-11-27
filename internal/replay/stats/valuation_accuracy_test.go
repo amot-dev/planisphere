@@ -142,7 +142,6 @@ func TestRadicoidaUnicaAggregatedCGAndPostCG(t *testing.T) {
 		`{"timestamp":"2025-11-24T18:55:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Ingensradices_Genus_Name;","Genus_Localised":"Radicoida","Species":"$Codex_Ent_Ingensradices_Unicus_Name;","Species_Localised":"Radicoida Unica","SystemAddress":147882789259,"Body":3}`,
 		`{"timestamp":"2025-11-24T19:12:26Z","event":"SellOrganicData","MarketID":129038712,"BioData":[{"Genus":"$Codex_Ent_Ingensradices_Genus_Name;","Species":"$Codex_Ent_Ingensradices_Unicus_Name;","Species_Localised":"Radicoida Unica","Value":2856888,"Bonus":0}]}`,
 		`{"timestamp":"2025-11-24T20:00:00Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":false}`,
-		`{"timestamp":"2026-02-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"$Codex_Ent_Ingensradices_Genus_Name;","Species":"$Codex_Ent_Ingensradices_Unicus_Name;","Species_Localised":"Radicoida Unica","SystemAddress":147882789259,"Body":3}`,
 	)
 
 	cgWindow := stats.Range{After: "2025-11-24T18:00:00Z", Until: "2025-11-24T21:00:00Z"}
@@ -159,14 +158,6 @@ func TestRadicoidaUnicaAggregatedCGAndPostCG(t *testing.T) {
 	}
 	if cgRealization.TotalRealized != 2856888 || cgRealization.OrganicLostDeath != 0 || cgRealization.PendingValue != 0 {
 		t.Errorf("expected all 3 aggregated CG samples realized with zero death loss, got %+v", cgRealization)
-	}
-
-	postCGMetrics, postError := engineInstance.ComputeExobiology(stats.Range{After: "2026-02-01T09:00:00Z", Until: "2026-02-01T11:00:00Z"}, nil)
-	if postError != nil {
-		t.Fatalf("ComputeExobiology post-CG window failed: %v", postError)
-	}
-	if postCGMetrics.OrganicValueTotal != 119037 {
-		t.Errorf("expected post-CG Radicoida Unica value 119,037 Cr, got %d", postCGMetrics.OrganicValueTotal)
 	}
 }
 

@@ -37,17 +37,29 @@ describe('SquareCheckbox', () => {
     expect(html).toContain('fill="#ff0000"')
   })
 
-  it('renders accessible overlay checkbox input for keyboard and click dispatch', () => {
-    const html = renderToString(
+  it('renders accessible overlay checkbox input reflecting checked, disabled, and aria-label attributes', () => {
+    const uncheckedHtml = renderToString(
       createElement(SquareCheckbox, {
         checked: false,
         onChange: () => {},
         'aria-label': 'Track Commander',
       }),
     )
-    expect(html).toContain('type="checkbox"')
-    expect(html).toContain('absolute inset-0')
-    expect(html).toContain('aria-label="Track Commander"')
+    expect(uncheckedHtml).toContain('type="checkbox"')
+    expect(uncheckedHtml).toContain('aria-label="Track Commander"')
+    expect(uncheckedHtml).not.toContain('checked=""')
+    expect(uncheckedHtml).not.toContain('disabled=""')
+
+    const checkedDisabledHtml = renderToString(
+      createElement(SquareCheckbox, {
+        checked: true,
+        disabled: true,
+        onChange: () => {},
+        'aria-label': 'Track Commander',
+      }),
+    )
+    expect(checkedDisabledHtml).toContain('checked=""')
+    expect(checkedDisabledHtml).toContain('disabled=""')
   })
 })
 

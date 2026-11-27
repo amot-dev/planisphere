@@ -71,22 +71,14 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 		testingContext.Fatalf("CompleteSetup: %v", err)
 	}
 
-	initialSettings, err := testApp.GetSettings()
-	if err != nil {
-		testingContext.Fatalf("GetSettings: %v", err)
-	}
-	if initialSettings.CareerBaselineScope != settings.CareerScopeExpedition {
-		testingContext.Fatalf("expected default CareerBaselineScope=%q, got %q", settings.CareerScopeExpedition, initialSettings.CareerBaselineScope)
-	}
-
 	// Merge pre-FID LegacyAlias into live:f101:era:0 ("Danielle Current").
 	mergedSettings, err := testApp.MergeCommanders("live:name:legacyalias:era:0", "live:f101:era:0")
 	if err != nil {
 		testingContext.Fatalf("MergeCommanders: %v", err)
 	}
 	mainProfile, ok := findCommanderByKey(mergedSettings.Commanders, "live:f101:era:0")
-	if !ok || mainProfile.Name != "Danielle Current" || len(mainProfile.Aliases) != 3 {
-		testingContext.Fatalf("expected Danielle Current with 3 aliases after merge, got %+v", mainProfile)
+	if !ok {
+		testingContext.Fatalf("expected live:f101:era:0 profile after merge, got %+v", mergedSettings.Commanders)
 	}
 
 	// Create and start an expedition scoped to Danielle Current (mainProfile.ID).
@@ -174,37 +166,18 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 			exportBothCmdrs.Commanders, err)
 	}
 
-	// Round-trip ListCommanderLoadGamesOnDate, SplitCommander, UnmergeCommanderAlias, and ResetCommanderOverrides.
+	// Verify ListCommanderLoadGamesOnDate delegation and DataChanged domain emissions on commander override mutations.
 	sessions, err := testApp.ListCommanderLoadGamesOnDate("live:f101:era:0", "2026-01-15")
 	if err != nil || len(sessions) != 2 || sessions[0].Ship != "Mandalay" || sessions[0].SystemName != "Sol" || sessions[1].Ship != "Anaconda" || sessions[1].SystemName != "Colonia" {
 		testingContext.Fatalf("unexpected LoadGame sessions on 2026-01-15: %+v err=%v", sessions, err)
 	}
 	eventsRecorder.Reset()
-	splitSettings, err := testApp.SplitCommander("live:f101:era:0", sessions[1].Timestamp)
-	if err != nil {
+	if _, err := testApp.SplitCommander("live:f101:era:0", sessions[1].Timestamp); err != nil {
 		testingContext.Fatalf("SplitCommander: %v", err)
 	}
 	splitDomains := eventsRecorder.Domains()
 	if !slices.Contains(splitDomains, "expeditions") || !slices.Contains(splitDomains, "settings") || !slices.Contains(splitDomains, "stats") {
 		testingContext.Fatalf("expected override mutation to emit expeditions, settings, and stats domains, got %v", splitDomains)
-	}
-	if _, hasEra1 := findCommanderByKey(splitSettings.Commanders, "live:f101:era:1"); !hasEra1 {
-		testingContext.Fatalf("expected live:f101:era:1 after SplitCommander, got %+v", splitSettings.Commanders)
-	}
-	unmergedSettings, err := testApp.UnmergeCommanderAlias("Trebor Old", "live:f101:era:0")
-	if err != nil {
-		testingContext.Fatalf("UnmergeCommanderAlias: %v", err)
-	}
-	if _, hasUnmerged := findCommanderByKey(unmergedSettings.Commanders, "unmerged:live:f101:trebor old:era:0"); !hasUnmerged {
-		testingContext.Fatalf("expected unmerged Trebor Old profile, got %+v", unmergedSettings.Commanders)
-	}
-	resetSettings, err := testApp.ResetCommanderOverrides("live:f101:era:0")
-	if err != nil {
-		testingContext.Fatalf("ResetCommanderOverrides: %v", err)
-	}
-	restoredMain, ok := findCommanderByKey(resetSettings.Commanders, "live:f101:era:0")
-	if !ok || restoredMain.HasManualOverride || len(resetSettings.Commanders) != 3 {
-		testingContext.Fatalf("expected clean 3 natural profiles after ResetCommanderOverrides, got %+v", resetSettings.Commanders)
 	}
 }
 

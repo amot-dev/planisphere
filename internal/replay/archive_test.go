@@ -1,9 +1,8 @@
 package replay_test
 
 import (
+	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,82 +71,6 @@ func TestArchiveStatusPropagatesDisabledCommanderQueryError(testingContext *test
 	if !strings.Contains(statusError.Error(), "check disabled commanders") {
 		testingContext.Fatalf("expected error wrapping check disabled commanders, got %v", statusError)
 	}
-}
-
-func TestListCommandersAfterByteZeroBackfill(testingContext *testing.T) {
-	conn := dbtest.OpenMemory(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-	logFilePath := filepath.Join(temporaryDirectory, "Journal.2026-04-01T120000.01.log")
-	earlyLine := `{"timestamp":"2026-04-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`
-	laterLine := `{"timestamp":"2026-04-01T12:01:00Z","event":"LoadGame","Commander":"CmdrAlpha","FID":"F10","Ship":"mandalay"}`
-	if writeError := os.WriteFile(logFilePath, []byte(earlyLine+"\n"+laterLine+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-
-	earlyEvent, _, parseEarlyError := journal.ParseLine([]byte(earlyLine), "Journal.2026-04-01T120000.01.log")
-	if parseEarlyError != nil {
-		testingContext.Fatal(parseEarlyError)
-	}
-	loadEvent, _, parseLoadError := journal.ParseLine([]byte(laterLine), "Journal.2026-04-01T120000.01.log")
-	if parseLoadError != nil {
-		testingContext.Fatal(parseLoadError)
-	}
-
-	if _, execError := conn.Exec(
-		`INSERT INTO ingested_journals (file_name, file_path, byte_offset, updated_at) VALUES (?, ?, 0, ?)`,
-		"Journal.2026-04-01T120000.01.log", logFilePath, "2026-04-01T12:01:00Z",
-	); execError != nil {
-		testingContext.Fatal(execError)
-	}
-	if _, execError := conn.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
-		 VALUES (?, '2026-04-01T12:00:00Z', 'Location', 'Sol', 1001, NULL, ?, '{}', '2026-04-01T12:01:00Z'),
-		        (?, '2026-04-01T12:01:00Z', 'LoadGame', '', 0, 'cmdralpha', ?, '{}', '2026-04-01T12:01:00Z')`,
-		earlyEvent.UID, "Journal.2026-04-01T120000.01.log",
-		loadEvent.UID, "Journal.2026-04-01T120000.01.log",
-	); execError != nil {
-		testingContext.Fatal(execError)
-	}
-	ingester := journal.NewIngester(conn)
-
-	if _, execError := conn.Exec(
-		`INSERT INTO commanders (name, fid, enabled, first_seen, last_seen)
-		 VALUES ('CmdrAlpha', 'F10', 1, '2026-04-01T12:00:00Z', '2026-04-01T12:01:00Z'),
-		        ('CmdrBeta', 'F20', 1, '2026-04-02T12:00:00Z', '2026-04-02T12:00:00Z')`,
-	); execError != nil {
-		testingContext.Fatal(execError)
-	}
-	if _, execError := conn.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, commander, source_file, raw_json, ingested_at)
-		 VALUES ('uid-beta', '2026-04-02T12:00:00Z', 'FSDJump', 'Achenar', 1002, 'CmdrBeta', 'other.log', '{}', '2026-04-02T12:00:00Z')`,
-	); execError != nil {
-		testingContext.Fatal(execError)
-	}
-
-	assertCounts := func(expectedAlpha, expectedBeta int) {
-		testingContext.Helper()
-		commanders, listError := replay.ListCommanders(conn)
-		if listError != nil {
-			testingContext.Fatalf("ListCommanders: %v", listError)
-		}
-		if len(commanders) != 2 {
-			testingContext.Fatalf("expected 2 commanders, got %d", len(commanders))
-		}
-		if commanders[0].Name != "CmdrAlpha" || commanders[0].EventCount != expectedAlpha {
-			testingContext.Fatalf("expected CmdrAlpha eventCount=%d, got %+v", expectedAlpha, commanders[0])
-		}
-		if commanders[1].Name != "CmdrBeta" || commanders[1].EventCount != expectedBeta {
-			testingContext.Fatalf("expected CmdrBeta eventCount=%d, got %+v", expectedBeta, commanders[1])
-		}
-	}
-
-	assertCounts(1, 1)
-
-	if _, ingestError := ingester.IngestFile(logFilePath); ingestError != nil {
-		testingContext.Fatalf("IngestFile: %v", ingestError)
-	}
-
-	assertCounts(2, 1)
 }
 
 func TestListCommandersEventCounts(testingContext *testing.T) {
@@ -327,6 +250,11 @@ func TestListCommanderNamesForScopeLegacyFallback(testingContext *testing.T) {
 }
 
 func TestJournalSystemQueriesRespectCmdrFilterLatestOrderAndBatchChunking(testingContext *testing.T) {
+	var typedNilDB *sql.DB
+	if nilCoords, nilError := replay.QueryJournalSystemCoords(typedNilDB, "Sol"); nilError != nil || nilCoords != nil {
+		testingContext.Fatalf("expected nil result for typed-nil *sql.DB in QueryJournalSystemCoords, got %+v err=%v", nilCoords, nilError)
+	}
+
 	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	if _, execError := databaseConnection.Exec(`

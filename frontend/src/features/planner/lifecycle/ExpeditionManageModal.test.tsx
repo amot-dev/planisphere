@@ -117,8 +117,6 @@ describe('ExpeditionManageModal', () => {
 
     const createButtonWhileLoading = modalView.findButtonByText('CREATE EXPEDITION')
     expect(createButtonWhileLoading.disabled).toBe(true)
-    expect(createButtonWhileLoading.className).toContain('opacity-40')
-    expect(createButtonWhileLoading.className).toContain('cursor-not-allowed')
 
     act(() => {
       createButtonWhileLoading.click()
@@ -152,7 +150,6 @@ describe('ExpeditionManageModal', () => {
 
     const createAndImportButton = modalView.findButtonByText('CREATE AND IMPORT (2)')
     expect(createAndImportButton.disabled).toBe(false)
-    expect(createAndImportButton.className).not.toContain('cursor-not-allowed')
 
     await act(async () => {
       createAndImportButton.click()

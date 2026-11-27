@@ -5,6 +5,65 @@ import { expedition } from '../../../api/models'
 import { PlannerRouteTable } from './PlannerRouteTable'
 
 describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
+  const renderTable = (plan: expedition.PlanView, insertMenuAfterId: number | null = null) => {
+    const tableItems = plan.rows.map((rowView, index) => ({
+      kind: (rowView.row.rowType === 'region' ? 'region' : 'waypoint') as 'region' | 'waypoint',
+      rowView,
+      index,
+      key: `${rowView.row.rowType}-${rowView.row.id}`,
+    }))
+    return renderToString(
+      createElement(PlannerRouteTable, {
+        plan,
+        isPlanning: false,
+        isCompleted: false,
+        columns: {
+          visibleColumnCount: 8,
+          tableMinWidthPixels: 1200,
+          showNotes: true,
+          showCarrierStop: true,
+          onToggleShowNotes: () => {},
+          onToggleShowCarrierStop: () => {},
+        },
+        externalLinks: {},
+        drawerState: {
+          expandedRowIds: {},
+          detailsById: {},
+          loadingDetails: {},
+          toggleExpand: () => {},
+        },
+        dragState: {
+          tableItems,
+          dropSlotGaps: new Set<number>(),
+          heldOrDraggedIndex: null,
+          draggedIndex: null,
+          dragOverGapIndex: null,
+          getRowDropProps: () => ({}),
+          getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
+          onClearDragOverGap: () => {},
+          onRowHoldStart: () => {},
+          onRowHoldEnd: () => {},
+          onRowDragStart: () => {},
+          onRowDragEnd: () => {},
+        },
+        rowActions: {
+          copiedSystemRowId: null,
+          insertMenuAfterId,
+          onSetInsertMenuAfterId: () => {},
+          onChangeRegion: () => {},
+          onInsert: () => {},
+          onDeleteRow: () => {},
+          onLegModeChange: () => {},
+          onFieldBlur: () => {},
+          onCopySystem: () => {},
+          onToggleFcStop: () => {},
+          onOverrideFcArrived: () => {},
+          onOpenCarrierRoutePrompt: () => {},
+        },
+      }),
+    )
+  }
+
   it('renders manual vs Spansh carrier route locks, drawer cascade flag, and region insert flag from Go permissions', () => {
     const buildPlanWithTargetPermissions = (
       targetPermissions: Partial<expedition.WaypointPermissions>,
@@ -70,66 +129,7 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
         ],
       })
 
-    const renderTable = (plan: expedition.PlanView) => {
-      const tableItems = plan.rows.map((rowView, index) => ({
-        kind: (rowView.row.rowType === 'region' ? 'region' : 'waypoint') as 'region' | 'waypoint',
-        rowView,
-        index,
-        key: `${rowView.row.rowType}-${rowView.row.id}`,
-      }))
-      return renderToString(
-        createElement(PlannerRouteTable, {
-          plan,
-          isPlanning: false,
-          isCompleted: false,
-          columns: {
-            visibleColumnCount: 8,
-            tableMinWidthPixels: 1200,
-            showNotes: true,
-            showCarrierStop: true,
-            onToggleShowNotes: () => {},
-            onToggleShowCarrierStop: () => {},
-          },
-          externalLinks: {},
-          drawerState: {
-            expandedRowIds: {},
-            detailsById: {},
-            loadingDetails: {},
-            toggleExpand: () => {},
-          },
-          dragState: {
-            tableItems,
-            dropSlotGaps: new Set<number>(),
-            heldOrDraggedIndex: null,
-            draggedIndex: null,
-            dragOverGapIndex: null,
-            getRowDropProps: () => ({}),
-            getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
-            onClearDragOverGap: () => {},
-            onRowHoldStart: () => {},
-            onRowHoldEnd: () => {},
-            onRowDragStart: () => {},
-            onRowDragEnd: () => {},
-          },
-          rowActions: {
-            copiedSystemRowId: null,
-            insertMenuAfterId: 9,
-            onSetInsertMenuAfterId: () => {},
-            onChangeRegion: () => {},
-            onInsert: () => {},
-            onDeleteRow: () => {},
-            onLegModeChange: () => {},
-            onFieldBlur: () => {},
-            onCopySystem: () => {},
-            onToggleFcStop: () => {},
-            onOverrideFcArrived: () => {},
-            onOpenCarrierRoutePrompt: () => {},
-          },
-        }),
-      )
-    }
-
-    const manualTableHtml = renderTable(buildPlanWithTargetPermissions({ isFcStopLocked: false }))
+    const manualTableHtml = renderTable(buildPlanWithTargetPermissions({ isFcStopLocked: false }), 9)
     expect(manualTableHtml).toContain('placeholder="Star System"')
     expect(manualTableHtml).toContain('ROUTING')
     expect(manualTableHtml).toContain(
@@ -149,6 +149,7 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
         isFcStopLocked: true,
         isSpanshRoutedFcStop: true,
       }),
+      9,
     )
     expect(spanshTableHtml).toContain('Locked while Fleet Carrier route to this waypoint is active')
   })
@@ -245,63 +246,7 @@ describe('PlannerRouteTable Carrier Locks and Region Borders', () => {
       visitedWaypointCount: 2,
     })
 
-    const tableItems = regionBorderPlan.rows.map((rowView, index) => ({
-      kind: (rowView.row.rowType === 'region' ? 'region' : 'waypoint') as 'region' | 'waypoint',
-      rowView,
-      index,
-      key: `${rowView.row.rowType}-${rowView.row.id}`,
-    }))
-
-    const html = renderToString(
-      createElement(PlannerRouteTable, {
-        plan: regionBorderPlan,
-        isPlanning: false,
-        isCompleted: false,
-        columns: {
-          visibleColumnCount: 8,
-          tableMinWidthPixels: 1200,
-          showNotes: true,
-          showCarrierStop: true,
-          onToggleShowNotes: () => {},
-          onToggleShowCarrierStop: () => {},
-        },
-        externalLinks: {},
-        drawerState: {
-          expandedRowIds: {},
-          detailsById: {},
-          loadingDetails: {},
-          toggleExpand: () => {},
-        },
-        dragState: {
-          tableItems,
-          dropSlotGaps: new Set<number>(),
-          heldOrDraggedIndex: null,
-          draggedIndex: null,
-          dragOverGapIndex: null,
-          getRowDropProps: () => ({}),
-          getSlotDropProps: () => ({ onDragOver: () => {}, onDrop: () => {} }),
-          onClearDragOverGap: () => {},
-          onRowHoldStart: () => {},
-          onRowHoldEnd: () => {},
-          onRowDragStart: () => {},
-          onRowDragEnd: () => {},
-        },
-        rowActions: {
-          copiedSystemRowId: null,
-          insertMenuAfterId: null,
-          onSetInsertMenuAfterId: () => {},
-          onChangeRegion: () => {},
-          onInsert: () => {},
-          onDeleteRow: () => {},
-          onLegModeChange: () => {},
-          onFieldBlur: () => {},
-          onCopySystem: () => {},
-          onToggleFcStop: () => {},
-          onOverrideFcArrived: () => {},
-          onOpenCarrierRoutePrompt: () => {},
-        },
-      }),
-    )
+    const html = renderTable(regionBorderPlan)
 
     const rowHtml = (rowId: number) => {
       const match = html.match(new RegExp(`<tr[^>]*data-row-id="${rowId}"[\\s\\S]*?<\\/tr>`))

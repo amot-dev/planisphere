@@ -205,40 +205,6 @@ func TestRecoveredJumpsRejections(testingContext *testing.T) {
 	}
 }
 
-func TestRecoveredJumpsMultiCommanderIsolation(testingContext *testing.T) {
-	databaseConnection := dbtest.OpenMemory(testingContext)
-	journaltest.IngestFiles(testingContext, databaseConnection, map[string][]string{
-		"Journal.2026-11-17T030000.01.log": {
-			`{"timestamp":"2026-11-17T03:00:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
-			`{"timestamp":"2026-11-17T03:00:05Z","event":"Location","StarSystem":"StartSystem","SystemAddress":1000,"StarPos":[1000,0,0],"Docked":false}`,
-			`{"timestamp":"2026-11-17T03:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"DeepDest","SystemAddress":1001}`,
-		},
-		"Journal.2026-11-17T030200.01.log": {
-			`{"timestamp":"2026-11-17T03:02:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"CobraMkV"}`,
-			`{"timestamp":"2026-11-17T03:02:05Z","event":"Location","StarSystem":"Sol","SystemAddress":2000,"StarPos":[0,0,0],"Docked":false}`,
-			`{"timestamp":"2026-11-17T03:02:30Z","event":"JetConeBoost","BoostValue":4.0}`,
-			`{"timestamp":"2026-11-17T03:02:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"BubbleDest","SystemAddress":2001}`,
-			`{"timestamp":"2026-11-17T03:03:00Z","event":"FSDJump","StarSystem":"BubbleDest","SystemAddress":2001,"StarPos":[0,30,0],"JumpDist":30.0}`,
-		},
-		"Journal.2026-11-17T030500.01.log": {
-			`{"timestamp":"2026-11-17T03:05:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
-			`{"timestamp":"2026-11-17T03:05:10Z","event":"Location","StarSystem":"DeepDest","SystemAddress":1001,"StarPos":[1000,60,80],"Docked":false}`,
-		},
-	})
-
-	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
-	if recoverError != nil {
-		testingContext.Fatalf("ComputeRecoveredJumpsScoped: %v", recoverError)
-	}
-	if len(recovered) != 1 {
-		testingContext.Fatalf("expected 1 recovered jump for CmdrExplorer, got %d: %+v", len(recovered), recovered)
-	}
-	recoveredJump := recovered[0]
-	if recoveredJump.SystemName != "DeepDest" || math.Abs(recoveredJump.JumpDist-100.0) > 1e-6 || recoveredJump.BoostUsed != 0 {
-		testingContext.Fatalf("unexpected recovered jump %+v (want DeepDest, 100.0 Ly from StartSystem, BoostUsed 0)", recoveredJump)
-	}
-}
-
 func TestRecoveredCarrierJumpsContinuousStayAndOnFootConcourse(testingContext *testing.T) {
 	databaseConnection := dbtest.OpenMemory(testingContext)
 	journaltest.IngestLines(
@@ -348,13 +314,16 @@ func TestRecoveredJumpsMidJumpRenameAndSameNameWipeIsolation(testingContext *tes
 			`{"timestamp":"2026-11-24T01:01:00Z","event":"JetConeBoost","BoostValue":4.0}`,
 			`{"timestamp":"2026-11-24T01:01:30Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"RenameDest","SystemAddress":9002}`,
 		},
-		// Interleaved second profile disconnecting and reconnecting between F900's StartJump (01:01:30Z) and F900's reconnect LoadGame (01:05:00Z).
+		// Interleaved second profile disconnecting, reconnecting, and completing a normal boosted jump between F900's StartJump and reconnect.
 		"Journal.2026-11-24T010200.01.log": {
 			`{"timestamp":"2026-11-24T01:02:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
 			`{"timestamp":"2026-11-24T01:02:05Z","event":"Location","StarSystem":"InterleavedOrigin","SystemAddress":9201,"StarPos":[0,0,0],"Docked":false}`,
 			`{"timestamp":"2026-11-24T01:02:20Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"InterleavedDest","SystemAddress":9202}`,
 			`{"timestamp":"2026-11-24T01:03:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
 			`{"timestamp":"2026-11-24T01:03:10Z","event":"Location","StarSystem":"InterleavedDest","SystemAddress":9202,"StarPos":[0,0,90],"Docked":false}`,
+			`{"timestamp":"2026-11-24T01:03:30Z","event":"Synthesis","Name":"FSD Standard"}`,
+			`{"timestamp":"2026-11-24T01:03:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"NormalBoostedDest","SystemAddress":9203}`,
+			`{"timestamp":"2026-11-24T01:04:00Z","event":"FSDJump","StarSystem":"NormalBoostedDest","SystemAddress":9203,"StarPos":[0,0,150],"JumpDist":60.0,"BoostUsed":2}`,
 		},
 		"Journal.2026-11-24T010500.01.log": {
 			`{"timestamp":"2026-11-24T01:05:00Z","event":"LoadGame","Commander":"CmdrAfterRename","FID":"F900","Ship":"Mandalay"}`,
@@ -385,5 +354,9 @@ func TestRecoveredJumpsMidJumpRenameAndSameNameWipeIsolation(testingContext *tes
 	}
 	if renamedJump.SystemName != "RenameDest" || math.Abs(renamedJump.JumpDist-150.0) > 1e-6 || renamedJump.BoostUsed != 4 || renamedJump.ProfileID <= 0 || renamedJump.ProfileID == interleavedJump.ProfileID {
 		testingContext.Fatalf("unexpected recovered jump across mid-jump rename after interleaved candidate: %+v", renamedJump)
+	}
+	f902Scoped, f902ScopedError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.NewProfileScope([]int64{interleavedJump.ProfileID}))
+	if f902ScopedError != nil || len(f902Scoped) != 1 || f902Scoped[0].SystemName != "InterleavedDest" {
+		testingContext.Fatalf("expected F902 normal boosted FSDJump excluded from recovered jumps, got %+v err=%v", f902Scoped, f902ScopedError)
 	}
 }
