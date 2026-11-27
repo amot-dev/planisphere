@@ -12,8 +12,8 @@ import {
 import { expedition, replay } from '../../../api/models'
 import { ModalShell } from '../../../components/ui/ModalShell'
 import {
+  resolveSelectedCommanderProfileId,
   ScopedExpeditionInlineEditor,
-  type CommanderScopeMode,
 } from './ExpeditionCommanderScopePicker'
 import { WaypointImportSection, type ParsedWaypointImport } from './WaypointImportSection'
 
@@ -66,8 +66,7 @@ export function ExpeditionManageModal({
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
-  const [editScopeMode, setEditScopeMode] = useState<CommanderScopeMode>('all_enabled')
-  const [editProfileIds, setEditProfileIds] = useState<number[]>([])
+  const [editProfileId, setEditProfileId] = useState<number>(0)
   const [errorMessage, setErrorMessage] = useState('')
   const parseRequestSeqRef = useRef(0)
   const parseDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -208,19 +207,13 @@ export function ExpeditionManageModal({
   }
 
   function handleSaveEdit(id: number) {
-    if (hasMultipleCommanders && editScopeMode === 'selected' && editProfileIds.length === 0) {
-      setErrorMessage('Select at least one commander save slot.')
+    if (hasMultipleCommanders && editProfileId <= 0) {
+      setErrorMessage('Select a commander save slot.')
       return
     }
     return runExpeditionAction(async () => {
       if (hasMultipleCommanders) {
-        await UpdateExpeditionScoped(
-          id,
-          editName,
-          editDescription,
-          editScopeMode,
-          editScopeMode === 'selected' ? editProfileIds : [],
-        )
+        await UpdateExpeditionScoped(id, editName, editDescription, editProfileId)
       } else {
         await UpdateExpedition(id, editName, editDescription)
       }
@@ -329,13 +322,11 @@ export function ExpeditionManageModal({
                   editName={editName}
                   editDescription={editDescription}
                   commanders={commanders}
-                  scopeMode={editScopeMode}
-                  selectedProfileIds={editProfileIds}
+                  selectedProfileId={editProfileId}
                   busy={busy}
                   onChangeName={setEditName}
                   onChangeDescription={setEditDescription}
-                  onChangeScopeMode={setEditScopeMode}
-                  onChangeSelectedProfileIds={setEditProfileIds}
+                  onChangeProfileId={setEditProfileId}
                   onCancel={() => {
                     setEditingId(null)
                     setErrorMessage('')
@@ -438,13 +429,11 @@ export function ExpeditionManageModal({
                           setEditingId(expeditionItem.id)
                           setEditName(expeditionItem.name)
                           setEditDescription(expeditionItem.description)
-                          const nextScope: CommanderScopeMode =
-                            expeditionItem.commanderScope === 'selected' ? 'selected' : 'all_enabled'
-                          setEditScopeMode(nextScope)
-                          setEditProfileIds(
-                            nextScope === 'selected'
-                              ? [...(expeditionItem.commanderProfileIds ?? [])]
-                              : [],
+                          setEditProfileId(
+                            resolveSelectedCommanderProfileId(
+                              commanders,
+                              expeditionItem.commanderProfileId,
+                            ),
                           )
                         }}
                         className="ed-btn"

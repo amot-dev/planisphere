@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"planisphere/internal/core/db"
 	"planisphere/internal/replay"
 	"planisphere/internal/testutil/dbtest"
 )
@@ -143,5 +144,92 @@ func TestListCommanderNamesForScopeLegacyFallback(testingContext *testing.T) {
 	}
 	if _, missingTableError := replay.ListCommanderNamesForScope(databaseConnection, replay.ProfileScope{}); missingTableError == nil {
 		testingContext.Fatal("expected error when commanders table is missing")
+	}
+}
+
+func TestListCommandersIncludesNamelessFIDEventsWithoutBlankAliases(testingContext *testing.T) {
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	dbtest.InsertSeedEvents(testingContext, databaseConnection,
+		dbtest.SeedEventRow{UID: "n1", Timestamp: "2026-01-01T10:00:00Z", Event: "LoadGame", Commander: "CmdrMain", FID: "F101", Universe: "live"},
+		dbtest.SeedEventRow{UID: "n2", Timestamp: "2026-01-01T10:05:00Z", Event: "FSDJump", Commander: "", FID: "F101", Universe: "live"},
+		dbtest.SeedEventRow{UID: "n3", Timestamp: "2026-01-02T10:00:00Z", Event: "FSDJump", Commander: "", FID: "F202", Universe: "live"},
+		dbtest.SeedEventRow{UID: "n4", Timestamp: "2026-01-02T10:05:00Z", Event: "FSDJump", Commander: "", FID: "", Universe: "live"},
+	)
+	if _, execError := databaseConnection.Exec(
+		`INSERT INTO journal_events (event_uid, timestamp, event, commander, fid, universe, source_file, raw_json, ingested_at)
+		 VALUES ('n5', '2026-01-02T10:06:00Z', 'FSDJump', NULL, 'F202', 'live', 'test.log', '{}', '2026-01-02T10:06:00Z')`,
+	); execError != nil {
+		testingContext.Fatalf("insert null-commander FID event: %v", execError)
+	}
+	if err := db.WithTx(databaseConnection, db.ResolveCommanders); err != nil {
+		testingContext.Fatalf("ResolveCommanders: %v", err)
+	}
+
+	listed, err := replay.ListCommanders(databaseConnection)
+	if err != nil || len(listed) != 2 {
+		testingContext.Fatalf("expected 2 resolved commander profiles, got %+v err=%v", listed, err)
+	}
+	if listed[0].FID != "F101" || listed[0].EventCount != 2 || len(listed[0].Aliases) != 1 || listed[0].Aliases[0].Name != "CmdrMain" {
+		testingContext.Fatalf("expected F101 EventCount=2 (1 named + 1 nameless) and 1 alias, got %+v", listed[0])
+	}
+	if listed[1].FID != "F202" || listed[1].EventCount != 2 || len(listed[1].Aliases) != 0 {
+		testingContext.Fatalf("expected nameless-only F202 EventCount=2 (empty + NULL commander) and 0 blank aliases, got %+v", listed[1])
+	}
+}
+
+func TestNormalizeAllTimeProfileScope(testingContext *testing.T) {
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO commander_profiles (id, profile_key, display_name, fid, universe, era_index, is_archived_career, enabled, first_seen, last_seen) VALUES
+		(1, 'live:f1:era:0', 'ArchivedWipe', 'F1', 'live', 0, 1, 0, '2025-01-01T00:00:00Z', '2025-06-01T00:00:00Z'),
+		(2, 'live:f1:era:1', 'ActiveMain', 'F1', 'live', 1, 0, 1, '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed commander_profiles: %v", execError)
+	}
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO journal_events (event_uid, timestamp, event, commander, fid, universe, profile_id, source_file, raw_json, ingested_at) VALUES
+		('e1', '2025-01-01T00:00:00Z', 'LoadGame', 'ArchivedWipe', 'F1', 'live', 1, 'a.log', '{}', '2026-02-01T00:00:00Z'),
+		('e2', '2026-01-01T00:00:00Z', 'LoadGame', 'ActiveMain', 'F1', 'live', 2, 'b.log', '{}', '2026-02-01T00:00:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("seed journal_events: %v", execError)
+	}
+
+	// Sole enabled profile alongside a disabled archived profile collapses to AllEnabled.
+	collapsed := replay.NormalizeAllTimeProfileScope(databaseConnection, replay.NewProfileScope([]int64{2}))
+	if !collapsed.IsAllEnabled() {
+		testingContext.Fatalf("expected sole enabled profile scope to collapse to AllEnabled, got %+v", collapsed)
+	}
+
+	// Disabled target profile must preserve its explicit scope so archived expeditions stay isolated.
+	disabledTarget := replay.NormalizeAllTimeProfileScope(databaseConnection, replay.NewProfileScope([]int64{1}))
+	if disabledTarget.IsAllEnabled() || !disabledTarget.ContainsProfileID(1) {
+		testingContext.Fatalf("expected disabled target scope to remain explicit, got %+v", disabledTarget)
+	}
+
+	// Unresolved profile_id=0 event must prevent collapsing because AllEnabled falls back to legacy rows.
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO journal_events (event_uid, timestamp, event, commander, fid, universe, profile_id, source_file, raw_json, ingested_at)
+		VALUES ('e-unresolved', '2026-02-02T00:00:00Z', 'FSDJump', '', '', 'live', 0, 'c.log', '{}', '2026-02-02T00:00:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("insert profile_id=0 event: %v", execError)
+	}
+	withUnresolved := replay.NormalizeAllTimeProfileScope(databaseConnection, replay.NewProfileScope([]int64{2}))
+	if withUnresolved.IsAllEnabled() || !withUnresolved.ContainsProfileID(2) {
+		testingContext.Fatalf("expected profile_id=0 row to preserve explicit scope, got %+v", withUnresolved)
+	}
+	if _, execError := databaseConnection.Exec(`DELETE FROM journal_events WHERE event_uid = 'e-unresolved'`); execError != nil {
+		testingContext.Fatalf("delete profile_id=0 event: %v", execError)
+	}
+
+	// Second enabled profile prevents collapsing so multi-career archives scope accurately.
+	if _, execError := databaseConnection.Exec(`
+		INSERT INTO commander_profiles (id, profile_key, display_name, fid, universe, era_index, is_archived_career, enabled, first_seen, last_seen)
+		VALUES (3, 'live:f2:era:0', 'AltCmdr', 'F2', 'live', 0, 0, 1, '2026-02-03T00:00:00Z', '2026-02-04T00:00:00Z')
+	`); execError != nil {
+		testingContext.Fatalf("insert second enabled profile: %v", execError)
+	}
+	multiEnabled := replay.NormalizeAllTimeProfileScope(databaseConnection, replay.NewProfileScope([]int64{2}))
+	if multiEnabled.IsAllEnabled() || !multiEnabled.ContainsProfileID(2) {
+		testingContext.Fatalf("expected multi-enabled archive to preserve explicit scope, got %+v", multiEnabled)
 	}
 }

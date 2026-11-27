@@ -201,6 +201,9 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 	`); execError != nil {
 		testingContext.Fatalf("insert departure test events: %v", execError)
 	}
+	if resolveError := db.WithTx(databaseConnection, db.ResolveCommanders); resolveError != nil {
+		testingContext.Fatalf("ResolveCommanders: %v", resolveError)
+	}
 	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
 		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
 	}

@@ -288,9 +288,10 @@ func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext 
 		`{"timestamp":"2026-03-04T11:30:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"Mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-03-04T11:31:00Z","event":"Location","StarSystem":"Hub Prime","SystemAddress":2000,"StarPos":[50,0,0]}`,
 
-		// CMDR Alt visits Hub Prime during both Global (all_enabled) and Main Scoped (CMDR Main only):
-		// must NOT be attributed to Main Scoped, so it falls through to Global Expedition.
+		// CMDR Alt origin arrival and subsequent visit to Hub Prime during both Alt Survey and Main Only Run:
+		// must NOT be attributed to Main Only Run (CMDR Main), so it attributes to Alt Survey (CMDR Alt).
 		`{"timestamp":"2026-03-05T08:00:00Z","event":"LoadGame","Commander":"CMDR Alt","FID":"F202","Ship":"CobraMkIII","Odyssey":true}`,
+		`{"timestamp":"2026-03-05T08:30:00Z","event":"Location","StarSystem":"Alt Origin","SystemAddress":2009,"StarPos":[90,0,0]}`,
 		`{"timestamp":"2026-03-05T09:00:00Z","event":"FSDJump","StarSystem":"Hub Prime","SystemAddress":2000,"StarPos":[50,0,0],"JumpDist":50.0}`,
 	)
 
@@ -306,10 +307,23 @@ func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext 
 	if err != nil {
 		testingContext.Fatal(err)
 	}
-	if err := expedition.StartTx(databaseConnection, globalExpedition.ID, "2026-03-02T09:00:00Z", 0); err != nil {
-		testingContext.Fatalf("StartTx global: %v", err)
+	if err := expedition.StartScopedTx(databaseConnection, globalExpedition.ID, "2026-03-02T09:00:00Z", 0, idsByName["CMDR Main"]); err != nil {
+		testingContext.Fatalf("StartScopedTx global: %v", err)
 	}
 	if _, err := databaseConnection.Exec(`UPDATE expeditions SET status = 'completed', end_timestamp = '2026-03-10T00:00:00Z' WHERE id = ?`, globalExpedition.ID); err != nil {
+		testingContext.Fatal(err)
+	}
+
+	altExpedition, err := expedition.CreateWithWaypoints(databaseConnection, "Alt Survey", "", []expedition.SeedWaypoint{
+		{SystemName: "Alt Origin"},
+	})
+	if err != nil {
+		testingContext.Fatal(err)
+	}
+	if err := expedition.StartScopedTx(databaseConnection, altExpedition.ID, "2026-03-05T08:30:00Z", 0, idsByName["CMDR Alt"]); err != nil {
+		testingContext.Fatalf("StartScopedTx alt: %v", err)
+	}
+	if _, err := databaseConnection.Exec(`UPDATE expeditions SET status = 'completed', end_timestamp = '2026-03-10T00:00:00Z' WHERE id = ?`, altExpedition.ID); err != nil {
 		testingContext.Fatal(err)
 	}
 
@@ -334,7 +348,7 @@ func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext 
 	if err != nil {
 		testingContext.Fatal(err)
 	}
-	if err := expedition.StartScopedTx(databaseConnection, scopedExpedition.ID, "2026-03-04T09:00:00Z", 0, expedition.ScopeSelected, []int64{idsByName["CMDR Main"]}); err != nil {
+	if err := expedition.StartScopedTx(databaseConnection, scopedExpedition.ID, "2026-03-04T09:00:00Z", 0, idsByName["CMDR Main"]); err != nil {
 		testingContext.Fatalf("StartScopedTx scoped: %v", err)
 	}
 
@@ -370,7 +384,7 @@ func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext 
 		expeditionName string
 		status         string
 	}{
-		{timestamp: "2026-03-05T09:00:00Z", expeditionID: globalExpedition.ID, expeditionName: "Global Survey", status: expedition.StatusCompleted},
+		{timestamp: "2026-03-05T09:00:00Z", expeditionID: altExpedition.ID, expeditionName: "Alt Survey", status: expedition.StatusCompleted},
 		{timestamp: "2026-03-04T11:31:00Z", expeditionID: scopedExpedition.ID, expeditionName: "Main Only Run", status: expedition.StatusActive},
 		{timestamp: "2026-03-04T10:00:00Z", expeditionID: scopedExpedition.ID, expeditionName: "Main Only Run", status: expedition.StatusActive},
 		{timestamp: "2026-03-01T09:00:00Z", expeditionID: 0, expeditionName: "", status: ""},

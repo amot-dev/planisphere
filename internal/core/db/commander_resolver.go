@@ -49,8 +49,13 @@ type resolverBaseGroup struct {
 }
 
 // ResolveCommanders deterministically resolves commander save-slot profiles,
-// career wipe eras, aliases, and journal_events.profile_id assignments.
+// career wipe eras, aliases, journal_events.profile_id assignments, and
+// expedition commander_profile_id event anchors.
 func ResolveCommanders(transaction *sql.Tx) error {
+	anchors, err := snapshotExpeditionCommanderAnchors(transaction)
+	if err != nil {
+		return err
+	}
 	existingEnabled, legacyEnabled, profilesWereEmpty, err := loadExistingAndLegacyEnabled(transaction)
 	if err != nil {
 		return err
@@ -64,8 +69,10 @@ func ResolveCommanders(transaction *sql.Tx) error {
 		return err
 	}
 	if len(sightings) == 0 && len(checkpoints) == 0 {
-		_, deleteErr := transaction.Exec(`DELETE FROM commander_profiles`)
-		return deleteErr
+		if _, deleteErr := transaction.Exec(`DELETE FROM commander_profiles`); deleteErr != nil {
+			return deleteErr
+		}
+		return reconcileExpeditionCommandersFromAnchors(transaction, anchors)
 	}
 	bridgePreV3LiveFIDs(sightings, checkpoints)
 	baseGroups := buildResolverBaseGroups(sightings, checkpoints, overrides)
@@ -75,13 +82,18 @@ func ResolveCommanders(transaction *sql.Tx) error {
 	}
 	surviving := applyProfileMergeOverrides(profiles, overrides)
 	if len(surviving) == 0 {
-		_, deleteErr := transaction.Exec(`DELETE FROM commander_profiles`)
-		return deleteErr
+		if _, deleteErr := transaction.Exec(`DELETE FROM commander_profiles`); deleteErr != nil {
+			return deleteErr
+		}
+		return reconcileExpeditionCommandersFromAnchors(transaction, anchors)
 	}
 	if err := persistProfileShellsAndEventIDs(transaction, surviving); err != nil {
 		return err
 	}
-	return finalizeProfilesAndAliases(transaction, surviving, existingEnabled, legacyEnabled, profilesWereEmpty)
+	if err := finalizeProfilesAndAliases(transaction, surviving, existingEnabled, legacyEnabled, profilesWereEmpty); err != nil {
+		return err
+	}
+	return reconcileExpeditionCommandersFromAnchors(transaction, anchors)
 }
 
 func bridgePreV3LiveFIDs(sightings []resolverSighting, checkpoints []resolverCheckpoint) {

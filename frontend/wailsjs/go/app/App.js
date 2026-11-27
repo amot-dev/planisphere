@@ -262,8 +262,8 @@ export function StartExpedition(arg1, arg2, arg3) {
   return window['go']['app']['App']['StartExpedition'](arg1, arg2, arg3);
 }
 
-export function StartExpeditionScoped(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['StartExpeditionScoped'](arg1, arg2, arg3, arg4, arg5);
+export function StartExpeditionScoped(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['StartExpeditionScoped'](arg1, arg2, arg3, arg4);
 }
 
 export function SwitchCarrierRouteToManual(arg1) {
@@ -286,8 +286,8 @@ export function UpdateExpeditionCarrierConfig(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateExpeditionCarrierConfig'](arg1, arg2, arg3);
 }
 
-export function UpdateExpeditionScoped(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['app']['App']['UpdateExpeditionScoped'](arg1, arg2, arg3, arg4, arg5);
+export function UpdateExpeditionScoped(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['UpdateExpeditionScoped'](arg1, arg2, arg3, arg4);
 }
 
 export function UpdateMode(arg1, arg2, arg3, arg4) {

@@ -85,23 +85,24 @@ func (app *App) SetCareerBaselineScope(scope string) (Settings, error) {
 	return app.GetSettings()
 }
 
-// UpdateExpeditionScoped updates an expedition's metadata and commander save-slot
-// scope atomically, re-evaluating active or completed waypoint progress when scope changes.
+// UpdateExpeditionScoped updates an expedition's metadata and assigned commander
+// save-slot profile atomically, re-evaluating active or completed waypoint progress
+// when the assigned commander changes.
 func (app *App) UpdateExpeditionScoped(
 	id int64,
-	name, description, commanderScope string,
-	commanderProfileIDs []int64,
+	name, description string,
+	commanderProfileID int64,
 ) error {
-	var scopeChanged bool
+	var profileChanged bool
 	if updateError := app.runUndoExclusive(func() error {
 		if err := app.withReadyReadLock(func() error {
 			var txError error
-			scopeChanged, txError = expedition.UpdateMetaAndScopeTx(app.db, id, name, description, commanderScope, commanderProfileIDs)
+			profileChanged, txError = expedition.UpdateMetaAndCommanderTx(app.db, id, name, description, commanderProfileID)
 			return txError
 		}); err != nil {
 			return err
 		}
-		if scopeChanged {
+		if profileChanged {
 			app.clearExpeditionUndoHistory(id)
 		}
 		return nil
@@ -109,7 +110,7 @@ func (app *App) UpdateExpeditionScoped(
 		return updateError
 	}
 	app.clearExportSnapshot()
-	if scopeChanged {
+	if profileChanged {
 		app.publishApp(id, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
 		return nil
 	}
@@ -117,18 +118,17 @@ func (app *App) UpdateExpeditionScoped(
 	return nil
 }
 
-// StartExpeditionScoped applies the expedition's commander save-slot scope (when
-// non-empty), activates the expedition at timestamp with initialModeID, and
-// replays scoped arrival history.
+// StartExpeditionScoped applies the expedition's commander save-slot profile,
+// activates the expedition at timestamp with initialModeID, and replays scoped
+// arrival history.
 func (app *App) StartExpeditionScoped(
 	expeditionID int64,
 	timestamp string,
 	initialModeID int64,
-	commanderScope string,
-	commanderProfileIDs []int64,
+	commanderProfileID int64,
 ) error {
 	applied, startError := app.recordUndoableMutation(expeditionID, "Engage Expedition", func(targetDB *sql.DB) (bool, error) {
-		err := expedition.StartScopedTx(targetDB, expeditionID, timestamp, initialModeID, commanderScope, commanderProfileIDs)
+		err := expedition.StartScopedTx(targetDB, expeditionID, timestamp, initialModeID, commanderProfileID)
 		return err == nil, err
 	})
 	if startError != nil {

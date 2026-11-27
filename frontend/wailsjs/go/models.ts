@@ -560,8 +560,7 @@ export namespace expedition {
 	    carrierType: string;
 	    carrierWeeklyUpkeep: number;
 	    activeModeId: number;
-	    commanderScope: string;
-	    commanderProfileIds: number[];
+	    commanderProfileId: number;
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -581,8 +580,7 @@ export namespace expedition {
 	        this.carrierType = source["carrierType"];
 	        this.carrierWeeklyUpkeep = source["carrierWeeklyUpkeep"];
 	        this.activeModeId = source["activeModeId"];
-	        this.commanderScope = source["commanderScope"];
-	        this.commanderProfileIds = source["commanderProfileIds"];
+	        this.commanderProfileId = source["commanderProfileId"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }

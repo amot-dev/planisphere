@@ -72,20 +72,19 @@ type Expedition struct {
 	CarrierType         string       `json:"carrierType"`
 	CarrierWeeklyUpkeep int64        `json:"carrierWeeklyUpkeep"`
 	ActiveModeID        int64        `json:"activeModeId"`
-	CommanderScope      string       `json:"commanderScope"`
-	CommanderProfileIDs []int64      `json:"commanderProfileIds"`
+	CommanderProfileID  int64        `json:"commanderProfileId"`
 	CreatedAt           string       `json:"createdAt"`
 	UpdatedAt           string       `json:"updatedAt"`
 }
 
 const expeditionCols = `id, name, description, status, COALESCE(start_timestamp,''), COALESCE(end_timestamp,''),
-	adjustments_json, COALESCE(carrier_type,'player'), COALESCE(carrier_weekly_upkeep,0), COALESCE(active_mode_id,0), COALESCE(commander_scope,'all_enabled'), created_at, updated_at`
+	adjustments_json, COALESCE(carrier_type,'player'), COALESCE(carrier_weekly_upkeep,0), COALESCE(active_mode_id,0), COALESCE(commander_profile_id,0), created_at, updated_at`
 
 func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error) {
 	var expeditionRecord Expedition
 	var adjustmentsJSON string
 	scanError := scanner.Scan(&expeditionRecord.ID, &expeditionRecord.Name, &expeditionRecord.Description, &expeditionRecord.Status, &expeditionRecord.StartTimestamp, &expeditionRecord.EndTimestamp,
-		&adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.ActiveModeID, &expeditionRecord.CommanderScope, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
+		&adjustmentsJSON, &expeditionRecord.CarrierType, &expeditionRecord.CarrierWeeklyUpkeep, &expeditionRecord.ActiveModeID, &expeditionRecord.CommanderProfileID, &expeditionRecord.CreatedAt, &expeditionRecord.UpdatedAt)
 	if scanError != nil {
 		return expeditionRecord, scanError
 	}
@@ -95,10 +94,9 @@ func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error)
 	if expeditionRecord.CarrierType == "" {
 		expeditionRecord.CarrierType = "player"
 	}
-	if expeditionRecord.CommanderScope != ScopeSelected {
-		expeditionRecord.CommanderScope = ScopeAllEnabled
+	if expeditionRecord.CommanderProfileID < 0 {
+		expeditionRecord.CommanderProfileID = 0
 	}
-	expeditionRecord.CommanderProfileIDs = []int64{}
 	if trimmedAdjustments := strings.TrimSpace(adjustmentsJSON); trimmedAdjustments != "" && trimmedAdjustments != "{}" {
 		if unmarshalError := json.Unmarshal([]byte(trimmedAdjustments), &expeditionRecord.Adjustments); unmarshalError != nil {
 			return expeditionRecord, fmt.Errorf("decode expedition %d adjustments: %w", expeditionRecord.ID, unmarshalError)
@@ -113,26 +111,16 @@ func List(queryer db.Queryer) ([]Expedition, error) {
 	if queryError != nil {
 		return nil, queryError
 	}
+	defer rows.Close()
 	var expeditions []Expedition
 	for rows.Next() {
 		expeditionRecord, scanError := scanExpedition(rows)
 		if scanError != nil {
-			_ = rows.Close()
 			return nil, scanError
 		}
 		expeditions = append(expeditions, expeditionRecord)
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := attachSelectedCommanderIDs(queryer, expeditions); err != nil {
-		return nil, err
-	}
-	return expeditions, nil
+	return expeditions, rows.Err()
 }
 
 // Get loads one expedition.
@@ -141,14 +129,7 @@ func Get(queryer db.Queryer, expeditionID int64) (Expedition, error) {
 	if errors.Is(queryError, sql.ErrNoRows) {
 		return expeditionRecord, fmt.Errorf("expedition %d not found", expeditionID)
 	}
-	if queryError != nil {
-		return expeditionRecord, queryError
-	}
-	singleSlice := []Expedition{expeditionRecord}
-	if err := attachSelectedCommanderIDs(queryer, singleSlice); err != nil {
-		return expeditionRecord, err
-	}
-	return singleSlice[0], nil
+	return expeditionRecord, queryError
 }
 
 // EffectiveStart resolves an expedition's telemetry start from Origin Waypoint #1's
@@ -257,8 +238,12 @@ func CreateWithWaypoints(dbConn *sql.DB, name, description string, waypoints []S
 	var expeditionID int64
 	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		defaultModeID := modes.DefaultFallbackModeID(transaction)
-		insertResult, insertError := transaction.Exec(`INSERT INTO expeditions(name, description, status, active_mode_id, created_at, updated_at) VALUES(?,?,?,?,?,?)`,
-			name, strings.TrimSpace(description), StatusPlanning, defaultModeID, now, now)
+		commanderProfileID, profileError := db.LatestCommanderProfileID(transaction)
+		if profileError != nil {
+			return profileError
+		}
+		insertResult, insertError := transaction.Exec(`INSERT INTO expeditions(name, description, status, active_mode_id, commander_profile_id, created_at, updated_at) VALUES(?,?,?,?,?,?,?)`,
+			name, strings.TrimSpace(description), StatusPlanning, defaultModeID, commanderProfileID, now, now)
 		if insertError != nil {
 			return insertError
 		}
@@ -342,8 +327,12 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 	var newExpeditionID int64
 	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
 		defaultModeID := modes.DefaultFallbackModeID(transaction)
-		insertResult, insertError := transaction.Exec(`INSERT INTO expeditions(name, description, status, carrier_type, carrier_weekly_upkeep, active_mode_id, commander_scope, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-			cloneName, sourceExpedition.Description, StatusPlanning, sourceExpedition.CarrierType, sourceExpedition.CarrierWeeklyUpkeep, defaultModeID, sourceExpedition.CommanderScope, now, now)
+		clonedProfileID, profileError := resolveValidOrLatestCommanderProfileID(transaction, sourceExpedition.CommanderProfileID)
+		if profileError != nil {
+			return profileError
+		}
+		insertResult, insertError := transaction.Exec(`INSERT INTO expeditions(name, description, status, carrier_type, carrier_weekly_upkeep, active_mode_id, commander_profile_id, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			cloneName, sourceExpedition.Description, StatusPlanning, sourceExpedition.CarrierType, sourceExpedition.CarrierWeeklyUpkeep, defaultModeID, clonedProfileID, now, now)
 		if insertError != nil {
 			return insertError
 		}
@@ -351,11 +340,6 @@ func Clone(dbConn *sql.DB, sourceExpeditionID int64) (Expedition, error) {
 		newExpeditionID, idError = insertResult.LastInsertId()
 		if idError != nil {
 			return fmt.Errorf("read cloned expedition id: %w", idError)
-		}
-		if sourceExpedition.CommanderScope == ScopeSelected {
-			if err := cloneExpeditionCommanders(transaction, sourceExpeditionID, newExpeditionID); err != nil {
-				return err
-			}
 		}
 		if len(sourceRows) == 0 {
 			_, seedError := transaction.Exec(`INSERT INTO expedition_rows(expedition_id, position, row_type, created_at, updated_at) VALUES(?,1,?,?,?)`,

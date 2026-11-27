@@ -19,9 +19,13 @@ type existingProfileState struct {
 }
 
 type segmentQueryClause struct {
-	whereSQL         string
-	args             []any
-	hasCommanderName bool
+	whereSQL string
+	args     []any
+}
+
+type profileTimeBounds struct {
+	startTS string
+	endTS   string
 }
 
 func asciiLower(input string) string {
@@ -102,9 +106,10 @@ func loadCommanderOverrides(transaction *sql.Tx) ([]commanderOverrideRule, error
 
 func loadSightingsAndCheckpoints(transaction *sql.Tx) ([]resolverSighting, []resolverCheckpoint, error) {
 	sightRows, err := transaction.Query(`
-		SELECT LOWER(commander), fid, universe, MIN(timestamp)
+		SELECT LOWER(COALESCE(commander, '')), COALESCE(fid, ''), universe, MIN(timestamp)
 		FROM journal_events
-		WHERE commander IS NOT NULL AND commander != '' COLLATE NOCASE
+		WHERE (commander IS NOT NULL AND commander != '' COLLATE NOCASE)
+		   OR fid != ''
 		GROUP BY commander COLLATE NOCASE, fid, universe`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query commander sightings: %w", err)
@@ -116,8 +121,12 @@ func loadSightingsAndCheckpoints(transaction *sql.Tx) ([]resolverSighting, []res
 		if err := sightRows.Scan(&nocaseName, &fid, &universe, &firstSeen); err != nil {
 			return nil, nil, err
 		}
-		if strings.TrimSpace(nocaseName) != "" {
-			trimmedFID := strings.TrimSpace(fid)
+		trimmedName := strings.TrimSpace(nocaseName)
+		trimmedFID := strings.TrimSpace(fid)
+		if trimmedName == "" {
+			nocaseName = ""
+		}
+		if nocaseName != "" || trimmedFID != "" {
 			normalizedUniverse := asciiLower(strings.TrimSpace(universe))
 			if normalizedUniverse == "" {
 				normalizedUniverse = "live"
@@ -201,7 +210,7 @@ func buildSegmentClauses(segment profileEventSegment) []segmentQueryClause {
 	for _, tuple := range segment.tuples {
 		if tuple.nocaseName != "" {
 			whereSQL, args := appendSegmentBounds(`commander = ? COLLATE NOCASE AND fid = ? AND universe = ?`, []any{tuple.nocaseName, tuple.rawFID, tuple.universe}, segment)
-			clauses = append(clauses, segmentQueryClause{whereSQL: whereSQL, args: args, hasCommanderName: true})
+			clauses = append(clauses, segmentQueryClause{whereSQL: whereSQL, args: args})
 			continue
 		}
 		nullSQL, nullArgs := appendSegmentBounds(`commander IS NULL AND fid = ? AND universe = ?`, []any{tuple.rawFID, tuple.universe}, segment)
@@ -218,9 +227,6 @@ func querySplitSegmentStats(transaction *sql.Tx, segment profileEventSegment) (i
 	totalCount := 0
 	earliestTimestamp := ""
 	for _, clause := range buildSegmentClauses(segment) {
-		if !clause.hasCommanderName {
-			continue
-		}
 		var count int
 		var minTimestamp string
 		if err := transaction.QueryRow(`SELECT COUNT(*), COALESCE(MIN(timestamp), '') FROM journal_events WHERE `+clause.whereSQL, clause.args...).Scan(&count, &minTimestamp); err != nil {
@@ -276,10 +282,10 @@ func assignSegmentEventProfileIDs(transaction *sql.Tx, profiles []*resolvedComma
 			}
 		}
 	}
-	if _, err := transaction.Exec(`UPDATE journal_events SET profile_id = 0 WHERE commander IS NULL AND fid = '' AND profile_id != 0`); err != nil {
+	if _, err := transaction.Exec(`UPDATE journal_events SET profile_id = 0 WHERE commander IS NULL AND (fid IS NULL OR fid = '') AND profile_id != 0`); err != nil {
 		return err
 	}
-	_, err := transaction.Exec(`UPDATE journal_events SET profile_id = 0 WHERE commander = '' COLLATE NOCASE AND fid = '' AND profile_id != 0`)
+	_, err := transaction.Exec(`UPDATE journal_events SET profile_id = 0 WHERE commander = '' COLLATE NOCASE AND (fid IS NULL OR fid = '') AND profile_id != 0`)
 	return err
 }
 
@@ -288,13 +294,17 @@ func finalizeProfilesAndAliases(transaction *sql.Tx, profiles []*resolvedCommand
 		return fmt.Errorf("clear commander_aliases: %w", err)
 	}
 	rows, err := transaction.Query(`
-		SELECT profile_id, MAX(timestamp || char(0) || commander), MAX(CASE WHEN fid != '' THEN fid ELSE '' END), MIN(timestamp), MAX(timestamp), COUNT(*)
-		FROM journal_events WHERE profile_id > 0 AND commander IS NOT NULL AND commander != '' COLLATE NOCASE
+		SELECT profile_id,
+		       CASE WHEN commander IS NOT NULL AND commander != '' COLLATE NOCASE THEN MAX(timestamp || char(0) || commander) ELSE '' END,
+		       MAX(CASE WHEN fid != '' THEN fid ELSE '' END), MIN(timestamp), MAX(timestamp), COUNT(*)
+		FROM journal_events
+		WHERE profile_id > 0 AND ((commander IS NOT NULL AND commander != '' COLLATE NOCASE) OR fid != '')
 		GROUP BY profile_id, commander COLLATE NOCASE`)
 	if err != nil {
 		return fmt.Errorf("query commander_aliases groups: %w", err)
 	}
 	aliasesByProfile := make(map[int64][]groupedAliasRow, len(profiles))
+	boundsByProfile := make(map[int64]profileTimeBounds, len(profiles))
 	for rows.Next() {
 		var item groupedAliasRow
 		var encoded string
@@ -302,6 +312,14 @@ func finalizeProfilesAndAliases(transaction *sql.Tx, profiles []*resolvedCommand
 			rows.Close()
 			return err
 		}
+		bounds := boundsByProfile[item.profileID]
+		if bounds.startTS == "" || item.startTS < bounds.startTS {
+			bounds.startTS = item.startTS
+		}
+		if item.endTS > bounds.endTS {
+			bounds.endTS = item.endTS
+		}
+		boundsByProfile[item.profileID] = bounds
 		if item.rawName = decodeTimestampPrefixedString(encoded); item.rawName != "" {
 			aliasesByProfile[item.profileID] = append(aliasesByProfile[item.profileID], item)
 		}
@@ -314,7 +332,7 @@ func finalizeProfilesAndAliases(transaction *sql.Tx, profiles []*resolvedCommand
 		return err
 	}
 	for _, profile := range profiles {
-		if err := writeFinalizedProfileAndAliases(transaction, profile, aliasesByProfile[profile.id], existing, legacy, profilesWereEmpty); err != nil {
+		if err := writeFinalizedProfileAndAliases(transaction, profile, aliasesByProfile[profile.id], boundsByProfile[profile.id], existing, legacy, profilesWereEmpty); err != nil {
 			return err
 		}
 	}
@@ -343,7 +361,7 @@ func collectManualMergedNames(profile *resolvedCommanderProfile) map[string]bool
 	return manual
 }
 
-func writeFinalizedProfileAndAliases(transaction *sql.Tx, profile *resolvedCommanderProfile, aliases []groupedAliasRow, existing map[string]existingProfileState, legacy map[string]int64, profilesWereEmpty bool) error {
+func writeFinalizedProfileAndAliases(transaction *sql.Tx, profile *resolvedCommanderProfile, aliases []groupedAliasRow, bounds profileTimeBounds, existing map[string]existingProfileState, legacy map[string]int64, profilesWereEmpty bool) error {
 	manualNames := collectManualMergedNames(profile)
 	disabledInLegacy := false
 	for _, alias := range aliases {
@@ -358,6 +376,12 @@ func writeFinalizedProfileAndAliases(transaction *sql.Tx, profile *resolvedComma
 				disabledInLegacy = true
 			}
 		}
+	}
+	if bounds.startTS != "" && (profile.firstSeen == "" || bounds.startTS < profile.firstSeen) {
+		profile.firstSeen = bounds.startTS
+	}
+	if bounds.endTS > profile.lastSeen {
+		profile.lastSeen = bounds.endTS
 	}
 	if existingState, ok := existing[profile.profileKey]; ok && existingState.isArchived == profile.isArchivedCareer {
 		profile.enabled = existingState.enabled

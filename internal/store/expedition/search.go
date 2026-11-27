@@ -374,7 +374,7 @@ func matchExpeditionForVisit(candidates []attributableExpedition, visit replay.S
 		if candidate.record.EndTimestamp != "" && visit.Timestamp > candidate.record.EndTimestamp {
 			continue
 		}
-		if candidate.record.CommanderScope == ScopeSelected && !candidate.profileScope.ContainsProfileID(visit.ProfileID) {
+		if !candidate.profileScope.IsAllEnabled() && !candidate.profileScope.ContainsProfileID(visit.ProfileID) {
 			continue
 		}
 		return candidate.record, true

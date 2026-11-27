@@ -211,33 +211,22 @@ func TestAppUndoInvalidatesExportSnapshotScopeChangeAndDBSwitch(testingContext *
 		testingContext.Fatalf("expected rebuilt export to contain undone empty notes, got %q", rebuiltExport.Plan.Rows[0].Row.Notes)
 	}
 
-	currentSettings, err := testApp.GetSettings()
-	if err != nil {
-		testingContext.Fatalf("GetSettings: %v", err)
+	res, execErr := testApp.db.Exec(
+		`INSERT INTO commander_profiles (profile_key, display_name, fid, universe, enabled) VALUES ('live:f202:era:0', 'CMDR AltSwitch', 'F202', 'live', 1)`,
+	)
+	if execErr != nil {
+		testingContext.Fatalf("insert commander_profile: %v", execErr)
 	}
-	var profileID int64
-	if len(currentSettings.Commanders) > 0 {
-		profileID = currentSettings.Commanders[0].ID
-	}
-	if profileID == 0 {
-		res, execErr := testApp.db.Exec(
-			`INSERT INTO commander_profiles (profile_key, display_name, fid, universe, enabled) VALUES ('live:f101:era:0', 'CMDR Alpha', 'F101', 'live', 1)`,
-		)
-		if execErr != nil {
-			testingContext.Fatalf("insert commander_profile: %v", execErr)
-		}
-		var idError error
-		profileID, idError = res.LastInsertId()
-		if idError != nil {
-			testingContext.Fatalf("read inserted commander_profile id: %v", idError)
-		}
+	profileID, idError := res.LastInsertId()
+	if idError != nil {
+		testingContext.Fatalf("read inserted commander_profile id: %v", idError)
 	}
 
 	updatedNote := "Before scope change"
 	if err := testApp.UpdateRow(expedition.RowPatch{ID: originID, Notes: &updatedNote}); err != nil {
 		testingContext.Fatalf("UpdateRow before scope change: %v", err)
 	}
-	if err := testApp.UpdateExpeditionScoped(createdExp.ID, "Export Scope DB", "Scoped", expedition.ScopeSelected, []int64{profileID}); err != nil {
+	if err := testApp.UpdateExpeditionScoped(createdExp.ID, "Export Scope DB", "Scoped", profileID); err != nil {
 		testingContext.Fatalf("UpdateExpeditionScoped: %v", err)
 	}
 	afterScopeUndo, err := testApp.UndoExpedition(createdExp.ID)
@@ -314,7 +303,7 @@ func TestAppConcurrentCommanderOverrideScopeChangeAndUndo(testingContext *testin
 		}
 	}()
 
-	// Worker B: repeatedly toggles commander scope via UpdateExpeditionScoped.
+	// Worker B: repeatedly switches commander save slot via UpdateExpeditionScoped.
 	go func() {
 		defer workers.Done()
 		for iteration := 0; iteration < 8; iteration++ {
@@ -323,14 +312,12 @@ func TestAppConcurrentCommanderOverrideScopeChangeAndUndo(testingContext *testin
 				testingContext.Errorf("concurrent GetSettings: %v", settingsError)
 				return
 			}
-			if iteration%2 == 0 && len(settingsNow.Commanders) > 0 {
-				if scopeError := testApp.UpdateExpeditionScoped(createdExp.ID, "Concurrent Race", "", expedition.ScopeSelected, []int64{settingsNow.Commanders[0].ID}); scopeError != nil && !strings.Contains(scopeError.Error(), "do not exist") {
-					testingContext.Errorf("concurrent UpdateExpeditionScoped(selected): %v", scopeError)
+			if len(settingsNow.Commanders) > 0 {
+				targetCommander := settingsNow.Commanders[iteration%len(settingsNow.Commanders)]
+				if scopeError := testApp.UpdateExpeditionScoped(createdExp.ID, "Concurrent Race", "", targetCommander.ID); scopeError != nil && !strings.Contains(scopeError.Error(), "does not exist") {
+					testingContext.Errorf("concurrent UpdateExpeditionScoped(%d): %v", targetCommander.ID, scopeError)
 					return
 				}
-			} else if scopeError := testApp.UpdateExpeditionScoped(createdExp.ID, "Concurrent Race", "", expedition.ScopeAllEnabled, nil); scopeError != nil {
-				testingContext.Errorf("concurrent UpdateExpeditionScoped(all_enabled): %v", scopeError)
-				return
 			}
 		}
 	}()

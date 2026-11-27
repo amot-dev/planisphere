@@ -137,7 +137,7 @@ export function StartCarrierRoute(arg1:number,arg2:number,arg3:string,arg4:strin
 
 export function StartExpedition(arg1:number,arg2:string,arg3:number):Promise<void>;
 
-export function StartExpeditionScoped(arg1:number,arg2:string,arg3:number,arg4:string,arg5:Array<number>):Promise<void>;
+export function StartExpeditionScoped(arg1:number,arg2:string,arg3:number,arg4:number):Promise<void>;
 
 export function SwitchCarrierRouteToManual(arg1:number):Promise<expedition.ActiveCarrierRouteState>;
 
@@ -149,7 +149,7 @@ export function UpdateExpedition(arg1:number,arg2:string,arg3:string):Promise<vo
 
 export function UpdateExpeditionCarrierConfig(arg1:number,arg2:string,arg3:number):Promise<void>;
 
-export function UpdateExpeditionScoped(arg1:number,arg2:string,arg3:string,arg4:string,arg5:Array<number>):Promise<void>;
+export function UpdateExpeditionScoped(arg1:number,arg2:string,arg3:string,arg4:number):Promise<void>;
 
 export function UpdateMode(arg1:number,arg2:string,arg3:string,arg4:string):Promise<void>;
 

@@ -67,11 +67,16 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 	if err != nil {
 		testingContext.Fatalf("create ExpAlt: %v", err)
 	}
+	// CreateWithWaypoints auto-selects the most recently active commander (CMDR Alt, last_seen 12:30).
+	if expMain.CommanderProfileID != altID || expAlt.CommanderProfileID != altID {
+		testingContext.Fatalf("expected newly created expeditions to default CommanderProfileID to latest commander %d, got main=%d alt=%d",
+			altID, expMain.CommanderProfileID, expAlt.CommanderProfileID)
+	}
 
-	// StartCandidates exposes both profileId and commander in JSON, and respects selected scope.
+	// StartCandidates exposes both profileId and commander in JSON across all profiles while planning, and scopes once started.
 	_, allSolCandidates, err := expedition.StartCandidates(dbConn, expMain.ID)
 	if err != nil || len(allSolCandidates) != 2 {
-		testingContext.Fatalf("expected 2 Sol candidates before scoping, got %+v err=%v", allSolCandidates, err)
+		testingContext.Fatalf("expected 2 Sol candidates while planning, got %+v err=%v", allSolCandidates, err)
 	}
 	encodedCandidate, marshalErr := json.Marshal(allSolCandidates[0])
 	if marshalErr != nil {
@@ -82,10 +87,10 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 		testingContext.Fatalf("expected StartCandidates JSON to include profileId and commander, got %s", string(encodedCandidate))
 	}
 
-	if err := expedition.StartScopedTx(dbConn, expMain.ID, "2026-03-02T09:05:00Z", 0, expedition.ScopeSelected, []int64{mainID}); err != nil {
+	if err := expedition.StartScopedTx(dbConn, expMain.ID, "2026-03-02T09:05:00Z", 0, mainID); err != nil {
 		testingContext.Fatalf("StartScopedTx ExpMain: %v", err)
 	}
-	if err := expedition.StartScopedTx(dbConn, expAlt.ID, "2026-03-03T09:05:00Z", 0, expedition.ScopeSelected, []int64{altID}); err != nil {
+	if err := expedition.StartScopedTx(dbConn, expAlt.ID, "2026-03-03T09:05:00Z", 0, altID); err != nil {
 		testingContext.Fatalf("StartScopedTx ExpAlt: %v", err)
 	}
 
@@ -158,18 +163,18 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 		testingContext.Fatalf("expected ExpMain EndTimestamp=2026-03-04T09:45:00Z, got %q err=%v", completedMain.EndTimestamp, err)
 	}
 
-	// Clone preserves commander_scope and expedition_commanders, and List batch-loads non-nil sorted CommanderProfileIDs.
+	// Clone preserves CommanderProfileID, and List returns each expedition's CommanderProfileID.
 	clonedMain, err := expedition.Clone(dbConn, expMain.ID)
-	if err != nil || clonedMain.CommanderScope != expedition.ScopeSelected || !reflect.DeepEqual(clonedMain.CommanderProfileIDs, []int64{mainID}) {
-		testingContext.Fatalf("expected Clone to preserve selected scope [%d], got %+v err=%v", mainID, clonedMain, err)
+	if err != nil || clonedMain.CommanderProfileID != mainID {
+		testingContext.Fatalf("expected Clone to preserve CommanderProfileID=%d, got %+v err=%v", mainID, clonedMain, err)
 	}
 	allListed, err := expedition.List(dbConn)
 	if err != nil || len(allListed) < 3 {
 		testingContext.Fatalf("List expeditions: %+v err=%v", allListed, err)
 	}
 	for _, item := range allListed {
-		if item.CommanderProfileIDs == nil {
-			testingContext.Fatalf("expected non-nil CommanderProfileIDs slice on expedition %d", item.ID)
+		if item.CommanderProfileID <= 0 {
+			testingContext.Fatalf("expected positive CommanderProfileID on expedition %d", item.ID)
 		}
 	}
 }
@@ -204,7 +209,7 @@ func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanAndDetails(testingCo
 	if err != nil {
 		testingContext.Fatalf("create historical expedition: %v", err)
 	}
-	if err := expedition.StartScopedTx(dbConn, histExp.ID, "2024-05-01T10:15:00Z", 0, expedition.ScopeSelected, []int64{archivedProfile.ID}); err != nil {
+	if err := expedition.StartScopedTx(dbConn, histExp.ID, "2024-05-01T10:15:00Z", 0, archivedProfile.ID); err != nil {
 		testingContext.Fatalf("StartScopedTx archived profile: %v", err)
 	}
 	if err := expedition.CompleteTx(dbConn, histExp.ID); err != nil {

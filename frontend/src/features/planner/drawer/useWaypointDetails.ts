@@ -43,9 +43,7 @@ interface DrawerRevisionSnapshot {
 }
 
 function formatExpeditionCommanderScopeSignature(plan: expedition.PlanView | null): string {
-  const scopeMode = plan?.expedition?.commanderScope || 'all_enabled'
-  const profileIds = (plan?.expedition?.commanderProfileIds ?? []).join(',')
-  return `${scopeMode}:${profileIds}`
+  return String(plan?.expedition?.commanderProfileId ?? 0)
 }
 
 function isLoadedDrawerFresh(

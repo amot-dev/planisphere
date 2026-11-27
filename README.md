@@ -69,8 +69,8 @@ Whether you're taking your own carrier into the black, flying with a squadron, o
 Fly multiple accounts, rename your commander, or start fresh after a save wipe without tangling your routes and career totals together.
 
 - **Automatic Save-Slot Separation and Renames:** Separates alt accounts, cleared saves, Legacy 3.8, and Beta servers into distinct save-slot profiles while keeping Frontier Store character renames unified under one career. Config lists historic names with individual event counts, while exports show only your current name.
-- **Per-Expedition Save-Slot Scoping:** Scope any expedition to specific save slots when starting or editing it, or track all enabled save slots together.
-- **Career and Baseline Scope:** Choose in Config whether Sidebar All-Time, Waypoint #1 Origin Baseline, and Export Career Diff totals follow your active expedition's save-slot scope or all enabled save slots.
+- **Per-Expedition Save Slot:** Each expedition tracks a single commander save slot, automatically defaulting to your most recent commander with the option to switch save slots when starting or editing an expedition if you fly multiple profiles.
+- **Career and Baseline Scope:** Choose in Config whether Sidebar All-Time, Waypoint #1 Origin Baseline, and Export Career Diff totals follow your active expedition's commander save slot or all enabled save slots.
 - **One-Time Manual Overrides:** Merge profiles after a rename, separate linked aliases, split a career at a save-wipe date (down to the exact `LoadGame` session), or reset back to auto-detection in Config.
 
 ### Expedition Export

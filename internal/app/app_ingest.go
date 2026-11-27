@@ -121,6 +121,7 @@ func (app *App) warmInitialStats() {
 		if activeExpedition != nil && settings.CareerBaselineScope(app.db) != settings.CareerScopeAllEnabled {
 			careerScope = activeExpedition.ProfileScope()
 		}
+		careerScope = replay.NormalizeAllTimeProfileScope(app.db, careerScope)
 		if _, metricsError := app.careerStats.GetScoped(careerScope); metricsError != nil {
 			log.Printf("warm initial career stats: %v", metricsError)
 		}

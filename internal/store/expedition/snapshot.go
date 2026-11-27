@@ -70,9 +70,9 @@ func CaptureSnapshot(queryer db.Queryer, expeditionID int64) (Snapshot, error) {
 }
 
 // RestoreSnapshotTx diff-restores target inside a single transaction, carrying
-// over newly resolved coordinates on unchanged system names, remapping any
-// deleted custom mode IDs to the fallback mode, and re-evaluating live arrivals
-// when the restored expedition is active.
+// over newly resolved coordinates and GEC POI names on unchanged system names,
+// remapping missing commander profile IDs and deleted custom mode IDs, and
+// re-evaluating live arrivals when the restored expedition is active.
 func RestoreSnapshotTx(dbConn *sql.DB, target Snapshot) (RestoreOutcome, error) {
 	var outcome RestoreOutcome
 	txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
@@ -84,6 +84,10 @@ func RestoreSnapshotTx(dbConn *sql.DB, target Snapshot) (RestoreOutcome, error) 
 
 		targetExpedition := cloneExpedition(target.Expedition)
 		targetRows := slices.Clone(target.Rows)
+		var resolveProfileError error
+		if targetExpedition.CommanderProfileID, resolveProfileError = resolveValidOrLatestCommanderProfileID(transaction, targetExpedition.CommanderProfileID); resolveProfileError != nil {
+			return resolveProfileError
+		}
 		if remapError := remapDeletedModeIDs(transaction, &targetExpedition, targetRows); remapError != nil {
 			return remapError
 		}
@@ -91,7 +95,7 @@ func RestoreSnapshotTx(dbConn *sql.DB, target Snapshot) (RestoreOutcome, error) 
 		for _, rowItem := range previousSnapshot.Rows {
 			previousRowsByID[rowItem.ID] = rowItem
 		}
-		outcome.NeedsCoordResolution = carryOverResolvedCoords(targetRows, previousRowsByID)
+		outcome.NeedsCoordResolution = preserveLiveResolvedFields(targetRows, previousRowsByID)
 
 		now := reference.NowISO()
 		if err := restoreExpeditionRecord(transaction, previousSnapshot.Expedition, targetExpedition, now); err != nil {
@@ -136,11 +140,6 @@ func RestoreSnapshotTx(dbConn *sql.DB, target Snapshot) (RestoreOutcome, error) 
 
 func cloneExpedition(source Expedition) Expedition {
 	cloned := source
-	if source.CommanderProfileIDs == nil {
-		cloned.CommanderProfileIDs = []int64{}
-	} else {
-		cloned.CommanderProfileIDs = slices.Clone(source.CommanderProfileIDs)
-	}
 	if source.Adjustments.TritiumUsed != nil {
 		tritiumCopy := *source.Adjustments.TritiumUsed
 		cloned.Adjustments.TritiumUsed = &tritiumCopy
@@ -156,7 +155,7 @@ func cloneSnapshot(source Snapshot) Snapshot {
 	}
 }
 
-func carryOverResolvedCoords(targetRows []Row, previousRowsByID map[int64]Row) bool {
+func preserveLiveResolvedFields(targetRows []Row, previousRowsByID map[int64]Row) bool {
 	needsResolution := false
 	for index := range targetRows {
 		rowItem := &targetRows[index]
@@ -168,6 +167,9 @@ func carryOverResolvedCoords(targetRows []Row, previousRowsByID map[int64]Row) b
 				rowItem.SystemAddress, rowItem.EDSMID = currentRow.SystemAddress, currentRow.EDSMID
 				rowItem.HasCoords, rowItem.X, rowItem.Y, rowItem.Z = true, currentRow.X, currentRow.Y, currentRow.Z
 				rowItem.CoordsSource = currentRow.CoordsSource
+				if rowItem.POIName == "" && currentRow.POIName != "" {
+					rowItem.POIName = currentRow.POIName
+				}
 			}
 		}
 		if rowItem.SystemName != "" && !rowItem.HasCoords && rowItem.CoordsSource == "" {
@@ -178,37 +180,23 @@ func carryOverResolvedCoords(targetRows []Row, previousRowsByID map[int64]Row) b
 }
 
 func restoreExpeditionRecord(transaction *sql.Tx, previousExpedition, targetExpedition Expedition, now string) error {
-	scopeChanged := previousExpedition.CommanderScope != targetExpedition.CommanderScope ||
-		!slices.Equal(previousExpedition.CommanderProfileIDs, targetExpedition.CommanderProfileIDs)
-	if !expeditionsEqual(previousExpedition, targetExpedition) {
-		adjustmentsBytes, marshalError := json.Marshal(targetExpedition.Adjustments)
-		if marshalError != nil {
-			return fmt.Errorf("marshal expedition %d adjustments: %w", targetExpedition.ID, marshalError)
-		}
-		if _, execError := transaction.Exec(
-			`UPDATE expeditions SET name = ?, description = ?, status = ?, start_timestamp = ?, end_timestamp = ?,
-			 armed_at = NULL, adjustments_json = ?, carrier_type = ?, carrier_weekly_upkeep = ?,
-			 active_mode_id = ?, commander_scope = ?, updated_at = ? WHERE id = ?`,
-			targetExpedition.Name, targetExpedition.Description, targetExpedition.Status,
-			nullableString(targetExpedition.StartTimestamp), nullableString(targetExpedition.EndTimestamp),
-			string(adjustmentsBytes), targetExpedition.CarrierType, targetExpedition.CarrierWeeklyUpkeep,
-			targetExpedition.ActiveModeID, targetExpedition.CommanderScope, now, targetExpedition.ID,
-		); execError != nil {
-			return fmt.Errorf("restore expedition %d record: %w", targetExpedition.ID, execError)
-		}
-	}
-	if !scopeChanged {
+	if expeditionsEqual(previousExpedition, targetExpedition) {
 		return nil
 	}
-	if _, deleteError := transaction.Exec(`DELETE FROM expedition_commanders WHERE expedition_id = ?`, targetExpedition.ID); deleteError != nil {
-		return fmt.Errorf("clear expedition %d commanders: %w", targetExpedition.ID, deleteError)
+	adjustmentsBytes, marshalError := json.Marshal(targetExpedition.Adjustments)
+	if marshalError != nil {
+		return fmt.Errorf("marshal expedition %d adjustments: %w", targetExpedition.ID, marshalError)
 	}
-	if targetExpedition.CommanderScope == ScopeSelected {
-		for _, profileID := range targetExpedition.CommanderProfileIDs {
-			if _, insertError := transaction.Exec(`INSERT INTO expedition_commanders (expedition_id, profile_id) VALUES (?, ?)`, targetExpedition.ID, profileID); insertError != nil {
-				return fmt.Errorf("restore expedition %d commander %d: %w", targetExpedition.ID, profileID, insertError)
-			}
-		}
+	if _, execError := transaction.Exec(
+		`UPDATE expeditions SET name = ?, description = ?, status = ?, start_timestamp = ?, end_timestamp = ?,
+		 armed_at = NULL, adjustments_json = ?, carrier_type = ?, carrier_weekly_upkeep = ?,
+		 active_mode_id = ?, commander_profile_id = ?, updated_at = ? WHERE id = ?`,
+		targetExpedition.Name, targetExpedition.Description, targetExpedition.Status,
+		nullableString(targetExpedition.StartTimestamp), nullableString(targetExpedition.EndTimestamp),
+		string(adjustmentsBytes), targetExpedition.CarrierType, targetExpedition.CarrierWeeklyUpkeep,
+		targetExpedition.ActiveModeID, targetExpedition.CommanderProfileID, now, targetExpedition.ID,
+	); execError != nil {
+		return fmt.Errorf("restore expedition %d record: %w", targetExpedition.ID, execError)
 	}
 	return nil
 }
@@ -375,13 +363,12 @@ func computeRestoreChangedEvents(
 	if !expeditionsEqual(previousExpedition, finalExpedition) || !slices.Equal(previousSnapshot.Rows, finalRows) || previousSnapshot.ActiveCarrierRouteJSON != finalCarrierRouteJSON {
 		changedEvents = changedEvents.Add(events.AppExpeditionPlanChanged)
 	}
-	commanderScopeChanged := previousExpedition.CommanderScope != finalExpedition.CommanderScope ||
-		!slices.Equal(previousExpedition.CommanderProfileIDs, finalExpedition.CommanderProfileIDs)
+	commanderChanged := previousExpedition.CommanderProfileID != finalExpedition.CommanderProfileID
 	if previousExpedition.Status != finalExpedition.Status || previousExpedition.StartTimestamp != finalExpedition.StartTimestamp ||
-		previousExpedition.EndTimestamp != finalExpedition.EndTimestamp || commanderScopeChanged {
+		previousExpedition.EndTimestamp != finalExpedition.EndTimestamp || commanderChanged {
 		changedEvents = changedEvents.Add(events.AppExpeditionBoundsChanged)
 	}
-	if previousExpedition.ActiveModeID != finalExpedition.ActiveModeID || commanderScopeChanged ||
+	if previousExpedition.ActiveModeID != finalExpedition.ActiveModeID || commanderChanged ||
 		!slices.Equal(collectWaypointModeStates(previousSnapshot.Rows), collectWaypointModeStates(finalRows)) {
 		changedEvents = changedEvents.Add(events.AppExpeditionModesChanged)
 	}
@@ -398,7 +385,7 @@ func expeditionsEqual(left, right Expedition) bool {
 		left.Status == right.Status && left.StartTimestamp == right.StartTimestamp && left.EndTimestamp == right.EndTimestamp &&
 		carrierStatsEqual(left.Adjustments, right.Adjustments) && left.CarrierType == right.CarrierType &&
 		left.CarrierWeeklyUpkeep == right.CarrierWeeklyUpkeep && left.ActiveModeID == right.ActiveModeID &&
-		left.CommanderScope == right.CommanderScope && slices.Equal(left.CommanderProfileIDs, right.CommanderProfileIDs)
+		left.CommanderProfileID == right.CommanderProfileID
 }
 
 func carrierStatsEqual(left, right CarrierStats) bool {

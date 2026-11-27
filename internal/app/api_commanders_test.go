@@ -80,6 +80,10 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	if !ok {
 		testingContext.Fatalf("expected live:f101:era:0 profile after merge, got %+v", mergedSettings.Commanders)
 	}
+	altProfile, ok := findCommanderByKey(mergedSettings.Commanders, "live:f202:era:0")
+	if !ok {
+		testingContext.Fatalf("expected live:f202:era:0 profile, got %+v", mergedSettings.Commanders)
+	}
 
 	// Create and start an expedition scoped to Danielle Current (mainProfile.ID).
 	createdExp, err := testApp.CreateExpedition("Scoped Expedition", "")
@@ -101,7 +105,7 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	if err := testApp.UpdateRow(expedition.RowPatch{ID: coloniaRow.ID, SystemName: &coloniaName}); err != nil {
 		testingContext.Fatal(err)
 	}
-	if err := testApp.StartExpeditionScoped(createdExp.ID, "2026-01-15T09:05:00Z", 0, expedition.ScopeSelected, []int64{mainProfile.ID}); err != nil {
+	if err := testApp.StartExpeditionScoped(createdExp.ID, "2026-01-15T09:05:00Z", 0, mainProfile.ID); err != nil {
 		testingContext.Fatalf("StartExpeditionScoped: %v", err)
 	}
 
@@ -156,14 +160,16 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 			exportAllEnabled.CareerStart, exportAllEnabled.OriginBaseline, exportAllEnabled.Live.DistanceLy)
 	}
 
-	// UpdateExpeditionScoped can switch expedition scope to all_enabled and back.
-	if err := testApp.UpdateExpeditionScoped(createdExp.ID, "Scoped Renamed", "Updated", expedition.ScopeAllEnabled, nil); err != nil {
-		testingContext.Fatalf("UpdateExpeditionScoped(all_enabled): %v", err)
+	// UpdateExpeditionScoped can switch the expedition's single commander save-slot profile and back.
+	if err := testApp.UpdateExpeditionScoped(createdExp.ID, "Scoped Renamed", "Updated", altProfile.ID); err != nil {
+		testingContext.Fatalf("UpdateExpeditionScoped(altProfile): %v", err)
 	}
-	exportBothCmdrs, err := testApp.GetExpeditionExportData(createdExp.ID)
-	if err != nil || !reflect.DeepEqual(exportBothCmdrs.Commanders, []string{"CMDR EarlyAlt", "Danielle Current"}) {
-		testingContext.Fatalf("expected [CMDR EarlyAlt, Danielle Current] after switching expedition to all_enabled, got %v err=%v",
-			exportBothCmdrs.Commanders, err)
+	reloadedAltPlan, err := testApp.GetPlan(createdExp.ID)
+	if err != nil || reloadedAltPlan.Expedition.CommanderProfileID != altProfile.ID {
+		testingContext.Fatalf("expected CommanderProfileID=%d after switching to alt, got %+v err=%v", altProfile.ID, reloadedAltPlan.Expedition, err)
+	}
+	if err := testApp.UpdateExpeditionScoped(createdExp.ID, "Scoped Renamed", "Updated", mainProfile.ID); err != nil {
+		testingContext.Fatalf("UpdateExpeditionScoped(mainProfile): %v", err)
 	}
 
 	// Verify ListCommanderLoadGamesOnDate delegation and DataChanged domain emissions on commander override mutations.
@@ -225,7 +231,10 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 		testingContext.Fatal(err)
 	}
 
-	// Warm CareerCartographics, ClosedWindowRevision, and lastExportSnapshot before the save wipe.
+	// Warm all-enabled CareerCartographics, ClosedWindowRevision, and lastExportSnapshot before the save wipe.
+	if _, err := testApp.SetCareerBaselineScope(settings.CareerScopeAllEnabled); err != nil {
+		testingContext.Fatalf("SetCareerBaselineScope(all_enabled): %v", err)
+	}
 	statsBeforeWipe, err := testApp.GetSidebarStats(exp.ID, stats.Filter{})
 	if err != nil || statsBeforeWipe.AllJournals.BodiesScanned != 1 {
 		testingContext.Fatalf("expected 1 pre-wipe scanned body in warm AllJournals, got %+v err=%v", statsBeforeWipe.AllJournals, err)

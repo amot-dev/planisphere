@@ -195,8 +195,7 @@ export default function App() {
           modesList={plan?.modes ?? modesState?.modes ?? []}
           initialModeId={plan?.expedition?.activeModeId ?? 0}
           commanders={settings?.commanders ?? []}
-          initialCommanderScope={plan?.expedition?.commanderScope}
-          initialCommanderProfileIds={plan?.expedition?.commanderProfileIds}
+          initialCommanderProfileId={plan?.expedition?.commanderProfileId}
           onClose={() => setActiveModal(null)}
         />
       )}

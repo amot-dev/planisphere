@@ -168,14 +168,13 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 		testingContext.Fatalf("expected live:f400:era:0 re-enabled, got %+v", profiles["live:f400:era:0"])
 	}
 
-	// Attach NetLogCmdr to an expedition_commanders row, merge NetLogCmdr into MainCmdr, and verify expedition_commanders remaps to MainCmdr's profile ID.
+	// Attach NetLogCmdr to an expedition, merge NetLogCmdr into MainCmdr, and verify commander_profile_id remaps to MainCmdr's profile ID.
 	initialProfiles := listProfileSummaries(testingContext, dbConn)
 	if _, err := dbConn.Exec(
-		`INSERT INTO expeditions (id, name, status, commander_scope, created_at, updated_at) VALUES (99, 'Scoped', 'planning', 'selected', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-		 INSERT INTO expedition_commanders (expedition_id, profile_id) VALUES (99, ?)`,
+		`INSERT INTO expeditions (id, name, status, commander_profile_id, created_at, updated_at) VALUES (99, 'Scoped', 'planning', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
 		initialProfiles["live:name:netlogcmdr:era:0"].id,
 	); err != nil {
-		testingContext.Fatalf("seed expedition_commanders: %v", err)
+		testingContext.Fatalf("seed scoped expedition: %v", err)
 	}
 
 	if err := settings.MergeCommanders(dbConn, "live:name:netlogcmdr:era:0", "live:f400:era:0"); err != nil {
@@ -186,8 +185,8 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 		testingContext.Fatalf("expected 1 merged profile with manual override, got %+v", afterMerge)
 	}
 	var remappedProfileID int64
-	if err := dbConn.QueryRow(`SELECT profile_id FROM expedition_commanders WHERE expedition_id = 99`).Scan(&remappedProfileID); err != nil || remappedProfileID != afterMerge["live:f400:era:0"].id {
-		testingContext.Fatalf("expected expedition_commanders remapped to %d, got %d (err=%v)", afterMerge["live:f400:era:0"].id, remappedProfileID, err)
+	if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = 99`).Scan(&remappedProfileID); err != nil || remappedProfileID != afterMerge["live:f400:era:0"].id {
+		testingContext.Fatalf("expected commander_profile_id remapped to %d, got %d (err=%v)", afterMerge["live:f400:era:0"].id, remappedProfileID, err)
 	}
 
 	// Unmerge manually merged alias NetLogCmdr (restores live:name:netlogcmdr:era:0 without orphan unmerge rule) and auto FID-merged alias OldAlias (creates unmerged:live:f400:oldalias:era:0).
@@ -205,12 +204,11 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 		testingContext.Fatalf("expected unmerged OldAlias profile, got %+v", afterUnmerge)
 	}
 
-	// Split MainCmdr first by YYYY-MM-DD date and then by exact ISO timestamp; verify expedition_commanders follows anchor events across SplitCommander, era-collapse MergeCommanders (with higher era shifting down), single-alias manual-split UnmergeCommanderAlias rejection, and ResetCommanderOverrides.
+	// Split MainCmdr first by YYYY-MM-DD date and then by exact ISO timestamp; verify commander_profile_id follows anchor events across SplitCommander, era-collapse MergeCommanders (with higher era shifting down), single-alias manual-split UnmergeCommanderAlias rejection, and ResetCommanderOverrides.
 	if _, err := dbConn.Exec(
-		`INSERT INTO expeditions (id, name, status, start_timestamp, commander_scope, created_at, updated_at) VALUES
-		 (101, 'Era1 Trip', 'active', '2025-06-15T08:00:00Z', 'selected', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-		 (102, 'Era2 Trip', 'active', '2025-06-15T18:30:00Z', 'selected', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-		 INSERT INTO expedition_commanders (expedition_id, profile_id) VALUES (101, ?), (102, ?)`,
+		`INSERT INTO expeditions (id, name, status, start_timestamp, commander_profile_id, created_at, updated_at) VALUES
+		 (101, 'Era1 Trip', 'active', '2025-06-15T08:00:00Z', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+		 (102, 'Era2 Trip', 'active', '2025-06-15T18:30:00Z', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
 		afterUnmerge["live:f400:era:0"].id, afterUnmerge["live:f400:era:0"].id,
 	); err != nil {
 		testingContext.Fatalf("seed split-anchor expeditions: %v", err)
@@ -226,10 +224,10 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 		testingContext.Fatalf("expected 3 eras (era:0..era:2) after date and ISO splits, got %+v", afterSplits)
 	}
 	var exp101Profile, exp102Profile int64
-	if err := dbConn.QueryRow(`SELECT profile_id FROM expedition_commanders WHERE expedition_id = 101`).Scan(&exp101Profile); err != nil || exp101Profile != afterSplits["live:f400:era:1"].id {
+	if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = 101`).Scan(&exp101Profile); err != nil || exp101Profile != afterSplits["live:f400:era:1"].id {
 		testingContext.Fatalf("expected exp 101 bound to era:1 (%d) after splits, got %d (err=%v)", afterSplits["live:f400:era:1"].id, exp101Profile, err)
 	}
-	if err := dbConn.QueryRow(`SELECT profile_id FROM expedition_commanders WHERE expedition_id = 102`).Scan(&exp102Profile); err != nil || exp102Profile != afterSplits["live:f400:era:2"].id {
+	if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = 102`).Scan(&exp102Profile); err != nil || exp102Profile != afterSplits["live:f400:era:2"].id {
 		testingContext.Fatalf("expected exp 102 bound to era:2 (%d) after splits, got %d (err=%v)", afterSplits["live:f400:era:2"].id, exp102Profile, err)
 	}
 
@@ -246,10 +244,10 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 	if _, hasEra2 := afterEraMerge["live:f400:era:2"]; hasEra2 {
 		testingContext.Fatalf("expected era:2 to shift down to era:1 after merging era:0 and era:1, got %+v", afterEraMerge)
 	}
-	if err := dbConn.QueryRow(`SELECT profile_id FROM expedition_commanders WHERE expedition_id = 101`).Scan(&exp101Profile); err != nil || exp101Profile != afterEraMerge["live:f400:era:0"].id {
+	if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = 101`).Scan(&exp101Profile); err != nil || exp101Profile != afterEraMerge["live:f400:era:0"].id {
 		testingContext.Fatalf("expected exp 101 rebound to collapsed era:0 (%d), got %d (err=%v)", afterEraMerge["live:f400:era:0"].id, exp101Profile, err)
 	}
-	if err := dbConn.QueryRow(`SELECT profile_id FROM expedition_commanders WHERE expedition_id = 102`).Scan(&exp102Profile); err != nil || exp102Profile != afterEraMerge["live:f400:era:1"].id {
+	if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = 102`).Scan(&exp102Profile); err != nil || exp102Profile != afterEraMerge["live:f400:era:1"].id {
 		testingContext.Fatalf("expected exp 102 shifted to new era:1 (%d), got %d (err=%v)", afterEraMerge["live:f400:era:1"].id, exp102Profile, err)
 	}
 
@@ -261,7 +259,7 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 	if len(afterReset) != 2 || afterReset["live:f400:era:0"].hasManualOverride != 0 {
 		testingContext.Fatalf("expected clean 2-profile natural state after ResetCommanderOverrides, got %+v", afterReset)
 	}
-	if err := dbConn.QueryRow(`SELECT profile_id FROM expedition_commanders WHERE expedition_id = 102`).Scan(&exp102Profile); err != nil || exp102Profile != afterReset["live:f400:era:0"].id {
+	if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = 102`).Scan(&exp102Profile); err != nil || exp102Profile != afterReset["live:f400:era:0"].id {
 		testingContext.Fatalf("expected exp 102 reconciled to natural era:0 (%d) after reset, got %d (err=%v)", afterReset["live:f400:era:0"].id, exp102Profile, err)
 	}
 }

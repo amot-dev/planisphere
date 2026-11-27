@@ -324,7 +324,7 @@ describe('ExpeditionManageModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('renders EDIT with Save-Slot Scope picker when multiple commanders exist and calls UpdateExpeditionScoped', async () => {
+  it('renders EDIT with single-commander save-slot selector when multiple commanders exist and calls UpdateExpeditionScoped', async () => {
     const { spies } = installWailsAppMock({
       UpdateExpedition: async () => {},
       UpdateExpeditionScoped: async () => {},
@@ -335,13 +335,26 @@ describe('ExpeditionManageModal', () => {
         name: 'Outer Arm Survey',
         description: 'Initial',
         status: 'active',
-        commanderScope: 'all_enabled',
-        commanderProfileIds: [],
+        commanderProfileId: 0,
       }),
     ]
     const commanders = [
-      makeCommander({ id: 10, profileKey: 'live:f10:era:0', name: 'Primary', enabled: true, eventCount: 300 }),
-      makeCommander({ id: 20, profileKey: 'live:f20:era:0', name: 'Secondary', enabled: false, eventCount: 80 }),
+      makeCommander({
+        id: 10,
+        profileKey: 'live:f10:era:0',
+        name: 'Primary',
+        enabled: true,
+        lastSeen: '2026-02-01T00:00:00Z',
+        eventCount: 300,
+      }),
+      makeCommander({
+        id: 20,
+        profileKey: 'live:f20:era:0',
+        name: 'Secondary',
+        enabled: false,
+        lastSeen: '2026-03-01T00:00:00Z',
+        eventCount: 80,
+      }),
     ]
 
     const modalView = mountTestRoot(
@@ -355,15 +368,18 @@ describe('ExpeditionManageModal', () => {
     )
 
     act(() => modalView.findButtonByText('EDIT').click())
-    expect(modalView.container.textContent).toContain('Save-Slot Scope')
+    expect(modalView.container.textContent).toContain('Commander Save Slot')
 
-    act(() => modalView.findButtonByText('Selected Save Slot(s)').click())
-    const checkboxes = Array.from(
-      modalView.container.querySelectorAll('input[type="checkbox"]'),
+    const radios = Array.from(
+      modalView.container.querySelectorAll('input[type="radio"]'),
     ) as HTMLInputElement[]
-    expect(checkboxes).toHaveLength(2)
-    expect(checkboxes[0].checked).toBe(true)
-    expect(checkboxes[1].checked).toBe(false)
+    expect(radios).toHaveLength(2)
+    expect(radios[0].checked).toBe(true)
+    expect(radios[1].checked).toBe(false)
+
+    act(() => radios[1].click())
+    expect(radios[0].checked).toBe(false)
+    expect(radios[1].checked).toBe(true)
 
     await act(async () => {
       modalView.findButtonByText('SAVE').click()
@@ -373,8 +389,7 @@ describe('ExpeditionManageModal', () => {
       5,
       'Outer Arm Survey',
       'Initial',
-      'selected',
-      [10],
+      20,
     )
     expect(spies.UpdateExpedition).not.toHaveBeenCalled()
   })

@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GetStartCandidates, StartExpedition, StartExpeditionScoped } from '../../../api/backend'
 import { app, modes, replay } from '../../../api/models'
 import { ModalShell } from '../../../components/ui/ModalShell'
 import { ED_AMBER_HEX } from '../../../domain/theme'
-import { ExpeditionCommanderScopePicker, type CommanderScopeMode } from './ExpeditionCommanderScopePicker'
+import { ExpeditionCommanderScopePicker, resolveSelectedCommanderProfileId } from './ExpeditionCommanderScopePicker'
 
 /**
  * StartExpeditionModalProps defines the expedition identifier, available flight
- * modes, commander profiles, initial scope, and close callback for engaging a planned expedition.
+ * modes, commander profiles, initial commander profile ID, and close callback for engaging a planned expedition.
  */
 export interface StartExpeditionModalProps {
   expeditionId: number
@@ -15,8 +15,7 @@ export interface StartExpeditionModalProps {
   initialModeId?: number
   defaultModeId?: number
   commanders?: replay.Commander[]
-  initialCommanderScope?: string
-  initialCommanderProfileIds?: number[]
+  initialCommanderProfileId?: number
   onClose: () => void
 }
 
@@ -35,14 +34,10 @@ function resolveDefaultModeId(
   return defaultMode?.id ?? modesList[0]?.id ?? 0
 }
 
-function resolveMatchingVisitTimestamp(visits: replay.Arrival[] | undefined, currentTs: string, profileIds: number[]): string {
-  if (!visits || visits.length === 0 || profileIds.length === 0) return currentTs
-  const selectedVisit = visits.find((visit) => visit.timestamp === currentTs)
-  if ((selectedVisit?.profileId ?? 0) > 0 && !profileIds.includes(selectedVisit!.profileId!)) {
-    const matchingVisit = visits.find((visit) => (visit.profileId ?? 0) > 0 && profileIds.includes(visit.profileId!))
-    if (matchingVisit) return matchingVisit.timestamp
-  }
-  return currentTs
+function filterVisitsForCommander(visits: replay.Arrival[] | undefined, hasMultipleCommanders: boolean, profileId: number): replay.Arrival[] {
+  const allVisits = visits ?? []
+  if (!hasMultipleCommanders || profileId <= 0) return allVisits
+  return allVisits.filter((visit) => (visit.profileId ?? 0) <= 0 || visit.profileId === profileId)
 }
 
 /**
@@ -56,27 +51,29 @@ export function StartExpeditionModal({
   initialModeId = 0,
   defaultModeId = 0,
   commanders = [],
-  initialCommanderScope,
-  initialCommanderProfileIds,
+  initialCommanderProfileId,
   onClose,
 }: StartExpeditionModalProps) {
   const hasMultipleCommanders = commanders.length > 1
-  const hasExplicitSelected = initialCommanderScope === 'selected' && (initialCommanderProfileIds?.length ?? 0) > 0
   const [candidates, setCandidates] = useState<app.StartCandidates | null>(null)
   const [selectedTimestamp, setSelectedTimestamp] = useState<string>('')
   const [selectedModeId, setSelectedModeId] = useState<number>(() =>
     resolveDefaultModeId(modesList, initialModeId, defaultModeId),
   )
-  const [scopeMode, setScopeMode] = useState<CommanderScopeMode>(() => (hasExplicitSelected ? 'selected' : 'all_enabled'))
-  const [selectedProfileIds, setSelectedProfileIds] = useState<number[]>(() => (hasExplicitSelected ? [...(initialCommanderProfileIds ?? [])] : []))
+  const [selectedProfileId, setSelectedProfileId] = useState<number>(() =>
+    resolveSelectedCommanderProfileId(commanders, initialCommanderProfileId),
+  )
   const [busy, setBusy] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
   const mountedRef = useRef(true)
-  const userTouchedScopeRef = useRef(false)
-  const scopeModeRef = useRef<CommanderScopeMode>(scopeMode)
-  scopeModeRef.current = scopeMode
-  const selectedProfileIdsRef = useRef<number[]>(selectedProfileIds)
-  selectedProfileIdsRef.current = selectedProfileIds
+  const prevExpeditionIdRef = useRef<number>(expeditionId)
+  const userTouchedProfileRef = useRef<boolean>(false)
+  const hasMultipleCommandersRef = useRef<boolean>(hasMultipleCommanders)
+  hasMultipleCommandersRef.current = hasMultipleCommanders
+  const candidatesRef = useRef<app.StartCandidates | null>(candidates)
+  candidatesRef.current = candidates
+  const selectedProfileIdRef = useRef<number>(selectedProfileId)
+  selectedProfileIdRef.current = selectedProfileId
 
   useEffect(() => {
     mountedRef.current = true
@@ -89,34 +86,56 @@ export function StartExpeditionModal({
     setSelectedModeId(resolveDefaultModeId(modesList, initialModeId, defaultModeId))
   }, [defaultModeId, initialModeId, modesList])
 
-  function applySelectedProfileScope(nextIds: number[]) {
-    scopeModeRef.current = 'selected'
-    selectedProfileIdsRef.current = nextIds
-    setScopeMode('selected')
-    setSelectedProfileIds(nextIds)
-  }
+  useEffect(() => {
+    const expeditionChanged = prevExpeditionIdRef.current !== expeditionId
+    if (expeditionChanged) {
+      prevExpeditionIdRef.current = expeditionId
+      userTouchedProfileRef.current = false
+      candidatesRef.current = null
+      setCandidates(null)
+      setSelectedTimestamp('')
+      setError('')
+    }
+    const currentProfileId = selectedProfileIdRef.current
+    const currentProfileValid =
+      currentProfileId > 0 && commanders.some((commander) => commander.id === currentProfileId)
+    if (expeditionChanged || !userTouchedProfileRef.current || !currentProfileValid) {
+      if (!currentProfileValid) {
+        userTouchedProfileRef.current = false
+      }
+      const nextProfileId = resolveSelectedCommanderProfileId(commanders, initialCommanderProfileId)
+      selectedProfileIdRef.current = nextProfileId
+      setSelectedProfileId(nextProfileId)
+      if (!expeditionChanged && candidatesRef.current !== null) {
+        const nextVisits = filterVisitsForCommander(
+          candidatesRef.current.visits,
+          commanders.length > 1,
+          nextProfileId,
+        )
+        setSelectedTimestamp((currentTs) =>
+          nextProfileId !== currentProfileId
+            ? (nextVisits[0]?.timestamp ?? '')
+            : nextVisits.some((visit) => visit.timestamp === currentTs)
+              ? currentTs
+              : (nextVisits[0]?.timestamp ?? ''),
+        )
+      }
+    }
+  }, [commanders, expeditionId, initialCommanderProfileId])
 
   useEffect(() => {
     let cancelled = false
     GetStartCandidates(expeditionId)
       .then((candidatesResult) => {
         if (cancelled) return
+        candidatesRef.current = candidatesResult
         setCandidates(candidatesResult)
-        const firstVisit = candidatesResult.visits?.[0]
-        if (!firstVisit) {
-          setSelectedTimestamp('')
-          return
-        }
-        if (hasMultipleCommanders && !hasExplicitSelected && !userTouchedScopeRef.current && (firstVisit.profileId ?? 0) > 0) {
-          applySelectedProfileScope([firstVisit.profileId!])
-          setSelectedTimestamp(firstVisit.timestamp)
-          return
-        }
-        setSelectedTimestamp(
-          hasMultipleCommanders && scopeModeRef.current === 'selected'
-            ? resolveMatchingVisitTimestamp(candidatesResult.visits, firstVisit.timestamp, selectedProfileIdsRef.current)
-            : firstVisit.timestamp,
+        const matchingVisits = filterVisitsForCommander(
+          candidatesResult.visits,
+          hasMultipleCommandersRef.current,
+          selectedProfileIdRef.current,
         )
+        setSelectedTimestamp(matchingVisits[0]?.timestamp ?? '')
       })
       .catch((loadError) => {
         if (!cancelled) setError(String(loadError))
@@ -124,40 +143,26 @@ export function StartExpeditionModal({
     return () => {
       cancelled = true
     }
-  }, [expeditionId, hasExplicitSelected, hasMultipleCommanders])
+  }, [expeditionId])
 
-  function handleSelectVisit(nextTimestamp: string) {
-    setError('')
-    setSelectedTimestamp(nextTimestamp)
-    if (hasMultipleCommanders && !hasExplicitSelected && !userTouchedScopeRef.current) {
-      const matchedVisit = candidates?.visits.find((visit) => visit.timestamp === nextTimestamp)
-      if (matchedVisit && (matchedVisit.profileId ?? 0) > 0) {
-        applySelectedProfileScope([matchedVisit.profileId!])
-      }
-    }
-  }
+  const visibleVisits = useMemo(
+    () => filterVisitsForCommander(candidates?.visits, hasMultipleCommanders, selectedProfileId),
+    [candidates?.visits, hasMultipleCommanders, selectedProfileId],
+  )
 
-  function handleChangeScopeMode(nextMode: CommanderScopeMode) {
-    userTouchedScopeRef.current = true
+  function handleChangeProfileId(nextProfileId: number) {
+    userTouchedProfileRef.current = true
     setError('')
-    scopeModeRef.current = nextMode
-    setScopeMode(nextMode)
-    if (nextMode === 'selected' && selectedProfileIdsRef.current.length > 0) {
-      setSelectedTimestamp((currentTs) => resolveMatchingVisitTimestamp(candidates?.visits, currentTs, selectedProfileIdsRef.current))
-    }
-  }
-
-  function handleChangeSelectedProfileIds(nextIds: number[]) {
-    userTouchedScopeRef.current = true
-    setError('')
-    selectedProfileIdsRef.current = nextIds
-    setSelectedProfileIds(nextIds)
-    if (scopeModeRef.current === 'selected') {
-      setSelectedTimestamp((currentTs) => resolveMatchingVisitTimestamp(candidates?.visits, currentTs, nextIds))
-    }
+    selectedProfileIdRef.current = nextProfileId
+    setSelectedProfileId(nextProfileId)
+    const nextVisits = filterVisitsForCommander(candidates?.visits, hasMultipleCommanders, nextProfileId)
+    setSelectedTimestamp((currentTs) =>
+      nextVisits.some((visit) => visit.timestamp === currentTs) ? currentTs : (nextVisits[0]?.timestamp ?? ''),
+    )
   }
 
   const selectedMode = modesList.find((modeItem) => modeItem.id === selectedModeId) ?? modesList[0]
+  const selectedCommander = commanders.find((commander) => commander.id === selectedProfileId)
 
   async function handleConfirm() {
     if (busy) return
@@ -166,21 +171,14 @@ export function StartExpeditionModal({
       setError('Select a recorded visit timestamp first.')
       return
     }
-    if (hasMultipleCommanders && scopeMode === 'selected') {
-      if (selectedProfileIds.length === 0) {
-        setError('Select at least one commander save slot.')
-        return
-      }
-      const selectedVisit = candidates?.visits.find((visit) => visit.timestamp === selectedTimestamp)
-      if ((selectedVisit?.profileId ?? 0) > 0 && !selectedProfileIds.includes(selectedVisit!.profileId!)) {
-        setError('Selected Waypoint #1 visit does not belong to any selected commander save slot.')
-        return
-      }
+    if (hasMultipleCommanders && selectedProfileId <= 0) {
+      setError('Select a commander save slot.')
+      return
     }
     setBusy(true)
     try {
       if (hasMultipleCommanders) {
-        await StartExpeditionScoped(expeditionId, selectedTimestamp, selectedModeId, scopeMode, scopeMode === 'selected' ? selectedProfileIds : [])
+        await StartExpeditionScoped(expeditionId, selectedTimestamp, selectedModeId, selectedProfileId)
       } else {
         await StartExpedition(expeditionId, selectedTimestamp, selectedModeId)
       }
@@ -204,15 +202,18 @@ export function StartExpeditionModal({
             Recorded Visit to{' '}
             <span className="text-ed-cyan">{candidates?.systemName || 'Waypoint #1'}</span>
           </div>
-          {candidates && candidates.visits.length > 0 ? (
+          {visibleVisits.length > 0 ? (
             <select
               aria-label="Recorded visit to Waypoint #1"
               disabled={busy}
               value={selectedTimestamp}
-              onChange={(event) => handleSelectVisit(event.target.value)}
+              onChange={(event) => {
+                setError('')
+                setSelectedTimestamp(event.target.value)
+              }}
               className="w-full bg-ed-void border border-ed-border px-2.5 py-1.5 font-mono-tabular text-xs text-ed-text-main"
             >
-              {candidates.visits.map((visit) => (
+              {visibleVisits.map((visit) => (
                 <option key={visit.uid} value={visit.timestamp}>
                   {visit.galactic} - ({visit.event}){hasMultipleCommanders && visit.commander ? ` (${visit.commander})` : ''}
                 </option>
@@ -220,7 +221,9 @@ export function StartExpeditionModal({
             </select>
           ) : (
             <div className="text-ed-text-muted italic">
-              No historical visits to {candidates?.systemName || 'Waypoint #1'} found in journals yet.
+              {hasMultipleCommanders && selectedCommander
+                ? `No historical visits to ${candidates?.systemName || 'Waypoint #1'} found for CMDR ${selectedCommander.name} yet.`
+                : `No historical visits to ${candidates?.systemName || 'Waypoint #1'} found in journals yet.`}
             </div>
           )}
           <p className="text-[11px] text-ed-text-muted">
@@ -262,11 +265,9 @@ export function StartExpeditionModal({
           <div className="p-3 border border-ed-border bg-ed-card space-y-2">
             <ExpeditionCommanderScopePicker
               commanders={commanders}
-              scopeMode={scopeMode}
-              selectedProfileIds={selectedProfileIds}
+              selectedProfileId={selectedProfileId}
               disabled={busy}
-              onChangeScopeMode={handleChangeScopeMode}
-              onChangeSelectedProfileIds={handleChangeSelectedProfileIds}
+              onChangeProfileId={handleChangeProfileId}
             />
           </div>
         )}

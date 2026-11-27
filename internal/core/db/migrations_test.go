@@ -30,6 +30,7 @@ func TestMigrateIdempotency(t *testing.T) {
 		"sell_organic_uid_dedup_v8",
 		"disconnect_events_v10",
 		"commander_profiles_v13",
+		"single_expedition_commander_v14",
 	}
 
 	for _, key := range expectedKeys {
@@ -423,4 +424,59 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 			subtestContext.Fatalf("end_timestamp after ScanOrganic = %q, want %q", endAfterOrganic, "2026-08-01T12:20:00Z")
 		}
 	})
+}
+
+func TestMigrateSingleExpeditionCommanderV14(testingContext *testing.T) {
+	dbConn := dbtest.OpenMemory(testingContext)
+
+	insertProfile := func(key, name string, enabled int, lastSeen string) int64 {
+		testingContext.Helper()
+		res, err := dbConn.Exec(
+			`INSERT INTO commander_profiles (profile_key, display_name, fid, universe, enabled, first_seen, last_seen) VALUES (?, ?, 'F1', 'live', ?, '2024-01-01T00:00:00Z', ?)`,
+			key, name, enabled, lastSeen,
+		)
+		if err != nil {
+			testingContext.Fatalf("insert profile %s: %v", key, err)
+		}
+		id, idErr := res.LastInsertId()
+		if idErr != nil {
+			testingContext.Fatal(idErr)
+		}
+		return id
+	}
+	earlyEnabledID := insertProfile("live:f1:era:0", "CmdrEarly", 1, "2025-05-01T00:00:00Z")
+	latestEnabledID := insertProfile("live:f2:era:0", "CmdrLatest", 1, "2026-06-01T00:00:00Z")
+	newerDisabledID := insertProfile("beta:f3:era:0", "CmdrBetaDisabled", 0, "2026-07-01T00:00:00Z")
+
+	if _, err := dbConn.Exec(`
+		INSERT INTO expeditions (id, name, status, commander_scope, commander_profile_id, created_at, updated_at) VALUES
+			(10, 'Selected Multi', 'active', 'selected', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(11, 'All Enabled Legacy', 'planning', 'all_enabled', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(12, 'Selected Orphan', 'planning', 'selected', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(13, 'Already Assigned', 'completed', 'selected', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		INSERT INTO expedition_commanders (expedition_id, profile_id) VALUES (10, ?), (10, ?);
+		DELETE FROM settings WHERE key = 'single_expedition_commander_v14';
+	`, newerDisabledID, earlyEnabledID, newerDisabledID); err != nil {
+		testingContext.Fatalf("seed v14 expeditions: %v", err)
+	}
+
+	if err := db.Migrate(dbConn); err != nil {
+		testingContext.Fatalf("db.Migrate v14: %v", err)
+	}
+
+	wantProfileByExp := map[int64]int64{
+		10: earlyEnabledID,
+		11: latestEnabledID,
+		12: latestEnabledID,
+		13: newerDisabledID,
+	}
+	for expID, wantProfileID := range wantProfileByExp {
+		var gotProfileID int64
+		if err := dbConn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = ?`, expID).Scan(&gotProfileID); err != nil {
+			testingContext.Fatalf("query expedition %d commander_profile_id: %v", expID, err)
+		}
+		if gotProfileID != wantProfileID {
+			testingContext.Errorf("expedition %d commander_profile_id = %d, want %d", expID, gotProfileID, wantProfileID)
+		}
+	}
 }

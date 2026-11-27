@@ -380,7 +380,7 @@ func TestBuildArchivedPreWipeCareerSelectedExpedition(testingContext *testing.T)
 	if createError != nil {
 		testingContext.Fatalf("create historical expedition: %v", createError)
 	}
-	if startError := expedition.StartScopedTx(fixture.databaseConnection, histExp.ID, "2024-05-01T10:15:00Z", 0, expedition.ScopeSelected, []int64{archivedProfile.ID}); startError != nil {
+	if startError := expedition.StartScopedTx(fixture.databaseConnection, histExp.ID, "2024-05-01T10:15:00Z", 0, archivedProfile.ID); startError != nil {
 		testingContext.Fatalf("StartScopedTx archived profile: %v", startError)
 	}
 	if completeError := expedition.CompleteTx(fixture.databaseConnection, histExp.ID); completeError != nil {

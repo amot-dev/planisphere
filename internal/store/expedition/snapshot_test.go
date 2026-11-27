@@ -1,7 +1,6 @@
 package expedition_test
 
 import (
-	"slices"
 	"testing"
 
 	"planisphere/internal/core/events"
@@ -86,8 +85,16 @@ func TestUndoRowDeletePreservesIDCoordsCarryOverAndPOIGuard(testingContext *test
 	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Edit Notes", Snapshot: beforeNotes})
 
 	sagCoords := reference.Vec3{X: 25.21875, Y: -20.90625, Z: 25899.96875}
-	if err := expedition.SetRowCoords(dbConn, sagARow.ID, "Sagittarius A*", 999999, 777, &sagCoords, "edsm"); err != nil {
-		testingContext.Fatalf("SetRowCoords: %v", err)
+	if err := expedition.ApplyResolvedWaypointsTx(dbConn, []expedition.ResolvedWaypointUpdate{{
+		RowID:         sagARow.ID,
+		SystemName:    "Sagittarius A*",
+		SystemAddress: 999999,
+		EDSMID:        777,
+		Pos:           &sagCoords,
+		Source:        "edsm",
+		POIName:       "Sagittarius A*",
+	}}); err != nil {
+		testingContext.Fatalf("ApplyResolvedWaypointsTx: %v", err)
 	}
 
 	undoNotes, err := history.Undo(dbConn, expeditionRecord.ID)
@@ -95,8 +102,8 @@ func TestUndoRowDeletePreservesIDCoordsCarryOverAndPOIGuard(testingContext *test
 		testingContext.Fatalf("Undo notes: outcome=%+v err=%v", undoNotes, err)
 	}
 	revertedSagA := mustGetRow(testingContext, dbConn, sagARow.ID)
-	if revertedSagA.Notes != "" || !revertedSagA.HasCoords || revertedSagA.CoordsSource != "edsm" || revertedSagA.SystemAddress != 999999 {
-		testingContext.Fatalf("expected notes reverted and resolved coords carried over, got %+v", revertedSagA)
+	if revertedSagA.Notes != "" || !revertedSagA.HasCoords || revertedSagA.CoordsSource != "edsm" || revertedSagA.SystemAddress != 999999 || revertedSagA.POIName != "Sagittarius A*" {
+		testingContext.Fatalf("expected notes reverted and live-resolved coords + GEC POIName preserved, got %+v", revertedSagA)
 	}
 	if !undoNotes.NeedsCoordResolution {
 		testingContext.Fatalf("expected NeedsCoordResolution=true because Beagle Point still lacks coords")
@@ -227,6 +234,7 @@ func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing
 		testingContext.Fatalf("ProfileIDsByName: len=%d map=%+v", len(idsByName), idsByName)
 	}
 	mainProfileID := idsByName["CMDR Main"]
+	altProfileID := idsByName["CMDR Alt"]
 
 	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Scoped Carrier Live", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, CoordsSource: "journal"},
@@ -239,9 +247,9 @@ func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing
 	}
 	history := expedition.NewUndoHistory(expedition.DefaultMaxUndoEntries)
 
-	// StartScopedTx undo restores planning status, commander_scope, and expedition_commanders.
+	// StartScopedTx undo restores planning status and prior CommanderProfileID (defaulted to latest commander CMDR Alt).
 	beforeStart := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
-	if err := expedition.StartScopedTx(dbConn, expeditionRecord.ID, "2026-04-03T08:05:00Z", 0, expedition.ScopeSelected, []int64{mainProfileID}); err != nil {
+	if err := expedition.StartScopedTx(dbConn, expeditionRecord.ID, "2026-04-03T08:05:00Z", 0, mainProfileID); err != nil {
 		testingContext.Fatalf("StartScopedTx: %v", err)
 	}
 	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Engage Expedition", Snapshot: beforeStart})
@@ -254,15 +262,29 @@ func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing
 		testingContext.Fatalf("expected bounds and modes events on StartScopedTx undo, got %v", undoStart.ChangedEvents.Names())
 	}
 	revertedExp, err := expedition.Get(dbConn, expeditionRecord.ID)
-	if err != nil || revertedExp.Status != expedition.StatusPlanning || revertedExp.CommanderScope != expedition.ScopeAllEnabled || len(revertedExp.CommanderProfileIDs) != 0 {
-		testingContext.Fatalf("expected reverted planning scope, got %+v (%v)", revertedExp, err)
+	if err != nil || revertedExp.Status != expedition.StatusPlanning || revertedExp.CommanderProfileID != altProfileID {
+		testingContext.Fatalf("expected reverted planning CommanderProfileID=%d, got %+v (%v)", altProfileID, revertedExp, err)
 	}
 	if _, err := history.Redo(dbConn, expeditionRecord.ID); err != nil {
 		testingContext.Fatalf("Redo StartScopedTx: %v", err)
 	}
 	restartedExp, err := expedition.Get(dbConn, expeditionRecord.ID)
-	if err != nil || restartedExp.CommanderScope != expedition.ScopeSelected || !slices.Equal(restartedExp.CommanderProfileIDs, []int64{mainProfileID}) {
-		testingContext.Fatalf("expected selected scope restored on redo, got %+v (%v)", restartedExp, err)
+	if err != nil || restartedExp.CommanderProfileID != mainProfileID {
+		testingContext.Fatalf("expected CommanderProfileID=%d restored on redo, got %+v (%v)", mainProfileID, restartedExp, err)
+	}
+
+	// RestoreSnapshotTx remaps a deleted/missing CommanderProfileID to LatestCommanderProfileID without leaving a dangling ID.
+	staleProfileSnapshot := mustCaptureSnapshot(testingContext, dbConn, expeditionRecord.ID)
+	staleProfileSnapshot.Expedition.CommanderProfileID = 999999
+	if _, err := expedition.RestoreSnapshotTx(dbConn, staleProfileSnapshot); err != nil {
+		testingContext.Fatalf("RestoreSnapshotTx stale CommanderProfileID: %v", err)
+	}
+	remappedExp := mustGetExpedition(testingContext, dbConn, expeditionRecord.ID)
+	if remappedExp.CommanderProfileID != altProfileID {
+		testingContext.Fatalf("expected missing CommanderProfileID remapped to latest commander %d, got %d", altProfileID, remappedExp.CommanderProfileID)
+	}
+	if _, err := expedition.UpdateMetaAndCommanderTx(dbConn, expeditionRecord.ID, restartedExp.Name, restartedExp.Description, mainProfileID); err != nil {
+		testingContext.Fatalf("restore mainProfileID after stale snapshot check: %v", err)
 	}
 
 	// OverrideCarrierStopArrival undo restores cascaded fc_arrived flags and cleared active_carrier_route.

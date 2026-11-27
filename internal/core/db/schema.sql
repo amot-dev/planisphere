@@ -147,12 +147,13 @@ CREATE TABLE IF NOT EXISTS expeditions (
     carrier_type          TEXT NOT NULL DEFAULT 'player',
     carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0,
     active_mode_id        INTEGER NOT NULL DEFAULT 0,
-    commander_scope       TEXT NOT NULL DEFAULT 'all_enabled',
+    commander_scope       TEXT NOT NULL DEFAULT 'all_enabled', -- deprecated (unused)
+    commander_profile_id  INTEGER NOT NULL DEFAULT 0,
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
 
--- Selected commander save-slot profiles when expeditions.commander_scope = 'selected'.
+-- Deprecated (unused): multi-commander expedition mapping superseded by expeditions.commander_profile_id.
 CREATE TABLE IF NOT EXISTS expedition_commanders (
     expedition_id INTEGER NOT NULL REFERENCES expeditions(id) ON DELETE CASCADE,
     profile_id    INTEGER NOT NULL REFERENCES commander_profiles(id) ON DELETE CASCADE,
@@ -233,4 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_gec_system_addr ON gec_pois_cache(system_address)
 -- - gec_pois_cache.raw_json: superseded by structured columns on gec_pois_cache;
 --   Catalog.Import writes "" to avoid per-POI JSON marshaling and multi-megabyte
 --   database bloat.
+-- - expeditions.commander_scope and expedition_commanders: superseded by single-profile
+--   expeditions.commander_profile_id; still read by migration
+--   single_expedition_commander_v14 (internal/core/db/commander_anchors.go).
 

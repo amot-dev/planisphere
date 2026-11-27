@@ -53,6 +53,33 @@ type CommanderSession struct {
 	SystemName string `json:"systemName"`
 }
 
+// NormalizeAllTimeProfileScope collapses a single-commander explicit scope to
+// the zero-value AllEnabled scope when that commander is the sole enabled
+// save-slot profile and no journal_events rows remain at profile_id <= 0,
+// allowing single-career archives to share the un-scoped CareerStats projections.
+func NormalizeAllTimeProfileScope(queryer db.Queryer, scope ProfileScope) ProfileScope {
+	if queryer == nil || scope.IsAllEnabled() {
+		return scope
+	}
+	ids := scope.normalizedIDs()
+	if len(ids) != 1 {
+		return scope
+	}
+	var canCollapse int
+	err := queryer.QueryRow(`
+		SELECT CASE WHEN
+			EXISTS (SELECT 1 FROM commander_profiles WHERE id = ? AND enabled != 0)
+			AND NOT EXISTS (SELECT 1 FROM commander_profiles WHERE id != ? AND enabled != 0)
+			AND NOT EXISTS (SELECT 1 FROM journal_events WHERE profile_id <= 0)
+		THEN 1 ELSE 0 END`,
+		ids[0], ids[0],
+	).Scan(&canCollapse)
+	if err == nil && canCollapse != 0 {
+		return ProfileScope{}
+	}
+	return scope
+}
+
 // CareerStartScoped returns the earliest career start timestamp for scope in
 // ISO-8601 UTC and Galactic Standard Time formats.
 func CareerStartScoped(queryer db.Queryer, scope ProfileScope) (string, string) {
@@ -162,14 +189,26 @@ func attachCommanderProfileAliases(queryer db.Queryer, profiles []Commander) err
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for index := range profiles {
-		if len(profiles[index].Aliases) == 0 {
-			if err := queryer.QueryRow(`SELECT COUNT(*) FROM journal_events WHERE profile_id = ?`, profiles[index].ID).Scan(&profiles[index].EventCount); err != nil {
-				return fmt.Errorf("count profile %d events: %w", profiles[index].ID, err)
-			}
+	namelessRows, err := queryer.Query(`SELECT profile_id, COUNT(*) FROM (
+		SELECT profile_id FROM journal_events WHERE commander IS NULL AND fid != '' AND +profile_id > 0
+		UNION ALL
+		SELECT profile_id FROM journal_events WHERE commander = '' COLLATE NOCASE AND fid != '' AND +profile_id > 0
+	) GROUP BY profile_id`)
+	if err != nil {
+		return fmt.Errorf("count nameless commander profile events: %w", err)
+	}
+	defer namelessRows.Close()
+	for namelessRows.Next() {
+		var profileID int64
+		var namelessCount int
+		if err := namelessRows.Scan(&profileID, &namelessCount); err != nil {
+			return fmt.Errorf("scan nameless commander profile event count: %w", err)
+		}
+		if profileIdx, found := indexByID[profileID]; found {
+			profiles[profileIdx].EventCount += namelessCount
 		}
 	}
-	return nil
+	return namelessRows.Err()
 }
 
 // ListCommanderNamesForScope returns deduplicated canonical display names for

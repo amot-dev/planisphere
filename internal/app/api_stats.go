@@ -59,6 +59,7 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter) (Sideba
 	if settings.CareerBaselineScope(app.db) == settings.CareerScopeAllEnabled {
 		careerScope = replay.ProfileScope{}
 	}
+	careerScope = replay.NormalizeAllTimeProfileScope(app.db, careerScope)
 
 	// Mode filters apply only to the current expedition, never to All Time.
 	// All-time personal carrier data comes directly from Frontier's lifetime Statistics.

@@ -109,6 +109,11 @@ var migrations = []migration{
 		description: "Backfill journal FID and universe metadata and initialize commander save-slot profiles",
 		apply:       migrateCommanderProfilesV13,
 	},
+	{
+		key:         "single_expedition_commander_v14",
+		description: "Backfill single commander_profile_id per expedition from selected scope or latest commander",
+		apply:       migrateSingleExpeditionCommanderV14,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -133,6 +138,7 @@ func Migrate(dbConn *sql.DB) error {
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN carrier_weekly_upkeep INTEGER NOT NULL DEFAULT 0`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN active_mode_id INTEGER NOT NULL DEFAULT 0`)
 	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN commander_scope TEXT NOT NULL DEFAULT 'all_enabled'`)
+	_, _ = dbConn.Exec(`ALTER TABLE expeditions ADD COLUMN commander_profile_id INTEGER NOT NULL DEFAULT 0`)
 	if _, schemaError := dbConn.Exec(schemaSQL); schemaError != nil {
 		return fmt.Errorf("apply schema: %w", schemaError)
 	}

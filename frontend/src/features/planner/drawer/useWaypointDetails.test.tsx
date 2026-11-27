@@ -312,10 +312,10 @@ describe('useWaypointDetails', () => {
     expect(mountedHook.getResult().loadingDetails[102]).toBe(false)
   })
 
-  it('refreshes open closed-leg drawers in place without loading flash when expedition commander scope changes', async () => {
-    const buildScopedPlan = (commanderScope: string, commanderProfileIds: number[]) =>
+  it('refreshes open closed-leg drawers in place without loading flash when expedition commander profile changes', async () => {
+    const buildScopedPlan = (commanderProfileId: number) =>
       expedition.PlanView.createFrom({
-        expedition: { id: 12, name: 'Scope Change Refresh', status: 'completed', commanderScope, commanderProfileIds },
+        expedition: { id: 12, name: 'Scope Change Refresh', status: 'completed', commanderProfileId },
         rows: [
           {
             row: { id: 301, expeditionId: 12, rowType: 'waypoint', systemName: 'Sol', visitedAt: '2026-01-01T10:00:00Z', departedAt: '2026-01-01T10:15:00Z' },
@@ -327,7 +327,7 @@ describe('useWaypointDetails', () => {
       })
 
     const { mountedHook, spies, resolveLoad } = mountWaypointDetailsHarness(
-      { plan: buildScopedPlan('all_enabled', []), databaseKey: '/data/main.db' },
+      { plan: buildScopedPlan(1), databaseKey: '/data/main.db' },
       2,
     )
 
@@ -349,7 +349,7 @@ describe('useWaypointDetails', () => {
     expect(mountedHook.getResult().detailsById[301]?.metrics.jumps).toBe(50)
 
     await act(async () => {
-      mountedHook.rerender({ plan: buildScopedPlan('selected', [2]), databaseKey: '/data/main.db' })
+      mountedHook.rerender({ plan: buildScopedPlan(2), databaseKey: '/data/main.db' })
     })
     expect(spies.GetWaypointDetails).toHaveBeenCalledTimes(2)
     expect(mountedHook.getResult().loadingDetails[301]).toBe(false)

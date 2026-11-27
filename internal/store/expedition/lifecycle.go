@@ -18,8 +18,10 @@ func setLifecycle(queryer db.Queryer, expeditionID int64, status string, startTi
 	return execError
 }
 
-// StartCandidates returns recorded arrivals matching Waypoint #1 (newest first)
-// scoped to the expedition's commander save-slot selection.
+// StartCandidates returns recorded arrivals matching Waypoint #1 (newest first).
+// Planning expeditions include arrivals across all resolved commander save-slot
+// profiles so Engage Expedition can switch save slots in place; started
+// expeditions filter to their assigned commander save-slot profile.
 func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, candidates []Arrival, loadError error) {
 	rows, listError := ListRows(queryer, expeditionID)
 	if listError != nil {
@@ -34,7 +36,14 @@ func StartCandidates(queryer db.Queryer, expeditionID int64) (system string, can
 		return "", nil, getError
 	}
 	waypoint := rows[firstIndex]
-	arrivals, arrivalsError := replay.QuerySystemArrivalCandidatesScoped(queryer, waypoint.SystemName, waypoint.SystemAddress, expeditionRecord.ProfileScope())
+	candidateScope := expeditionRecord.ProfileScope()
+	if expeditionRecord.Status == StatusPlanning {
+		var scopeError error
+		if candidateScope, scopeError = planningStartCandidatesScope(queryer); scopeError != nil {
+			return waypoint.SystemName, nil, scopeError
+		}
+	}
+	arrivals, arrivalsError := replay.QuerySystemArrivalCandidatesScoped(queryer, waypoint.SystemName, waypoint.SystemAddress, candidateScope)
 	if arrivalsError != nil {
 		return waypoint.SystemName, nil, arrivalsError
 	}
@@ -53,6 +62,11 @@ func Start(transaction *sql.Tx, expeditionID int64, startTimestamp string, initi
 	expeditionRecord, getError := Get(transaction, expeditionID)
 	if getError != nil {
 		return getError
+	}
+	if expeditionRecord.CommanderProfileID <= 0 {
+		if _, profileError := setCommanderProfileForExisting(transaction, expeditionRecord, 0); profileError != nil {
+			return profileError
+		}
 	}
 	rows, listError := ListRows(transaction, expeditionID)
 	if listError != nil {

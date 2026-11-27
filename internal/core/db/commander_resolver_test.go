@@ -192,6 +192,16 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 				{profileKey: "beta:f900:era:0", displayName: "MultiVerse", fid: "F900", universe: "beta", eraIndex: 0, isArchivedCareer: 0, enabled: 0},
 			},
 		},
+		{
+			name: "nameless single-FID events resolve onto matching career profile without blank aliases",
+			events: []dbtest.SeedEventRow{
+				{Timestamp: "2026-02-01T10:00:00Z", Event: "FSDJump", Commander: "", FID: "F606", Universe: "live"},
+				{Timestamp: "2026-02-01T10:05:00Z", Event: "Scan", Commander: "", FID: "F606", Universe: "live"},
+			},
+			wantProfiles: []gotProfile{
+				{profileKey: "live:f606:era:0", displayName: "", fid: "F606", universe: "live", eraIndex: 0, isArchivedCareer: 0, enabled: 1},
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -397,5 +407,76 @@ func TestMigrateCommanderProfilesV13ZeroRescanBackfill(testingContext *testing.T
 	liveProfile := byKey["live:f123:era:0"]
 	if liveProfile.universe != "live" || liveProfile.enabled != 1 || liveProfile.id != rolloverProfileID {
 		testingContext.Fatalf("unexpected live profile after v13: %+v", liveProfile)
+	}
+}
+
+func TestResolveCommandersPreservesExpeditionAnchorsAcrossPreWipeInsertAndFIDMerge(testingContext *testing.T) {
+	conn := dbtest.OpenMemory(testingContext)
+
+	// Seed pre-FID nameless-FID log for Trebor Johnson and post-wipe 2025 log for CMDR Pioneer.
+	dbtest.InsertSeedEvents(testingContext, conn,
+		dbtest.SeedEventRow{UID: "pre-fid-1", Timestamp: "2017-06-01T10:00:00Z", Event: "FSDJump", Commander: "Trebor Johnson", FID: "", Universe: "live"},
+		dbtest.SeedEventRow{UID: "post-wipe-1", Timestamp: "2025-05-01T10:00:00Z", Event: "LoadGame", Commander: "CMDR Pioneer", FID: "F777", Universe: "live"},
+		dbtest.SeedEventRow{UID: "post-wipe-2", Timestamp: "2025-05-01T10:15:00Z", Event: "FSDJump", Commander: "CMDR Pioneer", FID: "F777", Universe: "live"},
+	)
+	runResolveCommanders(testingContext, conn)
+
+	initialProfiles := queryProfiles(testingContext, conn)
+	initialByKey := make(map[string]gotProfile, len(initialProfiles))
+	for _, item := range initialProfiles {
+		initialByKey[item.profileKey] = item
+	}
+	treborOldID := initialByKey["live:name:trebor johnson:era:0"].id
+	pioneerInitialID := initialByKey["live:f777:era:0"].id
+	if treborOldID == 0 || pioneerInitialID == 0 {
+		testingContext.Fatalf("unexpected initial profiles: %+v", initialByKey)
+	}
+
+	// Seed 3 expeditions: planning on Trebor (pre-FID), active in 2025 on Pioneer, and unassigned (0).
+	if _, err := conn.Exec(`
+		INSERT INTO expeditions (id, name, status, start_timestamp, commander_profile_id, created_at, updated_at) VALUES
+			(50, 'Trebor Plan', 'planning', NULL, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(51, 'Pioneer 2025 Active', 'active', '2025-05-01T10:00:00Z', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(52, 'Unassigned Seed', 'planning', NULL, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+	`, treborOldID, pioneerInitialID); err != nil {
+		testingContext.Fatalf("seed anchor expeditions: %v", err)
+	}
+
+	// Backfill EDDiscovery 2023 pre-wipe era + ClearSavedGame for F777 AND modern FID log for Trebor Johnson.
+	dbtest.InsertSeedEvents(testingContext, conn,
+		dbtest.SeedEventRow{UID: "edd-2023-load", Timestamp: "2023-03-01T10:00:00Z", Event: "LoadGame", Commander: "CMDR Pioneer", FID: "F777", Universe: "live"},
+		dbtest.SeedEventRow{UID: "edd-2024-clear", Timestamp: "2024-01-01T00:00:00Z", Event: "ClearSavedGame", Commander: "CMDR Pioneer", FID: "F777", Universe: "live"},
+		dbtest.SeedEventRow{UID: "edd-2024-new", Timestamp: "2024-01-01T00:00:05Z", Event: "NewCommander", Commander: "CMDR Pioneer", FID: "F777", Universe: "live"},
+		dbtest.SeedEventRow{UID: "trebor-fid", Timestamp: "2026-02-01T10:00:00Z", Event: "LoadGame", Commander: "Trebor Johnson", FID: "F429", Universe: "live"},
+	)
+	runResolveCommanders(testingContext, conn)
+
+	afterProfiles := queryProfiles(testingContext, conn)
+	afterByKey := make(map[string]gotProfile, len(afterProfiles))
+	for _, item := range afterProfiles {
+		afterByKey[item.profileKey] = item
+	}
+	treborMergedID := afterByKey["live:f429:era:0"].id
+	pioneerEra1ID := afterByKey["live:f777:era:1"].id
+	if treborMergedID == 0 || treborMergedID == treborOldID || pioneerEra1ID == 0 || pioneerEra1ID == pioneerInitialID {
+		testingContext.Fatalf("expected Trebor merged to new FID profile and Pioneer 2025 shifted to era:1, got %+v", afterByKey)
+	}
+
+	readExpCommander := func(expID int64) int64 {
+		testingContext.Helper()
+		var cid int64
+		if err := conn.QueryRow(`SELECT commander_profile_id FROM expeditions WHERE id = ?`, expID).Scan(&cid); err != nil {
+			testingContext.Fatal(err)
+		}
+		return cid
+	}
+	if got := readExpCommander(50); got != treborMergedID {
+		testingContext.Errorf("expedition 50 (nameless-to-FID merge) commander_profile_id = %d, want %d", got, treborMergedID)
+	}
+	if got := readExpCommander(51); got != pioneerEra1ID {
+		testingContext.Errorf("expedition 51 (pre-wipe era insertion) commander_profile_id = %d, want %d", got, pioneerEra1ID)
+	}
+	if got := readExpCommander(52); got != treborMergedID {
+		testingContext.Errorf("expedition 52 (unassigned -> latest commander) commander_profile_id = %d, want %d", got, treborMergedID)
 	}
 }
