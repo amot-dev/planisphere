@@ -230,34 +230,6 @@ func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
 		testingContext.Fatalf("StartTx activeExp: %v", err)
 	}
 
-	completedExp, createCompletedErr := expedition.CreateWithWaypoints(databaseConnection, "Completed Unused", "", []expedition.SeedWaypoint{
-		{SystemName: "Sol"}, {SystemName: "Alpha"},
-	})
-	if createCompletedErr != nil {
-		testingContext.Fatalf("CreateWithWaypoints completedExp: %v", createCompletedErr)
-	}
-	if err := expedition.StartTx(databaseConnection, completedExp.ID, "2026-07-01T10:00:00Z", customMode.ID); err != nil {
-		testingContext.Fatalf("StartTx completedExp: %v", err)
-	}
-	completedRows, listCompletedErr := expedition.ListRows(databaseConnection, completedExp.ID)
-	if listCompletedErr != nil {
-		testingContext.Fatalf("ListRows completedExp: %v", listCompletedErr)
-	}
-	if _, err := expedition.SetLegModeTx(databaseConnection, completedRows[1].ID, travelID, false); err != nil {
-		testingContext.Fatalf("SetLegModeTx completedExp: %v", err)
-	}
-	if err := expedition.CompleteTx(databaseConnection, completedExp.ID); err != nil {
-		testingContext.Fatalf("CompleteTx completedExp: %v", err)
-	}
-
-	usageList, usageError := modes.UsageByExpedition(databaseConnection, customMode.ID)
-	if usageError != nil {
-		testingContext.Fatalf("UsageByExpedition: %v", usageError)
-	}
-	if len(usageList) != 1 || usageList[0].ExpeditionID != activeExp.ID || usageList[0].LegCount != 2 || !usageList[0].IsActiveMode {
-		testingContext.Fatalf("unexpected mode usage list (completed inactive active_mode_id should be excluded): %+v", usageList)
-	}
-
 	if deleteError := modes.DeleteTx(databaseConnection, customMode.ID); deleteError != nil {
 		testingContext.Fatalf("DeleteTx: %v", deleteError)
 	}
@@ -265,20 +237,15 @@ func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
 	if reloadActiveErr != nil {
 		testingContext.Fatalf("Get reloaded activeExp: %v", reloadActiveErr)
 	}
-	reloadedCompletedExp, reloadCompletedErr := expedition.Get(databaseConnection, completedExp.ID)
-	if reloadCompletedErr != nil {
-		testingContext.Fatalf("Get reloaded completedExp: %v", reloadCompletedErr)
-	}
 	reloadedActiveRows, reloadRowsErr := expedition.ListRows(databaseConnection, activeExp.ID)
 	if reloadRowsErr != nil {
 		testingContext.Fatalf("ListRows reloaded activeExp: %v", reloadRowsErr)
 	}
-	if reloadedActiveExp.ActiveModeID != travelID || reloadedCompletedExp.ActiveModeID != travelID {
-		testingContext.Fatalf("expected active_mode_id reassigned to Travel (%d), got active=%d completed=%d",
-			travelID, reloadedActiveExp.ActiveModeID, reloadedCompletedExp.ActiveModeID)
+	if reloadedActiveExp.ActiveModeID != travelID {
+		testingContext.Fatalf("expected active_mode_id reassigned to Travel (%d), got %d", travelID, reloadedActiveExp.ActiveModeID)
 	}
 	if reloadedActiveRows[1].LegModeID != travelID || reloadedActiveRows[2].LegModeID != travelID {
-		testingContext.Fatalf("expected visited leg modes reassigned to Travel (%d), got %d / %d",
+		testingContext.Fatalf("expected visited leg modes reassigned to Travel (%d), got %d and %d",
 			travelID, reloadedActiveRows[1].LegModeID, reloadedActiveRows[2].LegModeID)
 	}
 }

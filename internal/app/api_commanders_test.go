@@ -12,7 +12,6 @@ import (
 	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
-	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
 )
 
@@ -91,21 +90,9 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	if err != nil {
 		testingContext.Fatalf("CreateExpedition: %v", err)
 	}
-	planBefore, err := testApp.GetPlan(createdExp.ID)
-	if err != nil {
-		testingContext.Fatal(err)
-	}
-	solName, coloniaName := "Sol", "Colonia"
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: planBefore.Rows[0].Row.ID, SystemName: &solName}); err != nil {
-		testingContext.Fatal(err)
-	}
-	coloniaRow, err := testApp.AddRow(createdExp.ID, planBefore.Rows[0].Row.ID, expedition.RowWaypoint, 0)
-	if err != nil {
-		testingContext.Fatal(err)
-	}
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: coloniaRow.ID, SystemName: &coloniaName}); err != nil {
-		testingContext.Fatal(err)
-	}
+	planBefore := mustGetPlan(testingContext, testApp, createdExp.ID)
+	setTestRowSystemName(testingContext, testApp, planBefore.Rows[0].Row.ID, "Sol")
+	addTestWaypoint(testingContext, testApp, createdExp.ID, planBefore.Rows[0].Row.ID, "Colonia")
 	if err := testApp.StartExpeditionScoped(createdExp.ID, "2026-01-15T09:05:00Z", 0, mainProfile.ID); err != nil {
 		testingContext.Fatalf("StartExpeditionScoped: %v", err)
 	}
@@ -213,21 +200,9 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 	if err != nil {
 		testingContext.Fatal(err)
 	}
-	planBefore, err := testApp.GetPlan(exp.ID)
-	if err != nil {
-		testingContext.Fatal(err)
-	}
-	solName, alphaName := "Sol", "Alpha"
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: planBefore.Rows[0].Row.ID, SystemName: &solName}); err != nil {
-		testingContext.Fatal(err)
-	}
-	alphaRow, err := testApp.AddRow(exp.ID, planBefore.Rows[0].Row.ID, expedition.RowWaypoint, 0)
-	if err != nil {
-		testingContext.Fatal(err)
-	}
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: alphaRow.ID, SystemName: &alphaName}); err != nil {
-		testingContext.Fatal(err)
-	}
+	planBefore := mustGetPlan(testingContext, testApp, exp.ID)
+	setTestRowSystemName(testingContext, testApp, planBefore.Rows[0].Row.ID, "Sol")
+	addTestWaypoint(testingContext, testApp, exp.ID, planBefore.Rows[0].Row.ID, "Alpha")
 	if err := testApp.StartExpedition(exp.ID, "2026-02-01T10:05:00Z", 0); err != nil {
 		testingContext.Fatal(err)
 	}

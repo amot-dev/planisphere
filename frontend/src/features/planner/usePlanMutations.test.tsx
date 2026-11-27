@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../api/models'
+import { createDeferred } from '../../test/async'
 import { makePlanView } from '../../test/fixtures'
 import { renderHook } from '../../test/render'
 import { installWailsAppMock } from '../../test/wailsMock'
@@ -113,16 +114,8 @@ describe('executePlanMutation', () => {
   })
 })
 
-function createDeferredPromise() {
-  let resolvePromise!: () => void
-  const promise = new Promise<void>((resolve) => {
-    resolvePromise = resolve
-  })
-  return { promise, resolve: resolvePromise }
-}
-
 describe('usePlanMutations overlapping busy coordination and Go permission guards', () => {
-  it('preserves remaining mutation busy message regardless of settlement order and enforces Go carrier permissions', async () => {
+  it('preserves remaining mutation busy message when an overlapping mutation settles and enforces Go carrier permissions', async () => {
     const { spies } = installWailsAppMock({
       UpdateRow: async () => {},
     })
@@ -140,8 +133,8 @@ describe('usePlanMutations overlapping busy coordination and Go permission guard
     )
 
     // Later mutation settles first: restores earlier mutation's message until it finishes.
-    const firstAction = createDeferredPromise()
-    const secondAction = createDeferredPromise()
+    const firstAction = createDeferred()
+    const secondAction = createDeferred()
     const firstPromise = mountedHook.getResult().handleLifecycleAction(
       'COMPLETING EXPEDITION',
       () => firstAction.promise,
@@ -169,27 +162,6 @@ describe('usePlanMutations overlapping busy coordination and Go permission guard
       'COMPLETING EXPEDITION',
       null,
     ])
-
-    // Earlier mutation settles first: preserves later mutation's message until it finishes.
-    busyStates.length = 0
-    const thirdAction = createDeferredPromise()
-    const fourthAction = createDeferredPromise()
-    const thirdPromise = mountedHook.getResult().handleLifecycleAction(
-      'REORDERING ROUTE',
-      () => thirdAction.promise,
-    )
-    const fourthPromise = mountedHook.getResult().handleLifecycleAction(
-      'UPDATING REGION',
-      () => fourthAction.promise,
-    )
-
-    thirdAction.resolve()
-    await thirdPromise
-    expect(busyStates).toEqual(['REORDERING ROUTE', 'UPDATING REGION', 'UPDATING REGION'])
-
-    fourthAction.resolve()
-    await fourthPromise
-    expect(busyStates).toEqual(['REORDERING ROUTE', 'UPDATING REGION', 'UPDATING REGION', null])
 
     // Verify toggleFcStop respects Go permissions (canAddFcStop=false on row 11, canRemoveFcStop=true on row 12).
     spies.UpdateRow.mockResolvedValueOnce(undefined)

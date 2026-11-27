@@ -11,6 +11,7 @@ import (
 	"planisphere/internal/sources/edsm"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestCreateExpeditionWithWaypointsOfflineResolutionAndGEC(testingContext *testing.T) {
@@ -20,14 +21,11 @@ func TestCreateExpeditionWithWaypointsOfflineResolutionAndGEC(testingContext *te
 	}
 
 	// Seed a visited journal system with coordinates so offline resolution matches it immediately.
-	_, insertJournalError := testApp.db.Exec(`INSERT INTO journal_events (
-		event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, raw_json, ingested_at
-	) VALUES (
-		'ev-sol-import', '2026-01-01T10:00:00Z', 'FSDJump', 'Sol', 10477373803, 0.0, 0.0, 0.0, '{}', '2026-01-01T10:00:00Z'
-	)`)
-	if insertJournalError != nil {
-		testingContext.Fatalf("insert journal event: %v", insertJournalError)
-	}
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-01-01T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+	)
 
 	// Seed a cached EDSM system and a GEC POI to verify cache reuse and POI auto-population.
 	_, insertCacheError := testApp.db.Exec(`INSERT INTO system_cache (
@@ -169,14 +167,17 @@ func TestParseWaypointImportAndCreateExpeditionFromImport(testingContext *testin
 
 func TestBuildSeedWaypointsBatchSinglePassAndDisabledCommanderFilter(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-	if _, execError := testApp.db.Exec(`
-		INSERT INTO commanders (name, fid, enabled) VALUES ('CmdrEnabled', 'F1', 1), ('CmdrDisabled', 'F2', 0);
-		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, commander, raw_json, ingested_at) VALUES
-		('seed-alpha', '2026-01-01T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, 1, 2, 3, 'CmdrEnabled', '{}', '2026-01-01T00:00:00Z'),
-		('seed-muted', '2026-01-01T00:01:00Z', 'FSDJump', 'Disabled Haven', 9009, 9, 9, 9, 'CmdrDisabled', '{}', '2026-01-01T00:01:00Z')
-	`); execError != nil {
-		testingContext.Fatalf("seed journal events: %v", execError)
+	if _, execError := testApp.db.Exec(`INSERT INTO commanders (name, fid, enabled) VALUES ('CmdrEnabled', 'F1', 1), ('CmdrDisabled', 'F2', 0)`); execError != nil {
+		testingContext.Fatalf("seed commanders: %v", execError)
 	}
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-01-01T00:00:00Z","event":"LoadGame","Commander":"CmdrEnabled","FID":"F1","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-01-01T00:00:05Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,2,3]}`,
+		`{"timestamp":"2026-01-01T00:01:00Z","event":"LoadGame","Commander":"CmdrDisabled","FID":"F2","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-01-01T00:01:05Z","event":"FSDJump","StarSystem":"Disabled Haven","SystemAddress":9009,"StarPos":[9,9,9]}`,
+	)
 
 	var batchCalls, singleCalls atomic.Int32
 	originalBatch := testApp.resolver.JournalBatchLookup

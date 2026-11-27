@@ -21,10 +21,7 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	insertTestJournalEvent(testingContext, testApp, "2026-02-01T09:05:00Z", "Location", "loc-player",
 		`{"timestamp":"2026-02-01T09:05:00Z","event":"Location","StarSystem":"Shinrarta Dezhra","SystemAddress":3932277478106,"StarPos":[55.7,17.6,27.1]}`)
 
-	expOne, err := testApp.createExpeditionWithWaypoints("Carrier Prompt One", "", []string{"Sol", "Rohini", "Colonia"})
-	if err != nil {
-		testingContext.Fatalf("createExpeditionWithWaypoints: %v", err)
-	}
+	expOne := mustCreateExpeditionWithWaypoints(testingContext, testApp, "Carrier Prompt One", "", "Sol", "Rohini", "Colonia")
 	if err := testApp.UpdateExpeditionCarrierConfig(expOne.ID, "squadron", 0); err != nil {
 		testingContext.Fatalf("UpdateExpeditionCarrierConfig: %v", err)
 	}
@@ -126,10 +123,7 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 
 	// Non-cancellation Spansh errors fall back to ManualMode: true, ClearActiveCarrierRouteWithUndo emits plan domain,
 	// and CompleteCarrierRouteArrival with targetRowID=0 resolves the next unarrived FC stop inside the tx.
-	activeExp, err := testApp.createExpeditionWithWaypoints("Arrival Zero Target", "", []string{"Sol", "Beagle Point"})
-	if err != nil {
-		testingContext.Fatalf("createExpeditionWithWaypoints activeExp: %v", err)
-	}
+	activeExp := mustCreateExpeditionWithWaypoints(testingContext, testApp, "Arrival Zero Target", "", "Sol", "Beagle Point")
 	activePlan := mustGetPlan(testingContext, testApp, activeExp.ID)
 	beagleStopID := activePlan.Rows[1].Row.ID
 	if err := testApp.UpdateRow(expedition.RowPatch{ID: beagleStopID, FCStop: &fcStop}); err != nil {
@@ -317,10 +311,7 @@ func TestSwitchCarrierRouteToManualAndSaveDraftInputs(testingContext *testing.T)
 		}, nil
 	}
 
-	createdExp, createErr := testApp.createExpeditionWithWaypoints("Manual Switch Test", "", []string{"Sol", "Colonia"})
-	if createErr != nil {
-		testingContext.Fatalf("createExpeditionWithWaypoints: %v", createErr)
-	}
+	createdExp := mustCreateExpeditionWithWaypoints(testingContext, testApp, "Manual Switch Test", "", "Sol", "Colonia")
 	plan := mustGetPlan(testingContext, testApp, createdExp.ID)
 	fcStop := true
 	stopRowID := plan.Rows[1].Row.ID

@@ -3,20 +3,14 @@ package releases_test
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"planisphere/internal/sources/releases"
+	"planisphere/internal/testutil/httptestutil"
 	"planisphere/internal/version"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (transport roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return transport(request)
-}
 
 func TestLatestReleaseAPIURL(testingContext *testing.T) {
 	urlCases := []struct {
@@ -62,7 +56,7 @@ func TestFetchLatestRelease(testingContext *testing.T) {
 	releaseCases := []struct {
 		name        string
 		makeContext func() (context.Context, context.CancelFunc)
-		roundTrip   roundTripFunc
+		roundTrip   httptestutil.RoundTripFunc
 		wantVersion string
 		wantErrText string
 		wantErrIs   error
@@ -79,36 +73,21 @@ func TestFetchLatestRelease(testingContext *testing.T) {
 				if gotAccept := request.Header.Get("Accept"); gotAccept != "application/vnd.github+json" {
 					testingContext.Errorf("Accept = %q, want application/vnd.github+json", gotAccept)
 				}
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Status:     "200 OK",
-					Header:     make(http.Header),
-					Body:       io.NopCloser(strings.NewReader(`{"tag_name":" v1.2.3 "}`)),
-				}, nil
+				return httptestutil.Response(http.StatusOK, `{"tag_name":" v1.2.3 "}`), nil
 			},
 			wantVersion: "1.2.3",
 		},
 		{
 			name: "non-200 HTTP status returns descriptive error",
 			roundTrip: func(_ *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusServiceUnavailable,
-					Status:     "503 Service Unavailable",
-					Header:     make(http.Header),
-					Body:       io.NopCloser(strings.NewReader(`{"message":"unavailable"}`)),
-				}, nil
+				return httptestutil.Response(http.StatusServiceUnavailable, `{"message":"unavailable"}`), nil
 			},
 			wantErrText: "github latest release status: 503 Service Unavailable",
 		},
 		{
 			name: "invalid JSON payload returns decode error",
 			roundTrip: func(_ *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Status:     "200 OK",
-					Header:     make(http.Header),
-					Body:       io.NopCloser(strings.NewReader(`{"tag_name":`)),
-				}, nil
+				return httptestutil.Response(http.StatusOK, `{"tag_name":`), nil
 			},
 			wantErrText: "decode github latest release",
 		},
@@ -129,11 +108,7 @@ func TestFetchLatestRelease(testingContext *testing.T) {
 
 	for _, testCase := range releaseCases {
 		testingContext.Run(testCase.name, func(subContext *testing.T) {
-			originalTransport := http.DefaultTransport
-			subContext.Cleanup(func() {
-				http.DefaultTransport = originalTransport
-			})
-			http.DefaultTransport = testCase.roundTrip
+			httptestutil.StubDefaultTransport(subContext, testCase.roundTrip)
 
 			requestContext := context.Background()
 			if testCase.makeContext != nil {

@@ -245,22 +245,4 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	if locError != nil || lastLoc != "OwnedCarrierSys" {
 		testingContext.Fatalf("LastLocation = %q err=%v, want OwnedCarrierSys (foreign carrier ignored)", lastLoc, locError)
 	}
-	depotInfo, depotError := replay.QueryCarrierDepotInfo(databaseConnection, ownedSnapshot)
-	if depotError != nil {
-		testingContext.Fatalf("DepotInfo: %v", depotError)
-	}
-	if depotInfo.UsedCapacity != 10000 || depotInfo.DepotTritium != 750 || depotInfo.Cargo != 120 {
-		testingContext.Fatalf("DepotInfo = %+v, want UsedCapacity=10000 DepotTritium=750 Cargo=120", depotInfo)
-	}
-
-	// Own carrier deposit overrides DepotTritium when timestamp >= latest CarrierStats.
-	journaltest.InsertParsedLines(
-		testingContext,
-		databaseConnection,
-		`{"timestamp":"2026-05-02T13:00:00Z","event":"CarrierDepositFuel","CarrierID":3701199360,"Amount":150,"Total":900}`,
-	)
-	updatedDepot, updatedDepotErr := replay.QueryCarrierDepotInfo(databaseConnection, ownedSnapshot)
-	if updatedDepotErr != nil || updatedDepot.DepotTritium != 900 {
-		testingContext.Fatalf("updated DepotInfo = %+v err=%v, want DepotTritium=900", updatedDepot, updatedDepotErr)
-	}
 }

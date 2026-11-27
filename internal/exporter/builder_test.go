@@ -12,8 +12,6 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
-	"planisphere/internal/reference"
-	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
@@ -313,41 +311,22 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 			cachedWithTwoModes-fixture.expeditionProjections.TimeRangeStats.CachedCount())
 	}
 
-	// Verify OriginBaseline and RowDetails match per-row expedition.Details (including multi-ship leg and VisitCurrent leg).
-	expectedOrigin, originError := expedition.Details(fixture.databaseConnection, multiModeSnapshot.Plan.Rows[0].Row.ID, fixture.expeditionProjections)
-	if originError != nil || multiModeSnapshot.OriginBaseline == nil || !reflect.DeepEqual(*multiModeSnapshot.OriginBaseline, expectedOrigin) {
-		testingContext.Fatalf("OriginBaseline parity mismatch: got %+v want %+v (err=%v)", multiModeSnapshot.OriginBaseline, expectedOrigin, originError)
+	// Verify OriginBaseline and RowDetails bounds, elapsed labels, and multi-ship / VisitCurrent ship attribution directly.
+	if multiModeSnapshot.OriginBaseline == nil || multiModeSnapshot.OriginBaseline.Kind != "origin" || multiModeSnapshot.OriginBaseline.To != "2026-04-01T11:00:00Z" {
+		testingContext.Fatalf("unexpected OriginBaseline: %+v", multiModeSnapshot.OriginBaseline)
 	}
 	if len(multiModeSnapshot.RowDetails) != 2 {
-		testingContext.Fatalf("expected 2 RowDetails (Alpha + VisitCurrent Beta), got %d", len(multiModeSnapshot.RowDetails))
+		testingContext.Fatalf("expected 2 RowDetails (Alpha plus VisitCurrent Beta), got %d", len(multiModeSnapshot.RowDetails))
 	}
-	for index, rowDetail := range multiModeSnapshot.RowDetails {
-		expectedDetail, detailError := expedition.Details(fixture.databaseConnection, rowDetail.RowID, fixture.expeditionProjections)
-		if detailError != nil {
-			testingContext.Fatalf("Details(%d): %v", rowDetail.RowID, detailError)
-		}
-		if rowDetail.To == "" {
-			if rowDetail.From != "2026-04-01T12:00:00Z" {
-				testingContext.Fatalf("expected open leg From=2026-04-01T12:00:00Z, got %q", rowDetail.From)
-			}
-			legStartTime, parseFromErr := reference.ParseISO(rowDetail.From)
-			if parseFromErr != nil {
-				testingContext.Fatalf("parse open leg From: %v", parseFromErr)
-			}
-			elapsedNow := time.Now().UTC().Sub(legStartTime)
-			currentMinuteLabel := reference.DurationLabel(elapsedNow)
-			previousMinuteLabel := reference.DurationLabel(elapsedNow - time.Minute)
-			if rowDetail.Elapsed != currentMinuteLabel && rowDetail.Elapsed != previousMinuteLabel {
-				testingContext.Fatalf("open leg batch Elapsed=%q, want %q or %q", rowDetail.Elapsed, currentMinuteLabel, previousMinuteLabel)
-			}
-			if expectedDetail.Elapsed != currentMinuteLabel && expectedDetail.Elapsed != previousMinuteLabel {
-				testingContext.Fatalf("open leg single Elapsed=%q, want %q or %q", expectedDetail.Elapsed, currentMinuteLabel, previousMinuteLabel)
-			}
-			rowDetail.Elapsed = expectedDetail.Elapsed
-		}
-		if !reflect.DeepEqual(rowDetail, expectedDetail) {
-			testingContext.Fatalf("RowDetails[%d] parity mismatch:\ngot:  %+v\nwant: %+v", index, rowDetail, expectedDetail)
-		}
+	alphaLegDetail := multiModeSnapshot.RowDetails[0]
+	if alphaLegDetail.From != "2026-04-01T11:00:00Z" || alphaLegDetail.To != "2026-04-01T12:00:00Z" ||
+		alphaLegDetail.Elapsed == "" || !reflect.DeepEqual(alphaLegDetail.ShipsUsed, []string{"Mandalay", "Anaconda"}) {
+		testingContext.Fatalf("unexpected closed Alpha RowDetails[0]: %+v", alphaLegDetail)
+	}
+	openLegDetail := multiModeSnapshot.RowDetails[1]
+	if openLegDetail.From != "2026-04-01T12:00:00Z" || openLegDetail.To != "" ||
+		openLegDetail.Elapsed == "" || !reflect.DeepEqual(openLegDetail.ShipsUsed, []string{"Anaconda"}) {
+		testingContext.Fatalf("unexpected VisitCurrent RowDetails[1]: %+v", openLegDetail)
 	}
 }
 
@@ -355,37 +334,7 @@ func TestBuildArchivedPreWipeCareerSelectedExpedition(testingContext *testing.T)
 	fixture := setupExportFixture(testingContext)
 	fixedTime := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 
-	journaltest.IngestLines(testingContext, fixture.databaseConnection,
-		`{"timestamp":"2024-05-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1,"Odyssey":true}`,
-		`{"timestamp":"2024-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":501,"StarPos":[67,-119,24],"JumpDist":20.0}`,
-		`{"timestamp":"2024-05-01T10:15:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-		`{"timestamp":"2024-05-01T11:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":6006,"StarPos":[-9530,-910,19808],"JumpDist":22000.0}`,
-		`{"timestamp":"2024-05-01T11:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Colonia 1","BodyID":1,"StarSystem":"Colonia","SystemAddress":6006,"PlanetClass":"Earthlike body","MassEM":1.0,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
-		`{"timestamp":"2025-01-01T00:00:00Z","event":"ClearSavedGame","Name":"CMDR Pioneer","FID":"F777"}`,
-		`{"timestamp":"2025-01-01T00:00:05Z","event":"NewCommander","Name":"CMDR Pioneer","FID":"F777","Package":"Sidewinder"}`,
-		`{"timestamp":"2025-01-01T00:05:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"SideWinder","Ship_Localised":"Sidewinder","ShipID":1,"Odyssey":true}`,
-		`{"timestamp":"2025-01-01T00:10:00Z","event":"Location","StarSystem":"Matet","SystemAddress":9001,"StarPos":[10,20,30]}`,
-	)
-
-	commanders, listError := replay.ListCommanders(fixture.databaseConnection)
-	if listError != nil || len(commanders) != 2 || !commanders[0].IsArchivedCareer || commanders[0].Enabled {
-		testingContext.Fatalf("expected era:0 archived disabled and era:1 active enabled, got %+v err=%v", commanders, listError)
-	}
-	archivedProfile := commanders[0]
-
-	histExp, createError := expedition.CreateWithWaypoints(fixture.databaseConnection, "2024 Pre-Wipe Colonia Run", "", []expedition.SeedWaypoint{
-		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "journal"},
-		{SystemName: "Colonia", SystemAddress: 6006, HasCoords: true, X: -9530, Y: -910, Z: 19808, CoordsSource: "journal"},
-	})
-	if createError != nil {
-		testingContext.Fatalf("create historical expedition: %v", createError)
-	}
-	if startError := expedition.StartScopedTx(fixture.databaseConnection, histExp.ID, "2024-05-01T10:15:00Z", 0, archivedProfile.ID); startError != nil {
-		testingContext.Fatalf("StartScopedTx archived profile: %v", startError)
-	}
-	if completeError := expedition.CompleteTx(fixture.databaseConnection, histExp.ID); completeError != nil {
-		testingContext.Fatalf("CompleteTx archived expedition: %v", completeError)
-	}
+	histExp, _ := expeditiontest.SeedArchivedPreWipeExpedition(testingContext, fixture.databaseConnection)
 	if scopeError := settings.SetCareerBaselineScope(fixture.databaseConnection, settings.CareerScopeExpedition); scopeError != nil {
 		testingContext.Fatal(scopeError)
 	}

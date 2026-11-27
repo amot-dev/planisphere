@@ -2,6 +2,7 @@
 import { act, type ComponentProps, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { exporter } from '../../api/models'
+import { createDeferred, flushMicrotasks } from '../../test/async'
 import { installCanvasPngMock, installResizeObserverMock } from '../../test/domMocks'
 import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 import { mountTestRoot, setFormControlValue, type MountedTestRoot } from '../../test/render'
@@ -13,12 +14,6 @@ import { ExportPreviewPane } from './ExportPreviewPane'
 
 interface MemoComponentInternal<TProps> {
   type: (props: TProps) => ReactElement | null
-}
-
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
 }
 
 async function mountExportModal(expeditionId = 7): Promise<MountedTestRoot> {
@@ -37,13 +32,13 @@ describe('ExportExpeditionModal', () => {
     installResizeObserverMock()
 
     const sampleExportData = buildSampleExportData()
-    let resolveSavePath!: (path: string) => void
+    let savePathDeferred = createDeferred<string>()
     const { spies } = installWailsAppMock({
       GetExpeditionExportData: async () => sampleExportData,
-      PickExportSavePath: () =>
-        new Promise<string>((resolve) => {
-          resolveSavePath = resolve
-        }),
+      PickExportSavePath: () => {
+        savePathDeferred = createDeferred<string>()
+        return savePathDeferred.promise
+      },
       WriteExportOutput: async (targetPath: string) => targetPath,
     })
 
@@ -163,7 +158,7 @@ describe('ExportExpeditionModal', () => {
 
     // Cancel save dialog so exporting resets and controls re-enable cleanly.
     await act(async () => {
-      resolveSavePath('')
+      savePathDeferred.resolve('')
       await flushMicrotasks()
     })
 
@@ -196,7 +191,7 @@ describe('ExportExpeditionModal', () => {
     expect(mounted.findButtonByText('Separate (', { exact: false }).disabled).toBe(true)
 
     await act(async () => {
-      resolveSavePath('')
+      savePathDeferred.resolve('')
       await flushMicrotasks()
     })
     expect(mounted.findButtonByText('Next', { exact: true }).disabled).toBe(false)

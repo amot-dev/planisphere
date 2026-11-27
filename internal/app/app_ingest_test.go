@@ -1,7 +1,6 @@
 package app
 
 import (
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +12,9 @@ import (
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/eddtest"
+	"planisphere/internal/testutil/httptestutil"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testingContext *testing.T) {
@@ -136,24 +138,13 @@ func TestRescanJournalsSynchronousCompletionAndSelectiveCacheInvalidation(testin
 func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	expeditionID := createAndStartExpedition(testingContext, testApp, "Cache Key Test", "Sol")
-	initialPlan, initialPlanError := testApp.GetPlan(expeditionID)
-	if initialPlanError != nil || len(initialPlan.Rows) == 0 {
-		testingContext.Fatalf("initial GetPlan: len=%d err=%v", len(initialPlan.Rows), initialPlanError)
-	}
-	secondRow, insertError := testApp.AddRow(expeditionID, initialPlan.Rows[0].Row.ID, expedition.RowWaypoint, 0)
-	if insertError != nil {
-		testingContext.Fatalf("AddRow: %v", insertError)
-	}
-	secondSystem := "Alpha Centauri"
-	if updateError := testApp.UpdateRow(expedition.RowPatch{ID: secondRow.ID, SystemName: &secondSystem}); updateError != nil {
-		testingContext.Fatalf("UpdateRow second waypoint: %v", updateError)
-	}
-	if _, execError := testApp.db.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
-		 VALUES ('ev-cache-key-dest', '2026-01-02T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2026-01-02T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2026-01-02T00:00:00Z')`,
-	); execError != nil {
-		testingContext.Fatalf("insert destination arrival: %v", execError)
-	}
+	initialPlan := mustGetPlan(testingContext, testApp, expeditionID)
+	secondRow := addTestWaypoint(testingContext, testApp, expeditionID, initialPlan.Rows[0].Row.ID, "Alpha Centauri")
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-01-02T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
+	)
 	if _, reevalError := expedition.ReevaluateTx(testApp.db, expeditionID); reevalError != nil {
 		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
 	}
@@ -240,12 +231,11 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	if activeModeErr := testApp.SetExpeditionFlightMode(expeditionID, 2); activeModeErr != nil {
 		testingContext.Fatalf("SetExpeditionFlightMode(2): %v", activeModeErr)
 	}
-	if _, execError := testApp.db.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
-		 VALUES ('ev-cache-key-post', '2026-01-03T00:00:00Z', 'FSDJump', 'Barnard''s Star', 1003, '{"timestamp":"2026-01-03T00:00:00Z","event":"FSDJump","StarSystem":"Barnard''s Star","SystemAddress":1003,"StarPos":[2,2,2],"JumpDist":6.0}', 'test.log', '2026-01-03T00:00:00Z')`,
-	); execError != nil {
-		testingContext.Fatalf("insert post-destination jump: %v", execError)
-	}
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-01-03T00:00:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1003,"StarPos":[2,2,2],"JumpDist":6.0}`,
+	)
 	if _, reevalError := expedition.ReevaluateTx(testApp.db, expeditionID); reevalError != nil {
 		testingContext.Fatalf("ReevaluateTx post-destination: %v", reevalError)
 	}
@@ -282,33 +272,15 @@ func TestWarmInitialStatsCanonicalCacheKeyAndCosmeticPlanEdits(testingContext *t
 	}
 }
 
-type ingestRoundTripFunc func(*http.Request) (*http.Response, error)
-
-func (transport ingestRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return transport(request)
-}
-
 func TestRefreshGEC(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 
-	originalTransport := http.DefaultTransport
-	testingContext.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
-	http.DefaultTransport = ingestRoundTripFunc(func(_ *http.Request) (*http.Response, error) {
+	httptestutil.StubDefaultTransport(testingContext, func(_ *http.Request) (*http.Response, error) {
 		payload := `[{"id":1,"source":"GEC","type":"Historical","name":"Cradle of Humanity","galMapSearch":"Sol","coordinates":[0,0,0]}]`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(payload)),
-		}, nil
+		return httptestutil.Response(http.StatusOK, payload), nil
 	})
 
-	createdExp, createErr := testApp.createExpeditionWithWaypoints("GEC Backfill", "", []string{"Sol"})
-	if createErr != nil {
-		testingContext.Fatalf("createExpeditionWithWaypoints: %v", createErr)
-	}
-	testApp.backgroundWg.Wait()
+	createdExp := mustCreateExpeditionWithWaypoints(testingContext, testApp, "GEC Backfill", "", "Sol")
 
 	// Verify in-flight RefreshGEC guard and uninitialized GEC catalog error handling.
 	testApp.gecRefreshing.Store(true)
@@ -351,7 +323,7 @@ func TestRefreshGEC(testingContext *testing.T) {
 func TestMaybeCatchUpEDD(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 
-	eddPath := createMinimalEDDSQLite(testingContext, [][2]string{
+	eddPath := eddtest.BuildMinimalArchive(testingContext, [][2]string{
 		{"Fileheader", `{"timestamp":"2026-04-01T10:00:00Z","event":"Fileheader","part":1,"Odyssey":true}`},
 		{"Location", `{"timestamp":"2026-04-01T10:01:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":3230,"StarPos":[-9530.5,-910.28,19808.13]}`},
 	})

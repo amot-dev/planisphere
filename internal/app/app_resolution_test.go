@@ -2,7 +2,6 @@ package app
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"sync/atomic"
@@ -11,6 +10,8 @@ import (
 	"planisphere/internal/reference"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/httptestutil"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testingContext *testing.T) {
@@ -22,9 +23,12 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 		testingContext.Fatalf("set GEC timestamp: %v", setGECFetchErr)
 	}
 
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-01-01T00:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+	)
 	if _, execError := testApp.db.Exec(`
-		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, raw_json, ingested_at)
-		VALUES ('res-sol', '2026-01-01T00:00:00Z', 'FSDJump', 'Sol', 10477373803, 0, 0, 0, '{}', '2026-01-01T00:00:00Z');
 		INSERT INTO system_cache (name_key, system_name, system_address, edsm_id, x, y, z, source, fetched_at)
 		VALUES ('colonia', 'Colonia', 3238296097059, 43805, -9530.5, -910.28125, 19808.125, 'edsm', '2026-01-01T00:00:00Z');
 		INSERT INTO gec_pois_cache (id, name, system_name, system_address, poi_type, region, summary, poi_url, raw_json, source, fetched_at) VALUES
@@ -52,7 +56,8 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 
 	var onlineRequests atomic.Int32
 	offlineVerifiedBeforeFirstHTTP := atomic.Bool{}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	testApp.resolver.EDSMBase = "https://edsm.example.test"
+	testApp.resolver.HTTP = httptestutil.NewClient(func(request *http.Request) (*http.Response, error) {
 		requestNumber := onlineRequests.Add(1)
 		if requestNumber == 1 {
 			rowsBeforeOnline, listBeforeErr := expedition.ListRows(testApp.db, createdExpedition.ID)
@@ -64,23 +69,17 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 				offlineVerifiedBeforeFirstHTTP.Store(true)
 			}
 		}
-		writer.Header().Set("Content-Type", "application/json")
-		var responsePayload []byte
+		var responsePayload string
 		switch request.URL.Query().Get("systemName") {
 		case "Barnards Loop":
-			responsePayload = []byte(`{"name":"Barnards Loop","id":10,"id64":5001,"coords":{"x":100,"y":-200,"z":-1300}}`)
+			responsePayload = `{"name":"Barnards Loop","id":10,"id64":5001,"coords":{"x":100,"y":-200,"z":-1300}}`
 		case "Beagle Point":
-			responsePayload = []byte(`{"name":"Beagle Point","id":20,"id64":827689533218,"coords":{"x":-1111.5,"y":-134.2,"z":65269.75}}`)
+			responsePayload = `{"name":"Beagle Point","id":20,"id64":827689533218,"coords":{"x":-1111.5,"y":-134.2,"z":65269.75}}`
 		default:
-			responsePayload = []byte(`[]`)
+			responsePayload = `[]`
 		}
-		if _, writeErr := writer.Write(responsePayload); writeErr != nil {
-			testingContext.Errorf("write mock EDSM response: %v", writeErr)
-		}
-	}))
-	testingContext.Cleanup(mockServer.Close)
-	testApp.resolver.EDSMBase = mockServer.URL
-	testApp.resolver.HTTP = mockServer.Client()
+		return httptestutil.Response(http.StatusOK, responsePayload), nil
+	})
 
 	testApp.runExpeditionResolutionWorker(testApp.db, createdExpedition.ID, false)
 
@@ -151,17 +150,14 @@ func TestOnlineResolutionAbortsAcrossDatabaseSwitch(testingContext *testing.T) {
 	tempDir := testingContext.TempDir()
 	testApp := setupTestApp(testingContext)
 	enteredHTTP, releaseHTTP, httpCalls := make(chan struct{}), make(chan struct{}), atomic.Int32{}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	testApp.resolver.EDSMBase = "https://edsm.example.test"
+	testApp.resolver.HTTP = httptestutil.NewClient(func(_ *http.Request) (*http.Response, error) {
 		if httpCalls.Add(1) == 1 {
 			close(enteredHTTP)
 			<-releaseHTTP
 		}
-		if _, writeErr := writer.Write([]byte(`{"name":"Deep One","id":1,"id64":9001,"coords":{"x":1,"y":2,"z":3}}`)); writeErr != nil {
-			testingContext.Errorf("write mock EDSM: %v", writeErr)
-		}
-	}))
-	testingContext.Cleanup(mockServer.Close)
-	testApp.resolver.EDSMBase, testApp.resolver.HTTP = mockServer.URL, mockServer.Client()
+		return httptestutil.Response(http.StatusOK, `{"name":"Deep One","id":1,"id64":9001,"coords":{"x":1,"y":2,"z":3}}`), nil
+	})
 	oldExp, oldErr := expedition.CreateWithWaypoints(testApp.db, "Old", "", []expedition.SeedWaypoint{{SystemName: "Deep One"}, {SystemName: "Deep Two"}})
 	if onlineErr := settings.SetOnlineLookups(testApp.db, true); onlineErr != nil || oldErr != nil {
 		testingContext.Fatalf("prepare old expedition: onlineErr=%v oldErr=%v", onlineErr, oldErr)
@@ -180,13 +176,19 @@ func TestOnlineResolutionAbortsAcrossDatabaseSwitch(testingContext *testing.T) {
 
 func TestAsyncResolutionVisitedAddressMatchEmitsStatsDomain(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-	if _, execErr := testApp.db.Exec(`INSERT INTO journal_events (event_uid,timestamp,event,system_name,system_address,star_x,star_y,star_z,raw_json,ingested_at) VALUES ('addr-sol','2026-03-01T10:00:00Z','Location','Sol',10477373803,0,0,0,'{}','2026-03-01T10:00:00Z'),('addr-col','2026-03-01T11:00:00Z','FSDJump','Colonia',3238296097059,-9530.5,-910.28125,19808.125,'{}','2026-03-01T11:00:00Z'); INSERT INTO system_cache (name_key,system_name,system_address,edsm_id,x,y,z,source,fetched_at) VALUES ('eol prou rs-t d3-94','Eol Prou RS-T d3-94',3238296097059,43805,-9530.5,-910.28125,19808.125,'edsm','2026-03-01T10:00:00Z')`); execErr != nil {
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-03-01T11:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":3238296097059,"StarPos":[-9530.5,-910.28125,19808.125]}`,
+	)
+	if _, execErr := testApp.db.Exec(`INSERT INTO system_cache (name_key,system_name,system_address,edsm_id,x,y,z,source,fetched_at) VALUES ('eol prou rs-t d3-94','Eol Prou RS-T d3-94',3238296097059,43805,-9530.5,-910.28125,19808.125,'edsm','2026-03-01T10:00:00Z')`); execErr != nil {
 		testingContext.Fatalf("seed resolution fixtures: %v", execErr)
 	}
-	createdExp, createErr := testApp.createExpeditionWithWaypoints("Address Visit", "", []string{"Sol"})
+	createdExp := mustCreateExpeditionWithWaypoints(testingContext, testApp, "Address Visit", "", "Sol")
 	addedRow, addErr := testApp.AddRow(createdExp.ID, 0, expedition.RowWaypoint, 0)
-	if createErr != nil || addErr != nil || testApp.StartExpedition(createdExp.ID, "2026-03-01T10:00:00Z", 0) != nil {
-		testingContext.Fatalf("prepare active expedition: createErr=%v addErr=%v", createErr, addErr)
+	if addErr != nil || testApp.StartExpedition(createdExp.ID, "2026-03-01T10:00:00Z", 0) != nil {
+		testingContext.Fatalf("prepare active expedition: addErr=%v", addErr)
 	}
 	aliasName := "Eol Prou RS-T d3-94"
 	eventsRecorder := captureAppEvents(testingContext, testApp)

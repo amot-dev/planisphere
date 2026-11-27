@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/expeditiontest"
@@ -183,38 +182,7 @@ func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanAndDetails(testingCo
 	dbConn := dbtest.OpenMemory(testingContext)
 	_, projectionsBundle := expeditiontest.NewProjections(dbConn)
 
-	// Era 0 (pre-wipe archived career, enabled=0 by default) and Era 1 (post-wipe active career, enabled=1).
-	journaltest.IngestLines(testingContext, dbConn,
-		`{"timestamp":"2024-05-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1,"Odyssey":true}`,
-		`{"timestamp":"2024-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":501,"StarPos":[67,-119,24],"JumpDist":20.0}`,
-		`{"timestamp":"2024-05-01T10:15:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-		`{"timestamp":"2024-05-01T11:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":6006,"StarPos":[-9530,-910,19808],"JumpDist":22000.0}`,
-		`{"timestamp":"2024-05-01T11:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Colonia 1","BodyID":1,"StarSystem":"Colonia","SystemAddress":6006,"PlanetClass":"Earthlike body","MassEM":1.0,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
-		`{"timestamp":"2025-01-01T00:00:00Z","event":"ClearSavedGame","Name":"CMDR Pioneer","FID":"F777"}`,
-		`{"timestamp":"2025-01-01T00:00:05Z","event":"NewCommander","Name":"CMDR Pioneer","FID":"F777","Package":"Sidewinder"}`,
-		`{"timestamp":"2025-01-01T00:05:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"SideWinder","Ship_Localised":"Sidewinder","ShipID":1,"Odyssey":true}`,
-		`{"timestamp":"2025-01-01T00:10:00Z","event":"Location","StarSystem":"Matet","SystemAddress":9001,"StarPos":[10,20,30]}`,
-	)
-
-	commanders, err := replay.ListCommanders(dbConn)
-	if err != nil || len(commanders) != 2 || !commanders[0].IsArchivedCareer || commanders[0].Enabled {
-		testingContext.Fatalf("expected era:0 archived disabled and era:1 active enabled, got %+v err=%v", commanders, err)
-	}
-	archivedProfile := commanders[0]
-
-	histExp, err := expedition.CreateWithWaypoints(dbConn, "2024 Pre-Wipe Colonia Run", "", []expedition.SeedWaypoint{
-		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "journal"},
-		{SystemName: "Colonia", SystemAddress: 6006, HasCoords: true, X: -9530, Y: -910, Z: 19808, CoordsSource: "journal"},
-	})
-	if err != nil {
-		testingContext.Fatalf("create historical expedition: %v", err)
-	}
-	if err := expedition.StartScopedTx(dbConn, histExp.ID, "2024-05-01T10:15:00Z", 0, archivedProfile.ID); err != nil {
-		testingContext.Fatalf("StartScopedTx archived profile: %v", err)
-	}
-	if err := expedition.CompleteTx(dbConn, histExp.ID); err != nil {
-		testingContext.Fatalf("CompleteTx archived expedition: %v", err)
-	}
+	histExp, _ := expeditiontest.SeedArchivedPreWipeExpedition(testingContext, dbConn)
 
 	planView, err := expedition.BuildPlan(dbConn, histExp.ID, nil, projectionsBundle)
 	if err != nil || planView.VisitedWaypointCount != 2 {

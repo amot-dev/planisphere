@@ -1,17 +1,12 @@
 import { expedition, exporter, realization, stats } from '../../api/models'
 import { formatCredits, formatElapsedDuration, formatInt, formatLy } from '../../domain/galacticTime'
+import { expandConfigToCartItems } from '../../features/export/exportMetrics'
 import {
-  ExpeditionExportData,
-  ExportCareerDiffItem,
-  ExportCarrierCost,
-  ExportDerivedMetrics,
-  ExportLegTelemetry,
-  ExportModeBucket,
-  ExportRegionBucket,
-  ExportRegionModeBucket,
-  ExportTelemetrySnapshot,
-  PlainWailsDto,
+  CartBlockItem, ConfiguratorBlockConfig, ExpeditionExportData, ExportCareerDiffItem,
+  ExportCarrierCost, ExportDerivedMetrics, ExportLegTelemetry, ExportModeBucket,
+  ExportRegionBucket, ExportRegionModeBucket, ExportTelemetrySnapshot, PlainWailsDto,
 } from '../../features/export/exportTypes'
+import { makeMetrics, makeMode, makeRealization, makeWaypointDetails } from '../fixtures'
 
 const DAY_MS = 86_400_000
 
@@ -21,25 +16,9 @@ export type SampleExportDataOverrides = Omit<Partial<ExpeditionExportData>, 'exp
   modeBuckets?: Array<Omit<ExportModeBucket, 'elapsedDays' | 'shipsFlown' | 'derived'> & Partial<Pick<ExportModeBucket, 'elapsedDays' | 'shipsFlown' | 'derived'>>>
 }
 
-function makeMetrics(overrides: Partial<stats.Metrics> = {}): stats.Metrics {
-  return {
-    distanceLy: 0, shipDistanceLy: 0, carrierPassengerLy: 0, jumps: 0,
-    carrierJumps: 0, carrierDistanceLy: 0, tritiumUsed: undefined,
-    jetConeBoosts: 0, premiumBoosts: 0, standardBoosts: 0, basicBoosts: 0,
-    bodiesScanned: 0, bodiesMapped: 0, efficientMappings: 0,
-    scanValueTotal: 0, scanValueBase: 0, scanValueBonus: 0, scanValueEfficiencyBonus: 0,
-    firstDiscoveries: 0, firstMapped: 0, organicSamples: 0,
-    organicValueTotal: 0, organicValueBase: 0, organicValueBonus: 0, firstLogged: 0,
-    ...overrides,
-  }
-}
-
-function makeRealization(overrides: Partial<realization.Breakdown> = {}): realization.Breakdown {
-  return {
-    totalRealized: 0, cartoLostDeath: 0, organicLostDeath: 0, cartoStolen: 0,
-    organicStolen: 0, carrierTariffLoss: 0, npcCrewLoss: 0, pendingValue: 0,
-    ...overrides,
-  }
+/** Expands a single-card configurator block into its concrete CartBlockItem for renderer and filename tests. */
+export function expandCartItem(exportData: ExpeditionExportData, config: ConfiguratorBlockConfig, idPrefix = 'item'): CartBlockItem {
+  return expandConfigToCartItems(exportData, config, idPrefix)[0]
 }
 
 function sumMetrics(left: stats.Metrics, right: stats.Metrics): stats.Metrics {
@@ -309,8 +288,8 @@ function buildDefaultSamplePlan(): expedition.PlanView {
     startGalactic: '3312-04-01 08:00 UTC', endGalactic: '', waypointCount: 5, visitedWaypointCount: 4,
     plannedLy: 6000, coveredLy: 4200, remainingLy: 1800,
     modes: [
-      { id: 1, name: 'Exploration', color: '#00D2FF', isDefault: true, sortOrder: 1 },
-      { id: 2, name: 'Travel', color: '#FF7100', isDefault: true, sortOrder: 2 },
+      makeMode({ id: 1, name: 'Exploration', color: '#00D2FF', sortOrder: 1 }),
+      makeMode({ id: 2, name: 'Travel', color: '#FF7100', sortOrder: 2 }),
     ],
     rows: [
       { row: { id: 100, rowType: 'region', regionId: 18 }, number: 0, regionName: 'Inner Orion Spur' },
@@ -381,17 +360,17 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
     totalRealized: 155_000_000, cartoLostDeath: 1_000_000, organicLostDeath: 2_000_000,
     carrierTariffLoss: 2_000_000, pendingValue: 12_000_000,
   })
-  const defaultOriginBaseline = expedition.WaypointDetails.createFrom({
+  const defaultOriginBaseline = makeWaypointDetails({
     rowId: 1, kind: 'origin', number: 1, from: '2025-01-01T00:00:00Z', to: '2026-04-01T10:00:00Z',
     fromGalactic: '3311-01-01 00:00 UTC', toGalactic: '3312-04-01 10:00 UTC', elapsed: '1y 90d 10h 00m', shipsUsed: [],
-    metrics: makeMetrics({ distanceLy: 10_000, shipDistanceLy: 10_000, jumps: 200, bodiesScanned: 230, scanValueTotal: 84_000_000, organicSamples: 26, organicValueTotal: 260_000_000 }),
-    realization: makeRealization({ totalRealized: 310_000_000 }),
+    metrics: { distanceLy: 10_000, shipDistanceLy: 10_000, jumps: 200, bodiesScanned: 230, scanValueTotal: 84_000_000, organicSamples: 26, organicValueTotal: 260_000_000 },
+    realization: { totalRealized: 310_000_000 },
   })
   const defaultRowDetails = [
-    expedition.WaypointDetails.createFrom({ rowId: 2, kind: 'leg', number: 2, prevSystem: 'Sol', from: '2026-04-01T10:00:00Z', to: '2026-04-02T12:00:00Z', fromGalactic: '3312-04-01 10:00 UTC', toGalactic: '3312-04-02 12:00 UTC', elapsed: '1d 02h 00m', shipsUsed: ['Mandalay'], metrics: leg1Metrics, realization: leg1Realization }),
-    expedition.WaypointDetails.createFrom({ rowId: 3, kind: 'leg', number: 3, prevSystem: 'Alpha Rim', from: '2026-04-02T12:00:00Z', to: '2026-04-04T14:00:00Z', fromGalactic: '3312-04-02 12:00 UTC', toGalactic: '3312-04-04 14:00 UTC', elapsed: '2d 02h 00m', shipsUsed: ['Anaconda'], metrics: leg2Metrics, realization: leg2Realization }),
-    expedition.WaypointDetails.createFrom({ rowId: 4, kind: 'leg', number: 4, prevSystem: 'Beta Crossing', from: '2026-04-04T14:00:00Z', to: '', fromGalactic: '3312-04-04 14:00 UTC', toGalactic: '', inSystem: true, elapsed: '22h 00m', shipsUsed: ['Mandalay'], metrics: leg3Metrics, realization: leg3Realization }),
-    expedition.WaypointDetails.createFrom({ rowId: 5, kind: 'leg', number: 5, prevSystem: 'Odin Beacon', from: '2026-04-05T12:00:00Z', to: '', fromGalactic: '3312-04-05 12:00 UTC', toGalactic: '', elapsed: '1h 00m', shipsUsed: ['Mandalay'], metrics: makeMetrics({ distanceLy: 100, shipDistanceLy: 100, jumps: 2 }), realization: makeRealization() }),
+    makeWaypointDetails({ rowId: 2, number: 2, prevSystem: 'Sol', from: '2026-04-01T10:00:00Z', to: '2026-04-02T12:00:00Z', fromGalactic: '3312-04-01 10:00 UTC', toGalactic: '3312-04-02 12:00 UTC', elapsed: '1d 02h 00m', shipsUsed: ['Mandalay'], metrics: leg1Metrics, realization: leg1Realization }),
+    makeWaypointDetails({ rowId: 3, number: 3, prevSystem: 'Alpha Rim', from: '2026-04-02T12:00:00Z', to: '2026-04-04T14:00:00Z', fromGalactic: '3312-04-02 12:00 UTC', toGalactic: '3312-04-04 14:00 UTC', elapsed: '2d 02h 00m', shipsUsed: ['Anaconda'], metrics: leg2Metrics, realization: leg2Realization }),
+    makeWaypointDetails({ rowId: 4, number: 4, prevSystem: 'Beta Crossing', from: '2026-04-04T14:00:00Z', to: '', fromGalactic: '3312-04-04 14:00 UTC', toGalactic: '', inSystem: true, elapsed: '22h 00m', shipsUsed: ['Mandalay'], metrics: leg3Metrics, realization: leg3Realization }),
+    makeWaypointDetails({ rowId: 5, number: 5, prevSystem: 'Odin Beacon', from: '2026-04-05T12:00:00Z', to: '', fromGalactic: '3312-04-05 12:00 UTC', toGalactic: '', elapsed: '1h 00m', shipsUsed: ['Mandalay'], metrics: { distanceLy: 100, shipDistanceLy: 100, jumps: 2 }, realization: {} }),
   ]
   const defaultCarrierCost: ExportCarrierCost = {
     carrierType: 'player', weeklyUpkeep: 10_000_000, tritiumPrice: 50_000, tritiumCost: 20_000_000,
@@ -409,15 +388,11 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
 
   const visitedLegs = collectFixtureVisitedLegs(plan, rowDetails, nowMs)
   const allShips = Array.from(new Set(visitedLegs.flatMap((leg) => leg.shipsFlown)))
-  const expElapsedDays = overrides.expedition?.elapsedDays !== undefined
-    ? overrides.expedition.elapsedDays
-    : elapsedDaysBetween(effectiveStart, effectiveEnd, nowMs)
+  const expElapsedDays = overrides.expedition?.elapsedDays !== undefined ? overrides.expedition.elapsedDays : elapsedDaysBetween(effectiveStart, effectiveEnd, nowMs)
   const expMetrics = overrides.expedition?.metrics ?? defaultExpMetrics
   const expRealization = overrides.expedition?.realization ?? defaultExpRealization
   const expeditionSnapshot: ExportTelemetrySnapshot = {
-    metrics: expMetrics,
-    realization: expRealization,
-    elapsedDays: expElapsedDays,
+    metrics: expMetrics, realization: expRealization, elapsedDays: expElapsedDays,
     shipsFlown: overrides.expedition?.shipsFlown ?? allShips,
     derived: overrides.expedition?.derived ?? computeFixtureDerived(expMetrics, expRealization, carrierCost, expElapsedDays),
   }
@@ -436,20 +411,15 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
   ]
   const modeBuckets: ExportModeBucket[] = rawModeBuckets.map((bucket) => {
     const bucketElapsed = bucket.elapsedDays !== undefined ? bucket.elapsedDays : expElapsedDays
-    const modeShips = Array.from(new Set(visitedLegs.filter((l) => l.rowView.legModeId === bucket.modeId).flatMap((l) => l.shipsFlown)))
+    const modeShips = Array.from(new Set(visitedLegs.filter((leg) => leg.rowView.legModeId === bucket.modeId).flatMap((leg) => leg.shipsFlown)))
     return {
-      ...bucket,
-      elapsedDays: bucketElapsed,
-      shipsFlown: bucket.shipsFlown ?? modeShips,
+      ...bucket, elapsedDays: bucketElapsed, shipsFlown: bucket.shipsFlown ?? modeShips,
       derived: bucket.derived ?? computeFixtureDerived(bucket.metrics, bucket.realization, null, bucketElapsed),
     }
   })
 
   const legTelemetry: ExportLegTelemetry[] = overrides.legTelemetry ?? visitedLegs.map((leg) => ({
-    rowId: leg.rowView.row.id,
-    regionName: leg.regionName,
-    elapsedDays: leg.elapsedDays,
-    shipsFlown: leg.shipsFlown,
+    rowId: leg.rowView.row.id, regionName: leg.regionName, elapsedDays: leg.elapsedDays, shipsFlown: leg.shipsFlown,
     derived: computeFixtureDerived(leg.details.metrics, leg.details.realization, null, leg.elapsedDays),
   }))
   const regionBuckets = overrides.regionBuckets ?? buildFixtureRegions(visitedLegs)
@@ -463,35 +433,16 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
   const careerDiff = 'careerDiff' in overrides ? overrides.careerDiff : buildFixtureCareerDiff(originBaseline, liveMetrics, expRealization)
 
   return {
-    schemaVersion: 1,
-    exportedAt,
-    exportedAtGalactic: '3312-04-05 12:00 UTC',
-    appVersion: '0.6.2',
-    commanders: ['CMDR Horizon'],
-    departed: true,
-    effectiveStart,
-    effectiveStartGalactic: '3312-04-01 10:00 UTC',
-    effectiveEnd,
-    effectiveEndGalactic: '3312-04-05 12:00 UTC',
-    endIsNow: false,
-    duration: '4d',
-    careerStart: '2025-01-01T00:00:00Z',
-    careerStartGalactic: '3311-01-01 00:00 UTC',
-    careerDuration: '1y 94d',
+    schemaVersion: 1, exportedAt, exportedAtGalactic: '3312-04-05 12:00 UTC', appVersion: '0.6.2',
+    commanders: ['CMDR Horizon'], departed: true,
+    effectiveStart, effectiveStartGalactic: '3312-04-01 10:00 UTC',
+    effectiveEnd, effectiveEndGalactic: '3312-04-05 12:00 UTC',
+    endIsNow: false, duration: '4d',
+    careerStart: '2025-01-01T00:00:00Z', careerStartGalactic: '3311-01-01 00:00 UTC', careerDuration: '1y 94d',
     ...overrides,
-    plan,
-    expedition: expeditionSnapshot,
-    live: liveMetrics,
-    adjustments,
-    carrierCost,
-    originBaseline,
-    originBaselineElapsedDays: originElapsed,
-    originBaselineDerived: originDerived,
-    careerDiff,
-    modeBuckets,
-    rowDetails,
-    legTelemetry,
-    regionBuckets,
+    plan, expedition: expeditionSnapshot, live: liveMetrics, adjustments, carrierCost,
+    originBaseline, originBaselineElapsedDays: originElapsed, originBaselineDerived: originDerived, careerDiff,
+    modeBuckets, rowDetails, legTelemetry, regionBuckets,
     highlightsFullOrder: overrides.highlightsFullOrder ?? highlights.full,
     highlightsVariants: overrides.highlightsVariants ?? highlights.variants,
   }

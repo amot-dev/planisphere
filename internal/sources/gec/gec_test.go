@@ -3,21 +3,15 @@ package gec_test
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/httptestutil"
 	"planisphere/internal/version"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (transport roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return transport(request)
-}
 
 func TestGECandGMPCombinedImport(t *testing.T) {
 	dbConn := dbtest.OpenMemory(t)
@@ -90,7 +84,7 @@ func TestGECandGMPCombinedImport(t *testing.T) {
 func TestCatalogRefresh(testingContext *testing.T) {
 	refreshCases := []struct {
 		name        string
-		roundTrip   roundTripFunc
+		roundTrip   httptestutil.RoundTripFunc
 		wantCount   int
 		wantErrText string
 	}{
@@ -104,22 +98,14 @@ func TestCatalogRefresh(testingContext *testing.T) {
 					testingContext.Errorf("User-Agent = %q, want %q", gotAgent, version.UserAgent)
 				}
 				payload := `[{"id":101,"source":"GEC","type":"Nebula","name":"Veil West","galMapSearch":"Veil West Sector DL-Y d68","id64":2345678901,"coordinates":[-1300,-150,-260]}]`
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Header:     make(http.Header),
-					Body:       io.NopCloser(strings.NewReader(payload)),
-				}, nil
+				return httptestutil.Response(http.StatusOK, payload), nil
 			},
 			wantCount: 1,
 		},
 		{
 			name: "non-200 HTTP response returns status error",
 			roundTrip: func(_ *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusBadGateway,
-					Header:     make(http.Header),
-					Body:       io.NopCloser(strings.NewReader("gateway failure")),
-				}, nil
+				return httptestutil.Response(http.StatusBadGateway, "gateway failure"), nil
 			},
 			wantErrText: "GEC download: HTTP 502",
 		},
@@ -134,11 +120,7 @@ func TestCatalogRefresh(testingContext *testing.T) {
 
 	for _, testCase := range refreshCases {
 		testingContext.Run(testCase.name, func(subContext *testing.T) {
-			originalTransport := http.DefaultTransport
-			subContext.Cleanup(func() {
-				http.DefaultTransport = originalTransport
-			})
-			http.DefaultTransport = testCase.roundTrip
+			httptestutil.StubDefaultTransport(subContext, testCase.roundTrip)
 
 			dbConn := dbtest.OpenMemory(subContext)
 			catalogInstance := gec.NewCatalog(dbConn)

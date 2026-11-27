@@ -34,19 +34,8 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 		testingContext.Fatalf("expected 1 initial row, got %d", len(initialPlan.Rows))
 	}
 	originRowID := initialPlan.Rows[0].Row.ID
-	solName := "Sol"
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &solName}); err != nil {
-		testingContext.Fatalf("UpdateRow origin: %v", err)
-	}
-
-	coloniaRow, err := testApp.AddRow(createdExp.ID, originRowID, expedition.RowWaypoint, 0)
-	if err != nil {
-		testingContext.Fatalf("AddRow Colonia: %v", err)
-	}
-	coloniaName := "Colonia"
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: coloniaRow.ID, SystemName: &coloniaName}); err != nil {
-		testingContext.Fatalf("UpdateRow Colonia: %v", err)
-	}
+	setTestRowSystemName(testingContext, testApp, originRowID, "Sol")
+	coloniaRow := addTestWaypoint(testingContext, testApp, createdExp.ID, originRowID, "Colonia")
 
 	// Edit notes and repeat an identical no-op edit; no-op must push no entry and emit no DataChanged event.
 	noteValue := "Refuel stop"
@@ -165,18 +154,8 @@ func TestAppUndoInvalidatesExportSnapshotScopeChangeAndDBSwitch(testingContext *
 	}
 	plan := mustGetPlan(testingContext, testApp, createdExp.ID)
 	originID := plan.Rows[0].Row.ID
-	solName := "Sol"
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: originID, SystemName: &solName}); err != nil {
-		testingContext.Fatalf("UpdateRow Sol: %v", err)
-	}
-	destRow, err := testApp.AddRow(createdExp.ID, originID, expedition.RowWaypoint, 0)
-	if err != nil {
-		testingContext.Fatalf("AddRow dest: %v", err)
-	}
-	destName := "Barnard's Star"
-	if err := testApp.UpdateRow(expedition.RowPatch{ID: destRow.ID, SystemName: &destName}); err != nil {
-		testingContext.Fatalf("UpdateRow dest: %v", err)
-	}
+	setTestRowSystemName(testingContext, testApp, originID, "Sol")
+	addTestWaypoint(testingContext, testApp, createdExp.ID, originID, "Barnard's Star")
 	if err := testApp.StartExpedition(createdExp.ID, "2026-04-06T09:05:00Z", 0); err != nil {
 		testingContext.Fatalf("StartExpedition: %v", err)
 	}

@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"planisphere/internal/reference"
-	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
-	"planisphere/internal/testutil/journaltest"
 )
 
 func TestDeleteActiveExpeditionSelectsSurvivingAndEmitsTargetedDomains(testingContext *testing.T) {
@@ -63,19 +61,16 @@ func TestDeleteActiveExpeditionSelectsSurvivingAndEmitsTargetedDomains(testingCo
 func TestExpeditionFacadeMetadataRegionOptionsCandidatesAndLifecycle(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 
-	journaltest.InsertParsedLines(
+	publishTestJournalLines(
 		testingContext,
-		testApp.db,
+		testApp,
+		"2026-01-01T00:00:00Z",
+		"2026-01-02T00:00:00Z",
 		`{"timestamp":"2026-01-01T00:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-02T00:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":3230,"StarPos":[-9530.5,-910.28,19808.13],"JumpDist":22000.4}`,
 	)
-	testApp.publishJournalBatch(journal.NewEventSet(journal.EventLocation, journal.EventFSDJump), "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
 
-	createdExp, createErr := testApp.createExpeditionWithWaypoints("Draft Plan", "Old notes", []string{"Sol", "Colonia", "Beagle Point"})
-	if createErr != nil {
-		testingContext.Fatalf("createExpeditionWithWaypoints: %v", createErr)
-	}
-	testApp.backgroundWg.Wait()
+	createdExp := mustCreateExpeditionWithWaypoints(testingContext, testApp, "Draft Plan", "Old notes", "Sol", "Colonia", "Beagle Point")
 
 	eventsRecorder := captureAppEvents(testingContext, testApp)
 

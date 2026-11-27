@@ -4,6 +4,8 @@ package dbtest
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,26 @@ import (
 )
 
 var seedBatchCounter atomic.Uint64
+
+// IsolateUserDirs points HOME, XDG, and Windows AppData environment variables at fresh subdirectories under a temporary root.
+func IsolateUserDirs(testingContext *testing.T) string {
+	testingContext.Helper()
+	rootDirectory := testingContext.TempDir()
+	environmentDirectories := [][2]string{
+		{"HOME", filepath.Join(rootDirectory, "home")},
+		{"XDG_CONFIG_HOME", filepath.Join(rootDirectory, "xdg-config")},
+		{"XDG_DATA_HOME", filepath.Join(rootDirectory, "xdg-data")},
+		{"APPDATA", filepath.Join(rootDirectory, "appdata")},
+		{"LOCALAPPDATA", filepath.Join(rootDirectory, "localappdata")},
+	}
+	for _, entry := range environmentDirectories {
+		if mkdirError := os.MkdirAll(entry[1], 0o755); mkdirError != nil {
+			testingContext.Fatalf("create isolated %s directory: %v", entry[0], mkdirError)
+		}
+		testingContext.Setenv(entry[0], entry[1])
+	}
+	return rootDirectory
+}
 
 // OpenMemory opens a migrated in-memory SQLite database and registers cleanup on testingContext.
 func OpenMemory(testingContext *testing.T) *sql.DB {

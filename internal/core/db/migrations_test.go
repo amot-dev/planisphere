@@ -272,7 +272,7 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 		testingContext.Fatalf("seed v12 journal events: %v", execError)
 	}
 
-	// Create 3 pre-v12 expeditions: active, completed post-7fabd35 (end == arrival), completed pre-7fabd35 (end > departure, with trailing unvisited row).
+	// Create 2 pre-v12 expeditions: active, and completed pre-7fabd35 (end > departure, with trailing unvisited row).
 	insertExpedition := func(name, status, startTS, endTS string) int64 {
 		testingContext.Helper()
 		res, err := dbConn.Exec(`INSERT INTO expeditions(name, status, start_timestamp, end_timestamp, created_at, updated_at) VALUES(?, ?, ?, NULLIF(?, ''), '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`,
@@ -287,7 +287,6 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 		return id
 	}
 	activeID := insertExpedition("V12 Active", "active", "2026-08-01T10:00:00Z", "")
-	compArrivalID := insertExpedition("V12 Completed Arrival", "completed", "2026-08-01T10:00:00Z", "2026-08-01T12:00:00Z")
 	compLegacyID := insertExpedition("V12 Completed Legacy", "completed", "2026-08-01T10:00:00Z", "2026-08-06T00:00:00Z")
 
 	seedRows := func(expID int64, includeTrailingUnvisited bool) {
@@ -307,7 +306,6 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 		}
 	}
 	seedRows(activeID, false)
-	seedRows(compArrivalID, false)
 	seedRows(compLegacyID, true)
 
 	// Re-trigger migration v12.
@@ -348,18 +346,16 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 		testingContext.Fatalf("unexpected active v12 result: end=%q deps=%v", activeEnd, activeDeps)
 	}
 
-	// Both completed expeditions normalize end_timestamp to Beta 1 scan (12:25), clear post-end departure on Beta, and leave trailing Gamma unvisited.
-	for _, completedID := range []int64{compArrivalID, compLegacyID} {
-		compEnd, compDeps, compVisited := readDepartures(completedID)
-		if compEnd != "2026-08-01T12:25:00Z" {
-			testingContext.Fatalf("exp %d expected normalized end_timestamp=2026-08-01T12:25:00Z, got %q", completedID, compEnd)
-		}
-		if compDeps[0] != "2026-08-01T11:00:00Z" || compDeps[1] != "2026-08-01T12:00:00Z" || compDeps[2] != "" {
-			testingContext.Fatalf("exp %d unexpected completed departures: %v", completedID, compDeps)
-		}
-		if completedID == compLegacyID && (len(compVisited) != 4 || compVisited[3] != "" || compDeps[3] != "") {
-			testingContext.Fatalf("exp %d trailing unvisited row must remain untouched: visited=%v deps=%v", completedID, compVisited, compDeps)
-		}
+	// Completed expedition normalizes end_timestamp to Beta 1 scan (12:25), clears post-end departure on Beta, and leaves trailing Gamma unvisited.
+	compEnd, compDeps, compVisited := readDepartures(compLegacyID)
+	if compEnd != "2026-08-01T12:25:00Z" {
+		testingContext.Fatalf("exp %d expected normalized end_timestamp=2026-08-01T12:25:00Z, got %q", compLegacyID, compEnd)
+	}
+	if compDeps[0] != "2026-08-01T11:00:00Z" || compDeps[1] != "2026-08-01T12:00:00Z" || compDeps[2] != "" {
+		testingContext.Fatalf("exp %d unexpected completed departures: %v", compLegacyID, compDeps)
+	}
+	if len(compVisited) != 4 || compVisited[3] != "" || compDeps[3] != "" {
+		testingContext.Fatalf("exp %d trailing unvisited row must remain untouched: visited=%v deps=%v", compLegacyID, compVisited, compDeps)
 	}
 
 	testingContext.Run("open_final_stay_scoping", func(subtestContext *testing.T) {

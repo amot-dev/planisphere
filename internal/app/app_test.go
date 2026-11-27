@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"planisphere/internal/testutil/dbtest"
 )
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
@@ -201,8 +203,7 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 		testingContext.Fatalf("expected invalid URL scheme rejection on pre-init App")
 	}
 
-	temporaryDirectory := testingContext.TempDir()
-	isolateTestUserDirectories(testingContext, temporaryDirectory)
+	temporaryDirectory := dbtest.IsolateUserDirs(testingContext)
 	productionDBPath := filepath.Join(temporaryDirectory, "startup-race.sqlite")
 
 	// Seed a database with an expedition so callers receive real state
@@ -294,8 +295,7 @@ func TestStartupHookWaitsForDatabaseInitialization(testingContext *testing.T) {
 }
 
 func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testing.T) {
-	temporaryDirectory := testingContext.TempDir()
-	isolateTestUserDirectories(testingContext, temporaryDirectory)
+	temporaryDirectory := dbtest.IsolateUserDirs(testingContext)
 	seededDatabasePath := filepath.Join(temporaryDirectory, "startup-events.sqlite")
 	emptyJournalDirectory := filepath.Join(temporaryDirectory, "journals")
 	if mkdirError := os.MkdirAll(emptyJournalDirectory, 0o755); mkdirError != nil {

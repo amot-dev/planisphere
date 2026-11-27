@@ -109,11 +109,7 @@ describe('buildPlannerTableItems when a waypoint is grabbed', () => {
     // Grabbed row is index 2 (NGC 7822). Its neighbors index 1 (V509 Cassiopeiae) and index 3 (BD+83 357)
     // remain uncollapsed to frame the original position, while index 0 and index 4 collapse.
     const items = buildPlannerTableItems(plan, {}, false, 2, 4, dropPreviews)
-    expect(
-      items
-        .map((item) => item.kind)
-        .slice(0, 5),
-    ).toEqual([
+    expect(items.map((item) => item.kind)).toEqual([
       'collapsed_visited', // Row 0 (HR 839)
       'waypoint', // Row 1 (V509 Cassiopeiae) frames original position above
       'waypoint', // Row 2 (NGC 7822, grabbed)

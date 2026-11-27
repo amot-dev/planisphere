@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"planisphere/internal/testutil/httptestutil"
 )
 
 type notifyCloseReadCloser struct {
@@ -24,12 +26,6 @@ func (reader *notifyCloseReadCloser) Close() error {
 	closeError := reader.ReadCloser.Close()
 	reader.closeOnce.Do(reader.onClose)
 	return closeError
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (transport roundTripFunc) RoundTrip(httpRequest *http.Request) (*http.Response, error) {
-	return transport(httpRequest)
 }
 
 func TestReconcileSpanshJumps(t *testing.T) {
@@ -225,11 +221,9 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 		testingContext.Run(testCase.name, func(testingContext *testing.T) {
 			originalBaseURL := baseURL
 			originalPollInterval := pollInterval
-			originalDefaultTransport := http.DefaultTransport
 			testingContext.Cleanup(func() {
 				baseURL = originalBaseURL
 				pollInterval = originalPollInterval
-				http.DefaultTransport = originalDefaultTransport
 			})
 			if testCase.pollInterval > 0 {
 				pollInterval = testCase.pollInterval
@@ -242,7 +236,8 @@ func TestQuerySpanshCarrierRoute_ContextCancellationAndTimeout(testingContext *t
 			pollStarted := make(chan struct{})
 			var closeSubmittedOnce, closeResponseOnce sync.Once
 
-			http.DefaultTransport = roundTripFunc(func(httpRequest *http.Request) (*http.Response, error) {
+			var originalDefaultTransport http.RoundTripper
+			originalDefaultTransport = httptestutil.StubDefaultTransport(testingContext, func(httpRequest *http.Request) (*http.Response, error) {
 				httpResponse, roundTripError := originalDefaultTransport.RoundTrip(httpRequest)
 				if roundTripError == nil && httpRequest.URL.Path == "/api/fleetcarrier/route" {
 					httpResponse.Body = &notifyCloseReadCloser{

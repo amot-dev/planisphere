@@ -76,3 +76,17 @@ func mustCaptureSnapshot(testingContext *testing.T, databaseConnection *sql.DB, 
 	}
 	return snapshot
 }
+
+func mustCreateWithWaypoints(
+	testingContext *testing.T,
+	databaseConnection *sql.DB,
+	expeditionName, expeditionDescription string,
+	waypoints ...expedition.SeedWaypoint,
+) expedition.Expedition {
+	testingContext.Helper()
+	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, expeditionName, expeditionDescription, waypoints)
+	if createError != nil {
+		testingContext.Fatalf("CreateWithWaypoints(%q): %v", expeditionName, createError)
+	}
+	return expeditionRecord
+}

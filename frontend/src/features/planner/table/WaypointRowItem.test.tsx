@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
-import { act, type ComponentProps } from 'react'
+import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { expedition } from '../../../api/models'
+import { createDeferred, flushMicrotasks } from '../../../test/async'
 import {
+  createWaypointRowElement,
   makeRowView,
   makeWaypointRowHandlers,
   renderWaypointRowHtml,
 } from '../../../test/fixtures'
 import { mountTestRoot, setFormControlValue } from '../../../test/render'
-import { WaypointRowItem } from './WaypointRowItem'
-
-const defaultRowHandlers = makeWaypointRowHandlers()
 
 describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
   it('renders single-row textarea, drawer chevron, and waypoint left borders by flight mode, current leg, and muted origin', () => {
@@ -183,37 +181,9 @@ describe('WaypointRowItem Borders, Columns, and Row Controls', () => {
 })
 
 describe('WaypointRowItem lock transition and rollback draft recovery', () => {
-  function buildRowsElement(
-    ...rows: Array<Partial<ComponentProps<typeof WaypointRowItem>> & { rowView: expedition.RowView }>
-  ) {
-    return (
-      <table>
-        <tbody>
-          {rows.map((itemProps, itemIndex) => (
-            <WaypointRowItem
-              key={itemProps.rowView.row.id ?? itemIndex}
-              index={itemIndex}
-              isPlanning={false}
-              isLocked={false}
-              isBeingDragged={false}
-              isExpanded={false}
-              isSystemCopied={false}
-              insertMenuOpen={false}
-              lastVisitedIndex={0}
-              rowStyle={{}}
-              dropProps={{}}
-              handlers={defaultRowHandlers}
-              {...itemProps}
-            />
-          ))}
-        </tbody>
-      </table>
-    )
-  }
-
   it('clears editing state when a focused system input becomes locked so subsequent poiName updates sync into draft', () => {
     const mounted = mountTestRoot(
-      buildRowsElement({
+      createWaypointRowElement({
         rowView: makeRowView({
           row: { id: 70, systemName: 'Colonia', poiName: '' },
           number: 2,
@@ -234,7 +204,7 @@ describe('WaypointRowItem lock transition and rollback draft recovery', () => {
     expect(systemInput.value).toBe('Colonia Draft')
 
     mounted.rerender(
-      buildRowsElement({
+      createWaypointRowElement({
         rowView: makeRowView({
           row: {
             id: 70,
@@ -253,7 +223,7 @@ describe('WaypointRowItem lock transition and rollback draft recovery', () => {
     expect(mounted.container.querySelector('input[placeholder="Star System"]')).toBeNull()
 
     mounted.rerender(
-      buildRowsElement({
+      createWaypointRowElement({
         rowView: makeRowView({
           row: {
             id: 70,
@@ -277,13 +247,8 @@ describe('WaypointRowItem lock transition and rollback draft recovery', () => {
   })
 
   it('restores rejected systemName draft without overwriting a newly focused poiName edit', async () => {
-    let resolveSystemBlur!: (succeeded: boolean) => void
-    const onFieldBlur = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveSystemBlur = resolve
-        }),
-    )
+    const systemBlurDeferred = createDeferred<boolean>()
+    const onFieldBlur = vi.fn(() => systemBlurDeferred.promise)
     const rowView = makeRowView({
       row: { id: 71, systemName: 'Sagittarius A*', poiName: 'Supermassive Black Hole' },
       number: 3,
@@ -291,7 +256,7 @@ describe('WaypointRowItem lock transition and rollback draft recovery', () => {
     })
 
     const mounted = mountTestRoot(
-      buildRowsElement({
+      createWaypointRowElement({
         rowView,
         index: 2,
         isPlanning: true,
@@ -318,8 +283,8 @@ describe('WaypointRowItem lock transition and rollback draft recovery', () => {
     expect(onFieldBlur).toHaveBeenCalledWith(rowView.row, 'systemName', 'Rejected System Name')
 
     await act(async () => {
-      resolveSystemBlur(false)
-      await Promise.resolve()
+      systemBlurDeferred.resolve(false)
+      await flushMicrotasks()
     })
 
     expect(systemInput.value).toBe('Sagittarius A*')

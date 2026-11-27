@@ -18,26 +18,26 @@ func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testin
 		testingContext.Fatal(execError)
 	}
 
-	// Insert pre-expedition organic scan and sale so origin realization is non-zero.
+	// Insert pre-expedition organic scan and sale plus Sol and Acamar arrivals so origin realization is non-zero.
 	journaltest.InsertParsedLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-01T10:00:00Z","event":"ScanOrganic","StarSystem":"Sol","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":10477373803,"Body":1}`,
 		`{"timestamp":"2026-01-01T11:00:00Z","event":"SellOrganicData","StarSystem":"Sol","SystemAddress":10477373803,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`,
+		`{"timestamp":"2026-01-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-01-02T12:00:00Z","event":"FSDJump","StarSystem":"Acamar","SystemAddress":2002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 	)
 
-	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Realization Cache Test", "")
-	if _, execError := databaseConnection.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T12:00:00Z' WHERE id = ?`, expeditionRecord.ID); execError != nil {
-		testingContext.Fatal(execError)
+	expeditionRecord := mustCreateWithWaypoints(testingContext, databaseConnection, "Realization Cache Test", "",
+		expedition.SeedWaypoint{SystemName: "Sol"},
+		expedition.SeedWaypoint{SystemName: "Acamar"},
+	)
+	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-01T12:00:00Z", 0); startError != nil {
+		testingContext.Fatalf("StartTx: %v", startError)
 	}
-	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 18)
-
-	originVisitedAt := "2026-01-01T12:00:00Z"
-	secondVisitedAt := "2026-01-02T12:00:00Z"
-	if _, execError := databaseConnection.Exec(`UPDATE expedition_rows SET system_name = 'Sol', visited_at = ? WHERE id = ?`, originVisitedAt, originWaypoint.ID); execError != nil {
-		testingContext.Fatal(execError)
+	seededRows, listRowsError := expedition.ListRows(databaseConnection, expeditionRecord.ID)
+	if listRowsError != nil || len(seededRows) != 2 {
+		testingContext.Fatalf("ListRows: len=%d err=%v", len(seededRows), listRowsError)
 	}
-	if _, execError := databaseConnection.Exec(`UPDATE expedition_rows SET system_name = 'Acamar', visited_at = ? WHERE id = ?`, secondVisitedAt, secondWaypoint.ID); execError != nil {
-		testingContext.Fatal(execError)
-	}
+	originWaypoint, secondWaypoint := seededRows[0], seededRows[1]
 
 	// First call populates the origin projection cache (both Metrics and Realization).
 	firstOriginDetails, firstDetailsError := expedition.Details(databaseConnection, originWaypoint.ID, proj)

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
+import { createQuickShareCart } from './exportMetrics'
 import { defaultMetricsForSection } from './exportTypes'
 import { generateSelfContainedHtmlReport } from './htmlGenerator'
-import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
+import { buildSampleExportData, expandCartItem } from '../../test/fixtures/exportFixtures'
 
 describe('htmlGenerator', () => {
   it('renders a self-contained offline HTML report with escaped titles, print rules, departure badges, and no TOC bar', () => {
     const data = buildSampleExportData()
     const quickCart = createQuickShareCart(data)
-    const detailsItem = expandConfigToCartItems(
+    const detailsItem = expandCartItem(
       data,
       {
         kind: 'details',
@@ -19,14 +19,21 @@ describe('htmlGenerator', () => {
       },
       'extra',
     )
-    const html = generateSelfContainedHtmlReport(data, [...quickCart, ...detailsItem])
+    const html = generateSelfContainedHtmlReport(data, [...quickCart, detailsItem])
 
     expect(html).toContain('<!DOCTYPE html>')
     expect(html).toContain('@media print')
     // Expedition name containing angle brackets must be HTML-escaped.
     expect(html).not.toContain('Orion Horizon <Test>')
     expect(html).toContain('Orion Horizon')
+    expect(html).toContain('<span>CMDR: <strong class="mono">CMDR Horizon</strong></span>')
+    expect(html).toContain('<div class="kpi-val amber mono">~26,000,000 Cr</div>')
+    expect(html).toContain('<div class="kpi-grid kpi-grid-top cols-4">')
+    expect(html).toContain('<div class="kpi-grid kpi-grid-bottom cols-4">')
+    expect(html).toContain('<div class="strip-bar strip-bar-bottom">')
+    expect(html).toContain('NET PROFIT: <strong class="mono cyan">~129,000,000 Cr</strong>')
     expect(html).toContain('DEPARTED 3312-04-01 10:00 UTC')
+    expect(html).toContain('COVERED 4,200.0 Ly')
     expect(html).toContain('(IN SYSTEM)')
     expect(html).toContain('EXPEDITION HIGHLIGHTS // TOP 1')
     expect(html).toContain('Combined Estimated Exploration Value')
@@ -36,29 +43,20 @@ describe('htmlGenerator', () => {
     expect(html).toContain('id="section-4"')
   })
 
-  it('renders HTML parity details and tilde carrier cost prefixes across all section types', () => {
+  it('renders separate-mode accent borders, tilde carrier cost prefixes, and single-card highlight metadata', () => {
     const data = buildSampleExportData()
     const cartItems = [
-      ...expandConfigToCartItems(data, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-combined'),
-      ...expandConfigToCartItems(data, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' }, 'sum-sep'),
-      ...expandConfigToCartItems(data, { kind: 'details', section: 'carrier', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: defaultMetricsForSection('carrier') }, 'det-carrier'),
-      ...expandConfigToCartItems(data, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: defaultMetricsForSection('realized') }, 'det-realized'),
-      ...expandConfigToCartItems(data, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, selectedMetrics: ['jumps'] }, 'det-flight-sep'),
-      ...expandConfigToCartItems(data, { kind: 'waypoints', waypointsScope: 'visited', selectedColumns: ['timestamps'] }, 'wp'),
-      ...expandConfigToCartItems(data, { kind: 'highlights', depth: 1, selectedCards: ['mostLucrative'], lucrativeMetric: 'estimated', distanceMetric: 'total' }, 'hl'),
+      expandCartItem(data, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' }, 'sum-sep'),
+      expandCartItem(data, { kind: 'details', section: 'carrier', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: defaultMetricsForSection('carrier') }, 'det-carrier'),
+      expandCartItem(data, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: defaultMetricsForSection('realized') }, 'det-realized'),
+      expandCartItem(data, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, selectedMetrics: ['jumps'] }, 'det-flight-sep'),
+      expandCartItem(data, { kind: 'highlights', depth: 1, selectedCards: ['mostLucrative'], lucrativeMetric: 'estimated', distanceMetric: 'total' }, 'hl'),
     ]
 
     const html = generateSelfContainedHtmlReport(data, cartItems)
 
-    // Summary commander strip item, CSS spacing/strip classes, and separate-mode left accent border.
-    expect(html).toContain('<span>CMDR: <strong class="mono">CMDR Horizon</strong></span>')
-    expect(html).toContain('<div class="kpi-val amber mono">~26,000,000 Cr</div>')
-    expect(html).toContain('<div class="kpi-grid kpi-grid-top cols-4">')
-    expect(html).toContain('<div class="kpi-grid kpi-grid-bottom cols-4">')
-    expect(html).toContain('<div class="strip-bar strip-bar-bottom">')
-    expect(html).toContain('NET PROFIT: <strong class="mono cyan">~129,000,000 Cr</strong>')
-    expect(html).toContain('<section id="section-2" class="card" style="border-left:3px solid #00D2FF">')
-    expect(html).toContain('<section id="section-6" class="card" style="border-left:3px solid #00D2FF">')
+    expect(html).toContain('<section id="section-1" class="card" style="border-left:3px solid #00D2FF">')
+    expect(html).toContain('<section id="section-4" class="card" style="border-left:3px solid #00D2FF">')
 
     // Carrier cost estimation prefixes in Details realized subline and carrier breakdown card.
     expect(html).toContain('<div class="kpi-val mono amber">~129,000,000 Cr</div>')
@@ -68,8 +66,6 @@ describe('htmlGenerator', () => {
     expect(html).toContain('>400,000 Cr<')
     expect(html).not.toContain('~400,000 Cr')
 
-    // Waypoints covered distance and Highlights header metadata.
-    expect(html).toContain('COVERED 4,200.0 Ly')
     expect(html).toContain('<div>1 TROPHY CARDS</div>')
     expect(html).toContain('<div class="muted">3312-04-01 10:00 UTC</div>')
   })
@@ -94,12 +90,12 @@ describe('htmlGenerator', () => {
     })
 
     const cartItems = [
-      ...expandConfigToCartItems(hardenedData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-exact'),
-      ...expandConfigToCartItems(hardenedData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' }, 'sum-bad-color'),
-      ...expandConfigToCartItems(hardenedData, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: [] }, 'det-empty'),
-      ...expandConfigToCartItems(hardenedData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] }, 'det-exact-realized'),
-      ...expandConfigToCartItems(hardenedData, { kind: 'waypoints', waypointsScope: 'visited', selectedColumns: ['flightMode'] }, 'wp-bad-color'),
-      ...expandConfigToCartItems(hardenedData, { kind: 'highlights', depth: 1, selectedCards: [], lucrativeMetric: 'estimated', distanceMetric: 'total' }, 'hl-empty'),
+      expandCartItem(hardenedData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum-exact'),
+      expandCartItem(hardenedData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, careerDiff: 'hide' }, 'sum-bad-color'),
+      expandCartItem(hardenedData, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: [] }, 'det-empty'),
+      expandCartItem(hardenedData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] }, 'det-exact-realized'),
+      expandCartItem(hardenedData, { kind: 'waypoints', waypointsScope: 'visited', selectedColumns: ['flightMode'] }, 'wp-bad-color'),
+      expandCartItem(hardenedData, { kind: 'highlights', depth: 1, selectedCards: [], lucrativeMetric: 'estimated', distanceMetric: 'total' }, 'hl-empty'),
     ]
 
     const html = generateSelfContainedHtmlReport(hardenedData, cartItems)
@@ -122,4 +118,3 @@ describe('htmlGenerator', () => {
     expect(html).toContain('border-left:3px solid #3d2816')
   })
 })
-

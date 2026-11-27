@@ -10,16 +10,17 @@ import (
 	"planisphere/internal/sources/eddiscovery"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/eddtest"
 )
 
 func TestImportEDDiscoveryDB(t *testing.T) {
-	eddPath := buildEDDArchive(t, eddArchiveSeed{
+	eddPath := eddtest.BuildArchive(t, eddtest.ArchiveSeed{
 		FileName: "EDD.sqlite",
-		TravelLogs: []eddTravelLogSeed{
+		TravelLogs: []eddtest.TravelLogSeed{
 			{ID: 1, Name: "Journal.2026-01-18T190000.01.log", Path: `C:\ED\Journal.2026-01-18T190000.01.log`},
 			{ID: 2, Name: "Journal.2026-01-19T200000.01.log", Path: `C:\ED\Journal.2026-01-19T200000.01.log`},
 		},
-		Entries: []eddJournalEntrySeed{
+		Entries: []eddtest.JournalEntrySeed{
 			{ID: 1, TravelLogID: 1, EventType: "Location", EventData: `{"timestamp":"2026-01-18T19:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`},
 			{ID: 2, TravelLogID: 1, EventType: "LoadGame", EventData: `{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrOne","FID":"F001","Ship":"mandalay"}`},
 			{ID: 3, TravelLogID: 1, EventType: "FSDJump", EventData: `{"timestamp":"2026-01-18T19:20:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[0,0,100],"JumpDist":4.3}`},
@@ -145,18 +146,18 @@ func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
 }
 
 func TestImportEDDiscoveryCommanderFallbackAndRollover(testingContext *testing.T) {
-	eddPath := buildEDDArchive(testingContext, eddArchiveSeed{
+	eddPath := eddtest.BuildArchive(testingContext, eddtest.ArchiveSeed{
 		FileName: "EDDFallback.sqlite",
-		Commanders: []eddCommanderSeed{
+		Commanders: []eddtest.CommanderSeed{
 			{ID: 1, Name: "Trebor Johnson", Deleted: 0},
 			{ID: 2, Name: "DeletedCmdr", Deleted: 1},
 		},
-		TravelLogs: []eddTravelLogSeed{
+		TravelLogs: []eddtest.TravelLogSeed{
 			{ID: 10, Name: "netLog.1605011200.01.log", Path: `C:\ED\Logs\netLog.1605011200.01.log`, CommanderID: 1},
 			{ID: 11, Name: "Journal.2026-03-01T100000.01.log", Path: `C:\ED\Journal.2026-03-01T100000.01.log`, CommanderID: 1},
 			{ID: 12, Name: "Journal.2026-03-01T120000.02.log", Path: `C:\ED\Journal.2026-03-01T120000.02.log`, CommanderID: 2},
 		},
-		Entries: []eddJournalEntrySeed{
+		Entries: []eddtest.JournalEntrySeed{
 			{ID: 1, TravelLogID: 10, EventType: "FSDJump", EventData: `{"timestamp":"2016-05-01T12:05:00Z","event":"FSDJump","StarSystem":"Beagle Point","StarPos":[-1111.56,-134.21,65269.75]}`},
 			{ID: 2, TravelLogID: 11, EventType: "Fileheader", EventData: `{"timestamp":"2026-03-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`},
 			{ID: 3, TravelLogID: 11, EventType: "LoadGame", EventData: `{"timestamp":"2026-03-01T10:01:00Z","event":"LoadGame","Commander":"Trebor Johnson","FID":"F4293989","Ship":"Mandalay","Odyssey":true}`},
@@ -192,12 +193,12 @@ func TestImportEDDiscoveryCommanderFallbackAndRollover(testingContext *testing.T
 }
 
 func TestImportProgressSuppressesCompleteOnFailure(testingContext *testing.T) {
-	eddPath := buildEDDArchive(testingContext, eddArchiveSeed{
+	eddPath := eddtest.BuildArchive(testingContext, eddtest.ArchiveSeed{
 		FileName: "EDDProgress.sqlite",
-		TravelLogs: []eddTravelLogSeed{
+		TravelLogs: []eddtest.TravelLogSeed{
 			{ID: 1, Name: "Journal.2026-02-01T100000.01.log", Path: "/logs/Journal.2026-02-01T100000.01.log"},
 		},
-		Entries: []eddJournalEntrySeed{
+		Entries: []eddtest.JournalEntrySeed{
 			{ID: 1, TravelLogID: 1, EventType: "Location", EventData: `{"timestamp":"2026-02-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`},
 		},
 	})

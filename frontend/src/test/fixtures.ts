@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, type ReactElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { vi } from 'vitest'
 import { app, expedition, modes, realization, replay, stats } from '../api/models'
@@ -340,12 +340,12 @@ export function makeWaypointRowHandlers(
 }
 
 /**
- * renderWaypointRowHtml renders a single WaypointRowItem inside a valid table
- * wrapper and returns its static HTML string.
+ * createWaypointRowElement wraps a single WaypointRowItem inside a valid table
+ * body element with deterministic default props for interactive or static tests.
  */
-export function renderWaypointRowHtml(
+export function createWaypointRowElement(
   props: Partial<WaypointRowItemProps> & { rowView: expedition.RowView },
-): string {
+): ReactElement {
   const resolvedProps: WaypointRowItemProps = {
     index: 1,
     isPlanning: false,
@@ -360,13 +360,21 @@ export function renderWaypointRowHtml(
     handlers: makeWaypointRowHandlers(),
     ...props,
   }
-  return renderToString(
-    createElement(
-      'table',
-      null,
-      createElement('tbody', null, createElement(WaypointRowItem, resolvedProps)),
-    ),
+  return createElement(
+    'table',
+    null,
+    createElement('tbody', null, createElement(WaypointRowItem, resolvedProps)),
   )
+}
+
+/**
+ * renderWaypointRowHtml renders a single WaypointRowItem inside a valid table
+ * wrapper and returns its static HTML string.
+ */
+export function renderWaypointRowHtml(
+  props: Partial<WaypointRowItemProps> & { rowView: expedition.RowView },
+): string {
+  return renderToString(createWaypointRowElement(props))
 }
 
 /**

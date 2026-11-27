@@ -27,6 +27,7 @@ describe('ExportBlockRenderer', () => {
     expect(summaryMarkup).toContain('Organic Samples')
     expect(summaryMarkup).toContain('NET PROFIT:')
     expect(summaryMarkup).toContain('~129,000,000 Cr')
+    expect(summaryMarkup).toContain('~26,000,000 Cr')
     expect(summaryMarkup).toContain('ed-exp-grid-top')
     expect(summaryMarkup).toContain('ed-exp-grid-bottom')
     expect(summaryMarkup).toContain('ed-exp-strip-bottom')
@@ -62,6 +63,7 @@ describe('ExportBlockRenderer', () => {
     )
     expect(realizedMarkup).toContain('Net Profit After Carrier')
     expect(realizedMarkup).toContain('~129,000,000 Cr')
+    expect(realizedMarkup).toContain('Carrier cost: ~26,000,000 Cr')
   })
 
   it('renders Waypoints with DEPARTED origin and IN SYSTEM state, and Highlights at Top 3', () => {
@@ -102,24 +104,6 @@ describe('ExportBlockRenderer', () => {
     const baseData = buildSampleExportData()
     const renderCard = (exportData: typeof baseData, config: ExportBlockConfig) =>
       renderToStaticMarkup(<ExportBlockRenderer exportData={exportData} config={config} />)
-
-    expect(
-      renderCard(baseData, {
-        kind: 'summary',
-        scope: { kind: 'full' },
-        modeGrouping: 'combined',
-        careerDiff: 'hide',
-      }),
-    ).toContain('~26,000,000 Cr')
-    expect(
-      renderCard(baseData, {
-        kind: 'details',
-        section: 'realized',
-        scope: { kind: 'full' },
-        modeGrouping: 'combined',
-        selectedMetrics: ['netProfitAfterCarrierCost'],
-      }),
-    ).toContain('Carrier cost: ~26,000,000 Cr')
 
     const carrierEstimated = renderCard(baseData, {
       kind: 'details',

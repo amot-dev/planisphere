@@ -5,6 +5,7 @@ import (
 
 	stats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestLiveStatsCacheOnCarrierJump(testingContext *testing.T) {
@@ -125,33 +126,19 @@ func TestExpeditionCarrierCostAndConfig(testingContext *testing.T) {
 
 	// Start and complete expedition spanning exactly 7 days from WP #1 departure
 	// (2026-01-01T00:00:00Z) to final arrival (2026-01-08T00:00:00Z), and log 2 carrier jumps consuming 150t of tritium.
-	planView, planErr := testApp.GetPlan(expeditionRecord.ID)
-	if planErr != nil || len(planView.Rows) == 0 {
-		testingContext.Fatalf("GetPlan failed: len=%d err=%v", len(planView.Rows), planErr)
-	}
+	planView := mustGetPlan(testingContext, testApp, expeditionRecord.ID)
 	originRowID := planView.Rows[0].Row.ID
-	originName := "Sol"
-	if updateErr := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &originName}); updateErr != nil {
-		testingContext.Fatalf("UpdateRow origin failed: %v", updateErr)
-	}
+	setTestRowSystemName(testingContext, testApp, originRowID, "Sol")
 	if startErr := testApp.StartExpedition(expeditionRecord.ID, "2025-12-31T23:55:00Z", 0); startErr != nil {
 		testingContext.Fatalf("StartExpedition failed: %v", startErr)
 	}
-	destinationRow, insertErr := testApp.AddRow(expeditionRecord.ID, originRowID, expedition.RowWaypoint, 0)
-	if insertErr != nil {
-		testingContext.Fatalf("AddRow failed: %v", insertErr)
-	}
-	destinationName := "Alpha Centauri"
-	if updateErr := testApp.UpdateRow(expedition.RowPatch{ID: destinationRow.ID, SystemName: &destinationName}); updateErr != nil {
-		testingContext.Fatalf("UpdateRow destination failed: %v", updateErr)
-	}
-	if _, execErr := testApp.db.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at)
-		 VALUES ('ev-carrier-cost-depart', '2026-01-01T00:00:00Z', 'FSDJump', 'Transit', 1005, '{"timestamp":"2026-01-01T00:00:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1005,"StarPos":[0.5,0,0],"JumpDist":2.0}', 'test.log', '2026-01-01T00:00:00Z'),
-		        ('ev-carrier-cost-dest', '2026-01-08T00:00:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2026-01-08T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2026-01-08T00:00:00Z')`,
-	); execErr != nil {
-		testingContext.Fatalf("insert departure and destination arrivals failed: %v", execErr)
-	}
+	addTestWaypoint(testingContext, testApp, expeditionRecord.ID, originRowID, "Alpha Centauri")
+	journaltest.InsertParsedLines(
+		testingContext,
+		testApp.db,
+		`{"timestamp":"2026-01-01T00:00:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":1005,"StarPos":[0.5,0,0],"JumpDist":2.0}`,
+		`{"timestamp":"2026-01-08T00:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
+	)
 	if _, reevalErr := expedition.ReevaluateTx(testApp.db, expeditionRecord.ID); reevalErr != nil {
 		testingContext.Fatalf("ReevaluateTx failed: %v", reevalErr)
 	}

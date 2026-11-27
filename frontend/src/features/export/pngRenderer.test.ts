@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest'
 import { installCanvasPngMock } from '../../test/domMocks'
-import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
+import { buildSampleExportData, expandCartItem } from '../../test/fixtures/exportFixtures'
 import { EXPORT_CARD_CSS, EXPORT_CARD_WIDTH } from './exportCardStyles'
-import { createQuickShareCart, expandConfigToCartItems } from './exportMetrics'
+import { createQuickShareCart } from './exportMetrics'
 import {
   buildPngBundleFileName,
   buildSvgForeignObjectDocument,
@@ -26,18 +26,18 @@ describe('pngRenderer', () => {
     const quickItems = createQuickShareCart(data)
     expect(buildPngBundleFileName(quickItems[0], 1, 3)).toBe('images/01-full-expedition-summary.png')
 
-    const legItems = expandConfigToCartItems(
+    const legItem = expandCartItem(
       data,
       {
         kind: 'summary',
-        scope: { kind: 'allLegs' },
+        scope: { kind: 'leg', rowId: 2 },
         modeGrouping: 'combined',
         careerDiff: 'hide',
       },
       'leg',
     )
-    expect(buildPngBundleFileName(legItems[0], 1, 223)).toBe('images/001-wp2-summary.png')
-    expect(buildPngBundleFileName(legItems[0], 115, 223)).toBe('images/115-wp2-summary.png')
+    expect(buildPngBundleFileName(legItem, 1, 223)).toBe('images/001-wp2-summary.png')
+    expect(buildPngBundleFileName(legItem, 115, 223)).toBe('images/115-wp2-summary.png')
 
     const canvasMock = installCanvasPngMock()
     canvasMock.toDataURLSpy.mockReturnValueOnce('data:,')

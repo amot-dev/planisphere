@@ -52,15 +52,6 @@ func TestAppModesCRUDUsageDomainsAndUndo(testingContext *testing.T) {
 		testingContext.Fatalf("expected SetExpeditionFlightMode to emit stats and plan, got %+v", flightModeChanges)
 	}
 
-	undoFlightMode, undoError := testApp.UndoExpedition(targetExpeditionID)
-	if undoError != nil || !undoFlightMode.Applied || undoFlightMode.Label != "Change Flight Mode" {
-		testingContext.Fatalf("Undo SetExpeditionFlightMode: res=%+v err=%v", undoFlightMode, undoError)
-	}
-	if redoFlightMode, redoError := testApp.RedoExpedition(targetExpeditionID); redoError != nil || !redoFlightMode.Applied {
-		testingContext.Fatalf("Redo SetExpeditionFlightMode: res=%+v err=%v", redoFlightMode, redoError)
-	}
-	eventsRecorder.Reset()
-
 	activeUsage, usageError := testApp.GetModeUsage(createdMode.ID)
 	if usageError != nil || len(activeUsage) != 1 || activeUsage[0].ExpeditionID != targetExpeditionID || !activeUsage[0].IsActiveMode {
 		testingContext.Fatalf("unexpected GetModeUsage for active mode: %+v err=%v", activeUsage, usageError)

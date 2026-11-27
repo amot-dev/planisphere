@@ -1,17 +1,12 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { describe, expect, it } from 'vitest'
+import { flushMicrotasks } from '../../test/async'
 import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 import { mountTestRoot, setFormControlValue, type MountedTestRoot } from '../../test/render'
 import { installWailsAppMock } from '../../test/wailsMock'
 import { BlockConfigurator } from './BlockConfigurator'
 import { useExportStudio } from './useExportStudio'
-
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
-}
 
 function BlockConfiguratorHarness({ expeditionId }: { expeditionId: number }) {
   const studio = useExportStudio(expeditionId)

@@ -108,9 +108,6 @@ func TestRecoveredJumpsProjectionCachingInvalidationAndScoping(testingContext *t
 	if disableError := settings.SetCommanderEnabled(databaseConnection, "CmdrTest", false); disableError != nil {
 		testingContext.Fatal(disableError)
 	}
-	if _, execErr := databaseConnection.Exec(`UPDATE commander_profiles SET enabled = 0 WHERE id = ?`, commanders[0].ID); execErr != nil {
-		testingContext.Fatal(execErr)
-	}
 	eventBus.PublishApp(events.AppCommanderFilterChanged)
 
 	disabledRecovered, disabledError := recoveredJumps.InRange("", "")

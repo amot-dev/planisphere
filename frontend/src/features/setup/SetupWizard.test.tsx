@@ -2,6 +2,7 @@
 import { act, createElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { app } from '../../api/models'
+import { createDeferred, flushMicrotasks } from '../../test/async'
 import { makeSettings } from '../../test/fixtures'
 import { mountTestRoot } from '../../test/render'
 import { installWailsAppMock } from '../../test/wailsMock'
@@ -20,7 +21,7 @@ describe('SetupWizardModal async edge safety', () => {
     })
     const initialIngest = app.IngestStatus.createFrom({ filesTracked: 1, eventsStored: 42 })
 
-    let resolveGecSync!: (count: number) => void
+    const gecSyncDeferred = createDeferred<number>()
     const { spies } = installWailsAppMock({
       SetDatabasePath: async () => initialSettings,
       GetIngestStatus: async () => initialIngest,
@@ -29,10 +30,7 @@ describe('SetupWizardModal async edge safety', () => {
       SetOnlineLookups: async () => {
         throw new Error('settings write failed')
       },
-      RefreshGEC: () =>
-        new Promise<number>((resolve) => {
-          resolveGecSync = resolve
-        }),
+      RefreshGEC: () => gecSyncDeferred.promise,
     })
 
     const mounted = mountTestRoot(
@@ -48,11 +46,11 @@ describe('SetupWizardModal async edge safety', () => {
 
     await act(async () => {
       mounted.findButtonByText('NEXT').click()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
     await act(async () => {
       mounted.findButtonByText('NEXT').click()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
     act(() => mounted.findButtonByText('NEXT').click())
     expect(mounted.container.textContent).toContain('Step 4 of 4')
@@ -61,7 +59,7 @@ describe('SetupWizardModal async edge safety', () => {
       Array.from(mounted.container.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[]
     await act(async () => {
       checkboxes()[1].click()
-      await Promise.resolve()
+      await flushMicrotasks()
     })
     expect(spies.SetOnlineLookups).toHaveBeenCalledWith(false)
     expect(checkboxes()[1].checked).toBe(true)
@@ -80,8 +78,8 @@ describe('SetupWizardModal async edge safety', () => {
 
     mounted.unmount()
     await act(async () => {
-      resolveGecSync(1200)
-      await Promise.resolve()
+      gecSyncDeferred.resolve(1200)
+      await flushMicrotasks()
     })
   })
 })

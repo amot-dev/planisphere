@@ -26,33 +26,8 @@ func setSettingForTest(queryer db.Queryer, key, value string) error {
 	return execError
 }
 
-func TestDefaultPath(t *testing.T) {
-	defaultPath, pathError := db.DefaultPath()
-	if pathError != nil {
-		t.Fatalf("DefaultPath: %v", pathError)
-	}
-	if defaultPath == "" {
-		t.Fatalf("expected non-empty default path")
-	}
-}
-
 func TestConfiguredDatabasePathResolutionAndFallback(testingContext *testing.T) {
-	isolatedRoot := testingContext.TempDir()
-	homeDir := filepath.Join(isolatedRoot, "home")
-	xdgConfigDir := filepath.Join(isolatedRoot, "xdg-config")
-	xdgDataDir := filepath.Join(isolatedRoot, "xdg-data")
-	appDataDir := filepath.Join(isolatedRoot, "appdata")
-	localAppDataDir := filepath.Join(isolatedRoot, "localappdata")
-	for _, dirPath := range []string{homeDir, xdgConfigDir, xdgDataDir, appDataDir, localAppDataDir} {
-		if mkdirError := os.MkdirAll(dirPath, 0o755); mkdirError != nil {
-			testingContext.Fatalf("mkdir %s: %v", dirPath, mkdirError)
-		}
-	}
-	testingContext.Setenv("HOME", homeDir)
-	testingContext.Setenv("XDG_CONFIG_HOME", xdgConfigDir)
-	testingContext.Setenv("XDG_DATA_HOME", xdgDataDir)
-	testingContext.Setenv("APPDATA", appDataDir)
-	testingContext.Setenv("LOCALAPPDATA", localAppDataDir)
+	isolatedRoot := dbtest.IsolateUserDirs(testingContext)
 
 	expectedDefaultPath, defaultError := db.DefaultPath()
 	if defaultError != nil {

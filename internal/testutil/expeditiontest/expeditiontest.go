@@ -12,6 +12,7 @@ import (
 	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/journaltest"
 )
 
 // DefaultModes holds the database IDs of the seeded flight modes.
@@ -75,4 +76,41 @@ func ProfileIDsByName(testingContext *testing.T, conn *sql.DB) map[string]int64 
 		idsByName[commander.Name] = commander.ID
 	}
 	return idsByName
+}
+
+// SeedArchivedPreWipeExpedition ingests a two-era ClearSavedGame journal archive for CMDR Pioneer and returns a completed expedition scoped to the disabled pre-wipe career profile.
+func SeedArchivedPreWipeExpedition(testingContext *testing.T, conn *sql.DB) (expedition.Expedition, replay.Commander) {
+	testingContext.Helper()
+	journaltest.IngestLines(testingContext, conn,
+		`{"timestamp":"2024-05-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2024-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":501,"StarPos":[67,-119,24],"JumpDist":20.0}`,
+		`{"timestamp":"2024-05-01T10:15:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2024-05-01T11:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":6006,"StarPos":[-9530,-910,19808],"JumpDist":22000.0}`,
+		`{"timestamp":"2024-05-01T11:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Colonia 1","BodyID":1,"StarSystem":"Colonia","SystemAddress":6006,"PlanetClass":"Earthlike body","MassEM":1.0,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2025-01-01T00:00:00Z","event":"ClearSavedGame","Name":"CMDR Pioneer","FID":"F777"}`,
+		`{"timestamp":"2025-01-01T00:00:05Z","event":"NewCommander","Name":"CMDR Pioneer","FID":"F777","Package":"Sidewinder"}`,
+		`{"timestamp":"2025-01-01T00:05:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"SideWinder","Ship_Localised":"Sidewinder","ShipID":1,"Odyssey":true}`,
+		`{"timestamp":"2025-01-01T00:10:00Z","event":"Location","StarSystem":"Matet","SystemAddress":9001,"StarPos":[10,20,30]}`,
+	)
+
+	commanders, listError := replay.ListCommanders(conn)
+	if listError != nil || len(commanders) != 2 || !commanders[0].IsArchivedCareer || commanders[0].Enabled {
+		testingContext.Fatalf("expected era:0 archived disabled and era:1 active enabled, got %+v err=%v", commanders, listError)
+	}
+	archivedProfile := commanders[0]
+
+	historicalExpedition, createError := expedition.CreateWithWaypoints(conn, "2024 Pre-Wipe Colonia Run", "", []expedition.SeedWaypoint{
+		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "journal"},
+		{SystemName: "Colonia", SystemAddress: 6006, HasCoords: true, X: -9530, Y: -910, Z: 19808, CoordsSource: "journal"},
+	})
+	if createError != nil {
+		testingContext.Fatalf("create historical expedition: %v", createError)
+	}
+	if startError := expedition.StartScopedTx(conn, historicalExpedition.ID, "2024-05-01T10:15:00Z", 0, archivedProfile.ID); startError != nil {
+		testingContext.Fatalf("StartScopedTx archived profile: %v", startError)
+	}
+	if completeError := expedition.CompleteTx(conn, historicalExpedition.ID); completeError != nil {
+		testingContext.Fatalf("CompleteTx archived expedition: %v", completeError)
+	}
+	return historicalExpedition, archivedProfile
 }

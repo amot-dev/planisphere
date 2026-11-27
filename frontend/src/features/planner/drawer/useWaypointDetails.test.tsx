@@ -2,23 +2,11 @@
 import { act } from 'react'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../../api/models'
+import { createDeferred } from '../../../test/async'
 import { makeWaypointDetails } from '../../../test/fixtures'
 import { renderHook } from '../../../test/render'
 import { installWailsAppMock } from '../../../test/wailsMock'
 import { useWaypointDetails } from './useWaypointDetails'
-
-interface Deferred<T> {
-  promise: Promise<T>
-  resolve: (value: T) => void
-}
-
-function createDeferred<T>(): Deferred<T> {
-  let resolveValue!: (value: T) => void
-  const promise = new Promise<T>((resolve) => {
-    resolveValue = resolve
-  })
-  return { promise, resolve: resolveValue }
-}
 
 interface HarnessProps {
   plan: expedition.PlanView

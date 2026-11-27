@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -12,6 +11,8 @@ import (
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 type testEmitDispatcher struct {
@@ -195,27 +196,9 @@ func (recorder *capturedAppEvents) PendingTrue() <-chan struct{} {
 	return recorder.pendingTrueChan
 }
 
-func isolateTestUserDirectories(testingContext *testing.T, rootDirectory string) {
-	testingContext.Helper()
-	environmentDirectories := [][2]string{
-		{"HOME", filepath.Join(rootDirectory, "home")},
-		{"XDG_CONFIG_HOME", filepath.Join(rootDirectory, "xdg-config")},
-		{"XDG_DATA_HOME", filepath.Join(rootDirectory, "xdg-data")},
-		{"APPDATA", filepath.Join(rootDirectory, "appdata")},
-		{"LOCALAPPDATA", filepath.Join(rootDirectory, "localappdata")},
-	}
-	for _, entry := range environmentDirectories {
-		if mkdirError := os.MkdirAll(entry[1], 0o755); mkdirError != nil {
-			testingContext.Fatalf("create isolated %s directory: %v", entry[0], mkdirError)
-		}
-		testingContext.Setenv(entry[0], entry[1])
-	}
-}
-
 func setupTestApp(testingContext *testing.T) *App {
 	testingContext.Helper()
-	temporaryDirectory := testingContext.TempDir()
-	isolateTestUserDirectories(testingContext, temporaryDirectory)
+	temporaryDirectory := dbtest.IsolateUserDirs(testingContext)
 	databasePath := filepath.Join(temporaryDirectory, "test.sqlite")
 
 	testApp := New()
@@ -336,4 +319,44 @@ func mustGetPlan(testingContext *testing.T, testApp *App, expeditionID int64) ex
 func mustGetActiveCarrierRoute(testingContext *testing.T, testApp *App, expeditionID int64) *ActiveCarrierRouteState {
 	testingContext.Helper()
 	return mustGetPlan(testingContext, testApp, expeditionID).ActiveCarrierRoute
+}
+
+func mustCreateExpeditionWithWaypoints(
+	testingContext *testing.T,
+	targetApp *App,
+	expeditionName, expeditionDescription string,
+	systemNames ...string,
+) expedition.Expedition {
+	testingContext.Helper()
+	createdExpedition, createError := targetApp.createExpeditionWithWaypoints(expeditionName, expeditionDescription, systemNames)
+	if createError != nil {
+		testingContext.Fatalf("createExpeditionWithWaypoints(%q): %v", expeditionName, createError)
+	}
+	targetApp.backgroundWg.Wait()
+	return createdExpedition
+}
+
+func setTestRowSystemName(testingContext *testing.T, targetApp *App, rowID int64, systemName string) {
+	testingContext.Helper()
+	if updateError := targetApp.UpdateRow(expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
+		testingContext.Fatalf("UpdateRow(%d, %q): %v", rowID, systemName, updateError)
+	}
+}
+
+func addTestWaypoint(testingContext *testing.T, targetApp *App, expeditionID, afterRowID int64, systemName string) expedition.Row {
+	testingContext.Helper()
+	insertedRow, addError := targetApp.AddRow(expeditionID, afterRowID, expedition.RowWaypoint, 0)
+	if addError != nil {
+		testingContext.Fatalf("AddRow(%d): %v", expeditionID, addError)
+	}
+	setTestRowSystemName(testingContext, targetApp, insertedRow.ID, systemName)
+	return insertedRow
+}
+
+func publishTestJournalLines(testingContext *testing.T, targetApp *App, earliestTimestamp, latestTimestamp string, lines ...string) {
+	testingContext.Helper()
+	insertedTypes := journaltest.InsertParsedLines(testingContext, targetApp.db, lines...)
+	if len(insertedTypes) > 0 {
+		targetApp.publishJournalBatch(journal.NewEventSet(insertedTypes...), earliestTimestamp, latestTimestamp)
+	}
 }

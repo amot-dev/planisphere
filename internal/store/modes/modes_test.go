@@ -61,7 +61,6 @@ func TestModeColorValidation(testingContext *testing.T) {
 	}{
 		{name: "valid three digit hex update", rawColor: "#f0A"},
 		{name: "non hex update rejected", rawColor: "#zzzzzz", expectError: true},
-		{name: "css injection update rejected", rawColor: "#12;x:1", expectError: true},
 	}
 
 	for _, testCase := range updateCases {

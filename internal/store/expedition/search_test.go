@@ -24,17 +24,14 @@ func TestSearchWaypointsTiersRankingAndExclusions(testingContext *testing.T) {
 	}
 
 	// Expedition name contains "Vela" to verify expedition names alone do not match.
-	createdExpedition, createError := expedition.CreateWithWaypoints(databaseConnection, "Vela Grand Tour", "Desc", []expedition.SeedWaypoint{
-		{SystemName: "Unrelated Sys", POIName: "Gateway to Vela"}, // Tier 5: substring POI
-		{SystemName: "Deep Vela Rim", POIName: "Outer Rim"},       // Tier 4: substring system
-		{SystemName: "Far Vela Reach", POIName: "Vela Station"},   // Tier 3: prefix POI beats Tier 4 substring system
-		{SystemName: "Vela Pulsar", POIName: "Neutron"},           // Tier 2: prefix system
-		{SystemName: "Vela", POIName: "Origin"},                   // Tier 1: exact system
-		{SystemName: "Quiet Star", POIName: "Beacon"},             // Will hold "Vela" only in notes
-	})
-	if createError != nil {
-		testingContext.Fatalf("CreateWithWaypoints: %v", createError)
-	}
+	createdExpedition := mustCreateWithWaypoints(testingContext, databaseConnection, "Vela Grand Tour", "Desc",
+		expedition.SeedWaypoint{SystemName: "Unrelated Sys", POIName: "Gateway to Vela"}, // Tier 5: substring POI
+		expedition.SeedWaypoint{SystemName: "Deep Vela Rim", POIName: "Outer Rim"},       // Tier 4: substring system
+		expedition.SeedWaypoint{SystemName: "Far Vela Reach", POIName: "Vela Station"},   // Tier 3: prefix POI beats Tier 4 substring system
+		expedition.SeedWaypoint{SystemName: "Vela Pulsar", POIName: "Neutron"},           // Tier 2: prefix system
+		expedition.SeedWaypoint{SystemName: "Vela", POIName: "Origin"},                   // Tier 1: exact system
+		expedition.SeedWaypoint{SystemName: "Quiet Star", POIName: "Beacon"},             // Will hold "Vela" only in notes
+	)
 	rows, listError := expedition.ListRows(databaseConnection, createdExpedition.ID)
 	if listError != nil || len(rows) != 6 {
 		testingContext.Fatalf("ListRows: len=%d err=%v", len(rows), listError)
@@ -81,21 +78,10 @@ func TestSearchWaypointsTiersRankingAndExclusions(testingContext *testing.T) {
 func TestSearchWaypointsChronologicalTieBreakingAndStatusCoercion(testingContext *testing.T) {
 	databaseConnection := dbtest.OpenMemory(testingContext)
 
-	seedSingleWaypoint := func(name string) expedition.Expedition {
-		testingContext.Helper()
-		record, err := expedition.CreateWithWaypoints(databaseConnection, name, "", []expedition.SeedWaypoint{
-			{SystemName: "Colonia"},
-		})
-		if err != nil {
-			testingContext.Fatalf("create %s: %v", name, err)
-		}
-		return record
-	}
-
-	retroHistorical := seedSingleWaypoint("Retroactive Historical")
-	activeRecent := seedSingleWaypoint("Active Recent")
-	planningUnstarted := seedSingleWaypoint("Planning Unstarted")
-	coercedPlanning := seedSingleWaypoint("Coerced Active Without Start")
+	retroHistorical := mustCreateWithWaypoints(testingContext, databaseConnection, "Retroactive Historical", "", expedition.SeedWaypoint{SystemName: "Colonia"})
+	activeRecent := mustCreateWithWaypoints(testingContext, databaseConnection, "Active Recent", "", expedition.SeedWaypoint{SystemName: "Colonia"})
+	planningUnstarted := mustCreateWithWaypoints(testingContext, databaseConnection, "Planning Unstarted", "", expedition.SeedWaypoint{SystemName: "Colonia"})
+	coercedPlanning := mustCreateWithWaypoints(testingContext, databaseConnection, "Coerced Active Without Start", "", expedition.SeedWaypoint{SystemName: "Colonia"})
 
 	// Retroactive historical expedition has newest created_at (2026-04-01) but oldest start_timestamp (2024-06-01).
 	if _, err := databaseConnection.Exec(`UPDATE expeditions SET status = 'completed', start_timestamp = '2024-06-01T00:00:00Z', end_timestamp = '2024-07-01T00:00:00Z', created_at = '2026-04-01T00:00:00Z' WHERE id = ?`, retroHistorical.ID); err != nil {
@@ -439,21 +425,16 @@ func TestSearchWaypointsResultAndNonWaypointVisitCaps(testingContext *testing.T)
 
 	// Seed 205 non-waypoint jumps to Busy Hub to verify Visits capped at 200 with full TotalCount and EarliestGalactic.
 	startTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	insertStmt, prepError := databaseConnection.Prepare(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at) VALUES (?, ?, 'FSDJump', 'Busy Hub', '{}', ?)`,
-	)
-	if prepError != nil {
-		testingContext.Fatal(prepError)
-	}
-	defer insertStmt.Close()
-
 	const totalSeededVisits = 205
+	busyVisitLines := make([]string, totalSeededVisits)
 	for index := 0; index < totalSeededVisits; index++ {
 		visitTimestamp := reference.FormatISO(startTime.Add(time.Duration(index) * time.Hour))
-		if _, err := insertStmt.Exec(fmt.Sprintf("busy-uid-%03d", index), visitTimestamp, visitTimestamp); err != nil {
-			testingContext.Fatal(err)
-		}
+		busyVisitLines[index] = fmt.Sprintf(
+			`{"timestamp":%q,"event":"FSDJump","StarSystem":"Busy Hub","SystemAddress":7777,"StarPos":[0,0,0],"JumpDist":10.0}`,
+			visitTimestamp,
+		)
 	}
+	journaltest.InsertParsedLines(testingContext, databaseConnection, busyVisitLines...)
 
 	busyResponse, busyError := expedition.SearchWaypoints(databaseConnection, "Busy Hub", nil)
 	if busyError != nil {

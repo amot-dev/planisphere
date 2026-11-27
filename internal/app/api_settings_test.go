@@ -1,7 +1,6 @@
 package app
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/eddtest"
 )
 
 func TestJournalDebounceSettingPersistenceAndReload(t *testing.T) {
@@ -120,36 +120,6 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	}
 }
 
-func createMinimalEDDSQLite(testingContext *testing.T, entries [][2]string) string {
-	testingContext.Helper()
-	eddPath := filepath.Join(testingContext.TempDir(), "EDDUser.sqlite")
-	eddConn, openErr := sql.Open("sqlite", eddPath)
-	if openErr != nil {
-		testingContext.Fatalf("open temp EDD sqlite: %v", openErr)
-	}
-	defer eddConn.Close()
-
-	if _, schemaErr := eddConn.Exec(`
-		CREATE TABLE TravelLogUnit (Id INTEGER PRIMARY KEY, Name TEXT, Path TEXT);
-		CREATE TABLE JournalEntries (Id INTEGER PRIMARY KEY, TravelLogId INTEGER, EventType TEXT, EventData TEXT);
-		INSERT INTO TravelLogUnit (Id, Name, Path) VALUES (1, 'Journal.2026-03-01T000000.01.log', '/journals/Journal.2026-03-01T000000.01.log');
-	`); schemaErr != nil {
-		testingContext.Fatalf("seed EDD schema: %v", schemaErr)
-	}
-	for index, entry := range entries {
-		if _, insertErr := eddConn.Exec(
-			`INSERT INTO JournalEntries (Id, TravelLogId, EventType, EventData) VALUES (?, 1, ?, ?)`,
-			index+1, entry[0], entry[1],
-		); insertErr != nil {
-			testingContext.Fatalf("insert EDD entry %d: %v", index, insertErr)
-		}
-	}
-	if closeErr := eddConn.Close(); closeErr != nil {
-		testingContext.Fatalf("close temp EDD sqlite: %v", closeErr)
-	}
-	return eddPath
-}
-
 func TestSetCommanderEnabledSetJournalDirAndImportEDDiscoveryHistory(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 	if err := settings.SetSetupCompleted(testApp.db, true); err != nil {
@@ -198,7 +168,7 @@ func TestSetCommanderEnabledSetJournalDirAndImportEDDiscoveryHistory(testingCont
 		}
 	}
 
-	eddPath := createMinimalEDDSQLite(testingContext, [][2]string{
+	eddPath := eddtest.BuildMinimalArchive(testingContext, [][2]string{
 		{"Fileheader", `{"timestamp":"2026-03-02T09:00:00Z","event":"Fileheader","part":1,"Odyssey":true}`},
 		{"LoadGame", `{"timestamp":"2026-03-02T09:00:05Z","event":"LoadGame","Commander":"CmdrEDD","FID":"F999","Ship":"Anaconda"}`},
 		{"FSDJump", `{"timestamp":"2026-03-02T09:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":2002,"StarPos":[67.5,-119.4,24.8],"JumpDist":139.4}`},

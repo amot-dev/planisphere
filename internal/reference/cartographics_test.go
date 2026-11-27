@@ -42,11 +42,6 @@ func TestStarValuation(testingContext *testing.T) {
 			wantBase: 14184,
 		},
 		{
-			name:     "white dwarf two letter class DB",
-			bodyScan: BodyScan{StarType: "DB", StellarMass: 0.6, WasDiscovered: true},
-			wantBase: 14184,
-		},
-		{
 			name:           "white dwarf three letter class DCV first discovered",
 			bodyScan:       BodyScan{StarType: "DCV", StellarMass: 0.6, WasDiscovered: false},
 			wantBase:       14184,

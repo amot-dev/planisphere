@@ -3,7 +3,7 @@
 export const APP_NAME = "planisphere"
 export const APP_PRODUCT_NAME = "Planisphere"
 export const APP_TAGLINE = "Expedition Planner and Astrometric Telemetry Terminal"
-export const APP_VERSION = "1.0.0"
+export const APP_VERSION = "1.1.0"
 export const APP_AUTHOR = "Alexander Mot"
 export const APP_DESCRIPTION = "Elite Dangerous Expedition Planner and Astrometric Telemetry Terminal"
 export const APP_BINARY_NAME = "planisphere"
