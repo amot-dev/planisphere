@@ -1,11 +1,6 @@
 package projections_test
 
 import (
-	"context"
-	"database/sql"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"planisphere/internal/core/projection"
@@ -13,35 +8,19 @@ import (
 	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func insertJournalRow(testingContext *testing.T, database *sql.DB, timestamp, eventName, systemName, keyIdentifier, rawJSON string) {
-	testingContext.Helper()
-	eventUID := journal.ComputeUID(timestamp, eventName, keyIdentifier)
-	_, execError := database.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		eventUID, timestamp, eventName, journal.NullStringOrNil(systemName), rawJSON, timestamp,
-	)
-	if execError != nil {
-		testingContext.Fatalf("insert %s row: %v", eventName, execError)
-	}
-}
-
 func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-05-01T000000.01.log")
-	lines := []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-05-01T10:00:00Z","event":"LoadGame","Commander":"CmdrFirst","FID":"F1","Ship":"Mandalay"}`,
 		`{"timestamp":"2026-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":5.0}`,
 		`{"timestamp":"2026-05-02T10:00:00Z","event":"LoadGame","Commander":"CmdrSecond","FID":"F2","Ship":"Anaconda"}`,
-	}
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatal(scanError)
-	}
+	)
 
 	commanders, listError := replay.ListCommanders(databaseConnection)
 	if listError != nil || len(commanders) != 2 {
@@ -79,20 +58,14 @@ func TestCareerStartAndCommanderFilter(testingContext *testing.T) {
 }
 
 func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-05-02T000000.01.log")
-	lines := []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-05-02T10:00:00Z","event":"LoadGame","Commander":"CmdrNav","FID":"F3","Ship":"Mandalay"}`,
 		`{"timestamp":"2026-05-02T10:01:00Z","event":"Location","StarSystem":"ParkSys","SystemAddress":3001,"StarPos":[0,0,0],"Docked":false}`,
 		`{"timestamp":"2026-05-02T10:05:00Z","event":"FSDJump","StarSystem":"WaySys","SystemAddress":3002,"StarPos":[10,0,0],"JumpDist":10.0}`,
-	}
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatal(scanError)
-	}
+	)
 
 	eventBus := projection.NewBus()
 	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
@@ -117,8 +90,11 @@ func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testi
 	}
 
 	// Publishing non-arrival and disconnect-lookback events must NOT invalidate arrivals or visit counts.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-02T10:10:00Z", "FSDJump", "WaySys", "visit2",
-		`{"timestamp":"2026-05-02T10:10:00Z","event":"FSDJump","StarSystem":"WaySys","SystemAddress":3002,"StarPos":[10,0,0],"JumpDist":10.0}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-05-02T10:10:00Z","event":"FSDJump","StarSystem":"WaySys","SystemAddress":3002,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	)
 	eventBus.PublishJournal(journal.NewEventSet(
 		journal.EventScan,
 		journal.EventLoadGame,
@@ -150,21 +126,19 @@ func TestSystemArrivalsAndVisitCountsSelectiveInvalidation(testingContext *testi
 }
 
 func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	eventBus := projection.NewBus()
 	shipHistory := projections.NewShipHistory(databaseConnection, eventBus)
 
-	// Log first in Caspian Explorer ("Siderite Skillet", ShipID 7), then in Mandalay ("Dust Devil", ShipID 9).
-	insertJournalRow(testingContext, databaseConnection, "2026-05-01T10:00:00Z", "LoadGame", "", "lg1",
-		`{"timestamp":"2026-05-01T10:00:00Z","event":"LoadGame","Ship":"Explorer_NX","ShipID":7,"ShipName":"Siderite Skillet"}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-02T10:00:00Z", "LoadGame", "", "lg2",
-		`{"timestamp":"2026-05-02T10:00:00Z","event":"LoadGame","Ship":"Mandalay","ShipID":9,"ShipName":"Dust Devil"}`)
-	// Relog on foot in an engineered Artemis suit -> must NOT override active ship in header or timeline.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-03T10:00:00Z", "LoadGame", "", "lg-suit",
-		`{"timestamp":"2026-05-03T10:00:00Z","event":"LoadGame","Ship":"ExplorationSuit_Class5","Ship_Localised":"$ExplorationSuit_Class1_Name;","ShipID":9}`)
-	// Relog inside SRV Scarab -> must also be ignored.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-03T10:05:00Z", "LoadGame", "", "lg-srv",
-		`{"timestamp":"2026-05-03T10:05:00Z","event":"LoadGame","Ship":"TestBuggy","Ship_Localised":"SRV Scarab","ShipID":9}`)
+	// Log in Caspian Explorer ("Siderite Skillet", ShipID 7), then Mandalay ("Dust Devil", ShipID 9), followed by suit and SRV relogs that must be ignored.
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-05-01T10:00:00Z","event":"LoadGame","Ship":"Explorer_NX","ShipID":7,"ShipName":"Siderite Skillet"}`,
+		`{"timestamp":"2026-05-02T10:00:00Z","event":"LoadGame","Ship":"Mandalay","ShipID":9,"ShipName":"Dust Devil"}`,
+		`{"timestamp":"2026-05-03T10:00:00Z","event":"LoadGame","Ship":"ExplorationSuit_Class5","Ship_Localised":"$ExplorationSuit_Class1_Name;","ShipID":9}`,
+		`{"timestamp":"2026-05-03T10:05:00Z","event":"LoadGame","Ship":"TestBuggy","Ship_Localised":"SRV Scarab","ShipID":9}`,
+	)
 
 	currentBeforeSwap, shipError := replay.QueryCurrentShip(databaseConnection)
 	if shipError != nil {
@@ -175,8 +149,11 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 	}
 
 	// Swap back to ShipID 7 via ShipyardSwap (which omits ShipName); header must recover "Siderite Skillet".
-	insertJournalRow(testingContext, databaseConnection, "2026-05-04T10:00:00Z", "ShipyardSwap", "", "swap1",
-		`{"timestamp":"2026-05-04T10:00:00Z","event":"ShipyardSwap","ShipType":"explorer_nx","ShipID":7,"StoreOldShip":"Mandalay","StoreShipID":9}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-05-04T10:00:00Z","event":"ShipyardSwap","ShipType":"explorer_nx","ShipID":7,"StoreOldShip":"Mandalay","StoreShipID":9}`,
+	)
 
 	currentAfterSwap, swapShipError := replay.QueryCurrentShip(databaseConnection)
 	if swapShipError != nil {
@@ -188,14 +165,14 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 
 	// Timeline and leg transitions remain hull-only (preserving baseline display),
 	// while QueryJumpTimestampsScoped excludes Taxi and Multicrew FSDJump events.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-03T11:00:00Z", "FSDJump", "TaxiSys", "jump-taxi",
-		`{"timestamp":"2026-05-03T11:00:00Z","event":"FSDJump","StarSystem":"TaxiSys","JumpDist":12.0,"Taxi":true}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-03T11:30:00Z", "FSDJump", "CrewSys", "jump-crew",
-		`{"timestamp":"2026-05-03T11:30:00Z","event":"FSDJump","StarSystem":"CrewSys","JumpDist":15.0,"Multicrew":true}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-03T12:00:00Z", "FSDJump", "PilotedOne", "jump-1",
-		`{"timestamp":"2026-05-03T12:00:00Z","event":"FSDJump","StarSystem":"PilotedOne","JumpDist":40.0}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-04T12:00:00Z", "FSDJump", "PilotedTwo", "jump-2",
-		`{"timestamp":"2026-05-04T12:00:00Z","event":"FSDJump","StarSystem":"PilotedTwo","JumpDist":75.0}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-05-03T11:00:00Z","event":"FSDJump","StarSystem":"TaxiSys","JumpDist":12.0,"Taxi":true}`,
+		`{"timestamp":"2026-05-03T11:30:00Z","event":"FSDJump","StarSystem":"CrewSys","JumpDist":15.0,"Multicrew":true}`,
+		`{"timestamp":"2026-05-03T12:00:00Z","event":"FSDJump","StarSystem":"PilotedOne","JumpDist":40.0}`,
+		`{"timestamp":"2026-05-04T12:00:00Z","event":"FSDJump","StarSystem":"PilotedTwo","JumpDist":75.0}`,
+	)
 
 	timeline, timelineError := shipHistory.Timeline("2026-05-02T09:00:00Z", "2026-05-05T00:00:00Z")
 	if timelineError != nil {
@@ -215,13 +192,16 @@ func TestShipHistorySuitFilteringAndSwapCustomNameLookup(testingContext *testing
 }
 
 func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	eventBus := projection.NewBus()
 	carrierState := projections.NewCarrierState(databaseConnection, eventBus)
 
 	// Without any CarrierStats, unlabelled Location matches Location/CarrierJump consistently.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-01T09:00:00Z", "CarrierJump", "OriginSys", "cj0",
-		`{"timestamp":"2026-05-01T09:00:00Z","event":"CarrierJump","StarSystem":"OriginSys"}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-05-01T09:00:00Z","event":"CarrierJump","StarSystem":"OriginSys"}`,
+	)
 	initialSnapshot, snapshotError := carrierState.LatestStats()
 	if snapshotError != nil {
 		testingContext.Fatalf("initial LatestStats: %v", snapshotError)
@@ -231,21 +211,17 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 		testingContext.Fatalf("initial LastLocation = %q err=%v, want OriginSys", initialLoc, initialErr)
 	}
 
-	// Record personal carrier identity (CarrierID 3701199360, K1V-6QB) and fuel state.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-01T10:00:00Z", "CarrierStats", "", "cs1",
-		`{"timestamp":"2026-05-01T10:00:00Z","event":"CarrierStats","CarrierID":3701199360,"Callsign":"K1V-6QB","Name":"VANCOUVER","FuelLevel":750,"SpaceUsage":{"TotalCapacity":25000,"FreeSpace":15000,"Cargo":120}}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-01T11:00:00Z", "CarrierJump", "OwnedCarrierSys", "cj-own",
-		`{"timestamp":"2026-05-01T11:00:00Z","event":"CarrierJump","StarSystem":"OwnedCarrierSys","StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`)
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventCarrierStats))
-
-	// A newer passenger CarrierJump, CarrierJumpRequest, and CarrierDepositFuel on a FOREIGN carrier
-	// (3709999999 / D9Z-111) must be ignored in both LastLocation and DepotInfo.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-02T12:00:00Z", "CarrierJump", "ForeignDestSys", "cj-foreign",
-		`{"timestamp":"2026-05-02T12:00:00Z","event":"CarrierJump","StarSystem":"ForeignDestSys","StationName":"D9Z-111","StationType":"FleetCarrier","MarketID":3709999999}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-02T12:05:00Z", "CarrierJumpRequest", "ForeignReqSys", "cjr-foreign",
-		`{"timestamp":"2026-05-02T12:05:00Z","event":"CarrierJumpRequest","SystemName":"ForeignReqSys","CarrierID":3709999999}`)
-	insertJournalRow(testingContext, databaseConnection, "2026-05-02T12:10:00Z", "CarrierDepositFuel", "", "cdf-foreign",
-		`{"timestamp":"2026-05-02T12:10:00Z","event":"CarrierDepositFuel","CarrierID":3709999999,"Amount":200,"Total":999}`)
+	// Record personal carrier identity (CarrierID 3701199360, K1V-6QB) and fuel state, plus foreign carrier events that must be ignored.
+	journaltest.PublishParsedLines(
+		testingContext,
+		databaseConnection,
+		eventBus,
+		`{"timestamp":"2026-05-01T10:00:00Z","event":"CarrierStats","CarrierID":3701199360,"Callsign":"K1V-6QB","Name":"VANCOUVER","FuelLevel":750,"SpaceUsage":{"TotalCapacity":25000,"FreeSpace":15000,"Cargo":120}}`,
+		`{"timestamp":"2026-05-01T11:00:00Z","event":"CarrierJump","StarSystem":"OwnedCarrierSys","StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
+		`{"timestamp":"2026-05-02T12:00:00Z","event":"CarrierJump","StarSystem":"ForeignDestSys","StationName":"D9Z-111","StationType":"FleetCarrier","MarketID":3709999999}`,
+		`{"timestamp":"2026-05-02T12:05:00Z","event":"CarrierJumpRequest","SystemName":"ForeignReqSys","CarrierID":3709999999}`,
+		`{"timestamp":"2026-05-02T12:10:00Z","event":"CarrierDepositFuel","CarrierID":3709999999,"Amount":200,"Total":999}`,
+	)
 
 	ownedSnapshot, ownedSnapshotError := carrierState.LatestStats()
 	if ownedSnapshotError != nil || !ownedSnapshot.Found {
@@ -264,8 +240,11 @@ func TestCarrierStateIdentityFilteringAcrossAllCarrierEvents(testingContext *tes
 	}
 
 	// Own carrier deposit overrides DepotTritium when timestamp >= latest CarrierStats.
-	insertJournalRow(testingContext, databaseConnection, "2026-05-02T13:00:00Z", "CarrierDepositFuel", "", "cdf-own",
-		`{"timestamp":"2026-05-02T13:00:00Z","event":"CarrierDepositFuel","CarrierID":3701199360,"Amount":150,"Total":900}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-05-02T13:00:00Z","event":"CarrierDepositFuel","CarrierID":3701199360,"Amount":150,"Total":900}`,
+	)
 	updatedDepot, updatedDepotErr := replay.QueryCarrierDepotInfo(databaseConnection, ownedSnapshot)
 	if updatedDepotErr != nil || updatedDepot.DepotTritium != 900 {
 		testingContext.Fatalf("updated DepotInfo = %+v err=%v, want DepotTritium=900", updatedDepot, updatedDepotErr)

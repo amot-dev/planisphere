@@ -1,7 +1,8 @@
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { expedition, modes } from '../../api/models'
+import { expedition } from '../../api/models'
+import { makeMode } from '../../test/fixtures'
 import { ExpeditionPlanner } from './ExpeditionPlanner'
 import { StartExpeditionModal } from './lifecycle/StartExpeditionModal'
 import { PlannerHeaderBar } from './PlannerHeaderBar'
@@ -94,7 +95,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       lastVisitedIndex: 1,
       lastFcArrivedIndex: -1,
       defaultModeId: 1,
-      modes: [{ id: 1, name: 'Travel', color: '#FF7100' } as any],
+      modes: [makeMode({ id: 1, name: 'Travel', color: '#FF7100' })],
       visitedWaypointCount: 2,
       waypointCount: 4,
       activeRowId: 402,
@@ -155,7 +156,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
         createdAt: '3310-01-01T00:00:00Z',
         updatedAt: '3310-01-01T00:00:00Z',
       },
-      rows: null as any,
+      rows: null as unknown as expedition.RowView[],
       modes: [],
       visitedWaypointCount: 0,
       waypointCount: 0,
@@ -223,7 +224,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           distFromPrevLy: 6.0,
         },
       ],
-      modes: [modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#FF7100' })],
+      modes: [makeMode({ id: 1, name: 'Travel', color: '#FF7100' })],
       visitedWaypointCount: 3,
       waypointCount: 3,
       activeRowId: 32,
@@ -295,7 +296,7 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
           distFromPrevLy: 4.3,
         },
       ],
-      modes: [modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#FF7100' })],
+      modes: [makeMode({ id: 1, name: 'Travel', color: '#FF7100' })],
       visitedWaypointCount: 0,
       waypointCount: 2,
       activeRowId: 0,
@@ -447,8 +448,8 @@ describe('ExpeditionPlanner Hook Stability and Lifecycle', () => {
       createElement(StartExpeditionModal, {
         expeditionId: 1,
         modesList: [
-          modes.Mode.createFrom({ id: 1, name: 'Exploration', color: '#00B3FF' }),
-          modes.Mode.createFrom({ id: 3, name: 'Travel', color: '#FF7100' }),
+          makeMode({ id: 1, name: 'Exploration', color: '#00B3FF' }),
+          makeMode({ id: 3, name: 'Travel', color: '#FF7100' }),
         ],
         initialModeId: 3,
         onClose: () => {},

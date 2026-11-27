@@ -1,127 +1,50 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { stats, type EddImportProgress } from '../../api/models'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { EddImportProgress } from '../../api/models'
 import { SyncStatusButton } from '../../components/ui/SyncStatusButton'
-import type { DataChangedDispatchContext } from './syncEventRouter'
-import { useSyncPause, type UseSyncPauseResult } from './useSyncPause'
-
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-function createLiveDispatchHarness(expeditionId = 4) {
-  const filter = stats.Filter.createFrom({ enabled: false, modes: [] })
-  const refreshExpeditionListOnly = vi.fn()
-  const loadIngestStatusOnly = vi.fn(async () => null)
-  const loadSettingsOnly = vi.fn(async () => null)
-  const loadModesOnly = vi.fn(async () => null)
-  const loadPlanOnly = vi.fn(async () => {})
-  const loadStatsOnly = vi.fn(async () => {})
-  const refreshAll = vi.fn()
-  const applyEddProgress = vi.fn()
-
-  const liveContext: DataChangedDispatchContext = {
-    bootState: {
-      initialBootComplete: true,
-      bootCoreLoaded: true,
-      deferredPayloads: [],
-    },
-    currentActiveExpeditionId: expeditionId,
-    currentFilter: filter,
-    refreshExpeditionListOnly,
-    loadIngestStatusOnly,
-    loadSettingsOnly,
-    loadModesOnly,
-    loadPlanOnly,
-    loadStatsOnly,
-    refreshAll,
-  }
-
-  return {
-    filter,
-    liveContext,
-    refreshExpeditionListOnly,
-    loadIngestStatusOnly,
-    loadSettingsOnly,
-    loadModesOnly,
-    loadPlanOnly,
-    loadStatsOnly,
-    refreshAll,
-    applyEddProgress,
-  }
-}
+import { createSyncDispatchHarness } from '../../test/fixtures'
+import { renderHook } from '../../test/render'
+import { installWailsAppMock } from '../../test/wailsMock'
+import { useSyncPause } from './useSyncPause'
 
 function mountSyncPauseHook(
-  harness: ReturnType<typeof createLiveDispatchHarness>,
+  harness: ReturnType<typeof createSyncDispatchHarness>,
   initialActiveStatusMessage: string | null = null,
 ) {
-  const setLiveSyncPausedMock = vi.fn(async () => {})
-  window.go = {
-    app: {
-      App: {
-        SetLiveSyncPaused: setLiveSyncPausedMock,
-      },
-    },
-  }
+  const { spies } = installWailsAppMock({
+    SetLiveSyncPaused: async () => {},
+  })
 
-  let latestResult!: UseSyncPauseResult
-  let currentStatusMessage = initialActiveStatusMessage
-
-  function HookProbe({ statusMessage }: { statusMessage: string | null }) {
-    latestResult = useSyncPause({
-      activeStatusMessage: statusMessage,
-      getLiveDispatchContext: () => harness.liveContext,
-      applyEddProgress: harness.applyEddProgress,
-    })
-    return null
-  }
-
-  const container = document.createElement('div')
-  document.body.appendChild(container)
-  const root = createRoot(container)
-  let unmounted = false
-
-  const unmount = () => {
-    if (unmounted) return
-    unmounted = true
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
-  }
-
-  try {
-    act(() => {
-      root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
-    })
-  } catch (mountError) {
-    unmount()
-    throw mountError
-  }
+  const mountedHook = renderHook(
+    ({ statusMessage }: { statusMessage: string | null }) =>
+      useSyncPause({
+        activeStatusMessage: statusMessage,
+        getLiveDispatchContext: () => harness.dispatchContext,
+        applyEddProgress: harness.applyEddProgress,
+      }),
+    { statusMessage: initialActiveStatusMessage },
+  )
 
   return {
-    setLiveSyncPausedMock,
-    getResult: () => latestResult,
+    setLiveSyncPausedMock: spies.SetLiveSyncPaused,
+    getResult: mountedHook.getResult,
     setStatusMessage: (nextStatusMessage: string | null) => {
-      currentStatusMessage = nextStatusMessage
-      act(() => {
-        root.render(createElement(HookProbe, { statusMessage: currentStatusMessage }))
-      })
+      mountedHook.rerender({ statusMessage: nextStatusMessage })
     },
-    unmount,
+    unmount: mountedHook.unmount,
   }
 }
 
 afterEach(() => {
-  delete window.go
   delete document.documentElement.dataset.documentHidden
   Object.defineProperty(document, 'hidden', { configurable: true, value: false })
 })
 
 describe('useSyncPause', () => {
   it('syncs manual pause to backend while keeping explicit user mutations unblocked', () => {
-    const harness = createLiveDispatchHarness()
+    const harness = createSyncDispatchHarness()
     const mounted = mountSyncPauseHook(harness)
 
     try {
@@ -172,7 +95,7 @@ describe('useSyncPause', () => {
   })
 
   it('drains PAUSING into PAUSED when ingest or EDDiscovery tasks finish and supports cancel', () => {
-    const harness = createLiveDispatchHarness()
+    const harness = createSyncDispatchHarness()
     const mounted = mountSyncPauseHook(harness, 'INGESTING JOURNALS')
 
     try {
@@ -226,7 +149,7 @@ describe('useSyncPause', () => {
   })
 
   it('toggles data-document-hidden for CSS animation suspension without deferring sync events', () => {
-    const harness = createLiveDispatchHarness()
+    const harness = createSyncDispatchHarness()
     const mounted = mountSyncPauseHook(harness)
 
     try {

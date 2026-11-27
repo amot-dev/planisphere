@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/version"
 )
 
@@ -38,11 +39,7 @@ func TestDefaultPath(t *testing.T) {
 }
 
 func TestMigrateIdempotency(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatalf("Open: %v", openError)
-	}
-	defer dbConn.Close()
+	dbConn := dbtest.OpenMemory(t)
 
 	// Calling Migrate a second time must succeed without errors
 	if err := db.Migrate(dbConn); err != nil {
@@ -95,11 +92,7 @@ func TestMigrateIdempotency(t *testing.T) {
 }
 
 func TestWithTxRollbackOnPanic(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatalf("Open: %v", openError)
-	}
-	defer dbConn.Close()
+	dbConn := dbtest.OpenMemory(t)
 
 	var recoveredPanic any
 	func() {
@@ -314,11 +307,7 @@ func TestSnapshotTo(testingContext *testing.T) {
 }
 
 func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("Open: %v", openError)
-	}
-	defer dbConn.Close()
+	dbConn := dbtest.OpenMemory(testingContext)
 
 	lastVersion, versionError := getSettingForTest(dbConn, db.LastAppVersionKey)
 	if versionError != nil {
@@ -432,11 +421,7 @@ func TestDowngradeRoundTripSelfHealing(testingContext *testing.T) {
 }
 
 func TestMigrateDepartedAtV12(testingContext *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("Open: %v", openError)
-	}
-	defer dbConn.Close()
+	dbConn := dbtest.OpenMemory(testingContext)
 
 	// Seed journal history: Sol -> Alpha (with scan) -> Beta (with scan + later departure + post-departure scan) + multicrew noise.
 	if _, execError := dbConn.Exec(`
@@ -543,11 +528,7 @@ func TestMigrateDepartedAtV12(testingContext *testing.T) {
 	}
 
 	testingContext.Run("open_final_stay_scoping", func(subtestContext *testing.T) {
-		openStayConn, subOpenError := db.Open(":memory:")
-		if subOpenError != nil {
-			subtestContext.Fatalf("Open: %v", subOpenError)
-		}
-		defer openStayConn.Close()
+		openStayConn := dbtest.OpenMemory(subtestContext)
 
 		if _, execError := openStayConn.Exec(`
 			INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrA', 'FA', 1), ('CmdrB', 'FB', 1);

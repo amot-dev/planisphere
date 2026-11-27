@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestNormalizeRecalculateRefillAndSwitchCarrierRouteState(testingContext *testing.T) {
@@ -129,12 +132,12 @@ func TestNormalizeRecalculateRefillAndSwitchCarrierRouteState(testingContext *te
 }
 
 func TestResolveStartSystemStopLocksAndBuildPlanRouteEmbedding(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-02-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-	})
+	)
 
 	expeditionRecord, originRow := createExpeditionWithOriginRow(testingContext, databaseConnection, "Route Locks", "")
 	setRowSystemName(testingContext, databaseConnection, originRow.ID, "Sol")
@@ -212,7 +215,7 @@ func TestResolveStartSystemStopLocksAndBuildPlanRouteEmbedding(testingContext *t
 }
 
 func TestCompleteSpanshJumpLogManualJumpAndDraftInputsTx(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	expeditionRecord, originRow := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Tx Ops", "")
 	setRowSystemName(testingContext, databaseConnection, originRow.ID, "Sol")
 	stopRow := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originRow.ID, expedition.RowWaypoint, 0)

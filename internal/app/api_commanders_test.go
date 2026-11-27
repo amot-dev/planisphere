@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"planisphere/internal/replay"
@@ -138,26 +137,15 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	}
 
 	// Switch to SetCareerBaselineScope("all_enabled"): AllJournals, CareerStart, and OriginBaseline now include CMDR EarlyAlt (+120 Ly, 2024-02-01), while Live remains 200 Ly!
-	var emittedDomains []string
-	var emitMu sync.Mutex
-	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
-		if eventName == EventDataChanged && len(payload) > 0 {
-			if changed, ok := payload[0].(DataChanged); ok {
-				emitMu.Lock()
-				emittedDomains = append(emittedDomains, changed.Domains...)
-				emitMu.Unlock()
-			}
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 	updatedScopeSettings, err := testApp.SetCareerBaselineScope(settings.CareerScopeAllEnabled)
 	if err != nil || updatedScopeSettings.CareerBaselineScope != settings.CareerScopeAllEnabled {
 		testingContext.Fatalf("SetCareerBaselineScope(all_enabled): settings=%+v err=%v", updatedScopeSettings, err)
 	}
-	emitMu.Lock()
-	if !slices.Contains(emittedDomains, "stats") || !slices.Contains(emittedDomains, "plan") || !slices.Contains(emittedDomains, "settings") {
-		testingContext.Fatalf("expected stats, plan, and settings domains on SetCareerBaselineScope, got %v", emittedDomains)
+	scopeDomains := eventsRecorder.Domains()
+	if !slices.Contains(scopeDomains, "stats") || !slices.Contains(scopeDomains, "plan") || !slices.Contains(scopeDomains, "settings") {
+		testingContext.Fatalf("expected stats, plan, and settings domains on SetCareerBaselineScope, got %v", scopeDomains)
 	}
-	emitMu.Unlock()
 
 	sidebarAllEnabled, err := testApp.GetSidebarStats(createdExp.ID, stats.Filter{})
 	if err != nil {
@@ -191,18 +179,15 @@ func TestCommanderAPIsCareerBaselineScopeAndCanonicalExportNames(testingContext 
 	if err != nil || len(sessions) != 2 || sessions[0].Ship != "Mandalay" || sessions[0].SystemName != "Sol" || sessions[1].Ship != "Anaconda" || sessions[1].SystemName != "Colonia" {
 		testingContext.Fatalf("unexpected LoadGame sessions on 2026-01-15: %+v err=%v", sessions, err)
 	}
-	emitMu.Lock()
-	emittedDomains = nil
-	emitMu.Unlock()
+	eventsRecorder.Reset()
 	splitSettings, err := testApp.SplitCommander("live:f101:era:0", sessions[1].Timestamp)
 	if err != nil {
 		testingContext.Fatalf("SplitCommander: %v", err)
 	}
-	emitMu.Lock()
-	if !slices.Contains(emittedDomains, "expeditions") || !slices.Contains(emittedDomains, "settings") || !slices.Contains(emittedDomains, "stats") {
-		testingContext.Fatalf("expected override mutation to emit expeditions, settings, and stats domains, got %v", emittedDomains)
+	splitDomains := eventsRecorder.Domains()
+	if !slices.Contains(splitDomains, "expeditions") || !slices.Contains(splitDomains, "settings") || !slices.Contains(splitDomains, "stats") {
+		testingContext.Fatalf("expected override mutation to emit expeditions, settings, and stats domains, got %v", splitDomains)
 	}
-	emitMu.Unlock()
 	if _, hasEra1 := findCommanderByKey(splitSettings.Commanders, "live:f101:era:1"); !hasEra1 {
 		testingContext.Fatalf("expected live:f101:era:1 after SplitCommander, got %+v", splitSettings.Commanders)
 	}

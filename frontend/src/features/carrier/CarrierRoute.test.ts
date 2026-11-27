@@ -1,42 +1,13 @@
 // @vitest-environment happy-dom
 import { act, createElement, useEffect, useState } from 'react'
-import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../api/models'
-
-const mockPrepareCarrierRoutePrompt = vi.fn()
-const mockStartCarrierRoute = vi.fn()
-const mockCancelCarrierRoutePlot = vi.fn()
-const mockOpenManualCarrierRoute = vi.fn()
-const mockRefillCarrierDepot = vi.fn()
-const mockSwitchCarrierRouteToManual = vi.fn()
-const mockCompleteSpanshCarrierJump = vi.fn()
-const mockLogManualCarrierJump = vi.fn()
-const mockSaveCarrierManualDraftInputs = vi.fn()
-const mockCompleteCarrierRouteArrival = vi.fn()
-const mockClearActiveCarrierRouteWithUndo = vi.fn()
-
-vi.mock('../../api/backend', () => ({
-  PrepareCarrierRoutePrompt: (...args: unknown[]) => mockPrepareCarrierRoutePrompt(...args),
-  StartCarrierRoute: (...args: unknown[]) => mockStartCarrierRoute(...args),
-  CancelCarrierRoutePlot: (...args: unknown[]) => mockCancelCarrierRoutePlot(...args),
-  OpenManualCarrierRoute: (...args: unknown[]) => mockOpenManualCarrierRoute(...args),
-  RefillCarrierDepot: (...args: unknown[]) => mockRefillCarrierDepot(...args),
-  SwitchCarrierRouteToManual: (...args: unknown[]) => mockSwitchCarrierRouteToManual(...args),
-  CompleteSpanshCarrierJump: (...args: unknown[]) => mockCompleteSpanshCarrierJump(...args),
-  LogManualCarrierJump: (...args: unknown[]) => mockLogManualCarrierJump(...args),
-  SaveCarrierManualDraftInputs: (...args: unknown[]) => mockSaveCarrierManualDraftInputs(...args),
-  CompleteCarrierRouteArrival: (...args: unknown[]) => mockCompleteCarrierRouteArrival(...args),
-  ClearActiveCarrierRouteWithUndo: (...args: unknown[]) =>
-    mockClearActiveCarrierRouteWithUndo(...args),
-}))
-
+import { renderHook } from '../../test/render'
+import { installWailsAppMock } from '../../test/wailsMock'
 import { CarrierRouteBottomPanel } from './CarrierRouteBottomPanel'
 import { CarrierRouteModal } from './CarrierRouteModal'
 import { useCarrierRoute } from './useCarrierRoute'
-
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('CarrierRoute UI Components', () => {
   it('CarrierRouteModal omits Manual Entry Mode and keeps QUERYING SPANSH... single-line', () => {
@@ -277,27 +248,24 @@ function buildCarrierPlan(
 }
 
 describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
-  afterEach(() => {
-    vi.resetAllMocks()
-    vi.useRealTimers()
-  })
-
   it('cancels in-flight Spansh plots on modal close or expedition switch and prevents cross-database manual draft leaks', async () => {
-    mockCancelCarrierRoutePlot.mockResolvedValue(undefined)
-    mockSaveCarrierManualDraftInputs.mockResolvedValue(undefined)
-    mockPrepareCarrierRoutePrompt.mockImplementation(async (_expId: number, targetRowId: number) =>
-      expedition.CarrierRoutePromptDefaults.createFrom({
-        targetRowId,
-        origin: 'Sol',
-        destination: targetRowId === 11 ? 'Colonia' : 'Beagle Point',
-        carrierType: 'player',
-        capacityUsed: 4000,
-        depotTritium: 900,
-      }),
-    )
-
     let resolveFirstPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
-    mockStartCarrierRoute.mockImplementationOnce(
+    const { spies } = installWailsAppMock({
+      CancelCarrierRoutePlot: async () => {},
+      SaveCarrierManualDraftInputs: async () => {},
+      PrepareCarrierRoutePrompt: async (_expId: number, targetRowId: number) =>
+        expedition.CarrierRoutePromptDefaults.createFrom({
+          targetRowId,
+          origin: 'Sol',
+          destination: targetRowId === 11 ? 'Colonia' : 'Beagle Point',
+          carrierType: 'player',
+          capacityUsed: 4000,
+          depotTritium: 900,
+        }),
+      StartCarrierRoute: async () => null,
+      OpenManualCarrierRoute: async () => null,
+    })
+    spies.StartCarrierRoute.mockImplementationOnce(
       () =>
         new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
           resolveFirstPlot = resolve
@@ -307,184 +275,169 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
     const planOne = buildCarrierPlan(1, 11, 'Colonia')
     const planTwo = buildCarrierPlan(2, 21, 'Beagle Point')
     const busyMessages: Array<string | null> = []
-    let latestHook!: ReturnType<typeof useCarrierRoute>
 
-    function HookHarness({
-      externalPlan,
-      dbPath = '/db/alpha.sqlite',
-      manualRequestCount = 0,
-    }: {
-      externalPlan: expedition.PlanView
-      dbPath?: string
-      manualRequestCount?: number
-    }) {
-      const [currentPlan, setCurrentPlan] = useState(externalPlan)
-      useEffect(() => {
-        setCurrentPlan(externalPlan)
-      }, [externalPlan])
-      latestHook = useCarrierRoute({
-        plan: currentPlan,
-        dbPath,
-        manualPlotterRequestCount: manualRequestCount,
-        onBusyChange: (message) => busyMessages.push(message),
-        onPlanOptimisticUpdate: setCurrentPlan,
-      })
-      return null
-    }
+    const mountedHook = renderHook(
+      ({
+        externalPlan,
+        dbPath = '/db/alpha.sqlite',
+        manualRequestCount = 0,
+      }: {
+        externalPlan: expedition.PlanView
+        dbPath?: string
+        manualRequestCount?: number
+      }) => {
+        const [currentPlan, setCurrentPlan] = useState(externalPlan)
+        useEffect(() => {
+          setCurrentPlan(externalPlan)
+        }, [externalPlan])
+        return useCarrierRoute({
+          plan: currentPlan,
+          dbPath,
+          manualPlotterRequestCount: manualRequestCount,
+          onBusyChange: (message) => busyMessages.push(message),
+          onPlanOptimisticUpdate: setCurrentPlan,
+        })
+      },
+      { externalPlan: planOne },
+    )
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    await act(async () => {
+      await Promise.resolve()
+    })
 
-    try {
-      await act(async () => {
-        root.render(createElement(HookHarness, { externalPlan: planOne }))
-        await Promise.resolve()
-      })
+    await act(async () => {
+      await mountedHook.getResult().openCarrierRoutePrompt(1, planOne.rows[1].row)
+    })
+    expect(mountedHook.getResult().routePrompt?.destination).toBe('Colonia')
 
-      await act(async () => {
-        await latestHook.openCarrierRoutePrompt(1, planOne.rows[1].row)
-      })
-      expect(latestHook.routePrompt?.destination).toBe('Colonia')
+    let pendingPlotPromise!: Promise<void>
+    act(() => {
+      pendingPlotPromise = mountedHook.getResult().handleStartCarrierRoute()
+    })
+    expect(busyMessages.at(-1)).toBe('PLOTTING SPANSH CARRIER ROUTE')
 
-      let pendingPlotPromise!: Promise<void>
-      act(() => {
-        pendingPlotPromise = latestHook.handleStartCarrierRoute()
-      })
-      expect(busyMessages.at(-1)).toBe('PLOTTING SPANSH CARRIER ROUTE')
+    // Switching expeditions cancels the backend plot immediately and discards late resolution.
+    await act(async () => {
+      mountedHook.rerender({ externalPlan: planTwo })
+      await Promise.resolve()
+    })
+    expect(spies.CancelCarrierRoutePlot).toHaveBeenCalledTimes(1)
+    expect(busyMessages.at(-1)).toBe(null)
+    expect(mountedHook.getResult().routePrompt).toBeNull()
 
-      // Switching expeditions cancels the backend plot immediately and discards late resolution.
-      await act(async () => {
-        root.render(createElement(HookHarness, { externalPlan: planTwo }))
-        await Promise.resolve()
-      })
-      expect(mockCancelCarrierRoutePlot).toHaveBeenCalledTimes(1)
-      expect(busyMessages.at(-1)).toBe(null)
-      expect(latestHook.routePrompt).toBeNull()
-
-      await act(async () => {
-        resolveFirstPlot(
-          expedition.ActiveCarrierRouteState.createFrom({
-            expeditionId: 1,
-            targetRowId: 11,
-            route: { origin: 'Sol', destination: 'Colonia', jumps: [] },
-          }),
-        )
-        await pendingPlotPromise
-      })
-      expect(latestHook.activeCarrierRoute).toBeNull()
-
-      // Closing the modal mid-plot also calls CancelCarrierRoutePlot.
-      let resolveSecondPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
-      mockStartCarrierRoute.mockImplementationOnce(
-        () =>
-          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
-            resolveSecondPlot = resolve
-          }),
-      )
-      await act(async () => {
-        await latestHook.openCarrierRoutePrompt(1, planTwo.rows[1].row)
-      })
-      act(() => {
-        pendingPlotPromise = latestHook.handleStartCarrierRoute()
-      })
-      act(() => {
-        latestHook.handleCloseRoutePrompt()
-      })
-      expect(mockCancelCarrierRoutePlot).toHaveBeenCalledTimes(2)
-      await act(async () => {
-        resolveSecondPlot(null)
-        await pendingPlotPromise
-      })
-      expect(latestHook.activeCarrierRoute).toBeNull()
-
-      // External backend cancellation returning null resets prompt loading to false without leaving modal stuck.
-      let resolveExternallyCancelledPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
-      mockStartCarrierRoute.mockImplementationOnce(
-        () =>
-          new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
-            resolveExternallyCancelledPlot = resolve
-          }),
-      )
-      await act(async () => {
-        await latestHook.openCarrierRoutePrompt(1, planTwo.rows[1].row)
-      })
-      act(() => {
-        pendingPlotPromise = latestHook.handleStartCarrierRoute()
-      })
-      expect(latestHook.routePrompt?.loading).toBe(true)
-      await act(async () => {
-        resolveExternallyCancelledPlot(null)
-        await pendingPlotPromise
-      })
-      expect(latestHook.routePrompt).not.toBeNull()
-      expect(latestHook.routePrompt?.loading).toBe(false)
-      act(() => {
-        latestHook.handleCloseRoutePrompt()
-      })
-
-      // Open manual plotter on expedition 2, queue a draft edit, and switch to expedition 1 on the SAME dbPath: flushes draft.
-      mockOpenManualCarrierRoute.mockResolvedValueOnce(
+    await act(async () => {
+      resolveFirstPlot(
         expedition.ActiveCarrierRouteState.createFrom({
-          expeditionId: 2,
-          targetRowId: 21,
-          manualMode: true,
-          route: { origin: 'Sol', destination: 'Beagle Point', manualMode: true, jumps: [] },
+          expeditionId: 1,
+          targetRowId: 11,
+          route: { origin: 'Sol', destination: 'Colonia', jumps: [] },
         }),
       )
-      await act(async () => {
-        root.render(
-          createElement(HookHarness, { externalPlan: planTwo, manualRequestCount: 1 }),
-        )
-        await Promise.resolve()
-      })
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
+      await pendingPlotPromise
+    })
+    expect(mountedHook.getResult().activeCarrierRoute).toBeNull()
 
-      act(() => {
-        latestHook.handleChangeManualDistance('325.5')
-      })
-      expect(mockSaveCarrierManualDraftInputs).not.toHaveBeenCalled()
+    // Closing the modal mid-plot also calls CancelCarrierRoutePlot.
+    let resolveSecondPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
+    spies.StartCarrierRoute.mockImplementationOnce(
+      () =>
+        new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
+          resolveSecondPlot = resolve
+        }),
+    )
+    await act(async () => {
+      await mountedHook.getResult().openCarrierRoutePrompt(1, planTwo.rows[1].row)
+    })
+    act(() => {
+      pendingPlotPromise = mountedHook.getResult().handleStartCarrierRoute()
+    })
+    act(() => {
+      mountedHook.getResult().handleCloseRoutePrompt()
+    })
+    expect(spies.CancelCarrierRoutePlot).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      resolveSecondPlot(null)
+      await pendingPlotPromise
+    })
+    expect(mountedHook.getResult().activeCarrierRoute).toBeNull()
 
-      const manualStateOne = expedition.ActiveCarrierRouteState.createFrom({
-        expeditionId: 1,
-        targetRowId: 11,
+    // External backend cancellation returning null resets prompt loading to false without leaving modal stuck.
+    let resolveExternallyCancelledPlot!: (state: expedition.ActiveCarrierRouteState | null) => void
+    spies.StartCarrierRoute.mockImplementationOnce(
+      () =>
+        new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
+          resolveExternallyCancelledPlot = resolve
+        }),
+    )
+    await act(async () => {
+      await mountedHook.getResult().openCarrierRoutePrompt(1, planTwo.rows[1].row)
+    })
+    act(() => {
+      pendingPlotPromise = mountedHook.getResult().handleStartCarrierRoute()
+    })
+    expect(mountedHook.getResult().routePrompt?.loading).toBe(true)
+    await act(async () => {
+      resolveExternallyCancelledPlot(null)
+      await pendingPlotPromise
+    })
+    expect(mountedHook.getResult().routePrompt).not.toBeNull()
+    expect(mountedHook.getResult().routePrompt?.loading).toBe(false)
+    act(() => {
+      mountedHook.getResult().handleCloseRoutePrompt()
+    })
+
+    // Open manual plotter on expedition 2, queue a draft edit, and switch to expedition 1 on the SAME dbPath: flushes draft.
+    spies.OpenManualCarrierRoute.mockResolvedValueOnce(
+      expedition.ActiveCarrierRouteState.createFrom({
+        expeditionId: 2,
+        targetRowId: 21,
         manualMode: true,
-        route: { origin: 'Sol', destination: 'Colonia', manualMode: true, jumps: [] },
-      })
-      await act(async () => {
-        root.render(
-          createElement(HookHarness, {
-            externalPlan: buildCarrierPlan(1, 11, 'Colonia', manualStateOne),
-            dbPath: '/db/alpha.sqlite',
-            manualRequestCount: 1,
-          }),
-        )
-        await Promise.resolve()
-      })
-      expect(mockSaveCarrierManualDraftInputs).toHaveBeenCalledTimes(1)
-      expect(mockSaveCarrierManualDraftInputs).toHaveBeenCalledWith(2, '325.5', '')
-      mockSaveCarrierManualDraftInputs.mockClear()
+        route: { origin: 'Sol', destination: 'Beagle Point', manualMode: true, jumps: [] },
+      }),
+    )
+    await act(async () => {
+      mountedHook.rerender({ externalPlan: planTwo, manualRequestCount: 1 })
+      await Promise.resolve()
+    })
+    expect(mountedHook.getResult().activeCarrierRoute).not.toBeNull()
 
-      // Queue another draft edit on DB alpha (expeditionId === 1), then switch dbPath to DB beta (also expeditionId === 1): MUST NOT flush!
-      act(() => {
-        latestHook.handleChangeManualDistance('999.9')
+    act(() => {
+      mountedHook.getResult().handleChangeManualDistance('325.5')
+    })
+    expect(spies.SaveCarrierManualDraftInputs).not.toHaveBeenCalled()
+
+    const manualStateOne = expedition.ActiveCarrierRouteState.createFrom({
+      expeditionId: 1,
+      targetRowId: 11,
+      manualMode: true,
+      route: { origin: 'Sol', destination: 'Colonia', manualMode: true, jumps: [] },
+    })
+    await act(async () => {
+      mountedHook.rerender({
+        externalPlan: buildCarrierPlan(1, 11, 'Colonia', manualStateOne),
+        dbPath: '/db/alpha.sqlite',
+        manualRequestCount: 1,
       })
-      await act(async () => {
-        root.render(
-          createElement(HookHarness, {
-            externalPlan: buildCarrierPlan(1, 11, 'Colonia'),
-            dbPath: '/db/beta.sqlite',
-            manualRequestCount: 1,
-          }),
-        )
-        await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(spies.SaveCarrierManualDraftInputs).toHaveBeenCalledTimes(1)
+    expect(spies.SaveCarrierManualDraftInputs).toHaveBeenCalledWith(2, '325.5', '')
+    spies.SaveCarrierManualDraftInputs.mockClear()
+
+    // Queue another draft edit on DB alpha (expeditionId === 1), then switch dbPath to DB beta (also expeditionId === 1): MUST NOT flush!
+    act(() => {
+      mountedHook.getResult().handleChangeManualDistance('999.9')
+    })
+    await act(async () => {
+      mountedHook.rerender({
+        externalPlan: buildCarrierPlan(1, 11, 'Colonia'),
+        dbPath: '/db/beta.sqlite',
+        manualRequestCount: 1,
       })
-      expect(mockSaveCarrierManualDraftInputs).not.toHaveBeenCalled()
-      expect(latestHook.manualDistanceInput).toBe('')
-    } finally {
-      act(() => root.unmount())
-      container.remove()
-    }
+      await Promise.resolve()
+    })
+    expect(spies.SaveCarrierManualDraftInputs).not.toHaveBeenCalled()
+    expect(mountedHook.getResult().manualDistanceInput).toBe('')
   })
 
   it('coordinates Spansh hop completion, depot refill, manual switch, manual jump logging, arrival error recovery, and route cancel', async () => {
@@ -520,20 +473,30 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
       ],
     })
 
-    mockRefillCarrierDepot.mockResolvedValueOnce(
+    let rejectFirstArrival!: (reason: Error) => void
+    const { spies } = installWailsAppMock({
+      RefillCarrierDepot: async () => null,
+      CompleteSpanshCarrierJump: async () => null,
+      SwitchCarrierRouteToManual: async () => null,
+      LogManualCarrierJump: async () => null,
+      SaveCarrierManualDraftInputs: async () => {},
+      ClearActiveCarrierRouteWithUndo: async () => {},
+      CompleteCarrierRouteArrival: async () => {},
+    })
+    spies.RefillCarrierDepot.mockResolvedValueOnce(
       expedition.ActiveCarrierRouteState.createFrom({
         ...initialSpanshState,
         route: { ...initialSpanshState.route, depotTritium: 1000, capacityUsed: 4500 },
       }),
     )
-    mockCompleteSpanshCarrierJump.mockResolvedValueOnce(
+    spies.CompleteSpanshCarrierJump.mockResolvedValueOnce(
       expedition.ActiveCarrierRouteState.createFrom({
         ...initialSpanshState,
         jumpIdx: 1,
         route: { ...initialSpanshState.route, depotTritium: 940 },
       }),
     )
-    mockSwitchCarrierRouteToManual.mockResolvedValueOnce(
+    spies.SwitchCarrierRouteToManual.mockResolvedValueOnce(
       expedition.ActiveCarrierRouteState.createFrom({
         ...initialSpanshState,
         jumpIdx: 1,
@@ -542,7 +505,7 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
         manualTritInput: '44',
       }),
     )
-    mockLogManualCarrierJump.mockResolvedValueOnce(
+    spies.LogManualCarrierJump.mockResolvedValueOnce(
       expedition.ActiveCarrierRouteState.createFrom({
         ...initialSpanshState,
         jumpIdx: 1,
@@ -552,11 +515,7 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
         manualLegTrit: 44,
       }),
     )
-    mockSaveCarrierManualDraftInputs.mockResolvedValue(undefined)
-    mockClearActiveCarrierRouteWithUndo.mockResolvedValue(undefined)
-
-    let rejectFirstArrival!: (reason: Error) => void
-    mockCompleteCarrierRouteArrival
+    spies.CompleteCarrierRouteArrival
       .mockImplementationOnce(
         () =>
           new Promise<void>((_, reject) => {
@@ -566,12 +525,11 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
       .mockResolvedValueOnce(undefined)
 
     let refreshPlanCalls = 0
-    let latestHook!: ReturnType<typeof useCarrierRoute>
     let replaceExternalPlan!: (nextPlan: expedition.PlanView) => void
-    function HookHarness() {
+    const mountedHook = renderHook(() => {
       const [currentPlan, setCurrentPlan] = useState(initialPlan)
       replaceExternalPlan = setCurrentPlan
-      latestHook = useCarrierRoute({
+      return useCarrierRoute({
         plan: currentPlan,
         onBusyChange: () => {},
         onPlanOptimisticUpdate: setCurrentPlan,
@@ -579,91 +537,85 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
           refreshPlanCalls += 1
         },
       })
-      return null
-    }
-
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    })
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
       await act(async () => {
-        root.render(createElement(HookHarness))
         await Promise.resolve()
       })
-      expect(latestHook.nextFcStopEntry?.row.id).toBe(11)
-      expect(latestHook.routedCarrierStopIndex).toBe(2)
+      expect(mountedHook.getResult().nextFcStopEntry?.row.id).toBe(11)
+      expect(mountedHook.getResult().routedCarrierStopIndex).toBe(2)
 
       await act(async () => {
-        latestHook.handleRefillDepot()
+        mountedHook.getResult().handleRefillDepot()
         await Promise.resolve()
       })
-      expect(mockRefillCarrierDepot).toHaveBeenCalledWith(1)
-      expect(latestHook.activeCarrierRoute?.depotTritium).toBe(1000)
+      expect(spies.RefillCarrierDepot).toHaveBeenCalledWith(1)
+      expect(mountedHook.getResult().activeCarrierRoute?.depotTritium).toBe(1000)
 
       await act(async () => {
-        await latestHook.handleCompleteSpanshJump()
+        await mountedHook.getResult().handleCompleteSpanshJump()
       })
-      expect(mockCompleteSpanshCarrierJump).toHaveBeenCalledWith(1)
-      expect(latestHook.carrierJumpIndex).toBe(1)
+      expect(spies.CompleteSpanshCarrierJump).toHaveBeenCalledWith(1)
+      expect(mountedHook.getResult().carrierJumpIndex).toBe(1)
 
       await act(async () => {
-        latestHook.switchActiveRouteToManualMode()
+        mountedHook.getResult().switchActiveRouteToManualMode()
         await Promise.resolve()
       })
-      expect(mockSwitchCarrierRouteToManual).toHaveBeenCalledWith(1)
-      expect(latestHook.isManualCarrierRoute).toBe(true)
-      expect(latestHook.manualDistanceInput).toBe('400')
-      expect(latestHook.manualTritiumInput).toBe('44')
-      expect(latestHook.routedCarrierStopIndex).toBe(1)
+      expect(spies.SwitchCarrierRouteToManual).toHaveBeenCalledWith(1)
+      expect(mountedHook.getResult().isManualCarrierRoute).toBe(true)
+      expect(mountedHook.getResult().manualDistanceInput).toBe('400')
+      expect(mountedHook.getResult().manualTritiumInput).toBe('44')
+      expect(mountedHook.getResult().routedCarrierStopIndex).toBe(1)
 
       await act(async () => {
-        await latestHook.handleLogManualJump()
+        await mountedHook.getResult().handleLogManualJump()
       })
-      expect(mockLogManualCarrierJump).toHaveBeenCalledWith(1, 400, 44)
-      expect(latestHook.manualLegJumps).toBe(1)
-      expect(latestHook.manualDistanceInput).toBe('')
+      expect(spies.LogManualCarrierJump).toHaveBeenCalledWith(1, 400, 44)
+      expect(mountedHook.getResult().manualLegJumps).toBe(1)
+      expect(mountedHook.getResult().manualDistanceInput).toBe('')
 
       // Queue debounced draft input, start arrival (cancels pending timer and blocks concurrent clicks), reject, then succeed.
       act(() => {
-        latestHook.handleChangeManualDistance('180')
+        mountedHook.getResult().handleChangeManualDistance('180')
       })
       let firstArrivalPromise!: Promise<void>
       act(() => {
-        firstArrivalPromise = latestHook.handleCarrierArriveAtWaypoint()
+        firstArrivalPromise = mountedHook.getResult().handleCarrierArriveAtWaypoint()
       })
-      expect(latestHook.loggingJump).toBe(true)
+      expect(mountedHook.getResult().loggingJump).toBe(true)
       await act(async () => {
-        await latestHook.handleCarrierArriveAtWaypoint()
+        await mountedHook.getResult().handleCarrierArriveAtWaypoint()
         vi.advanceTimersByTime(300)
       })
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledTimes(1)
-      expect(mockCompleteCarrierRouteArrival).toHaveBeenCalledWith(1, 0, 0, 0)
-      expect(mockSaveCarrierManualDraftInputs).not.toHaveBeenCalled()
+      expect(spies.CompleteCarrierRouteArrival).toHaveBeenCalledTimes(1)
+      expect(spies.CompleteCarrierRouteArrival).toHaveBeenCalledWith(1, 0, 0, 0)
+      expect(spies.SaveCarrierManualDraftInputs).not.toHaveBeenCalled()
 
       await act(async () => {
         rejectFirstArrival(new Error('sqlite busy'))
         await firstArrivalPromise
       })
-      expect(latestHook.loggingJump).toBe(false)
-      expect(latestHook.activeCarrierRoute).not.toBeNull()
+      expect(mountedHook.getResult().loggingJump).toBe(false)
+      expect(mountedHook.getResult().activeCarrierRoute).not.toBeNull()
 
       // In-flight SaveCarrierManualDraftInputs protects newer user edits from stale backend plan updates.
       let resolveDraftSave!: () => void
-      mockSaveCarrierManualDraftInputs.mockImplementationOnce(
+      spies.SaveCarrierManualDraftInputs.mockImplementationOnce(
         () =>
           new Promise<void>((resolve) => {
             resolveDraftSave = resolve
           }),
       )
       act(() => {
-        latestHook.handleChangeManualDistance('275')
+        mountedHook.getResult().handleChangeManualDistance('275')
       })
       act(() => {
         vi.advanceTimersByTime(250)
       })
-      expect(mockSaveCarrierManualDraftInputs).toHaveBeenCalledWith(1, '275', '')
+      expect(spies.SaveCarrierManualDraftInputs).toHaveBeenCalledWith(1, '275', '')
       act(() => {
         replaceExternalPlan(
           expedition.PlanView.createFrom({
@@ -677,7 +629,7 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
           }),
         )
       })
-      expect(latestHook.manualDistanceInput).toBe('275')
+      expect(mountedHook.getResult().manualDistanceInput).toBe('275')
       await act(async () => {
         resolveDraftSave()
         await Promise.resolve()
@@ -685,14 +637,14 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
 
       // If GetPlan settles a newer PlanView while RefillCarrierDepot is in flight, stale optimistic clone is skipped.
       let resolveLateRefill!: (state: expedition.ActiveCarrierRouteState | null) => void
-      mockRefillCarrierDepot.mockImplementationOnce(
+      spies.RefillCarrierDepot.mockImplementationOnce(
         () =>
           new Promise<expedition.ActiveCarrierRouteState | null>((resolve) => {
             resolveLateRefill = resolve
           }),
       )
       act(() => {
-        latestHook.handleRefillDepot()
+        mountedHook.getResult().handleRefillDepot()
       })
       const authoritativeBackendPlan = expedition.PlanView.createFrom({
         ...initialPlan,
@@ -716,21 +668,19 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
         )
         await Promise.resolve()
       })
-      expect(latestHook.activeCarrierRoute?.depotTritium).toBe(1000)
+      expect(mountedHook.getResult().activeCarrierRoute?.depotTritium).toBe(1000)
 
       // Cancel route calls ClearActiveCarrierRouteWithUndo, clears optimistic route immediately, and rolls back via onRefreshPlan on rejection.
-      mockClearActiveCarrierRouteWithUndo.mockRejectedValueOnce(new Error('cancel failed'))
+      spies.ClearActiveCarrierRouteWithUndo.mockRejectedValueOnce(new Error('cancel failed'))
       await act(async () => {
-        latestHook.handleCancelCarrierRoute()
+        mountedHook.getResult().handleCancelCarrierRoute()
         await Promise.resolve()
       })
-      expect(mockClearActiveCarrierRouteWithUndo).toHaveBeenCalledWith(1)
-      expect(latestHook.activeCarrierRoute).toBeNull()
+      expect(spies.ClearActiveCarrierRouteWithUndo).toHaveBeenCalledWith(1)
+      expect(mountedHook.getResult().activeCarrierRoute).toBeNull()
       expect(refreshPlanCalls).toBe(1)
     } finally {
       errorSpy.mockRestore()
-      act(() => root.unmount())
-      container.remove()
     }
   })
 })

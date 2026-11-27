@@ -1,47 +1,9 @@
-import { createElement } from 'react'
-import { renderToString } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { expedition } from '../../../api/models'
-import { WaypointRowItem, type WaypointRowHandlers } from './WaypointRowItem'
+import { makeWaypointRowHandlers, renderWaypointRowHtml } from '../../../test/fixtures'
 
-const defaultRowHandlers: WaypointRowHandlers = {
-  onToggleExpand: () => {},
-  onFieldBlur: () => {},
-  onCopySystem: () => {},
-  onToggleFcStop: () => {},
-  onOpenCarrierRoutePrompt: () => {},
-  onToggleInsertMenu: () => {},
-  onInsert: () => {},
-  onDelete: () => {},
-  onDragStart: () => {},
-  onDragEnd: () => {},
-}
-
-function renderRowItem(
-  props: Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView },
-) {
-  const defaultProps: Parameters<typeof WaypointRowItem>[0] = {
-    index: 1,
-    isPlanning: false,
-    isLocked: false,
-    isBeingDragged: false,
-    isExpanded: false,
-    isSystemCopied: false,
-    insertMenuOpen: false,
-    lastVisitedIndex: 0,
-    rowStyle: {},
-    dropProps: {},
-    handlers: defaultRowHandlers,
-    ...props,
-  }
-  return renderToString(
-    createElement(
-      'table',
-      null,
-      createElement('tbody', null, createElement(WaypointRowItem, defaultProps)),
-    ),
-  )
-}
+const defaultRowHandlers = makeWaypointRowHandlers()
+const renderRowItem = renderWaypointRowHtml
 
 describe('WaypointCarrierStopCell Rules and Badges', () => {
   it('renders carrier stop elements with uniform h-5 height inside h-7 container for both active stop and add button', () => {

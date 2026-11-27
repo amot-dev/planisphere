@@ -1,10 +1,8 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
+import { act } from 'react'
 import { describe, expect, it } from 'vitest'
-import { createBusyTaskTracker, useBusyTasks, type UseBusyTasksResult } from './useBusyTasks'
-
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { renderHook } from '../test/render'
+import { createBusyTaskTracker, useBusyTasks } from './useBusyTasks'
 
 describe('createBusyTaskTracker', () => {
   it('preserves active task message across out-of-order completions and emits null only when empty', () => {
@@ -43,43 +41,25 @@ describe('createBusyTaskTracker', () => {
 
 describe('useBusyTasks', () => {
   it('coordinates initial boot status, token-scoped tasks, and setBusyAction without clobbering', () => {
-    let latestResult!: UseBusyTasksResult
-    function HookProbe() {
-      latestResult = useBusyTasks('INITIALIZING TERMINAL')
-      return null
-    }
+    const hook = renderHook(() => useBusyTasks('INITIALIZING TERMINAL'))
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    expect(hook.getResult().busyAction).toBe('INITIALIZING TERMINAL')
 
-    try {
-      act(() => {
-        root.render(createElement(HookProbe))
-      })
-      expect(latestResult.busyAction).toBe('INITIALIZING TERMINAL')
+    let endBootTask!: () => void
+    act(() => {
+      endBootTask = hook.getResult().beginBusyTask('INITIALIZING TERMINAL')
+      hook.getResult().setBusyAction('PLOTTING SPANSH CARRIER ROUTE')
+    })
+    expect(hook.getResult().busyAction).toBe('PLOTTING SPANSH CARRIER ROUTE')
 
-      let endBootTask!: () => void
-      act(() => {
-        endBootTask = latestResult.beginBusyTask('INITIALIZING TERMINAL')
-        latestResult.setBusyAction('PLOTTING SPANSH CARRIER ROUTE')
-      })
-      expect(latestResult.busyAction).toBe('PLOTTING SPANSH CARRIER ROUTE')
+    act(() => {
+      hook.getResult().setBusyAction(null)
+    })
+    expect(hook.getResult().busyAction).toBe('INITIALIZING TERMINAL')
 
-      act(() => {
-        latestResult.setBusyAction(null)
-      })
-      expect(latestResult.busyAction).toBe('INITIALIZING TERMINAL')
-
-      act(() => {
-        endBootTask()
-      })
-      expect(latestResult.busyAction).toBeNull()
-    } finally {
-      act(() => {
-        root.unmount()
-      })
-      container.remove()
-    }
+    act(() => {
+      endBootTask()
+    })
+    expect(hook.getResult().busyAction).toBeNull()
   })
 })

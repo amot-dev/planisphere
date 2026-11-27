@@ -11,24 +11,18 @@ import (
 	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func profileIDsByName(testingContext *testing.T, commanders []replay.Commander) map[string]int64 {
-	testingContext.Helper()
-	byName := make(map[string]int64, len(commanders))
-	for _, cmdr := range commanders {
-		byName[cmdr.Name] = cmdr.ID
-	}
-	return byName
-}
-
 func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	_, projectionsBundle := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(testingContext)
+	_, projectionsBundle := expeditiontest.NewProjections(dbConn)
 
 	// Monday (CMDR Main, F101, Mandalay), Tuesday (CMDR Alt, F202, Cobra Mk III), Wednesday (CMDR Main swaps to Caspian Explorer and reaches MainWP3).
 	// Both accounts start at Sol and pass through SharedHub at different times with different scans and sales.
-	ingestJournalLines(testingContext, dbConn, []string{
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2026-03-02T09:00:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-03-02T09:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-03-02T10:00:00Z","event":"FSDJump","StarSystem":"SharedHub","SystemAddress":2002,"StarPos":[100,0,0],"JumpDist":100.0}`,
@@ -51,13 +45,12 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 		`{"timestamp":"2026-03-04T12:00:00Z","event":"LoadGame","Commander":"CMDR Alt","FID":"F202","Ship":"cobramkiii","Ship_Localised":"Cobra Mk III","ShipID":2,"Odyssey":true}`,
 		`{"timestamp":"2026-03-04T12:15:00Z","event":"FSDJump","StarSystem":"MainDest","SystemAddress":4004,"StarPos":[250,0,0],"JumpDist":170.0}`,
 		`{"timestamp":"2026-03-04T12:30:00Z","event":"Scan","ScanType":"Detailed","BodyName":"MainDest 2","BodyID":32,"StarSystem":"MainDest","SystemAddress":4004,"PlanetClass":"Water world","MassEM":1.0,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
-	})
+	)
 
-	commanders, err := replay.ListCommanders(dbConn)
-	if err != nil || len(commanders) != 2 {
-		testingContext.Fatalf("expected 2 resolved commanders, got %+v err=%v", commanders, err)
+	idsByName := expeditiontest.ProfileIDsByName(testingContext, dbConn)
+	if len(idsByName) != 2 {
+		testingContext.Fatalf("expected 2 resolved commanders, got %+v", idsByName)
 	}
-	idsByName := profileIDsByName(testingContext, commanders)
 	mainID, altID := idsByName["CMDR Main"], idsByName["CMDR Alt"]
 
 	expMain, err := expedition.CreateWithWaypoints(dbConn, "Main Survey", "Main account", []expedition.SeedWaypoint{
@@ -185,11 +178,11 @@ func TestInterleavedTwoAccountConcurrentSelectedExpeditions(testingContext *test
 }
 
 func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanDetailsAndExport(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	_, projectionsBundle := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(testingContext)
+	_, projectionsBundle := expeditiontest.NewProjections(dbConn)
 
 	// Era 0 (pre-wipe archived career, enabled=0 by default) and Era 1 (post-wipe active career, enabled=1).
-	ingestJournalLines(testingContext, dbConn, []string{
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2024-05-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"anaconda","Ship_Localised":"Anaconda","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2024-05-01T10:05:00Z","event":"FSDJump","StarSystem":"Achenar","SystemAddress":501,"StarPos":[67,-119,24],"JumpDist":20.0}`,
 		`{"timestamp":"2024-05-01T10:15:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
@@ -199,7 +192,7 @@ func TestArchivedPreWipeCareerSelectedExpeditionComputesPlanDetailsAndExport(tes
 		`{"timestamp":"2025-01-01T00:00:05Z","event":"NewCommander","Name":"CMDR Pioneer","FID":"F777","Package":"Sidewinder"}`,
 		`{"timestamp":"2025-01-01T00:05:00Z","event":"LoadGame","Commander":"CMDR Pioneer","FID":"F777","Ship":"SideWinder","Ship_Localised":"Sidewinder","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2025-01-01T00:10:00Z","event":"Location","StarSystem":"Matet","SystemAddress":9001,"StarPos":[10,20,30]}`,
-	})
+	)
 
 	commanders, err := replay.ListCommanders(dbConn)
 	if err != nil || len(commanders) != 2 || !commanders[0].IsArchivedCareer || commanders[0].Enabled {

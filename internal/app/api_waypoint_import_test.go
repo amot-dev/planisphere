@@ -246,17 +246,7 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 		testingContext.Fatalf("create seeded expedition: %v", createError)
 	}
 
-	var emittedMutex sync.Mutex
-	var planEmitCount int
-	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
-		if eventName == EventDataChanged && len(payload) > 0 {
-			if dataChanged, ok := payload[0].(DataChanged); ok && slices.Contains(dataChanged.Domains, "plan") {
-				emittedMutex.Lock()
-				planEmitCount++
-				emittedMutex.Unlock()
-			}
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 
 	var onlineRequests atomic.Int32
 	offlineVerifiedBeforeFirstHTTP := atomic.Bool{}
@@ -267,9 +257,7 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 			if listBeforeErr != nil {
 				testingContext.Errorf("list rows before online: %v", listBeforeErr)
 			}
-			emittedMutex.Lock()
-			emitsSoFar := planEmitCount
-			emittedMutex.Unlock()
+			emitsSoFar := eventsRecorder.CountDomain("plan")
 			if len(rowsBeforeOnline) == 5 && rowsBeforeOnline[0].HasCoords && rowsBeforeOnline[1].HasCoords && rowsBeforeOnline[1].POIName == "Jaques Station" && emitsSoFar == 1 {
 				offlineVerifiedBeforeFirstHTTP.Store(true)
 			}
@@ -300,10 +288,8 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 	if onlineRequests.Load() != 3 {
 		testingContext.Fatalf("expected 3 online EDSM requests, got %d", onlineRequests.Load())
 	}
-	emittedMutex.Lock()
-	totalPlanEmits := planEmitCount
-	planEmitCount = 0
-	emittedMutex.Unlock()
+	totalPlanEmits := eventsRecorder.CountDomain("plan")
+	eventsRecorder.Reset()
 	if totalPlanEmits != 2 {
 		testingContext.Fatalf("expected 2 coalesced plan emissions (offline pass + online completion), got %d", totalPlanEmits)
 	}
@@ -325,9 +311,7 @@ func TestExpeditionResolutionWorkerBatchOfflineAndCoalescedOnlineEmissions(testi
 	if offlineListErr != nil {
 		testingContext.Fatalf("list offline expedition rows: %v", offlineListErr)
 	}
-	emittedMutex.Lock()
-	offlinePlanEmits := planEmitCount
-	emittedMutex.Unlock()
+	offlinePlanEmits := eventsRecorder.CountDomain("plan")
 	if onlineRequests.Load() != 0 || offlinePlanEmits != 1 || !offlineRows[0].HasCoords || offlineRows[1].CoordsSource != "notfound" {
 		testingContext.Fatalf("expected single transactional offline batch (0 HTTP, 1 emit), got http=%d emits=%d rows=%+v", onlineRequests.Load(), offlinePlanEmits, offlineRows)
 	}
@@ -370,19 +354,7 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 		testingContext.Fatalf("write setup journal: %v", writeError)
 	}
 
-	var emittedMutex sync.Mutex
-	var emittedEventNames []string
-	var emittedDomains [][]string
-	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
-		emittedMutex.Lock()
-		defer emittedMutex.Unlock()
-		emittedEventNames = append(emittedEventNames, eventName)
-		if eventName == EventDataChanged && len(payload) > 0 {
-			if dataChanged, ok := payload[0].(DataChanged); ok {
-				emittedDomains = append(emittedDomains, dataChanged.Domains)
-			}
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 
 	initialStatus, setupError := testApp.SetupConfigureJournals(journalDirectory)
 	if setupError != nil || initialStatus.EventsStored != 1 {
@@ -403,11 +375,9 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	if !watcherStarted {
 		testingContext.Fatalf("expected live journal watcher to become active after SetupConfigureJournals")
 	}
-	emittedMutex.Lock()
-	if len(emittedEventNames) != 0 {
-		testingContext.Fatalf("expected 0 redundant emissions during pre-completion setup scan, got %v", emittedEventNames)
+	if preSetupEvents := eventsRecorder.EventNames(); len(preSetupEvents) != 0 {
+		testingContext.Fatalf("expected 0 redundant emissions during pre-completion setup scan, got %v", preSetupEvents)
 	}
-	emittedMutex.Unlock()
 
 	if setCompleteErr := settings.SetSetupCompleted(testApp.db, true); setCompleteErr != nil {
 		testingContext.Fatalf("mark setup completed: %v", setCompleteErr)
@@ -415,11 +385,11 @@ func TestSetupConfigureJournalsAvoidsDuplicateEmissionsAndPreservesPostSetupSync
 	if _, postSetupErr := testApp.SetupConfigureJournals(journalDirectory); postSetupErr != nil {
 		testingContext.Fatalf("SetupConfigureJournals post-setup: %v", postSetupErr)
 	}
-	emittedMutex.Lock()
-	defer emittedMutex.Unlock()
-	if !slices.Equal(emittedEventNames, []string{EventDataChanged}) || len(emittedDomains) != 1 ||
-		!slices.Contains(emittedDomains[0], "ingest") || !slices.Contains(emittedDomains[0], "settings") {
-		testingContext.Fatalf("expected 1 post-setup DataChanged event with ingest and settings, got events=%v domains=%v", emittedEventNames, emittedDomains)
+	emittedEventNames := eventsRecorder.EventNames()
+	emittedChanges := eventsRecorder.DataChanges()
+	if !slices.Equal(emittedEventNames, []string{EventDataChanged}) || len(emittedChanges) != 1 ||
+		!slices.Contains(emittedChanges[0].Domains, "ingest") || !slices.Contains(emittedChanges[0].Domains, "settings") {
+		testingContext.Fatalf("expected 1 post-setup DataChanged event with ingest and settings, got events=%v changes=%+v", emittedEventNames, emittedChanges)
 	}
 }
 
@@ -538,18 +508,18 @@ func TestAsyncResolutionVisitedAddressMatchEmitsStatsDomain(testingContext *test
 	if createErr != nil || addErr != nil || testApp.StartExpedition(createdExp.ID, "2026-03-01T10:00:00Z", 0) != nil {
 		testingContext.Fatalf("prepare active expedition: createErr=%v addErr=%v", createErr, addErr)
 	}
-	aliasName, sawPlanAndStats := "Eol Prou RS-T d3-94", atomic.Bool{}
-	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
-		if eventName == EventDataChanged && len(payload) > 0 {
-			if changed, ok := payload[0].(DataChanged); ok && slices.Contains(changed.Domains, "plan") && slices.Contains(changed.Domains, "stats") {
-				sawPlanAndStats.Store(true)
-			}
-		}
-	})
+	aliasName := "Eol Prou RS-T d3-94"
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 	updateErr := testApp.UpdateRow(expedition.RowPatch{ID: addedRow.ID, SystemName: &aliasName})
 	testApp.backgroundWg.Wait()
 	resolvedRow, rowErr := expedition.GetRow(testApp.db, addedRow.ID)
-	if updateErr != nil || rowErr != nil || resolvedRow.VisitedAt != "2026-03-01T11:00:00Z" || !sawPlanAndStats.Load() {
-		testingContext.Fatalf("expected visited match and plan+stats emit, got updateErr=%v rowErr=%v row=%+v sawBoth=%v", updateErr, rowErr, resolvedRow, sawPlanAndStats.Load())
+	sawPlanAndStats := false
+	for _, change := range eventsRecorder.DataChanges() {
+		if slices.Contains(change.Domains, "plan") && slices.Contains(change.Domains, "stats") {
+			sawPlanAndStats = true
+		}
+	}
+	if updateErr != nil || rowErr != nil || resolvedRow.VisitedAt != "2026-03-01T11:00:00Z" || !sawPlanAndStats {
+		testingContext.Fatalf("expected visited match and plan+stats emit, got updateErr=%v rowErr=%v row=%+v sawBoth=%v", updateErr, rowErr, resolvedRow, sawPlanAndStats)
 	}
 }

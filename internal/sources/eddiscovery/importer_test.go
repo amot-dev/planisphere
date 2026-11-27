@@ -2,51 +2,27 @@ package eddiscovery_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"path/filepath"
 	"slices"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/sources/eddiscovery"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
 )
 
-func createTestEDDArchive(testingContext *testing.T) string {
-	testingContext.Helper()
-	eddPath := filepath.Join(testingContext.TempDir(), "EDDProgress.sqlite")
-
-	eddConn, openEDDError := sql.Open("sqlite", eddPath)
-	if openEDDError != nil {
-		testingContext.Fatal(openEDDError)
-	}
-	defer eddConn.Close()
-
-	if _, schemaError := eddConn.Exec(`
-		CREATE TABLE TravelLogUnit (Id INTEGER PRIMARY KEY, Name TEXT, Path TEXT);
-		CREATE TABLE JournalEntries (Id INTEGER PRIMARY KEY, TravelLogId INTEGER, EventType TEXT, EventData TEXT);
-		INSERT INTO TravelLogUnit (Id, Name, Path) VALUES (1, 'Journal.2026-02-01T100000.01.log', '/logs/Journal.2026-02-01T100000.01.log');
-		INSERT INTO JournalEntries (Id, TravelLogId, EventType, EventData) VALUES
-			(1, 1, 'Location', '{"timestamp":"2026-02-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}');
-	`); schemaError != nil {
-		testingContext.Fatal(schemaError)
-	}
-	if closeError := eddConn.Close(); closeError != nil {
-		testingContext.Fatal(closeError)
-	}
-	return eddPath
-}
-
 func TestImportProgressSuppressesCompleteOnFailure(testingContext *testing.T) {
-	eddPath := createTestEDDArchive(testingContext)
+	eddPath := buildEDDArchive(testingContext, eddArchiveSeed{
+		FileName: "EDDProgress.sqlite",
+		TravelLogs: []eddTravelLogSeed{
+			{ID: 1, Name: "Journal.2026-02-01T100000.01.log", Path: "/logs/Journal.2026-02-01T100000.01.log"},
+		},
+		Entries: []eddJournalEntrySeed{
+			{ID: 1, TravelLogID: 1, EventType: "Location", EventData: `{"timestamp":"2026-02-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`},
+		},
+	})
 
-	destConn, openDestError := db.Open(":memory:")
-	if openDestError != nil {
-		testingContext.Fatal(openDestError)
-	}
-	defer destConn.Close()
-
+	destConn := dbtest.OpenMemory(testingContext)
 	ingester := journal.NewIngester(destConn)
 
 	// Cancel mid-import right as importEntriesTx begins so txError is non-nil.

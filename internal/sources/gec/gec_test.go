@@ -3,16 +3,12 @@ package gec_test
 import (
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/sources/gec"
+	"planisphere/internal/testutil/dbtest"
 )
 
 func TestGECandGMPCombinedImport(t *testing.T) {
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		t.Fatalf("open db: %v", openError)
-	}
-	defer dbConn.Close()
+	dbConn := dbtest.OpenMemory(t)
 
 	catalogInstance := gec.NewCatalog(dbConn)
 

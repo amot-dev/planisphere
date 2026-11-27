@@ -7,22 +7,11 @@ import (
 	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/dbtest"
 )
 
-func openSettingsTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = dbConn.Close()
-	})
-	return dbConn
-}
-
 func TestSettingsRoundTripsAndNormalization(testingContext *testing.T) {
-	dbConn := openSettingsTestDB(testingContext)
+	dbConn := dbtest.OpenMemory(testingContext)
 
 	// Generic CRUD
 	if initialValue, getError := settings.Get(dbConn, "custom_key"); getError != nil || initialValue != "" {
@@ -112,17 +101,6 @@ func TestSettingsRoundTripsAndNormalization(testingContext *testing.T) {
 	}
 }
 
-func seedOverrideJournalEvent(testingContext *testing.T, dbConn *sql.DB, uid, timestamp, event, commander, fid string) {
-	testingContext.Helper()
-	if _, err := dbConn.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, commander, fid, universe, source_file, raw_json, ingested_at)
-		 VALUES (?, ?, ?, ?, ?, 'live', 'test.log', '{}', ?)`,
-		uid, timestamp, event, commander, fid, timestamp,
-	); err != nil {
-		testingContext.Fatalf("seed event %s: %v", uid, err)
-	}
-}
-
 func listProfileSummaries(testingContext *testing.T, dbConn *sql.DB) map[string]struct {
 	id                int64
 	displayName       string
@@ -162,14 +140,16 @@ func listProfileSummaries(testingContext *testing.T, dbConn *sql.DB) map[string]
 }
 
 func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) {
-	dbConn := openSettingsTestDB(testingContext)
+	dbConn := dbtest.OpenMemory(testingContext)
 
 	// Shared FID F400 with rename OldAlias -> MainCmdr, plus pre-FID NetLogCmdr (empty FID), plus LoadGames on 2025-06-15.
-	seedOverrideJournalEvent(testingContext, dbConn, "e1", "2024-01-10T10:00:00Z", "LoadGame", "OldAlias", "F400")
-	seedOverrideJournalEvent(testingContext, dbConn, "e2", "2025-01-10T10:00:00Z", "LoadGame", "MainCmdr", "F400")
-	seedOverrideJournalEvent(testingContext, dbConn, "e3", "2025-06-15T08:00:00Z", "LoadGame", "MainCmdr", "F400")
-	seedOverrideJournalEvent(testingContext, dbConn, "e4", "2025-06-15T18:30:00Z", "LoadGame", "MainCmdr", "F400")
-	seedOverrideJournalEvent(testingContext, dbConn, "e5", "2023-05-01T12:00:00Z", "FSDJump", "NetLogCmdr", "")
+	dbtest.InsertSeedEvents(testingContext, dbConn,
+		dbtest.SeedEventRow{UID: "e1", Timestamp: "2024-01-10T10:00:00Z", Event: "LoadGame", Commander: "OldAlias", FID: "F400"},
+		dbtest.SeedEventRow{UID: "e2", Timestamp: "2025-01-10T10:00:00Z", Event: "LoadGame", Commander: "MainCmdr", FID: "F400"},
+		dbtest.SeedEventRow{UID: "e3", Timestamp: "2025-06-15T08:00:00Z", Event: "LoadGame", Commander: "MainCmdr", FID: "F400"},
+		dbtest.SeedEventRow{UID: "e4", Timestamp: "2025-06-15T18:30:00Z", Event: "LoadGame", Commander: "MainCmdr", FID: "F400"},
+		dbtest.SeedEventRow{UID: "e5", Timestamp: "2023-05-01T12:00:00Z", Event: "FSDJump", Commander: "NetLogCmdr", FID: ""},
+	)
 	if err := db.WithTx(dbConn, db.ResolveCommanders); err != nil {
 		testingContext.Fatalf("initial ResolveCommanders: %v", err)
 	}
@@ -287,11 +267,13 @@ func TestCommanderOverridesAndProfileToggleRoundTrip(testingContext *testing.T) 
 }
 
 func TestSingleAliasManualEraMergeUnmergesCleanlyWithoutBogusUnmergeRule(testingContext *testing.T) {
-	dbConn := openSettingsTestDB(testingContext)
-	seedOverrideJournalEvent(testingContext, dbConn, "w1", "2024-03-01T10:00:00Z", "LoadGame", "SameName", "F777")
-	seedOverrideJournalEvent(testingContext, dbConn, "w2", "2024-03-01T12:00:00Z", "ClearSavedGame", "SameName", "F777")
-	seedOverrideJournalEvent(testingContext, dbConn, "w3", "2024-03-01T12:00:05Z", "NewCommander", "SameName", "F777")
-	seedOverrideJournalEvent(testingContext, dbConn, "w4", "2024-03-01T12:10:00Z", "FSDJump", "SameName", "F777")
+	dbConn := dbtest.OpenMemory(testingContext)
+	dbtest.InsertSeedEvents(testingContext, dbConn,
+		dbtest.SeedEventRow{UID: "w1", Timestamp: "2024-03-01T10:00:00Z", Event: "LoadGame", Commander: "SameName", FID: "F777"},
+		dbtest.SeedEventRow{UID: "w2", Timestamp: "2024-03-01T12:00:00Z", Event: "ClearSavedGame", Commander: "SameName", FID: "F777"},
+		dbtest.SeedEventRow{UID: "w3", Timestamp: "2024-03-01T12:00:05Z", Event: "NewCommander", Commander: "SameName", FID: "F777"},
+		dbtest.SeedEventRow{UID: "w4", Timestamp: "2024-03-01T12:10:00Z", Event: "FSDJump", Commander: "SameName", FID: "F777"},
+	)
 	if err := db.WithTx(dbConn, db.ResolveCommanders); err != nil {
 		testingContext.Fatal(err)
 	}

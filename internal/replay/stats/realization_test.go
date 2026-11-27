@@ -1,54 +1,27 @@
 package stats_test
 
 import (
-	"database/sql"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func setupRealizationDB(t *testing.T) *sql.DB {
-	t.Helper()
-	databaseConnection, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("open in-memory db: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-	return databaseConnection
-}
-
-func insertEvent(t *testing.T, databaseConnection *sql.DB, timestamp, event, rawJSON string) {
-	t.Helper()
-	eventUID := journal.ComputeUID(timestamp, event, rawJSON)
-	_, err := databaseConnection.Exec(`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at)
-		VALUES (?, ?, ?, ?, ?)`, eventUID, timestamp, event, rawJSON, timestamp)
-	if err != nil {
-		t.Fatalf("insert %s event: %v", event, err)
-	}
-}
-
 func TestRealizationNpcCrewCut(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 
-	// Scan two samples sold in rapid consecutive transactions within 5 seconds.
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":111,"Body":1}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:05:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Bacterial","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","WasLogged":true,"SystemAddress":111,"Body":2}`)
-
-	// First sale for 19,010,800 credits with concurrent NPC crew cut of 1,901,080 (10%).
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "NpcCrewPaidWage",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"NpcCrewPaidWage","NpcCrewId":99,"NpcCrewName":"Piloteer","Amount":1901080}`)
-
-	// Second sale 2 seconds later without its own NpcCrewPaidWage must not re-claim the consumed wage event.
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:02Z", "SellOrganicData",
-		`{"timestamp":"2026-03-01T12:00:02Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`)
+	// Scan two samples sold in rapid consecutive transactions within 5 seconds, with a 10% NPC crew cut on the first sale only.
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":111,"Body":1}`,
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Bacterial","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","WasLogged":true,"SystemAddress":111,"Body":2}`,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"NpcCrewPaidWage","NpcCrewId":99,"NpcCrewName":"Piloteer","Amount":1901080}`,
+		`{"timestamp":"2026-03-01T12:00:02Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`,
+	)
 
 	engine := stats.NewEngine(databaseConnection)
 	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
@@ -67,26 +40,20 @@ func TestRealizationNpcCrewCut(t *testing.T) {
 }
 
 func TestRealizationCartoLostDeathAndSold(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 	engineInstance := stats.NewEngine(databaseConnection)
 
-	// Ship destruction with insurance rebuy (Option "rebuy", Cost > 0) loses pending cartography.
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1234,"BodyID":1,"BodyName":"Sol A 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T11:00:05Z", "Resurrect",
-		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"rebuy","Cost":2500000,"Bankrupt":false}`)
-
-	// Taking a free Sidewinder on ship destruction ("freewinder" with Cost 0) loses pending cartography.
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Achenar","SystemAddress":2345,"BodyID":1,"BodyName":"Achenar 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T13:00:05Z", "Resurrect",
-		`{"timestamp":"2026-03-01T13:00:05Z","event":"Resurrect","Option":"freewinder","Cost":0,"Bankrupt":false}`)
-
-	// Bankruptcy into a free Sidewinder (Option "free", Cost 0, Bankrupt true) also loses pending cartography.
-	insertEvent(t, databaseConnection, "2026-03-01T14:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alioth","SystemAddress":3456,"BodyID":1,"BodyName":"Alioth 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T15:00:05Z", "Resurrect",
-		`{"timestamp":"2026-03-01T15:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":true}`)
+	// Ship destruction via insurance rebuy, free Sidewinder, or bankruptcy each loses pending cartography.
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1234,"BodyID":1,"BodyName":"Sol A 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"rebuy","Cost":2500000,"Bankrupt":false}`,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Achenar","SystemAddress":2345,"BodyID":1,"BodyName":"Achenar 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T13:00:05Z","event":"Resurrect","Option":"freewinder","Cost":0,"Bankrupt":false}`,
+		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alioth","SystemAddress":3456,"BodyID":1,"BodyName":"Alioth 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T15:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":true}`,
+	)
 
 	for _, scenario := range []struct {
 		label  string
@@ -110,25 +77,18 @@ func TestRealizationCartoLostDeathAndSold(t *testing.T) {
 }
 
 func TestRealizationOnFootDeathPreservesCarto(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 
-	// Scan body in ship
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1234,"BodyID":1,"BodyName":"Sol A 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`)
-
-	// Scan organic on foot
-	insertEvent(t, databaseConnection, "2026-03-01T10:30:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":1234,"Body":1}`)
-
-	// On-foot free suit redeploy and detention-center hand-in (with Cost > 0 fine) both preserve shipboard cartography
-	insertEvent(t, databaseConnection, "2026-03-01T11:00:05Z", "Resurrect",
-		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T11:30:05Z", "Resurrect",
-		`{"timestamp":"2026-03-01T11:30:05Z","event":"Resurrect","Option":"handin","Cost":5000,"Bankrupt":false}`)
-
-	// Later sold cartography via MultiSellExplorationData
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Sol","NumBodies":1}]}`)
+	// On-foot free suit redeploy and detention-center hand-in both preserve shipboard cartography while losing organic data.
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1234,"BodyID":1,"BodyName":"Sol A 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false,"WasFootfalled":false}`,
+		`{"timestamp":"2026-03-01T10:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":1234,"Body":1}`,
+		`{"timestamp":"2026-03-01T11:00:05Z","event":"Resurrect","Option":"free","Cost":0,"Bankrupt":false}`,
+		`{"timestamp":"2026-03-01T11:30:05Z","event":"Resurrect","Option":"handin","Cost":5000,"Bankrupt":false}`,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Sol","NumBodies":1}]}`,
+	)
 
 	engineInstance := stats.NewEngine(databaseConnection)
 	realizationBreakdown, computeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:45:00Z"}, nil)
@@ -148,20 +108,18 @@ func TestRealizationOnFootDeathPreservesCarto(t *testing.T) {
 }
 
 func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 
 	// Scan three undiscovered systems: Alpha and Beta sold via MultiSellExplorationData,
 	// Gamma sold individually via SellExplorationData where someone else claimed discovery first.
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":1001,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:15:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:15:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Beta","SystemAddress":1002,"BodyID":1,"BodyName":"Beta 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:20:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Gamma","SystemAddress":1003,"BodyID":1,"BodyName":"Gamma 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-
-	// Bulk Page 1 sells Alpha with Bonus: 0 (no system-completion bonus; first-discovery bonus is baked into BaseValue).
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[{"SystemName":"Alpha","NumBodies":1}]}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":1001,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T10:15:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Beta","SystemAddress":1002,"BodyID":1,"BodyName":"Beta 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T10:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Gamma","SystemAddress":1003,"BodyID":1,"BodyName":"Gamma 1","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":0,"TotalEarnings":1000000,"Discovered":[{"SystemName":"Alpha","NumBodies":1}]}`,
+	)
 
 	engineInstance := stats.NewEngine(databaseConnection)
 	legWindow := stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T10:30:00Z"}
@@ -181,10 +139,12 @@ func TestRealizationMultiSellMultiPageAndStolen(t *testing.T) {
 	}
 
 	// Bulk Page 2 realizes Beta, and individual SellExplorationData sells Gamma with empty Discovered (stolen bonus).
-	insertEvent(t, databaseConnection, "2026-03-08T12:00:00Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-08T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Beta","NumBodies":1}]}`)
-	insertEvent(t, databaseConnection, "2026-03-08T12:05:00Z", "SellExplorationData",
-		`{"timestamp":"2026-03-08T12:05:00Z","event":"SellExplorationData","Systems":["Gamma"],"Discovered":[],"BaseValue":15117,"Bonus":0,"TotalEarnings":15117}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-08T12:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"Beta","NumBodies":1}]}`,
+		`{"timestamp":"2026-03-08T12:05:00Z","event":"SellExplorationData","Systems":["Gamma"],"Discovered":[],"BaseValue":15117,"Bonus":0,"TotalEarnings":15117}`,
+	)
 
 	afterSecondPageBreakdown, secondPageError := engineInstance.ComputeRealization(legWindow, nil)
 	if secondPageError != nil {
@@ -214,18 +174,20 @@ func TestRealizationSameTimestampDistinctSalesPreservedAndCanonicalUID(t *testin
 		t.Fatalf("expected identical canonical UID for SellOrganicData across whitespace differences, got %s vs %s", rawJournalEvent.UID, eddJournalEvent.UID)
 	}
 
-	// Verify duplicate whitespace-varied sales are ignored while genuinely distinct sales sharing the same 1-second timestamp are both preserved
-	databaseConnection := setupRealizationDB(t)
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Bacterial","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","WasLogged":true,"SystemAddress":111,"Body":1}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:05:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":111,"Body":1}`)
+	// Verify duplicate whitespace-varied sales with legacy un-canonicalized UIDs are ignored while genuinely distinct sales sharing the same 1-second timestamp are both preserved
+	databaseConnection := dbtest.OpenMemory(t)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Bacterial","Species":"$Codex_Ent_Bacterial_01_Name;","Species_Localised":"Bacterium Aurasus","WasLogged":true,"SystemAddress":111,"Body":1}`,
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":111,"Body":1}`,
+	)
 
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+	insertRawUIDEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Bacterial_01_Name;","Value":1000000,"Bonus":0}]}`)
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+	insertRawUIDEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{ "timestamp":"2026-03-01T12:00:00Z", "event":"SellOrganicData", "MarketID":123, "BioData":[ {"Species":"$Codex_Ent_Bacterial_01_Name;", "Value":1000000, "Bonus":0} ] }`)
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+	insertRawUIDEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`)
 
 	engine := stats.NewEngine(databaseConnection)
@@ -239,29 +201,25 @@ func TestRealizationSameTimestampDistinctSalesPreservedAndCanonicalUID(t *testin
 }
 
 func TestRealizationFirstFootfallOnlyDeterminesFirstLoggedAndStolen(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 
 	// Body 1: Already footfalled (WasFootfalled: true).
 	// Even though ScanOrganic reports WasLogged: false (https://issues.frontierstore.net/issue-detail/81891),
 	// selling with Bonus: 0 must NOT be flagged as stolen.
-	insertEvent(t, databaseConnection, "2026-03-01T09:50:00Z", "Scan",
-		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Pegasi","SystemAddress":5001,"BodyID":1,"BodyName":"Pegasi 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Cactoid","Species":"$Codex_Ent_Cactoid_03_Name;","Species_Localised":"Cactoida Vermis","WasLogged":false,"SystemAddress":5001,"Body":1}`)
-
 	// Body 2: First footfall (WasFootfalled: false), even if previously discovered from space (WasDiscovered: true).
 	// Selling with Bonus: 0 MUST be flagged as stolen because WasFootfalled was false at time of scan.
-	insertEvent(t, databaseConnection, "2026-03-01T10:10:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"DeepSpace","SystemAddress":5002,"BodyID":2,"BodyName":"DeepSpace 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:20:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:20:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":5002,"Body":2}`)
-
-	// Sell both with Bonus = 0
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Pegasi","SystemAddress":5001,"BodyID":1,"BodyName":"Pegasi 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Cactoid","Species":"$Codex_Ent_Cactoid_03_Name;","Species_Localised":"Cactoida Vermis","WasLogged":false,"SystemAddress":5001,"Body":1}`,
+		`{"timestamp":"2026-03-01T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"DeepSpace","SystemAddress":5002,"BodyID":2,"BodyName":"DeepSpace 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`,
+		`{"timestamp":"2026-03-01T10:20:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":5002,"Body":2}`,
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
 			{"Species":"$Codex_Ent_Cactoid_03_Name;","Species_Localised":"Cactoida Vermis","Value":16202800,"Bonus":0},
 			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":0}
-		]}`)
+		]}`,
+	)
 
 	engine := stats.NewEngine(databaseConnection)
 	realizationBreakdown, err := engine.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
@@ -280,14 +238,16 @@ func TestRealizationFirstFootfallOnlyDeterminesFirstLoggedAndStolen(t *testing.T
 }
 
 func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 	engine := stats.NewEngine(databaseConnection)
 
 	// Body already has WasFootfalled: true (another commander landed previously without logging organics).
-	insertEvent(t, databaseConnection, "2026-03-01T09:50:00Z", "Scan",
-		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"FootfalledSys","SystemAddress":6001,"BodyID":1,"BodyName":"FootfalledSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":6001,"Body":1}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"FootfalledSys","SystemAddress":6001,"BodyID":1,"BodyName":"FootfalledSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":6001,"Body":1}`,
+	)
 
 	legWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T10:30:00Z"}
 
@@ -304,10 +264,13 @@ func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
 	}
 
 	// Sold on a later leg with the 4x first-logged bonus (76,043,200 Cr).
-	insertEvent(t, databaseConnection, "2026-03-01T14:00:00Z", "SellOrganicData",
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
 		`{"timestamp":"2026-03-01T14:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
 			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200}
-		]}`)
+		]}`,
+	)
 
 	// After sale: the original leg's Exobiology Value upgrades to include the first-logged bonus (95,054,000 Cr).
 	afterMetrics, afterError := engine.ComputeExobiology(legWindow, nil)
@@ -326,26 +289,23 @@ func TestFootfalledBodyUpgradesExobiologyBonusWhenSoldWithBonus(t *testing.T) {
 }
 
 func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 	engineInstance := stats.NewEngine(databaseConnection)
 
 	// First scan Stratum Tectonicas on an already-footfalled body (WasFootfalled: true),
-	// then scan the same species on an un-footfalled body (WasFootfalled: false).
-	insertEvent(t, databaseConnection, "2026-03-01T09:50:00Z", "Scan",
-		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":1,"BodyName":"TieBreakSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`)
-	insertEvent(t, databaseConnection, "2026-03-01T09:52:00Z", "Scan",
-		`{"timestamp":"2026-03-01T09:52:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":2,"BodyName":"TieBreakSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":1}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:10:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":2}`)
-
-	// Sell both in one SellOrganicData event with the bonus-paying sample listed first.
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
+	// then scan the same species on an un-footfalled body (WasFootfalled: false), and sell both together.
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T09:50:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":1,"BodyName":"TieBreakSys 1","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":true,"WasFootfalled":true}`,
+		`{"timestamp":"2026-03-01T09:52:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"TieBreakSys","SystemAddress":7001,"BodyID":2,"BodyName":"TieBreakSys 2","PlanetClass":"Rocky body","MassEM":0.1,"WasDiscovered":true,"WasMapped":false,"WasFootfalled":false}`,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":1}`,
+		`{"timestamp":"2026-03-01T10:10:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":7001,"Body":2}`,
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[
 			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":76043200},
 			{"Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","Value":19010800,"Bonus":0}
-		]}`)
+		]}`,
+	)
 
 	organicWindow := stats.Range{After: "2026-03-01T09:55:00Z", Until: "2026-03-01T11:00:00Z"}
 	realizationResult, realizationError := engineInstance.ComputeRealization(organicWindow, nil)
@@ -374,12 +334,15 @@ func TestOrganicSaleBonusTieBreakerAvoidsFalseUpgradeAndFalseStolen(t *testing.T
 }
 
 func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) {
-	databaseConnection := setupRealizationDB(t)
+	databaseConnection := dbtest.OpenMemory(t)
 	engineInstance := stats.NewEngine(databaseConnection)
 
 	// Initial AutoScan of DedupeSys 1.
-	insertEvent(t, databaseConnection, "2026-03-01T10:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	)
 
 	firstLegWindow := stats.Range{After: "2026-03-01T09:50:00Z", Until: "2026-03-01T10:30:00Z"}
 	afterInitialScan, initialScanError := engineInstance.ComputeRealization(firstLegWindow, nil)
@@ -392,12 +355,13 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 	}
 
 	// Map DedupeSys 1 with DSS and emit a duplicate SAAScanComplete plus a follow-up Detailed Scan.
-	insertEvent(t, databaseConnection, "2026-03-01T10:05:00Z", "SAAScanComplete",
-		`{"timestamp":"2026-03-01T10:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:06:00Z", "SAAScanComplete",
-		`{"timestamp":"2026-03-01T10:06:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`)
-	insertEvent(t, databaseConnection, "2026-03-01T10:10:00Z", "Scan",
-		`{"timestamp":"2026-03-01T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`,
+		`{"timestamp":"2026-03-01T10:06:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`,
+		`{"timestamp":"2026-03-01T10:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	)
 
 	afterMappingAndDuplicateScan, duplicateScanError := engineInstance.ComputeRealization(firstLegWindow, nil)
 	if duplicateScanError != nil {
@@ -409,8 +373,11 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 	}
 
 	// Selling DedupeSys must clear all pending value without leaving an orphaned pending record from the second Scan.
-	insertEvent(t, databaseConnection, "2026-03-01T11:00:00Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-01T11:00:00Z","event":"MultiSellExplorationData","BaseValue":1500000,"Bonus":500000,"TotalEarnings":2000000,"Discovered":[{"SystemName":"DedupeSys","NumBodies":1}]}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T11:00:00Z","event":"MultiSellExplorationData","BaseValue":1500000,"Bonus":500000,"TotalEarnings":2000000,"Discovered":[{"SystemName":"DedupeSys","NumBodies":1}]}`,
+	)
 
 	afterSale, afterSaleError := engineInstance.ComputeRealization(firstLegWindow, nil)
 	if afterSaleError != nil {
@@ -424,10 +391,12 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 	}
 
 	// Re-scanning or re-mapping an already-sold body later in the career must not create a new pending record.
-	insertEvent(t, databaseConnection, "2026-03-01T12:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":true,"WasMapped":true}`)
-	insertEvent(t, databaseConnection, "2026-03-01T12:05:00Z", "SAAScanComplete",
-		`{"timestamp":"2026-03-01T12:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"Scan","ScanType":"AutoScan","StarSystem":"DedupeSys","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":true,"WasMapped":true}`,
+		`{"timestamp":"2026-03-01T12:05:00Z","event":"SAAScanComplete","SystemAddress":8001,"BodyID":1,"BodyName":"DedupeSys 1","ProbesUsed":5,"EfficiencyTarget":6}`,
+	)
 
 	rescanSoldWindow := stats.Range{After: "2026-03-01T11:30:00Z", Until: "2026-03-01T12:30:00Z"}
 	afterSoldRescan, soldRescanError := engineInstance.ComputeRealization(rescanSoldWindow, nil)
@@ -439,12 +408,13 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 	}
 
 	// Scanning a body, losing it to ship destruction, and then re-scanning it must create a new payable pending record.
-	insertEvent(t, databaseConnection, "2026-03-01T13:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T13:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T13:30:00Z", "Resurrect",
-		`{"timestamp":"2026-03-01T13:30:00Z","event":"Resurrect","Option":"rebuy","Cost":1000000,"Bankrupt":false}`)
-	insertEvent(t, databaseConnection, "2026-03-01T14:00:00Z", "Scan",
-		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T13:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-03-01T13:30:00Z","event":"Resurrect","Option":"rebuy","Cost":1000000,"Bankrupt":false}`,
+		`{"timestamp":"2026-03-01T14:00:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RebuySys","SystemAddress":8002,"BodyID":1,"BodyName":"RebuySys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	)
 
 	postRebuyWindow := stats.Range{After: "2026-03-01T13:45:00Z", Until: "2026-03-01T14:30:00Z"}
 	afterPostRebuyRescan, postRebuyRescanError := engineInstance.ComputeRealization(postRebuyWindow, nil)
@@ -456,8 +426,11 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 	}
 
 	// Selling the post-rebuy re-scan realizes the payout on the new record.
-	insertEvent(t, databaseConnection, "2026-03-01T15:00:00Z", "MultiSellExplorationData",
-		`{"timestamp":"2026-03-01T15:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"RebuySys","NumBodies":1}]}`)
+	journaltest.InsertParsedLines(
+		t,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T15:00:00Z","event":"MultiSellExplorationData","BaseValue":1000000,"Bonus":500000,"TotalEarnings":1500000,"Discovered":[{"SystemName":"RebuySys","NumBodies":1}]}`,
+	)
 
 	afterPostRebuySale, postRebuySaleError := engineInstance.ComputeRealization(postRebuyWindow, nil)
 	if postRebuySaleError != nil {
@@ -472,34 +445,25 @@ func TestRealizationCartoDeduplicationSoldStateAndPostRebuyRescan(t *testing.T) 
 }
 
 func TestRealizationCrewWageWindowAndBinarySearchBounds(testingContext *testing.T) {
-	databaseConnection := setupRealizationDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	engineInstance := stats.NewEngine(databaseConnection)
 
-	// Record at exact After boundary (excluded), inside window (included), and after Until boundary (excluded).
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":1}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:15:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:15:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":2}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:01Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:30:01Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":3}`)
-
-	// Unattributed cartographic sales at exact After boundary (excluded), exact Until boundary (included), and after Until (excluded).
-	// Also test NpcCrewPaidWage 5-second window boundaries around the 10:30:00Z sale:
-	// -6s (10:29:54Z, excluded), -5s (10:29:55Z, included: 10,000), +5s (10:30:05Z, included: 20,000), +6s (10:30:06Z, excluded).
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:00:00Z", "SellExplorationData",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"SellExplorationData","Systems":["BeforeSys"],"Discovered":[],"BaseValue":100000,"Bonus":0,"TotalEarnings":100000}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:29:54Z", "NpcCrewPaidWage",
-		`{"timestamp":"2026-03-01T10:29:54Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":99999}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:29:55Z", "NpcCrewPaidWage",
-		`{"timestamp":"2026-03-01T10:29:55Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":10000}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:00Z", "SellExplorationData",
-		`{"timestamp":"2026-03-01T10:30:00Z","event":"SellExplorationData","Systems":["InsideSys"],"Discovered":[],"BaseValue":500000,"Bonus":0,"TotalEarnings":500000}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:05Z", "NpcCrewPaidWage",
-		`{"timestamp":"2026-03-01T10:30:05Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":20000}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:06Z", "NpcCrewPaidWage",
-		`{"timestamp":"2026-03-01T10:30:06Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":88888}`)
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:30:01Z", "SellExplorationData",
-		`{"timestamp":"2026-03-01T10:30:01Z","event":"SellExplorationData","Systems":["AfterSys"],"Discovered":[],"BaseValue":700000,"Bonus":0,"TotalEarnings":700000}`)
+	// Record at exact After boundary (excluded), inside window (included), and after Until boundary (excluded),
+	// plus NpcCrewPaidWage 5-second window boundaries around the 10:30:00Z sale.
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":1}`,
+		`{"timestamp":"2026-03-01T10:15:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":2}`,
+		`{"timestamp":"2026-03-01T10:30:01Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":9001,"Body":3}`,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"SellExplorationData","Systems":["BeforeSys"],"Discovered":[],"BaseValue":100000,"Bonus":0,"TotalEarnings":100000}`,
+		`{"timestamp":"2026-03-01T10:29:54Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":99999}`,
+		`{"timestamp":"2026-03-01T10:29:55Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":10000}`,
+		`{"timestamp":"2026-03-01T10:30:00Z","event":"SellExplorationData","Systems":["InsideSys"],"Discovered":[],"BaseValue":500000,"Bonus":0,"TotalEarnings":500000}`,
+		`{"timestamp":"2026-03-01T10:30:05Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":20000}`,
+		`{"timestamp":"2026-03-01T10:30:06Z","event":"NpcCrewPaidWage","NpcCrewId":1,"NpcCrewName":"CrewA","Amount":88888}`,
+		`{"timestamp":"2026-03-01T10:30:01Z","event":"SellExplorationData","Systems":["AfterSys"],"Discovered":[],"BaseValue":700000,"Bonus":0,"TotalEarnings":700000}`,
+	)
 
 	window := stats.Range{After: "2026-03-01T10:00:00Z", Until: "2026-03-01T10:30:00Z"}
 	breakdown, computeError := engineInstance.ComputeRealization(window, nil)

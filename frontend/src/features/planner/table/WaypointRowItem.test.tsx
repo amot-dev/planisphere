@@ -1,121 +1,18 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
-import { renderToString } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../../api/models'
+import {
+  makeRowView,
+  makeWaypointRowHandlers,
+  renderWaypointRowHtml,
+} from '../../../test/fixtures'
+import { mountTestRoot, setFormControlValue } from '../../../test/render'
 import { WaypointRowItem, type WaypointRowHandlers } from './WaypointRowItem'
 
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-const defaultRowHandlers: WaypointRowHandlers = {
-  onToggleExpand: () => {},
-  onFieldBlur: () => {},
-  onCopySystem: () => {},
-  onToggleFcStop: () => {},
-  onOpenCarrierRoutePrompt: () => {},
-  onToggleInsertMenu: () => {},
-  onInsert: () => {},
-  onDelete: () => {},
-  onDragStart: () => {},
-  onDragEnd: () => {},
-}
-
-interface MakeWaypointRowOptions {
-  row?: Partial<expedition.Row>
-  number?: number
-  visitState?: string
-  visitedAtGalactic?: string
-  departedAtGalactic?: string
-  distFromPrevLy?: number
-  distFromCurrentLy?: number
-  isNextWaypoint?: boolean
-  legModeId?: number
-  legModeColor?: string
-  detectedRegion?: string
-  visitCount?: number
-  allowInsertWaypoint?: boolean
-  permissions?: Partial<expedition.WaypointPermissions>
-}
-
-function makeWaypointRow(options: MakeWaypointRowOptions = {}): expedition.RowView {
-  const visitState = options.visitState ?? 'future'
-  const number = options.number ?? 2
-  const isVisited = visitState === 'visited'
-  const isOrigin = number === 1 && isVisited
-  return expedition.RowView.createFrom({
-    row: {
-      id: 10,
-      expeditionId: 1,
-      rowType: 'waypoint',
-      systemName: 'Sol',
-      ...options.row,
-    },
-    number,
-    visitState,
-    visitedAtGalactic: options.visitedAtGalactic ?? '',
-    departedAtGalactic: options.departedAtGalactic,
-    distFromPrevLy: options.distFromPrevLy,
-    distFromCurrentLy: options.distFromCurrentLy,
-    isNextWaypoint: options.isNextWaypoint,
-    legModeId: options.legModeId ?? 0,
-    legModeColor: options.legModeColor ?? '',
-    detectedRegion: options.detectedRegion ?? '',
-    visitCount: options.visitCount ?? 0,
-    allowInsertWaypoint: options.allowInsertWaypoint ?? true,
-    permissions: {
-      systemLocked: isVisited || isOrigin,
-      allowInsertWaypoint: options.allowInsertWaypoint ?? true,
-      canReorder: !isOrigin,
-      deleteDisabledReason: isOrigin ? 'Origin waypoint cannot be deleted' : undefined,
-      reorderDisabledReason: isOrigin ? 'Origin waypoint cannot be reordered' : undefined,
-      canAddFcStop: true,
-      canRemoveFcStop: true,
-      canOverrideFcBadge: true,
-      hasDrawer: visitState !== 'future',
-      ...options.permissions,
-    },
-  })
-}
-
-function renderRowItem(
-  props: Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView },
-): string {
-  const defaultProps: Parameters<typeof WaypointRowItem>[0] = {
-    index: 1,
-    isPlanning: false,
-    isLocked: false,
-    isBeingDragged: false,
-    isExpanded: false,
-    isSystemCopied: false,
-    insertMenuOpen: false,
-    lastVisitedIndex: 0,
-    rowStyle: {},
-    dropProps: {},
-    handlers: defaultRowHandlers,
-    ...props,
-  }
-  return renderToString(
-    createElement(
-      'table',
-      null,
-      createElement('tbody', null, createElement(WaypointRowItem, defaultProps)),
-    ),
-  )
-}
-
-function setFormControlValue(
-  element: HTMLInputElement | HTMLTextAreaElement,
-  nextValue: string,
-): void {
-  const prototype =
-    element instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype
-  const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value')
-  descriptor?.set?.call(element, nextValue)
-  element.dispatchEvent(new Event('input', { bubbles: true }))
-}
+const defaultRowHandlers = makeWaypointRowHandlers()
+const makeWaypointRow = makeRowView
+const renderRowItem = renderWaypointRowHtml
 
 describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () => {
   it('renders visited row with uniform h-7 (28px) elements, align-top cells, and inset shadow left border', () => {
@@ -444,70 +341,61 @@ describe('WaypointRowItem and AutoExpandingTextarea Row Height Consistency', () 
 })
 
 describe('WaypointRowItem lock transition, rollback draft recovery, and visit inspection', () => {
-  function mountRows(
-    root: ReturnType<typeof createRoot>,
+  function buildRowsElement(
     ...rows: Array<Partial<Parameters<typeof WaypointRowItem>[0]> & { rowView: expedition.RowView }>
   ) {
-    act(() => {
-      root.render(
-        createElement(
-          'table',
-          null,
-          createElement(
-            'tbody',
-            null,
-            ...rows.map((itemProps, itemIndex) =>
-              createElement(WaypointRowItem, {
-                key: itemProps.rowView.row.id ?? itemIndex,
-                index: itemIndex,
-                isPlanning: false,
-                isLocked: false,
-                isBeingDragged: false,
-                isExpanded: false,
-                isSystemCopied: false,
-                insertMenuOpen: false,
-                lastVisitedIndex: 0,
-                rowStyle: {},
-                dropProps: {},
-                handlers: defaultRowHandlers,
-                ...itemProps,
-              }),
-            ),
-          ),
+    return createElement(
+      'table',
+      null,
+      createElement(
+        'tbody',
+        null,
+        ...rows.map((itemProps, itemIndex) =>
+          createElement(WaypointRowItem, {
+            key: itemProps.rowView.row.id ?? itemIndex,
+            index: itemIndex,
+            isPlanning: false,
+            isLocked: false,
+            isBeingDragged: false,
+            isExpanded: false,
+            isSystemCopied: false,
+            insertMenuOpen: false,
+            lastVisitedIndex: 0,
+            rowStyle: {},
+            dropProps: {},
+            handlers: defaultRowHandlers,
+            ...itemProps,
+          }),
         ),
-      )
-    })
+      ),
+    )
   }
 
   it('clears editing state when a focused system input becomes locked so subsequent poiName updates sync into draft', () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-
-    const renderMountedRow = (rowView: expedition.RowView, lastVisitedIndex: number) =>
-      mountRows(root, { rowView, index: 1, lastVisitedIndex })
-
-    try {
-      renderMountedRow(
-        makeWaypointRow({
+    const mounted = mountTestRoot(
+      buildRowsElement({
+        rowView: makeWaypointRow({
           row: { id: 70, systemName: 'Colonia', poiName: '' },
           number: 2,
           visitState: 'future',
         }),
-        0,
-      )
+        index: 1,
+        lastVisitedIndex: 0,
+      }),
+    )
 
-      const systemInput = container.querySelector(
-        'input[placeholder="Star System"]',
-      ) as HTMLInputElement
-      act(() => {
-        systemInput.focus()
-        setFormControlValue(systemInput, 'Colonia Draft')
-      })
-      expect(systemInput.value).toBe('Colonia Draft')
+    const systemInput = mounted.container.querySelector(
+      'input[placeholder="Star System"]',
+    ) as HTMLInputElement
+    act(() => {
+      systemInput.focus()
+      setFormControlValue(systemInput, 'Colonia Draft')
+    })
+    expect(systemInput.value).toBe('Colonia Draft')
 
-      renderMountedRow(
-        makeWaypointRow({
+    mounted.rerender(
+      buildRowsElement({
+        rowView: makeWaypointRow({
           row: {
             id: 70,
             systemName: 'Colonia',
@@ -518,12 +406,15 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
           visitState: 'visited',
           visitedAtGalactic: '3312-02-01 10:00 UTC',
         }),
-        1,
-      )
-      expect(container.querySelector('input[placeholder="Star System"]')).toBeNull()
+        index: 1,
+        lastVisitedIndex: 1,
+      }),
+    )
+    expect(mounted.container.querySelector('input[placeholder="Star System"]')).toBeNull()
 
-      renderMountedRow(
-        makeWaypointRow({
+    mounted.rerender(
+      buildRowsElement({
+        rowView: makeWaypointRow({
           row: {
             id: 70,
             systemName: 'Colonia',
@@ -534,17 +425,15 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
           visitState: 'visited',
           visitedAtGalactic: '3312-02-01 10:00 UTC',
         }),
-        1,
-      )
+        index: 1,
+        lastVisitedIndex: 1,
+      }),
+    )
 
-      const poiTextarea = container.querySelector(
-        'textarea[placeholder="POI Name"]',
-      ) as HTMLTextAreaElement
-      expect(poiTextarea.value).toBe('Jaques Station')
-    } finally {
-      act(() => root.unmount())
-      container.remove()
-    }
+    const poiTextarea = mounted.container.querySelector(
+      'textarea[placeholder="POI Name"]',
+    ) as HTMLTextAreaElement
+    expect(poiTextarea.value).toBe('Jaques Station')
   })
 
   it('restores rejected systemName draft without overwriting a newly focused poiName edit', async () => {
@@ -561,52 +450,45 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
       visitState: 'future',
     })
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-
-    try {
-      mountRows(root, {
+    const mounted = mountTestRoot(
+      buildRowsElement({
         rowView,
         index: 2,
         isPlanning: true,
-        handlers: { ...defaultRowHandlers, onFieldBlur },
-      })
+        handlers: makeWaypointRowHandlers({ onFieldBlur }),
+      }),
+    )
 
-      const systemInput = container.querySelector(
-        'input[placeholder="Star System"]',
-      ) as HTMLInputElement
-      const poiTextarea = container.querySelector(
-        'textarea[placeholder="POI Name"]',
-      ) as HTMLTextAreaElement
-      act(() => {
-        systemInput.focus()
-        setFormControlValue(systemInput, 'Rejected System Name')
-      })
+    const systemInput = mounted.container.querySelector(
+      'input[placeholder="Star System"]',
+    ) as HTMLInputElement
+    const poiTextarea = mounted.container.querySelector(
+      'textarea[placeholder="POI Name"]',
+    ) as HTMLTextAreaElement
+    act(() => {
+      systemInput.focus()
+      setFormControlValue(systemInput, 'Rejected System Name')
+    })
 
-      act(() => {
-        systemInput.blur()
-        poiTextarea.focus()
-        setFormControlValue(poiTextarea, 'Explorer Anchorage')
-      })
-      expect(onFieldBlur).toHaveBeenCalledWith(rowView.row, 'systemName', 'Rejected System Name')
+    act(() => {
+      systemInput.blur()
+      poiTextarea.focus()
+      setFormControlValue(poiTextarea, 'Explorer Anchorage')
+    })
+    expect(onFieldBlur).toHaveBeenCalledWith(rowView.row, 'systemName', 'Rejected System Name')
 
-      await act(async () => {
-        resolveSystemBlur(false)
-        await Promise.resolve()
-      })
+    await act(async () => {
+      resolveSystemBlur(false)
+      await Promise.resolve()
+    })
 
-      expect(systemInput.value).toBe('Sagittarius A*')
-      expect(poiTextarea.value).toBe('Explorer Anchorage')
-    } finally {
-      act(() => root.unmount())
-      container.remove()
-    }
+    expect(systemInput.value).toBe('Sagittarius A*')
+    expect(poiTextarea.value).toBe('Explorer Anchorage')
   })
 
   it('makes green journal CoordStatusIndicator clickable with two-line tooltip while leaving EDSM non-clickable', () => {
     const onInspectSystemVisits = vi.fn()
-    const handlers: WaypointRowHandlers = { ...defaultRowHandlers, onInspectSystemVisits }
+    const handlers: WaypointRowHandlers = makeWaypointRowHandlers({ onInspectSystemVisits })
     const journalRowView = makeWaypointRow({
       row: { id: 72, systemName: 'Sol', hasCoords: true, coordsSource: 'journal', x: 0, y: 0, z: 0 },
       number: 1,
@@ -630,42 +512,34 @@ describe('WaypointRowItem lock transition, rollback draft recovery, and visit in
       visitState: 'future',
     })
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-
-    try {
-      mountRows(
-        root,
+    const mounted = mountTestRoot(
+      buildRowsElement(
         { rowView: journalRowView, index: 0, handlers },
         { rowView: edsmRowView, index: 1, handlers },
-      )
+      ),
+    )
 
-      const journalButton = container.querySelector(
-        'button[aria-label="Search visit history for Sol"]',
-      ) as HTMLButtonElement | null
-      expect(journalButton).toBeTruthy()
-      expect(journalButton?.title).toBe(
-        'Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)\nClick to search visit history',
-      )
+    const journalButton = mounted.container.querySelector(
+      'button[aria-label="Search visit history for Sol"]',
+    ) as HTMLButtonElement | null
+    expect(journalButton).toBeTruthy()
+    expect(journalButton?.title).toBe(
+      'Inner Orion Spur (0.0, 0.0, 0.0) via Journal (3 Visits)\nClick to search visit history',
+    )
 
-      act(() => {
-        journalButton?.click()
-      })
-      expect(onInspectSystemVisits).toHaveBeenCalledTimes(1)
-      expect(onInspectSystemVisits).toHaveBeenCalledWith('Sol')
+    act(() => {
+      journalButton?.click()
+    })
+    expect(onInspectSystemVisits).toHaveBeenCalledTimes(1)
+    expect(onInspectSystemVisits).toHaveBeenCalledWith('Sol')
 
-      expect(
-        container.querySelector('button[aria-label="Search visit history for Beagle Point"]'),
-      ).toBeNull()
-      expect(
-        container.querySelector(
-          'span[title="The Abyss (-1111.6, -134.2, 65269.8) via EDSM (Never Visited)"]',
-        ),
-      ).toBeTruthy()
-    } finally {
-      act(() => root.unmount())
-      container.remove()
-    }
+    expect(
+      mounted.container.querySelector('button[aria-label="Search visit history for Beagle Point"]'),
+    ).toBeNull()
+    expect(
+      mounted.container.querySelector(
+        'span[title="The Abyss (-1111.6, -134.2, 65269.8) via EDSM (Never Visited)"]',
+      ),
+    ).toBeTruthy()
   })
 })

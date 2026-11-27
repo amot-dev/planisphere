@@ -1,74 +1,30 @@
 package replay_test
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func openReplayTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-	return databaseConnection
-}
-
-func execJournalEvent(statement *sql.Stmt, parsedEvent *journal.Event, sourceFile string, ingestedAt string) (sql.Result, error) {
-	var xCoord, yCoord, zCoord any
-	if parsedEvent.StarPos != nil {
-		xCoord, yCoord, zCoord = parsedEvent.StarPos.X, parsedEvent.StarPos.Y, parsedEvent.StarPos.Z
-	}
-	return statement.Exec(
-		parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event,
-		journal.NullStringOrNil(parsedEvent.SystemName), parsedEvent.SystemAddress, parsedEvent.BodyID,
-		journal.NullStringOrNil(parsedEvent.BodyName), xCoord, yCoord, zCoord,
-		journal.NullStringOrNil(parsedEvent.Commander), sourceFile, parsedEvent.Raw, ingestedAt,
-	)
-}
-
 func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
-	databaseConnection := openReplayTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
-	seedLines := []string{
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-01-01T00:00:00Z","event":"Commander","Commander":"CmdrEnabled","FID":"F1"}`,
 		`{"timestamp":"2026-01-01T00:01:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-01T00:02:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,2,3],"JumpDist":4.3}`,
 		`{"timestamp":"2026-01-01T00:03:00Z","event":"Commander","Commander":"CmdrDisabled","FID":"F2"}`,
 		`{"timestamp":"2026-01-01T00:04:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":1003,"StarPos":[10,20,30],"JumpDist":50.0}`,
-	}
-	statement, prepError := databaseConnection.Prepare(journal.InsertJournalEventPrefixSQL)
-	if prepError != nil {
-		testingContext.Fatalf("prepare insert: %v", prepError)
-	}
-	defer statement.Close()
-
-	activeCommander := ""
-	for _, rawLine := range seedLines {
-		parsedEvent, ok, parseError := journal.ParseLine([]byte(rawLine), "Journal.test.log")
-		if parseError != nil || !ok {
-			testingContext.Fatalf("parse line %s: ok=%v err=%v", rawLine, ok, parseError)
-		}
-		if parsedEvent.Commander != "" {
-			activeCommander = parsedEvent.Commander
-		} else {
-			parsedEvent.Commander = activeCommander
-		}
-		if _, execError := execJournalEvent(statement, &parsedEvent, "Journal.test.log", "2026-01-01T00:05:00Z"); execError != nil {
-			testingContext.Fatalf("insert event: %v", execError)
-		}
-	}
+	)
 	if _, execError := databaseConnection.Exec(
 		`INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrEnabled', 'F1', 1), ('CmdrDisabled', 'F2', 0)`,
 	); execError != nil {
@@ -103,7 +59,7 @@ func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
 }
 
 func TestArchiveStatusPropagatesDisabledCommanderQueryError(testingContext *testing.T) {
-	conn := openReplayTestDB(testingContext)
+	conn := dbtest.OpenMemory(testingContext)
 
 	if _, dropError := conn.Exec(`DROP TABLE commanders`); dropError != nil {
 		testingContext.Fatal(dropError)
@@ -119,7 +75,7 @@ func TestArchiveStatusPropagatesDisabledCommanderQueryError(testingContext *test
 }
 
 func TestListCommandersAfterByteZeroBackfill(testingContext *testing.T) {
-	conn := openReplayTestDB(testingContext)
+	conn := dbtest.OpenMemory(testingContext)
 	temporaryDirectory := testingContext.TempDir()
 	logFilePath := filepath.Join(temporaryDirectory, "Journal.2026-04-01T120000.01.log")
 	earlyLine := `{"timestamp":"2026-04-01T12:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`
@@ -253,7 +209,7 @@ func TestListCommandersEventCounts(testingContext *testing.T) {
 
 	for _, testCase := range testCases {
 		testingContext.Run(testCase.name, func(subTest *testing.T) {
-			databaseConnection := openReplayTestDB(subTest)
+			databaseConnection := dbtest.OpenMemory(subTest)
 			for index, commanderName := range testCase.commanders {
 				timestamp := fmt.Sprintf("2026-04-0%dT00:00:00Z", index+1)
 				if _, execError := databaseConnection.Exec(
@@ -293,16 +249,16 @@ func TestListCommandersEventCounts(testingContext *testing.T) {
 }
 
 func TestMulticrewIgnoredAcrossArrivalsLocationAndVisitCounts(testingContext *testing.T) {
-	databaseConnection := openReplayTestDB(testingContext)
-	if _, execError := databaseConnection.Exec(`
-		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, commander, source_file, raw_json, ingested_at) VALUES
-		('mc-sol', '2026-06-01T10:00:00Z', 'Location', 'Sol', 1001, 0, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}', '2026-06-01T10:00:00Z'),
-		('mc-taxi', '2026-06-01T10:10:00Z', 'FSDJump', 'Alpha Centauri', 1002, 4, 0, 0, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:10:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"Taxi":true}', '2026-06-01T10:10:00Z'),
-		('mc-loc', '2026-06-01T10:20:00Z', 'Location', 'Colonia', 1003, 9000, 0, 9000, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:20:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":1003,"StarPos":[9000,0,9000],"Multicrew":true}', '2026-06-01T10:20:00Z'),
-		('mc-jump', '2026-06-01T10:30:00Z', 'FSDJump', 'Beagle Point', 1004, 0, 0, 65000, 'CmdrA', 't.log', '{"timestamp":"2026-06-01T10:30:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1004,"StarPos":[0,0,65000],"Multicrew":true}', '2026-06-01T10:30:00Z')
-	`); execError != nil {
-		testingContext.Fatalf("seed multicrew and taxi events: %v", execError)
-	}
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-06-01T09:59:00Z","event":"Commander","Commander":"CmdrA","FID":"FA"}`,
+		`{"timestamp":"2026-06-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-06-01T10:10:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"Taxi":true}`,
+		`{"timestamp":"2026-06-01T10:20:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":1003,"StarPos":[9000,0,9000],"Multicrew":true}`,
+		`{"timestamp":"2026-06-01T10:30:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1004,"StarPos":[0,0,65000],"Multicrew":true}`,
+	)
 
 	windowArrivals, windowError := replay.QueryArrivalsInWindowScoped(databaseConnection, "2026-06-01T09:00:00Z", "", replay.ProfileScope{})
 	if windowError != nil {
@@ -332,7 +288,7 @@ func TestMulticrewIgnoredAcrossArrivalsLocationAndVisitCounts(testingContext *te
 }
 
 func TestListCommanderNamesForScopeLegacyFallback(testingContext *testing.T) {
-	databaseConnection := openReplayTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	emptyNames, emptyError := replay.ListCommanderNamesForScope(databaseConnection, replay.ProfileScope{})
 	if emptyError != nil || emptyNames == nil || len(emptyNames) != 0 {
@@ -371,7 +327,7 @@ func TestListCommanderNamesForScopeLegacyFallback(testingContext *testing.T) {
 }
 
 func TestJournalSystemQueriesRespectCmdrFilterLatestOrderAndBatchChunking(testingContext *testing.T) {
-	databaseConnection := openReplayTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	if _, execError := databaseConnection.Exec(`
 		INSERT INTO commanders (name, fid, enabled, first_seen, last_seen) VALUES

@@ -7,6 +7,8 @@ import (
 	"planisphere/internal/core/db"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
 )
 
 func TestPopulatePlanFrontiersAndPermissions_PlanningActiveAndCompleted(testingContext *testing.T) {
@@ -184,8 +186,8 @@ func TestPopulatePlanFrontiersAndPermissions_ManualVsSpanshCarrierRoutes(testing
 }
 
 func TestBuildPlanPopulatesDefaultModeAndPermissions(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	_, proj := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(testingContext)
+	_, proj := expeditiontest.NewProjections(dbConn)
 
 	expeditionRecord, originRow := createExpeditionWithOriginRow(testingContext, dbConn, "BuildPlan Permissions", "")
 	setRowSystemName(testingContext, dbConn, originRow.ID, "Sol")

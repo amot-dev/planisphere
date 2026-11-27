@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,136 +14,8 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/replay"
 	stats "planisphere/internal/replay/stats"
-	"planisphere/internal/sources/journal"
-	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/settings"
 )
-
-type testEmitDispatcher struct {
-	mutex   sync.RWMutex
-	handler func(event string, payload ...any)
-}
-
-func (dispatcher *testEmitDispatcher) currentHandler() func(event string, payload ...any) {
-	dispatcher.mutex.RLock()
-	defer dispatcher.mutex.RUnlock()
-	return dispatcher.handler
-}
-
-func (dispatcher *testEmitDispatcher) emit(event string, payload ...any) {
-	if activeHandler := dispatcher.currentHandler(); activeHandler != nil {
-		activeHandler(event, payload...)
-	}
-}
-
-func (dispatcher *testEmitDispatcher) swapHandler(nextHandler func(event string, payload ...any)) func(event string, payload ...any) {
-	dispatcher.mutex.Lock()
-	defer dispatcher.mutex.Unlock()
-	previousHandler := dispatcher.handler
-	dispatcher.handler = nextHandler
-	return previousHandler
-}
-
-var (
-	testEmitDispatchersMu sync.Mutex
-	testEmitDispatchers   = map[*App]*testEmitDispatcher{}
-)
-
-func registerTestEmitDispatcher(testingContext *testing.T, targetApp *App) {
-	testingContext.Helper()
-	dispatcher := &testEmitDispatcher{}
-	targetApp.emit = dispatcher.emit
-
-	testEmitDispatchersMu.Lock()
-	testEmitDispatchers[targetApp] = dispatcher
-	testEmitDispatchersMu.Unlock()
-
-	testingContext.Cleanup(func() {
-		testEmitDispatchersMu.Lock()
-		defer testEmitDispatchersMu.Unlock()
-		delete(testEmitDispatchers, targetApp)
-	})
-}
-
-func setTestEmitHook(testingContext *testing.T, targetApp *App, nextHandler func(event string, payload ...any)) func(event string, payload ...any) {
-	testingContext.Helper()
-	testEmitDispatchersMu.Lock()
-	dispatcher, exists := testEmitDispatchers[targetApp]
-	testEmitDispatchersMu.Unlock()
-	if !exists {
-		testingContext.Fatalf("test emit dispatcher was not registered before initialize on *App")
-	}
-	return dispatcher.swapHandler(nextHandler)
-}
-
-func isolateTestUserDirectories(testingContext *testing.T, rootDirectory string) {
-	testingContext.Helper()
-	environmentDirectories := [][2]string{
-		{"HOME", filepath.Join(rootDirectory, "home")},
-		{"XDG_CONFIG_HOME", filepath.Join(rootDirectory, "xdg-config")},
-		{"XDG_DATA_HOME", filepath.Join(rootDirectory, "xdg-data")},
-		{"APPDATA", filepath.Join(rootDirectory, "appdata")},
-		{"LOCALAPPDATA", filepath.Join(rootDirectory, "localappdata")},
-	}
-	for _, entry := range environmentDirectories {
-		if mkdirError := os.MkdirAll(entry[1], 0o755); mkdirError != nil {
-			testingContext.Fatalf("create isolated %s directory: %v", entry[0], mkdirError)
-		}
-		testingContext.Setenv(entry[0], entry[1])
-	}
-}
-
-func setupTestApp(testingContext *testing.T) *App {
-	testingContext.Helper()
-	temporaryDirectory := testingContext.TempDir()
-	isolateTestUserDirectories(testingContext, temporaryDirectory)
-	databasePath := filepath.Join(temporaryDirectory, "test.sqlite")
-
-	testApp := New()
-	registerTestEmitDispatcher(testingContext, testApp)
-	applicationContext, cancelFunction := context.WithCancel(context.Background())
-	if initializeError := testApp.initialize(applicationContext, databasePath); initializeError != nil {
-		cancelFunction()
-		testingContext.Fatalf("initialize db: %v", initializeError)
-	}
-	if err := settings.SetOnlineLookups(testApp.db, false); err != nil {
-		cancelFunction()
-		testApp.shutdown(applicationContext)
-		testingContext.Fatalf("disable online lookups: %v", err)
-	}
-	testingContext.Cleanup(func() {
-		cancelFunction()
-		testApp.shutdown(applicationContext)
-	})
-	return testApp
-}
-
-func insertTestJournalEvent(testingContext *testing.T, testApp *App, timestamp, eventName, keyIdentifier, rawJSON string) {
-	testingContext.Helper()
-	var systemPayload struct {
-		StarSystem string `json:"StarSystem"`
-		SystemName string `json:"SystemName"`
-	}
-	if unmarshalError := json.Unmarshal([]byte(rawJSON), &systemPayload); unmarshalError != nil {
-		testingContext.Fatalf("unmarshal %s journal event JSON: %v", eventName, unmarshalError)
-	}
-	systemName := systemPayload.StarSystem
-	if systemName == "" {
-		systemName = systemPayload.SystemName
-	}
-
-	eventUID := journal.ComputeUID(timestamp, eventName, keyIdentifier)
-	_, insertError := testApp.db.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		eventUID, timestamp, eventName, systemName, rawJSON, timestamp,
-	)
-	if insertError != nil {
-		testingContext.Fatalf("insert %s journal event: %v", eventName, insertError)
-	}
-	if parsedEvent, ok := journal.ParseEventType(eventName); ok {
-		testApp.publishJournalBatch(journal.NewEventSet(parsedEvent), "", "")
-	}
-}
 
 func TestDatabaseHotSwapConcurrent(t *testing.T) {
 	tempDir := t.TempDir()
@@ -356,66 +227,6 @@ func TestGetSidebarStatsRealizationExpeditionVsAllTime(testingContext *testing.T
 	if sidebarStats.AllJournalsRealization.TotalRealized != 38021600 {
 		testingContext.Errorf("expected AllJournalsRealization.TotalRealized 38,021,600, got %d", sidebarStats.AllJournalsRealization.TotalRealized)
 	}
-}
-
-func seedDatabaseWithExpedition(testingContext *testing.T, databasePath, expeditionName, expeditionDescription string, settingPairs ...[2]string) {
-	testingContext.Helper()
-	seedApp := New()
-	seedApp.debugMode = false
-	registerTestEmitDispatcher(testingContext, seedApp)
-	seedContext, cancelSeed := context.WithCancel(context.Background())
-	if initError := seedApp.initialize(seedContext, databasePath); initError != nil {
-		cancelSeed()
-		testingContext.Fatalf("seed initialize %s: %v", databasePath, initError)
-	}
-	if err := settings.SetOnlineLookups(seedApp.db, false); err != nil {
-		cancelSeed()
-		seedApp.shutdown(seedContext)
-		testingContext.Fatalf("disable online lookups: %v", err)
-	}
-	for _, settingPair := range settingPairs {
-		if _, setError := seedApp.db.Exec(
-			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			settingPair[0], settingPair[1],
-		); setError != nil {
-			cancelSeed()
-			seedApp.shutdown(seedContext)
-			testingContext.Fatalf("seed setting %s: %v", settingPair[0], setError)
-		}
-	}
-	if _, createError := seedApp.CreateExpedition(expeditionName, expeditionDescription); createError != nil {
-		cancelSeed()
-		seedApp.shutdown(seedContext)
-		testingContext.Fatalf("seed CreateExpedition %q: %v", expeditionName, createError)
-	}
-	cancelSeed()
-	seedApp.shutdown(seedContext)
-}
-
-func startExpeditionAtOrigin(testingContext *testing.T, targetApp *App, expeditionID int64, originSystemName string) int64 {
-	testingContext.Helper()
-	planView, planError := targetApp.GetPlan(expeditionID)
-	if planError != nil || len(planView.Rows) == 0 {
-		testingContext.Fatalf("GetPlan(%d): len=%d err=%v", expeditionID, len(planView.Rows), planError)
-	}
-	originRowID := planView.Rows[0].Row.ID
-	if updateError := targetApp.UpdateRow(expedition.RowPatch{ID: originRowID, SystemName: &originSystemName}); updateError != nil {
-		testingContext.Fatalf("UpdateRow SystemName: %v", updateError)
-	}
-	if startError := targetApp.StartExpedition(expeditionID, "2026-01-01T00:00:00Z", 0); startError != nil {
-		testingContext.Fatalf("StartExpedition: %v", startError)
-	}
-	return originRowID
-}
-
-func createAndStartExpedition(testingContext *testing.T, targetApp *App, expeditionName, originSystemName string) int64 {
-	testingContext.Helper()
-	createdExpedition, createError := targetApp.CreateExpedition(expeditionName, "")
-	if createError != nil {
-		testingContext.Fatalf("CreateExpedition %q: %v", expeditionName, createError)
-	}
-	startExpeditionAtOrigin(testingContext, targetApp, createdExpedition.ID, originSystemName)
-	return createdExpedition.ID
 }
 
 func TestDebugModeDatabaseIsolation(testingContext *testing.T) {
@@ -757,19 +568,7 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 	startupApp := New()
 	startupApp.debugMode = false
 	registerTestEmitDispatcher(testingContext, startupApp)
-
-	var emittedMutex sync.Mutex
-	var emittedChanges []DataChanged
-	setTestEmitHook(testingContext, startupApp, func(eventName string, payload ...any) {
-		if eventName != EventDataChanged || len(payload) == 0 {
-			return
-		}
-		if dataChangedPayload, ok := payload[0].(DataChanged); ok {
-			emittedMutex.Lock()
-			emittedChanges = append(emittedChanges, dataChangedPayload)
-			emittedMutex.Unlock()
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, startupApp)
 
 	onStartup := StartupHook(startupApp)
 	onShutdown := ShutdownHook(startupApp)
@@ -787,9 +586,7 @@ func TestStartupDoesNotEmitRedundantPostBootSettingsChange(testingContext *testi
 		testingContext.Fatalf("expected SetupCompleted to be true after startup")
 	}
 
-	emittedMutex.Lock()
-	defer emittedMutex.Unlock()
-	for _, changeEvent := range emittedChanges {
+	for _, changeEvent := range eventsRecorder.DataChanges() {
 		if slices.Contains(changeEvent.Domains, "settings") {
 			testingContext.Errorf("unexpected startup %q event emitted with Domains=%v", EventDataChanged, changeEvent.Domains)
 		}
@@ -961,18 +758,7 @@ func TestDeleteActiveExpeditionSelectsSurvivingAndEmitsTargetedDomains(testingCo
 		testingContext.Fatalf("create active expedition: %v", createSecondError)
 	}
 
-	var emittedMutex sync.Mutex
-	var emittedEvents []DataChanged
-	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
-		if eventName != EventDataChanged || len(payload) == 0 {
-			return
-		}
-		if dataChangedEvent, ok := payload[0].(DataChanged); ok {
-			emittedMutex.Lock()
-			emittedEvents = append(emittedEvents, dataChangedEvent)
-			emittedMutex.Unlock()
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 
 	assertDeleteOutcome := func(expectedActiveID int64) {
 		testingContext.Helper()
@@ -984,11 +770,7 @@ func TestDeleteActiveExpeditionSelectsSurvivingAndEmitsTargetedDomains(testingCo
 			testingContext.Fatalf("expected active_expedition_id %d, got %d", expectedActiveID, loadedSettings.ActiveExpeditionID)
 		}
 
-		emittedMutex.Lock()
-		capturedEvents := append([]DataChanged(nil), emittedEvents...)
-		emittedEvents = nil
-		emittedMutex.Unlock()
-
+		capturedEvents := eventsRecorder.TakeDataChanges()
 		if len(capturedEvents) != 1 {
 			testingContext.Fatalf("expected 1 DataChanged event, got %d (%+v)", len(capturedEvents), capturedEvents)
 		}

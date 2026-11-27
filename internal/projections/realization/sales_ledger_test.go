@@ -4,37 +4,23 @@ import (
 	"database/sql"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
 	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func insertLedgerTestEvent(testingContext *testing.T, databaseConnection *sql.DB, timestamp, eventName, rawJSON string) {
-	testingContext.Helper()
-	eventUID := journal.ComputeUID(timestamp, eventName, rawJSON)
-	_, execError := databaseConnection.Exec(
-		`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
-		eventUID, timestamp, eventName, rawJSON, timestamp,
-	)
-	if execError != nil {
-		testingContext.Fatalf("insert %s event: %v", eventName, execError)
-	}
-}
-
 func TestSalesLedgerCachingAndBusInvalidation(testingContext *testing.T) {
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("open test database: %v", openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
-	insertLedgerTestEvent(testingContext, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`,
+	)
 
 	eventBus := projection.NewBus()
 	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
@@ -47,8 +33,11 @@ func TestSalesLedgerCachingAndBusInvalidation(testingContext *testing.T) {
 		testingContext.Fatalf("expected positive PendingValue, got %d", firstResult.PendingValue)
 	}
 
-	insertLedgerTestEvent(testingContext, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`,
+	)
 
 	// Unrelated and session-context-only events must leave cached SalesLedger untouched.
 	initialLedgerGeneration := salesLedger.Generation()
@@ -113,13 +102,7 @@ func insertScopedLedgerEvent(testingContext *testing.T, databaseConnection *sql.
 }
 
 func TestSalesLedgerPerProfileIsolationAndDisabledScope(testingContext *testing.T) {
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("open test database: %v", openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	if _, err := databaseConnection.Exec(`
 		INSERT INTO commander_profiles (id, profile_key, display_name, fid, universe, era_index, is_archived_career, enabled, first_seen, last_seen) VALUES

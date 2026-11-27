@@ -1,26 +1,25 @@
 package replay_test
 
 import (
-	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
-	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestQuerySystemVisitsScopedAndReconcilesWithVisitCounts(testingContext *testing.T) {
-	databaseConnection := openReplayTestDB(testingContext)
-	journalDir := testingContext.TempDir()
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	// Seed two active commanders plus a third commander disabled in settings:
 	// - Sol has only Location events (initial starting system fallback).
 	// - Colonia has FSDJump, CarrierJump, a crash-recovered jump, and a Multicrew jump.
 	// - TieSys has two FSDJumps at the identical timestamp to verify UID DESC tie-breaking.
-	journalLines := []string{
+	journaltest.IngestLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-05-01T08:00:00Z","event":"LoadGame","Commander":"CmdrAlpha","FID":"F101","Ship":"Mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-05-01T08:01:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-05-01T08:30:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
@@ -31,29 +30,13 @@ func TestQuerySystemVisitsScopedAndReconcilesWithVisitCounts(testingContext *tes
 		`{"timestamp":"2026-05-01T10:01:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,0]}`,
 		`{"timestamp":"2026-05-01T10:30:00Z","event":"CarrierJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,0]}`,
 		`{"timestamp":"2026-05-01T10:45:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,0],"JumpDist":20.0,"Multicrew":true}`,
-
 		`{"timestamp":"2026-05-02T08:00:00Z","event":"LoadGame","Commander":"CmdrBeta","FID":"F202","Ship":"CobraMkIII","Odyssey":true}`,
 		`{"timestamp":"2026-05-02T08:05:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,0],"JumpDist":80.0}`,
-
 		`{"timestamp":"2026-05-03T08:00:00Z","event":"LoadGame","Commander":"CmdrMuted","FID":"F303","Ship":"SideWinder","Odyssey":true}`,
 		`{"timestamp":"2026-05-03T08:05:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,0],"JumpDist":80.0}`,
-	}
-	journalPath := filepath.Join(journalDir, "Journal.2026-05-01T080000.01.log")
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(journalLines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), journalDir); scanError != nil {
-		testingContext.Fatalf("ScanDir: %v", scanError)
-	}
+	)
 
-	commanders, listError := replay.ListCommanders(databaseConnection)
-	if listError != nil {
-		testingContext.Fatalf("ListCommanders: %v", listError)
-	}
-	profileIDByCommander := make(map[string]int64, len(commanders))
-	for _, commander := range commanders {
-		profileIDByCommander[commander.Name] = commander.ID
-	}
+	profileIDByCommander := expeditiontest.ProfileIDsByName(testingContext, databaseConnection)
 	if _, disableError := databaseConnection.Exec(`UPDATE commander_profiles SET enabled = 0 WHERE id = ?`, profileIDByCommander["CmdrMuted"]); disableError != nil {
 		testingContext.Fatalf("disable CmdrMuted: %v", disableError)
 	}

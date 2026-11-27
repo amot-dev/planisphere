@@ -11,26 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
-
-func openJournalTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-	return databaseConnection
-}
 
 func seedByteZeroBackfillFixture(testingContext *testing.T, logFilename, locationTimestamp, loadGameTimestamp string) (*sql.DB, *journal.Ingester, string) {
 	testingContext.Helper()
-	databaseConnection := openJournalTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	temporaryDirectory := testingContext.TempDir()
 	logFilePath := filepath.Join(temporaryDirectory, logFilename)
 	earlyLine := `{"timestamp":"` + locationTimestamp + `","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`
@@ -68,7 +57,7 @@ func seedByteZeroBackfillFixture(testingContext *testing.T, logFilename, locatio
 }
 
 func TestIngestFile(t *testing.T) {
-	conn := openJournalTestDB(t)
+	conn := dbtest.OpenMemory(t)
 
 	temporaryDir := t.TempDir()
 	logFile := filepath.Join(temporaryDir, "Journal.2026-01-18T190000.01.log")
@@ -104,7 +93,7 @@ func TestIngestFile(t *testing.T) {
 }
 
 func TestIngestFilePartialLine(t *testing.T) {
-	conn := openJournalTestDB(t)
+	conn := dbtest.OpenMemory(t)
 
 	temporaryDir := t.TempDir()
 	logFile := filepath.Join(temporaryDir, "Journal.2026-01-18T200000.01.log")
@@ -241,7 +230,7 @@ func TestWatcherReconnectWhenDirectoryCreated(t *testing.T) {
 }
 
 func TestScanDir_ContextCancellation(t *testing.T) {
-	temporaryDatabaseConnection := openJournalTestDB(t)
+	temporaryDatabaseConnection := dbtest.OpenMemory(t)
 
 	temporaryDirectory := t.TempDir()
 	journalFilePath := filepath.Join(temporaryDirectory, "Journal.2026-01-18T190000.01.log")
@@ -284,7 +273,7 @@ func TestComputeUIDDeterministicAndConcurrent(t *testing.T) {
 }
 
 func TestWatcherDebounceConfigurationAndBatching(t *testing.T) {
-	temporaryDatabaseConnection := openJournalTestDB(t)
+	temporaryDatabaseConnection := dbtest.OpenMemory(t)
 
 	temporaryJournalDirectory := t.TempDir()
 	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
@@ -409,7 +398,7 @@ func TestParseLinePreJumpFilters(testingContext *testing.T) {
 }
 
 func TestIngestMidFileClearSavedGameAndNewCommander(testingContext *testing.T) {
-	conn := openJournalTestDB(testingContext)
+	conn := dbtest.OpenMemory(testingContext)
 	tempDir := testingContext.TempDir()
 	logPath := filepath.Join(tempDir, "Journal.2026-04-10T120000.01.log")
 	preWipeLines := []string{
@@ -507,47 +496,31 @@ func TestIngestMidFileClearSavedGameAndNewCommander(testingContext *testing.T) {
 }
 
 func TestIngestContinuedRolloverInheritsIdentityAndProfile(testingContext *testing.T) {
-	conn := openJournalTestDB(testingContext)
-	tempDir := testingContext.TempDir()
+	conn := dbtest.OpenMemory(testingContext)
 
 	// Seed BOTH a newer 2026 Live rollover session (which sorts BEFORE Journal.23... in ASCII)
 	// and an older 2023 Legacy 2-digit-year rollover session so ScanDir verifies timestamp-bounded
 	// rollover resolution and universe preservation.
-	live2026PartOne := filepath.Join(tempDir, "Journal.2026-04-12T180000.01.log")
-	live2026PartTwo := filepath.Join(tempDir, "Journal.2026-04-12T200000.02.log")
-	legacy2023PartOne := filepath.Join(tempDir, "Journal.230501100000.01.log")
-	legacy2023PartTwo := filepath.Join(tempDir, "Journal.230501120000.02.log")
-
-	filesToWrite := map[string][]string{
-		live2026PartOne: {
+	journaltest.IngestFiles(testingContext, conn, map[string][]string{
+		"Journal.2026-04-12T180000.01.log": {
 			`{"timestamp":"2026-04-12T18:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
 			`{"timestamp":"2026-04-12T18:01:00Z","event":"LoadGame","Commander":"CmdrRollover","FID":"F707","Ship":"Mandalay","Odyssey":true}`,
 			`{"timestamp":"2026-04-12T19:59:59Z","event":"Continued","Part":2}`,
 		},
-		live2026PartTwo: {
+		"Journal.2026-04-12T200000.02.log": {
 			`{"timestamp":"2026-04-12T20:00:00Z","event":"Fileheader","part":2,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`,
 			`{"timestamp":"2026-04-12T20:05:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":5001,"StarPos":[10,20,30],"JumpDist":65.2}`,
 		},
-		legacy2023PartOne: {
+		"Journal.230501100000.01.log": {
 			`{"timestamp":"2023-05-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"3.8.0.404","build":"r280100/r0 "}`,
 			`{"timestamp":"2023-05-01T10:01:00Z","event":"LoadGame","Commander":"CmdrLegacyRoll","FID":"F308","Ship":"Asp"}`,
 			`{"timestamp":"2023-05-01T11:59:59Z","event":"Continued","Part":2}`,
 		},
-		legacy2023PartTwo: {
+		"Journal.230501120000.02.log": {
 			`{"timestamp":"2023-05-01T12:00:00Z","event":"Fileheader","part":2}`,
 			`{"timestamp":"2023-05-01T12:05:00Z","event":"FSDJump","StarSystem":"Sagittarius A*","SystemAddress":6001,"StarPos":[25,0,25900],"JumpDist":35.0}`,
 		},
-	}
-	for filePath, lines := range filesToWrite {
-		if err := os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-			testingContext.Fatal(err)
-		}
-	}
-
-	ingester := journal.NewIngester(conn)
-	if _, err := ingester.ScanDir(context.Background(), tempDir); err != nil {
-		testingContext.Fatalf("ScanDir: %v", err)
-	}
+	})
 
 	assertJump := func(starSystem, wantCmdr, wantFID, wantUniverse, wantKey string) {
 		testingContext.Helper()

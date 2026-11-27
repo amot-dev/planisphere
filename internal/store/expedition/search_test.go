@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"planisphere/internal/reference"
-	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func TestSearchWaypointsTiersRankingAndExclusions(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	emptyResponse, emptyError := expedition.SearchWaypoints(databaseConnection, "   ", nil)
 	if emptyError != nil {
@@ -77,7 +79,7 @@ func TestSearchWaypointsTiersRankingAndExclusions(testingContext *testing.T) {
 }
 
 func TestSearchWaypointsChronologicalTieBreakingAndStatusCoercion(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	seedSingleWaypoint := func(name string) expedition.Expedition {
 		testingContext.Helper()
@@ -129,7 +131,7 @@ func TestSearchWaypointsChronologicalTieBreakingAndStatusCoercion(testingContext
 }
 
 func TestSearchWaypointsCondensingRegionNumberingAndEmptySystemPOIs(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	firstExpedition, createFirstError := expedition.CreateWithWaypoints(databaseConnection, "Round Trip", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol", POIName: "Home Base"},
@@ -220,7 +222,7 @@ func TestSearchWaypointsCondensingRegionNumberingAndEmptySystemPOIs(testingConte
 }
 
 func TestSearchWaypointsLikeWildcardEscaping(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	if _, err := expedition.CreateWithWaypoints(databaseConnection, "Wildcard Test", "", []expedition.SeedWaypoint{
 		{SystemName: "Alpha_1"},
@@ -254,15 +256,15 @@ func TestSearchWaypointsLikeWildcardEscaping(testingContext *testing.T) {
 }
 
 func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, projectionsBundle := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, projectionsBundle := expeditiontest.NewProjections(databaseConnection)
 
 	// Ingest journal events covering:
 	// - Starter Port: initial Location-only system (multiple Locations, zero jumps).
 	// - Hub Prime: waypoint-linked FSDJump, legacy timestamp-linked FSDJump, Multicrew jump,
 	//   crash-recovered jump, CMDR Main scoped expedition visit, CMDR Alt visit during CMDR Main's
 	//   scoped expedition, and pre-expedition unattributed visit.
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-03-01T08:00:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"Mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-03-01T08:05:00Z","event":"Location","StarSystem":"Starter Port","SystemAddress":1000,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-03-01T08:15:00Z","event":"Location","StarSystem":"Starter Port","SystemAddress":1000,"StarPos":[0,0,0]}`,
@@ -290,13 +292,12 @@ func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext 
 		// must NOT be attributed to Main Scoped, so it falls through to Global Expedition.
 		`{"timestamp":"2026-03-05T08:00:00Z","event":"LoadGame","Commander":"CMDR Alt","FID":"F202","Ship":"CobraMkIII","Odyssey":true}`,
 		`{"timestamp":"2026-03-05T09:00:00Z","event":"FSDJump","StarSystem":"Hub Prime","SystemAddress":2000,"StarPos":[50,0,0],"JumpDist":50.0}`,
-	})
+	)
 
-	commanders, cmdrError := replay.ListCommanders(databaseConnection)
-	if cmdrError != nil || len(commanders) != 2 {
-		testingContext.Fatalf("ListCommanders: got %+v err=%v", commanders, cmdrError)
+	idsByName := expeditiontest.ProfileIDsByName(testingContext, databaseConnection)
+	if len(idsByName) != 2 {
+		testingContext.Fatalf("ProfileIDsByName: got %+v", idsByName)
 	}
-	idsByName := profileIDsByName(testingContext, commanders)
 
 	globalExpedition, err := expedition.CreateWithWaypoints(databaseConnection, "Global Survey", "", []expedition.SeedWaypoint{
 		{SystemName: "Origin One"},
@@ -402,7 +403,7 @@ func TestSearchWaypointsNonWaypointVisitsAttributionAndEdgeCases(testingContext 
 }
 
 func TestSearchWaypointsResultAndNonWaypointVisitCaps(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	// Seed 52 matching waypoints to verify TotalMatches=52 and Results capped at 50.
 	seedWaypoints := make([]expedition.SeedWaypoint, 52)

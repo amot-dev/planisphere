@@ -10,23 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/reference"
 	"planisphere/internal/replay"
 	"planisphere/internal/sources/edsm"
+	"planisphere/internal/testutil/dbtest"
 )
-
-func openEDSMTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-	return databaseConnection
-}
 
 func wireReplayCallbacks(databaseConnection *sql.DB, resolver *edsm.Resolver) {
 	resolver.JournalLookup = func(systemName string) (*edsm.Info, error) {
@@ -62,7 +50,7 @@ func wireReplayCallbacks(databaseConnection *sql.DB, resolver *edsm.Resolver) {
 }
 
 func TestResolveLocalBatchEnrichmentFallbackChunkingAndCmdrFilter(testingContext *testing.T) {
-	databaseConnection := openEDSMTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	resolver := edsm.NewResolver(databaseConnection, func() bool { return false })
 	wireReplayCallbacks(databaseConnection, resolver)
 
@@ -136,7 +124,7 @@ func TestResolveLocalBatchEnrichmentFallbackChunkingAndCmdrFilter(testingContext
 }
 
 func TestSystemCacheErrorPropagationInResolveLocalBatchAndStore(testingContext *testing.T) {
-	databaseConnection := openEDSMTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"name":"Beagle Point","id":124406,"id64":827689533218,"coords":{"x":-1111.5625,"y":-134.21875,"z":65269.75}}`))
@@ -185,7 +173,7 @@ func TestSystemCacheErrorPropagationInResolveLocalBatchAndStore(testingContext *
 	}
 
 	// Verify online disabled returns wrapped ErrorNotFound when DB is healthy.
-	healthyDB := openEDSMTestDB(testingContext)
+	healthyDB := dbtest.OpenMemory(testingContext)
 	offlineResolver := edsm.NewResolver(healthyDB, func() bool { return false })
 	if _, offlineErr := offlineResolver.Resolve(context.Background(), "Unknown Sys"); !errors.Is(offlineErr, edsm.ErrorNotFound) {
 		testingContext.Fatalf("expected ErrorNotFound when online disabled, got %v", offlineErr)

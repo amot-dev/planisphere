@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { installResizeObserverMock } from '../../test/domMocks'
 import { createTextareaResizeCoordinator } from './AutoExpandingTextarea'
 
 interface MockTextareaOptions {
@@ -87,11 +88,9 @@ function expectResetsBeforeReads(operationLog: string[]): void {
 }
 
 describe('createTextareaResizeCoordinator', () => {
-  const originalResizeObserver = globalThis.ResizeObserver
   const originalWindow = globalThis.window
 
   afterEach(() => {
-    globalThis.ResizeObserver = originalResizeObserver
     if (originalWindow === undefined) {
       delete (globalThis as { window?: unknown }).window
     } else {
@@ -148,29 +147,7 @@ describe('createTextareaResizeCoordinator', () => {
   })
 
   it('shares one ResizeObserver across textareas, skips redundant initial ticks, and disconnects on last unobserve', async () => {
-    let observerConstructorCalls = 0
-    let disconnectCalls = 0
-    let capturedCallback: ResizeObserverCallback | null = null
-    const observedTargets = new Set<Element>()
-
-    class MockResizeObserver implements ResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        observerConstructorCalls++
-        capturedCallback = callback
-      }
-      observe(target: Element) {
-        observedTargets.add(target)
-      }
-      unobserve(target: Element) {
-        observedTargets.delete(target)
-      }
-      disconnect() {
-        disconnectCalls++
-        observedTargets.clear()
-      }
-    }
-
-    globalThis.ResizeObserver = MockResizeObserver
+    const resizeObserverMock = installResizeObserverMock()
 
     const operationLog: string[] = []
     const coordinator = createTextareaResizeCoordinator()
@@ -185,8 +162,8 @@ describe('createTextareaResizeCoordinator', () => {
 
     coordinator.observe(visibleTextarea, 3)
     coordinator.observe(offscreenTextarea, 3)
-    expect(observerConstructorCalls).toBe(1)
-    expect(observedTargets.size).toBe(2)
+    expect(resizeObserverMock.instanceCount).toBe(1)
+    expect(resizeObserverMock.observedTargets.size).toBe(2)
 
     coordinator.scheduleMeasure(visibleTextarea, 3)
     coordinator.scheduleMeasure(offscreenTextarea, 3)
@@ -195,44 +172,36 @@ describe('createTextareaResizeCoordinator', () => {
 
     // Initial observer callback: visible cell was already measured while visible,
     // while offscreen cell mounted at width 0 and must measure once visible.
-    capturedCallback!(
-      [createResizeEntry(visibleTextarea, 240), createResizeEntry(offscreenTextarea, 240)],
-      {} as ResizeObserver,
-    )
+    resizeObserverMock.trigger([
+      createResizeEntry(visibleTextarea, 240),
+      createResizeEntry(offscreenTextarea, 240),
+    ])
     expect(operationLog.some((entry) => entry.includes(':visible'))).toBe(false)
     expect(operationLog.some((entry) => entry.includes(':offscreen'))).toBe(true)
 
     // Height-only notifications at unchanged width are ignored.
     operationLog.length = 0
-    capturedCallback!(
-      [createResizeEntry(visibleTextarea, 240), createResizeEntry(offscreenTextarea, 240)],
-      {} as ResizeObserver,
-    )
+    resizeObserverMock.trigger([
+      createResizeEntry(visibleTextarea, 240),
+      createResizeEntry(offscreenTextarea, 240),
+    ])
     expect(operationLog).toHaveLength(0)
 
     // Width changes trigger one batched pass across both textareas.
-    capturedCallback!(
-      [createResizeEntry(visibleTextarea, 180), createResizeEntry(offscreenTextarea, 180)],
-      {} as ResizeObserver,
-    )
+    resizeObserverMock.trigger([
+      createResizeEntry(visibleTextarea, 180),
+      createResizeEntry(offscreenTextarea, 180),
+    ])
     expectResetsBeforeReads(operationLog)
 
     coordinator.unobserve(visibleTextarea)
-    expect(disconnectCalls).toBe(0)
+    expect(resizeObserverMock.disconnectCount).toBe(0)
     coordinator.unobserve(offscreenTextarea)
-    expect(disconnectCalls).toBe(1)
+    expect(resizeObserverMock.disconnectCount).toBe(1)
   })
 
   it('re-measures on initial ResizeObserver scrollbar width shift while skipping single-line cells, and preserves lastObservedWidth across hide and unhide', async () => {
-    let capturedCallback: ResizeObserverCallback | null = null
-    globalThis.ResizeObserver = class {
-      constructor(callback: ResizeObserverCallback) {
-        capturedCallback = callback
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver
+    const resizeObserverMock = installResizeObserverMock()
 
     const operationLog: string[] = []
     const coordinator = createTextareaResizeCoordinator()
@@ -254,23 +223,23 @@ describe('createTextareaResizeCoordinator', () => {
 
     // Container scrollbar narrows width from 240 to 226 before first observer tick:
     // multi-line shifted cell must re-measure, while short single-line cell skips.
-    capturedCallback!(
-      [createResizeEntry(shiftedTextarea, 226), createResizeEntry(singleLineTextarea, 226)],
-      {} as ResizeObserver,
-    )
+    resizeObserverMock.trigger([
+      createResizeEntry(shiftedTextarea, 226),
+      createResizeEntry(singleLineTextarea, 226),
+    ])
     expect(operationLog.some((entry) => entry.includes(':shifted'))).toBe(true)
     expect(operationLog.some((entry) => entry.includes(':single'))).toBe(false)
 
     // Hiding (width 0) and unhiding at the same width (226) preserves lastObservedWidth and skips.
     operationLog.length = 0
-    capturedCallback!([createResizeEntry(shiftedTextarea, 0)], {} as ResizeObserver)
+    resizeObserverMock.trigger([createResizeEntry(shiftedTextarea, 0)])
     expect(operationLog).toHaveLength(0)
-    capturedCallback!([createResizeEntry(shiftedTextarea, 226)], {} as ResizeObserver)
+    resizeObserverMock.trigger([createResizeEntry(shiftedTextarea, 226)])
     expect(operationLog).toHaveLength(0)
 
     // Unhiding at a different width (200) triggers re-measurement because 226 was preserved.
-    capturedCallback!([createResizeEntry(shiftedTextarea, 0)], {} as ResizeObserver)
-    capturedCallback!([createResizeEntry(shiftedTextarea, 200)], {} as ResizeObserver)
+    resizeObserverMock.trigger([createResizeEntry(shiftedTextarea, 0)])
+    resizeObserverMock.trigger([createResizeEntry(shiftedTextarea, 200)])
     expect(operationLog.some((entry) => entry.includes(':shifted'))).toBe(true)
   })
 
@@ -309,44 +278,51 @@ describe('createTextareaResizeCoordinator', () => {
   })
 
   it('attaches and cleans up a single window resize listener when ResizeObserver is unavailable', () => {
+    const previousResizeObserver = globalThis.ResizeObserver
     delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
-    const listeners = new Map<string, Set<EventListener>>()
-    ;(globalThis as { window?: unknown }).window = {
-      addEventListener(eventName: string, listener: EventListener) {
-        const set = listeners.get(eventName) ?? new Set()
-        set.add(listener)
-        listeners.set(eventName, set)
-      },
-      removeEventListener(eventName: string, listener: EventListener) {
-        listeners.get(eventName)?.delete(listener)
-      },
+    try {
+      const listeners = new Map<string, Set<EventListener>>()
+      ;(globalThis as { window?: unknown }).window = {
+        addEventListener(eventName: string, listener: EventListener) {
+          const set = listeners.get(eventName) ?? new Set()
+          set.add(listener)
+          listeners.set(eventName, set)
+        },
+        removeEventListener(eventName: string, listener: EventListener) {
+          listeners.get(eventName)?.delete(listener)
+        },
+      }
+
+      const operationLog: string[] = []
+      const coordinator = createTextareaResizeCoordinator()
+      const firstTextarea = createMockTextarea(
+        { id: 'first', value: 'Fallback resize measurement cell one', scrollHeight: 46 },
+        operationLog,
+      )
+      const secondTextarea = createMockTextarea(
+        { id: 'second', value: 'Fallback resize measurement cell two', scrollHeight: 46 },
+        operationLog,
+      )
+
+      coordinator.observe(firstTextarea, 3)
+      coordinator.observe(secondTextarea, 3)
+      expect(listeners.get('resize')?.size).toBe(1)
+
+      for (const listener of listeners.get('resize') ?? []) {
+        listener(new Event('resize'))
+      }
+      expect(firstTextarea.style.height).toBe('48px')
+      expect(secondTextarea.style.height).toBe('48px')
+
+      coordinator.unobserve(firstTextarea)
+      expect(listeners.get('resize')?.size).toBe(1)
+      coordinator.unobserve(secondTextarea)
+      expect(listeners.get('resize')?.size).toBe(0)
+    } finally {
+      if (previousResizeObserver !== undefined) {
+        globalThis.ResizeObserver = previousResizeObserver
+      }
     }
-
-    const operationLog: string[] = []
-    const coordinator = createTextareaResizeCoordinator()
-    const firstTextarea = createMockTextarea(
-      { id: 'first', value: 'Fallback resize measurement cell one', scrollHeight: 46 },
-      operationLog,
-    )
-    const secondTextarea = createMockTextarea(
-      { id: 'second', value: 'Fallback resize measurement cell two', scrollHeight: 46 },
-      operationLog,
-    )
-
-    coordinator.observe(firstTextarea, 3)
-    coordinator.observe(secondTextarea, 3)
-    expect(listeners.get('resize')?.size).toBe(1)
-
-    for (const listener of listeners.get('resize') ?? []) {
-      listener(new Event('resize'))
-    }
-    expect(firstTextarea.style.height).toBe('48px')
-    expect(secondTextarea.style.height).toBe('48px')
-
-    coordinator.unobserve(firstTextarea)
-    expect(listeners.get('resize')?.size).toBe(1)
-    coordinator.unobserve(secondTextarea)
-    expect(listeners.get('resize')?.size).toBe(0)
   })
 })
 

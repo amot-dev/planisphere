@@ -10,97 +10,19 @@ import (
 	"testing"
 
 	"planisphere/internal/core/db"
-	"planisphere/internal/core/projection"
-	"planisphere/internal/projections"
-	"planisphere/internal/projections/realization"
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
-	"planisphere/internal/store/modes"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func newExpeditionProjections(databaseConnection *sql.DB) (*projection.Bus, *expedition.Projections) {
-	eventBus := projection.NewBus()
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	return eventBus, &expedition.Projections{
-		Arrivals:       projections.NewSystemArrivals(databaseConnection, eventBus),
-		VisitCounts:    projections.NewSystemVisitCounts(databaseConnection, eventBus, recoveredJumps),
-		ShipHistory:    projections.NewShipHistory(databaseConnection, eventBus),
-		TimeRangeStats: stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
-		SalesLedger:    salesLedger,
-		RecoveredJumps: recoveredJumps,
-	}
-}
-
-func openExpeditionTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-	return databaseConnection
-}
-
-func ingestJournalLines(testingContext *testing.T, databaseConnection *sql.DB, journalLines []string) string {
-	testingContext.Helper()
-	temporaryDirectory := testingContext.TempDir()
-	journalFilePath := filepath.Join(temporaryDirectory, "Journal.2026-01-18T190000.01.log")
-	if writeError := os.WriteFile(journalFilePath, []byte(strings.Join(journalLines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	scanResult, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory)
-	if scanError != nil {
-		testingContext.Fatal(scanError)
-	}
-	if scanResult.NewEvents != len(journalLines) {
-		testingContext.Fatalf("ingested %d events, want %d", scanResult.NewEvents, len(journalLines))
-	}
-	return journalFilePath
-}
-
-func setRowSystemName(testingContext *testing.T, databaseConnection *sql.DB, rowID int64, systemName string) {
-	testingContext.Helper()
-	if _, updateError := expedition.UpdateRow(databaseConnection, expedition.RowPatch{ID: rowID, SystemName: &systemName}); updateError != nil {
-		testingContext.Fatal(updateError)
-	}
-}
-
-func createExpeditionWithOriginRow(testingContext *testing.T, databaseConnection *sql.DB, expeditionName, expeditionDescription string) (expedition.Expedition, expedition.Row) {
-	testingContext.Helper()
-	expeditionRecord, createError := expedition.Create(databaseConnection, expeditionName, expeditionDescription)
-	if createError != nil {
-		testingContext.Fatal(createError)
-	}
-	initialRows, listError := expedition.ListRows(databaseConnection, expeditionRecord.ID)
-	if listError != nil || len(initialRows) != 1 {
-		testingContext.Fatalf("expected 1 initial row, got %d (%v)", len(initialRows), listError)
-	}
-	return expeditionRecord, initialRows[0]
-}
-
-func mustInsert(t *testing.T, dbConn *sql.DB, expeditionID, afterID int64, rowType string, regionID int) expedition.Row {
-	t.Helper()
-	var insertedRow expedition.Row
-	if txError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
-		var insertError error
-		insertedRow, insertError = expedition.InsertRow(transaction, expeditionID, afterID, rowType, regionID)
-		return insertError
-	}); txError != nil {
-		t.Fatal(txError)
-	}
-	return insertedRow
-}
-
 func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
-	dbConn := openExpeditionTestDB(t)
-	_, proj := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(t)
+	_, proj := expeditiontest.NewProjections(dbConn)
 	lines := []string{
 		// Pre-expedition visit to Waypoint #3 (must be ignored because it is before expedition_start_timestamp).
 		`{"timestamp":"2026-01-10T10:00:00Z","event":"FSDJump","StarSystem":"Outotz LS-K d8-3","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":45.0}`,
@@ -118,7 +40,14 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 		`{"timestamp":"2026-01-18T21:00:00Z","event":"ShipyardSwap","ShipType":"explorer_nx","ShipType_Localised":"Caspian Explorer","ShipID":2,"StoreOldShip":"mandalay","StoreShipID":1}`,
 		`{"timestamp":"2026-01-18T21:30:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1005,"StarPos":[0,0,65000],"JumpDist":60.5,"BoostUsed":3}`,
 	}
-	journalFile := ingestJournalLines(t, dbConn, lines)
+	journalDirectory := t.TempDir()
+	journalFile := filepath.Join(journalDirectory, "Journal.2026-01-18T190000.01.log")
+	if writeError := os.WriteFile(journalFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
+		t.Fatal(writeError)
+	}
+	if scanResult, scanError := journal.NewIngester(dbConn).ScanDir(context.Background(), journalDirectory); scanError != nil || scanResult.NewEvents != len(lines) {
+		t.Fatalf("ScanDir: events=%d want=%d err=%v", scanResult.NewEvents, len(lines), scanError)
+	}
 
 	// Delete the journal file from disk: zero data may be lost.
 	if removeError := os.Remove(journalFile); removeError != nil {
@@ -227,16 +156,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 	}
 
 	// Verify mode filtering with the Travel scan/exobio override using expedition leg modes.
-	modesList, modesError := modes.List(dbConn)
-	if modesError != nil || len(modesList) < 3 {
-		t.Fatalf("expected 3 default modes, got %v (%v)", modesList, modesError)
-	}
-	var travelModeID int64
-	for _, modeItem := range modesList {
-		if modeItem.Name == "Travel" {
-			travelModeID = modeItem.ID
-		}
-	}
+	travelModeID := expeditiontest.LookupDefaultModes(t, dbConn).Travel
 
 	// Hide Travel jumps and distance while retaining Travel scans and exobiology.
 	filteredSummary, computeError := proj.TimeRangeStats.Compute(replaystats.Range{After: "2026-01-18T19:42:10Z"}, &replaystats.Filter{
@@ -259,7 +179,7 @@ func TestZeroDataLossAndSequentialProgressionWithBoundedMove(t *testing.T) {
 }
 
 func TestPruneEmptyRowsOnComplete(t *testing.T) {
-	dbConn := openExpeditionTestDB(t)
+	dbConn := dbtest.OpenMemory(t)
 	expeditionRecord, originRow := createExpeditionWithOriginRow(t, dbConn, "Prune Test", "Test pruning empty rows on complete")
 	setRowSystemName(t, dbConn, originRow.ID, "Sol")
 
@@ -278,10 +198,10 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 	// Header 3: Empty header at end (no waypoints at all)
 	_ = mustInsert(t, dbConn, expeditionRecord.ID, emptyWaypoint2.ID, expedition.RowRegion, 3)
 
-	ingestJournalLines(t, dbConn, []string{
+	journaltest.IngestLines(t, dbConn,
 		`{"timestamp":"2026-01-18T19:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-01-18T20:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
-	})
+	)
 
 	// Start expedition
 	if startTxError := db.WithTx(dbConn, func(transaction *sql.Tx) error {
@@ -322,8 +242,8 @@ func TestPruneEmptyRowsOnComplete(t *testing.T) {
 }
 
 func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
-	dbConn := openExpeditionTestDB(t)
-	_, proj := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(t)
+	_, proj := expeditiontest.NewProjections(dbConn)
 
 	lines := []string{
 		// Historical ship swaps before expedition
@@ -358,7 +278,7 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 		// Post-expedition ship swap (should be clamped out)
 		`{"timestamp":"2026-01-25T12:00:00Z","event":"ShipyardSwap","Commander":"Cmdr Test","FID":"F1","ShipType":"empire_trader","ShipType_Localised":"Imperial Cutter","ShipID":30}`,
 	}
-	ingestJournalLines(t, dbConn, lines)
+	journaltest.IngestLines(t, dbConn, lines...)
 
 	exp, originRow := createExpeditionWithOriginRow(t, dbConn, "Ship Clamping Test", "")
 	setRowSystemName(t, dbConn, originRow.ID, "Sol")
@@ -427,15 +347,15 @@ func TestBuildPlanShipTimelineClampingAndCaching(t *testing.T) {
 }
 
 func TestDetailsLightweightAndOriginCache(t *testing.T) {
-	dbConn := openExpeditionTestDB(t)
-	_, proj := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(t)
+	_, proj := expeditiontest.NewProjections(dbConn)
 
 	lines := []string{
 		`{"timestamp":"2026-01-01T10:00:00Z","event":"LoadGame","Commander":"Cmdr Test","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":20.0}`,
 		`{"timestamp":"2026-01-19T12:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 	}
-	ingestJournalLines(t, dbConn, lines)
+	journaltest.IngestLines(t, dbConn, lines...)
 
 	exp, wp1 := createExpeditionWithOriginRow(t, dbConn, "Details Test Expedition", "")
 	solName := "Sol"
@@ -561,7 +481,7 @@ func TestDetailsLightweightAndOriginCache(t *testing.T) {
 }
 
 func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
-	dbConn := openExpeditionTestDB(t)
+	dbConn := dbtest.OpenMemory(t)
 	expeditionRecord, wp1 := createExpeditionWithOriginRow(t, dbConn, "Batch Test", "Test position updates")
 
 	// Insert at end
@@ -728,8 +648,8 @@ func TestInsertRowPositionsAndReevaluateConsolidatedUpdates(t *testing.T) {
 }
 
 func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
-	dbConn := openExpeditionTestDB(t)
-	_, proj := newExpeditionProjections(dbConn)
+	dbConn := dbtest.OpenMemory(t)
+	_, proj := expeditiontest.NewProjections(dbConn)
 
 	expeditionRecord, firstWaypoint := createExpeditionWithOriginRow(t, dbConn, "Route Telemetry Test", "")
 	if _, err := dbConn.Exec(`UPDATE expedition_rows SET system_name = 'Sol', x = 0, y = 0, z = 0 WHERE id = ?`, firstWaypoint.ID); err != nil {
@@ -782,11 +702,9 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	}
 
 	// Player is initially at Sol (0, 0, 0)
-	_, err = dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, star_x, star_y, star_z, raw_json, ingested_at)
-		VALUES ('ev-sol', '2026-03-01T10:00:00Z', 'Location', 'Sol', 0.0, 0.0, 0.0, '{}', '2026-03-01T10:00:00Z')`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	journaltest.InsertParsedLines(t, dbConn,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"Location","StarSystem":"Sol","StarPos":[0,0,0]}`,
+	)
 
 	planAtOrigin, err := expedition.BuildPlan(dbConn, expeditionRecord.ID, nil, proj)
 	if err != nil {
@@ -823,11 +741,9 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 	}
 
 	// Player departs Sol and jumps closer to secondWaypoint: "Interim System" at (60, 0, 0).
-	_, err = dbConn.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, star_x, star_y, star_z, raw_json, ingested_at)
-		VALUES ('ev-jump1', '2026-03-01T11:00:00Z', 'FSDJump', 'Interim System', 60.0, 0.0, 0.0, '{}', '2026-03-01T11:00:00Z')`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	journaltest.InsertParsedLines(t, dbConn,
+		`{"timestamp":"2026-03-01T11:00:00Z","event":"FSDJump","StarSystem":"Interim System","StarPos":[60,0,0],"JumpDist":60.0}`,
+	)
 	if _, reevalError := expedition.ReevaluateTx(dbConn, expeditionRecord.ID); reevalError != nil {
 		t.Fatalf("ReevaluateTx after origin departure: %v", reevalError)
 	}
@@ -889,22 +805,18 @@ func TestBuildPlanNextWaypointPlayerDistanceAndRemainingLy(t *testing.T) {
 }
 
 func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	eventBus, proj := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	eventBus, proj := expeditiontest.NewProjections(databaseConnection)
 
 	if _, execError := databaseConnection.Exec(`INSERT INTO commanders (name, enabled, first_seen) VALUES ('Jameson', 1, '2026-01-01T00:00:00Z')`); execError != nil {
 		testingContext.Fatal(execError)
 	}
 
 	// Insert pre-expedition organic scan and sale so origin realization is non-zero.
-	if _, execError := databaseConnection.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, raw_json, ingested_at)
-		VALUES ('ev-org-scan', '2026-01-01T10:00:00Z', 'ScanOrganic', 'Sol', 10477373803, 1, '{"timestamp":"2026-01-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":10477373803,"Body":1}', '2026-01-01T10:00:00Z')`); execError != nil {
-		testingContext.Fatal(execError)
-	}
-	if _, execError := databaseConnection.Exec(`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, raw_json, ingested_at)
-		VALUES ('ev-org-sell', '2026-01-01T11:00:00Z', 'SellOrganicData', 'Sol', 10477373803, 1, '{"timestamp":"2026-01-01T11:00:00Z","event":"SellOrganicData","BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}', '2026-01-01T11:00:00Z')`); execError != nil {
-		testingContext.Fatal(execError)
-	}
+	journaltest.InsertParsedLines(testingContext, databaseConnection,
+		`{"timestamp":"2026-01-01T10:00:00Z","event":"ScanOrganic","StarSystem":"Sol","ScanType":"Analyse","Species":"$Codex_Ent_Stratum_07_Name;","WasLogged":true,"SystemAddress":10477373803,"Body":1}`,
+		`{"timestamp":"2026-01-01T11:00:00Z","event":"SellOrganicData","StarSystem":"Sol","SystemAddress":10477373803,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`,
+	)
 
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Realization Cache Test", "")
 	if _, execError := databaseConnection.Exec(`UPDATE expeditions SET status = 'active', start_timestamp = '2026-01-01T12:00:00Z' WHERE id = ?`, expeditionRecord.ID); execError != nil {
@@ -969,8 +881,8 @@ func TestDetailsOriginRealizationCacheAndErrorPropagation(testingContext *testin
 }
 
 func TestBuildPlanVisitCountAndEDSMToJournalUpgrade(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	eventBus, proj := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	eventBus, proj := expeditiontest.NewProjections(databaseConnection)
 
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Visit Count Plan", "")
 	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
@@ -986,14 +898,14 @@ func TestBuildPlanVisitCountAndEDSMToJournalUpgrade(testingContext *testing.T) {
 		testingContext.Fatalf("expected initial EDSM source with 0 visits, got source=%q visits=%d", initialPlan.Rows[0].Row.CoordsSource, initialPlan.Rows[0].VisitCount)
 	}
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	scanResult := journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay"}`,
 		`{"timestamp":"2026-01-18T19:10:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-18T19:20:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-01-18T19:40:00Z","event":"CarrierJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
-	})
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventLoadGame, journal.EventLocation, journal.EventFSDJump, journal.EventCarrierJump))
+	)
+	eventBus.PublishJournal(scanResult.Events)
 
 	updatedPlan, updatedPlanError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, proj)
 	if updatedPlanError != nil {
@@ -1005,16 +917,16 @@ func TestBuildPlanVisitCountAndEDSMToJournalUpgrade(testingContext *testing.T) {
 }
 
 func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, proj := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, proj := expeditiontest.NewProjections(databaseConnection)
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-18T11:00:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1004,"StarPos":[5,0,0],"JumpDist":5.0}`,
 		`{"timestamp":"2026-01-18T12:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"JumpDist":4.0}`,
 		`{"timestamp":"2026-01-18T13:00:00Z","event":"FSDJump","StarSystem":"Sirius","SystemAddress":1003,"StarPos":[8,0,0],"JumpDist":8.0}`,
 		`{"timestamp":"2026-01-18T14:00:00Z","event":"FSDJump","StarSystem":"Barnard's Star","SystemAddress":1004,"StarPos":[5,0,0],"JumpDist":5.0}`,
-	})
+	)
 
 	expeditionRecord, solWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Frontier Test", "")
 	setRowSystemName(testingContext, databaseConnection, solWaypoint.ID, "Sol")
@@ -1152,21 +1064,18 @@ func TestCarrierFrontierDropBoundsAndArrivalOverride(testingContext *testing.T) 
 }
 
 func TestHubRevisitMovePreservesLegMode(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
-	modeList, listModesError := modes.List(databaseConnection)
-	if listModesError != nil {
-		testingContext.Fatal(listModesError)
-	}
-	explorationModeID := modeList[0].ID
-	travelModeID := modeList[2].ID
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, databaseConnection)
+	explorationModeID := defaultModes.Exploration
+	travelModeID := defaultModes.Travel
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-03-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":2001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-03-01T11:00:00Z","event":"FSDJump","StarSystem":"Hub","SystemAddress":2002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-03-01T11:30:00Z","event":"FSDJump","StarSystem":"Outpost","SystemAddress":2003,"StarPos":[20,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-03-01T12:00:00Z","event":"FSDJump","StarSystem":"Hub","SystemAddress":2002,"StarPos":[10,0,0],"JumpDist":10.0}`,
-	})
+	)
 
 	expeditionRecord, solWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Hub Loop Test", "")
 	setRowSystemName(testingContext, databaseConnection, solWaypoint.ID, "Sol")
@@ -1223,17 +1132,17 @@ func TestHubRevisitMovePreservesLegMode(testingContext *testing.T) {
 }
 
 func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, proj := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, proj := expeditiontest.NewProjections(databaseConnection)
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-11-17T01:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Ship_Localised":"Caspian Explorer","ShipID":36}`,
 		`{"timestamp":"2026-11-17T01:01:00Z","event":"FSDJump","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321,"StarPos":[-9962.1875,-1.3125,-7604.875],"JumpDist":75.0}`,
 		`{"timestamp":"2026-11-17T01:10:00Z","event":"FSDJump","StarSystem":"Hypo Aeb ST-B b54-0","SystemAddress":538078878161,"StarPos":[-9894.84375,-5.5625,-7569.25],"JumpDist":76.305}`,
 		`{"timestamp":"2026-11-17T01:40:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321}`,
 		`{"timestamp":"2026-11-17T01:41:42Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Explorer_NX","Ship_Localised":"Caspian Explorer","ShipID":36}`,
 		`{"timestamp":"2026-11-17T01:41:53Z","event":"Location","StarSystem":"Hypo Aeb JS-D b53-0","SystemAddress":537273637321,"StarPos":[-9962.1875,-1.3125,-7604.875],"Docked":false}`,
-	})
+	)
 
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Disconnect Leg Test", "")
 	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Hypo Aeb ST-B b54-0")
@@ -1274,7 +1183,7 @@ func TestDisconnectedJumpLegTransitionsAndRepeatVisitCount(testingContext *testi
 }
 
 func TestRecordCarrierJumpAndApplyTo(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	createdExpedition, createError := expedition.Create(databaseConnection, "Carrier Stats Test", "")
 	if createError != nil {
 		testingContext.Fatal(createError)
@@ -1305,7 +1214,7 @@ func TestRecordCarrierJumpAndApplyTo(testingContext *testing.T) {
 }
 
 func TestCompleteRejectsActiveCarrierRouteAndDeleteClearsRoute(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	expeditionRecord, originRow := createExpeditionWithOriginRow(testingContext, databaseConnection, "Carrier Route Lifecycle Guard", "")
 	setRowSystemName(testingContext, databaseConnection, originRow.ID, "Sol")
 
@@ -1346,7 +1255,7 @@ func TestCompleteRejectsActiveCarrierRouteAndDeleteClearsRoute(testingContext *t
 }
 
 func TestUpdateRowTxRollbackAndCompletedRestrictions(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Row Guard Completed Test", "")
 	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
 	regionRow := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowRegion, 1)
@@ -1370,10 +1279,10 @@ func TestUpdateRowTxRollbackAndCompletedRestrictions(testingContext *testing.T) 
 		testingContext.Fatalf("expected UpdateRowTx to roll back POIName on invalid RegionID, got %+v", reloadedRegion)
 	}
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-01-18T12:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[100,0,100],"JumpDist":50.0}`,
-	})
+	)
 	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2026-01-18T10:00:00Z", 0); startError != nil {
 		testingContext.Fatal(startError)
 	}
@@ -1428,11 +1337,11 @@ func TestUpdateRowTxRollbackAndCompletedRestrictions(testingContext *testing.T) 
 }
 
 func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-01-18T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-01-18T11:00:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[4,0,0],"JumpDist":4.0}`,
-	})
+	)
 
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Active Guards Test", "")
 	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
@@ -1534,10 +1443,10 @@ func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
 }
 
 func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-06-01T10:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"Mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
 		`{"timestamp":"2026-06-01T10:05:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-06-01T10:15:00Z","event":"FSDJump","StarSystem":"Transit One","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
@@ -1547,7 +1456,7 @@ func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
 		`{"timestamp":"2026-06-01T11:00:00Z","event":"FSDJump","StarSystem":"Transit Two","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-06-01T11:10:00Z","event":"ShipyardSwap","Commander":"CmdrTest","FID":"F1","ShipType":"Krait_Phantom","ShipType_Localised":"Krait Phantom","ShipID":4}`,
 		`{"timestamp":"2026-06-01T11:20:00Z","event":"FSDJump","StarSystem":"Transit Three","SystemAddress":1005,"StarPos":[40,0,0],"JumpDist":10.0}`,
-	})
+	)
 
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Multi-Hull Test", "")
 	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
@@ -1580,7 +1489,7 @@ func TestDetailsMultiHullAndActiveOpenLegShipsUsed(testingContext *testing.T) {
 }
 
 func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	expeditionRecord, originWaypoint := createExpeditionWithOriginRow(testingContext, databaseConnection, "Historical Completion Test", "")
 	setRowSystemName(testingContext, databaseConnection, originWaypoint.ID, "Sol")
 	secondWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, originWaypoint.ID, expedition.RowWaypoint, 0)
@@ -1588,9 +1497,9 @@ func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
 	thirdWaypoint := mustInsert(testingContext, databaseConnection, expeditionRecord.ID, secondWaypoint.ID, expedition.RowWaypoint, 0)
 	setRowSystemName(testingContext, databaseConnection, thirdWaypoint.ID, "Beagle Point")
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2022-05-01T10:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0],"JumpDist":10.0}`,
-	})
+	)
 	if startError := expedition.StartTx(databaseConnection, expeditionRecord.ID, "2022-05-01T10:00:00Z", 0); startError != nil {
 		testingContext.Fatalf("StartTx: %v", startError)
 	}
@@ -1601,13 +1510,10 @@ func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
 	}
 
 	// Arrive at Alpha Centauri and then make an unrelated later jump; Beagle Point remains unvisited.
-	if _, execError := databaseConnection.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at) VALUES
-		 ('ev-complete-wp2', '2022-05-01T12:30:00Z', 'FSDJump', 'Alpha Centauri', 1002, '{"timestamp":"2022-05-01T12:30:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}', 'test.log', '2022-05-01T12:30:00Z'),
-		 ('ev-complete-unrelated', '2022-05-05T18:00:00Z', 'FSDJump', 'Unrelated System', 9999, '{"timestamp":"2022-05-05T18:00:00Z","event":"FSDJump","StarSystem":"Unrelated System","SystemAddress":9999,"StarPos":[50,0,0],"JumpDist":49.0}', 'test.log', '2022-05-05T18:00:00Z')`,
-	); execError != nil {
-		testingContext.Fatalf("insert second waypoint and unrelated jump: %v", execError)
-	}
+	journaltest.InsertParsedLines(testingContext, databaseConnection,
+		`{"timestamp":"2022-05-01T12:30:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[1,1,1],"JumpDist":4.3}`,
+		`{"timestamp":"2022-05-05T18:00:00Z","event":"FSDJump","StarSystem":"Unrelated System","SystemAddress":9999,"StarPos":[50,0,0],"JumpDist":49.0}`,
+	)
 	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
 		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
 	}
@@ -1628,12 +1534,9 @@ func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
 	if reopenError := expedition.ReopenTx(databaseConnection, expeditionRecord.ID); reopenError != nil {
 		testingContext.Fatalf("ReopenTx: %v", reopenError)
 	}
-	if _, execError := databaseConnection.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, raw_json, source_file, ingested_at) VALUES
-		 ('ev-complete-wp3', '2022-05-10T09:15:00Z', 'FSDJump', 'Beagle Point', 1003, '{"timestamp":"2022-05-10T09:15:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":60.0}', 'test.log', '2022-05-10T09:15:00Z')`,
-	); execError != nil {
-		testingContext.Fatalf("insert third waypoint arrival: %v", execError)
-	}
+	journaltest.InsertParsedLines(testingContext, databaseConnection,
+		`{"timestamp":"2022-05-10T09:15:00Z","event":"FSDJump","StarSystem":"Beagle Point","SystemAddress":1003,"StarPos":[100,0,100],"JumpDist":60.0}`,
+	)
 	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
 		testingContext.Fatalf("ReevaluateTx after reopen: %v", reevalError)
 	}
@@ -1650,7 +1553,7 @@ func TestCompleteUsesFinalVisitedWaypointTimestamp(testingContext *testing.T) {
 }
 
 func TestCreateWithWaypoints(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 
 	// Empty waypoint slice falls back to a single blank waypoint row.
 	emptyExpedition, emptyError := expedition.CreateWithWaypoints(databaseConnection, "Blank Seed", "", []expedition.SeedWaypoint{
@@ -1712,17 +1615,17 @@ func TestCreateWithWaypoints(testingContext *testing.T) {
 }
 
 func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-09-01T09:00:00Z","event":"LoadGame","Commander":"CmdrA","FID":"FA","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-09-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":5001,"StarPos":[0,0,0]}`,
 		// Pre-departure scan inside WP #1 (must remain in Historical Baseline once WP #1 departs).
 		`{"timestamp":"2026-09-01T10:10:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Sol A 1","BodyID":1,"StarSystem":"Sol","SystemAddress":5001,"PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 		// Telepresence multicrew arrival elsewhere must be ignored completely.
 		`{"timestamp":"2026-09-01T10:12:00Z","event":"Location","StarSystem":"Colonia","SystemAddress":9999,"StarPos":[9000,0,9000],"Multicrew":true}`,
-	})
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Departure Flow", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"},
@@ -1865,23 +1768,14 @@ func TestDepartureBoundariesCompletionChainedAndMultiCommander(testingContext *t
 	}
 }
 
-func mustGetExpedition(testingContext *testing.T, databaseConnection *sql.DB, expeditionID int64) expedition.Expedition {
-	testingContext.Helper()
-	record, getError := expedition.Get(databaseConnection, expeditionID)
-	if getError != nil {
-		testingContext.Fatalf("expedition.Get(%d): %v", expeditionID, getError)
-	}
-	return record
-}
-
 func TestCompleteOpenStayScopesToSystemCommanderAndNonMulticrew(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-10-01T09:00:00Z","event":"LoadGame","Commander":"CmdrA","FID":"FA","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-10-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":6001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-10-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":6002,"StarPos":[20,0,0],"JumpDist":20.0}`,
 		`{"timestamp":"2026-10-01T12:15:00Z","event":"SAAScanComplete","BodyName":"Beta 1","SystemAddress":6002,"BodyID":1,"ProbesUsed":4,"EfficiencyTarget":6}`,
-	})
+	)
 	if _, execError := databaseConnection.Exec(`
 		INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrB', 'FB', 1)
 		ON CONFLICT(name) DO UPDATE SET enabled = 1;
@@ -1932,7 +1826,7 @@ func TestCompleteOpenStayScopesToSystemCommanderAndNonMulticrew(testingContext *
 }
 
 func TestScanExpeditionAdjustmentsDecodeError(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	createdExpedition, createError := expedition.Create(databaseConnection, "Adjustments Check", "")
 	if createError != nil {
 		testingContext.Fatalf("Create: %v", createError)

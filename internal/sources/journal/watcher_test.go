@@ -11,6 +11,7 @@ import (
 
 	"planisphere/internal/reference"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
 )
 
 func waitForActiveWatcher(testingContext *testing.T, watcherInstance *journal.Watcher) {
@@ -29,7 +30,7 @@ func waitForActiveWatcher(testingContext *testing.T, watcherInstance *journal.Wa
 }
 
 func TestWatcherPauseCoalescesPendingFilesInChronologicalOrder(testingContext *testing.T) {
-	databaseConnection := openJournalTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	journalDirectory := testingContext.TempDir()
 	ingesterInstance := journal.NewIngester(databaseConnection)
 
@@ -134,7 +135,7 @@ func TestWatcherPauseCoalescesPendingFilesInChronologicalOrder(testingContext *t
 }
 
 func TestWatcherClearPendingSuppressesStaleFlushOnResume(testingContext *testing.T) {
-	databaseConnection := openJournalTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	journalDirectory := testingContext.TempDir()
 	ingesterInstance := journal.NewIngester(databaseConnection)
 

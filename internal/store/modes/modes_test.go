@@ -6,24 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/dbtest"
 )
 
-func openModesTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	dbConn, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatal(openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = dbConn.Close()
-	})
-	return dbConn
-}
-
 func TestModeColorValidation(testingContext *testing.T) {
-	dbConn := openModesTestDB(testingContext)
+	dbConn := dbtest.OpenMemory(testingContext)
 
 	createCases := []struct {
 		name          string
@@ -96,7 +84,7 @@ func TestModeColorValidation(testingContext *testing.T) {
 }
 
 func TestDeleteModeDistinguishesNotFoundFromSQLError(testingContext *testing.T) {
-	dbConn := openModesTestDB(testingContext)
+	dbConn := dbtest.OpenMemory(testingContext)
 
 	missingError := modes.DeleteTx(dbConn, 999999)
 	if missingError == nil || !strings.Contains(missingError.Error(), "mode 999999 not found") {

@@ -7,9 +7,11 @@ import (
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/reference"
-	"planisphere/internal/replay"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func mustCaptureSnapshot(testingContext *testing.T, dbConn *sql.DB, expeditionID int64) expedition.Snapshot {
@@ -21,32 +23,14 @@ func mustCaptureSnapshot(testingContext *testing.T, dbConn *sql.DB, expeditionID
 	return snapshot
 }
 
-func mustGetRow(testingContext *testing.T, dbConn *sql.DB, rowID int64) expedition.Row {
-	testingContext.Helper()
-	rowItem, getError := expedition.GetRow(dbConn, rowID)
-	if getError != nil {
-		testingContext.Fatalf("GetRow(%d): %v", rowID, getError)
-	}
-	return rowItem
-}
-
-func mustGetActiveCarrierRoute(testingContext *testing.T, dbConn *sql.DB, expeditionID int64) *expedition.ActiveCarrierRouteState {
-	testingContext.Helper()
-	routeState, routeError := expedition.GetActiveCarrierRoute(dbConn, expeditionID)
-	if routeError != nil {
-		testingContext.Fatalf("GetActiveCarrierRoute(%d): %v", expeditionID, routeError)
-	}
-	return routeState
-}
-
 func TestUndoRowDeletePreservesIDCoordsCarryOverAndPOIGuard(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	ingestJournalLines(testingContext, dbConn, []string{
+	dbConn := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2026-04-01T08:00:00Z","event":"LoadGame","Commander":"CMDR Undo","FID":"F1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-04-01T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-04-01T09:00:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2002,"StarPos":[-9530,-910,19808],"JumpDist":220.0}`,
 		`{"timestamp":"2026-04-01T10:00:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":3003,"StarPos":[-9500,-900,19900],"JumpDist":40.0}`,
-	})
+	)
 
 	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Undo Coords", "Test", []expedition.SeedWaypoint{
 		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "journal"},
@@ -170,20 +154,17 @@ func TestUndoRowDeletePreservesIDCoordsCarryOverAndPOIGuard(testingContext *test
 }
 
 func TestUndoFlightModesLegModesAndMinimalChangedEvents(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	ingestJournalLines(testingContext, dbConn, []string{
+	dbConn := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2026-04-02T08:00:00Z","event":"LoadGame","Commander":"CMDR Modes","FID":"F2","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-04-02T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-04-02T09:00:00Z","event":"FSDJump","StarSystem":"SysA","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-02T10:00:00Z","event":"FSDJump","StarSystem":"SysB","SystemAddress":1003,"StarPos":[20,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-02T11:00:00Z","event":"FSDJump","StarSystem":"SysC","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
-	})
+	)
 
-	modeList, err := modes.List(dbConn)
-	if err != nil || len(modeList) < 3 {
-		testingContext.Fatalf("modes.List: len=%d err=%v", len(modeList), err)
-	}
-	modeOneID, modeTwoID, modeThreeID := modeList[0].ID, modeList[1].ID, modeList[2].ID
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, dbConn)
+	modeOneID, modeTwoID, modeThreeID := defaultModes.Exploration, defaultModes.Tourism, defaultModes.Travel
 
 	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Mode Undo", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, CoordsSource: "journal"},
@@ -295,18 +276,18 @@ func TestUndoFlightModesLegModesAndMinimalChangedEvents(testingContext *testing.
 }
 
 func TestRestoreSnapshotRemapsDeletedCustomModeIDs(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	ingestJournalLines(testingContext, dbConn, []string{
+	dbConn := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2026-04-04T08:00:00Z","event":"LoadGame","Commander":"CMDR Custom","FID":"F4","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-04-04T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-04-04T09:00:00Z","event":"FSDJump","StarSystem":"SysA","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
-	})
+	)
 
 	customMode, err := modes.Create(dbConn, "Exobiology Survey", "Custom sampling mode", "#00CCAA")
 	if err != nil {
 		testingContext.Fatalf("modes.Create: %v", err)
 	}
-	fallbackModeID := modes.DefaultFallbackModeID(dbConn)
+	fallbackModeID := expeditiontest.LookupDefaultModes(testingContext, dbConn).Fallback
 	if fallbackModeID <= 0 || fallbackModeID == customMode.ID {
 		testingContext.Fatalf("expected distinct fallback mode ID, got fallback=%d custom=%d", fallbackModeID, customMode.ID)
 	}
@@ -365,19 +346,19 @@ func TestRestoreSnapshotRemapsDeletedCustomModeIDs(testingContext *testing.T) {
 }
 
 func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
-	ingestJournalLines(testingContext, dbConn, []string{
+	dbConn := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2026-04-03T08:00:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-04-03T08:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-04-03T09:00:00Z","event":"FSDJump","StarSystem":"SysA","SystemAddress":1002,"StarPos":[100,0,0],"JumpDist":100.0}`,
 		`{"timestamp":"2026-04-03T09:30:00Z","event":"LoadGame","Commander":"CMDR Alt","FID":"F202","Ship":"cobramkiii","Ship_Localised":"Cobra Mk III","ShipID":2,"Odyssey":true}`,
 		`{"timestamp":"2026-04-03T09:35:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
-	})
-	commanders, err := replay.ListCommanders(dbConn)
-	if err != nil || len(commanders) != 2 {
-		testingContext.Fatalf("ListCommanders: len=%d err=%v", len(commanders), err)
+	)
+	idsByName := expeditiontest.ProfileIDsByName(testingContext, dbConn)
+	if len(idsByName) != 2 {
+		testingContext.Fatalf("ProfileIDsByName: len=%d map=%+v", len(idsByName), idsByName)
 	}
-	mainProfileID := profileIDsByName(testingContext, commanders)["CMDR Main"]
+	mainProfileID := idsByName["CMDR Main"]
 
 	expeditionRecord, err := expedition.CreateWithWaypoints(dbConn, "Scoped Carrier Live", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol", SystemAddress: 1001, HasCoords: true, CoordsSource: "journal"},
@@ -472,10 +453,10 @@ func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing
 	}
 	history.Push(expeditionRecord.ID, expedition.UndoEntry{Label: "Edit Notes", Snapshot: beforeNote})
 
-	ingestJournalLines(testingContext, dbConn, []string{
+	journaltest.IngestLines(testingContext, dbConn,
 		`{"timestamp":"2026-04-03T11:00:00Z","event":"LoadGame","Commander":"CMDR Main","FID":"F101","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-04-03T11:10:00Z","event":"FSDJump","StarSystem":"SysB","SystemAddress":1003,"StarPos":[200,0,0],"JumpDist":100.0}`,
-	})
+	)
 	if changed, err := expedition.ReevaluateTx(dbConn, expeditionRecord.ID); err != nil || !changed {
 		testingContext.Fatalf("ReevaluateTx after live FSDJump: changed=%v err=%v", changed, err)
 	}
@@ -496,7 +477,7 @@ func TestUndoStartScopedOverrideCarrierAndLiveReevaluate(testingContext *testing
 }
 
 func TestUndoHistoryCapacityRedoClearIsolationAndClearAll(testingContext *testing.T) {
-	dbConn := openExpeditionTestDB(testingContext)
+	dbConn := dbtest.OpenMemory(testingContext)
 	expA, rowA := createExpeditionWithOriginRow(testingContext, dbConn, "Expedition A", "")
 	expB, rowB := createExpeditionWithOriginRow(testingContext, dbConn, "Expedition B", "")
 

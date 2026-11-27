@@ -7,6 +7,7 @@ import {
   buildExobiologyBreakdownRows,
   buildRealizationLossRows,
 } from '../../domain/telemetryBreakdowns'
+import { installCanvasPngMock } from '../../test/domMocks'
 import { BlockConfigurator } from './BlockConfigurator'
 import { DetailsBlock } from './blocks/DetailsBlock'
 import { ExportBlockRenderer } from './blocks/ExportBlockRenderer'
@@ -170,49 +171,24 @@ describe('export visual blocks and PNG SVG serializer', () => {
     expect(buildPngBundleFileName(legItems[0], 1, 223)).toBe('images/001-wp2-summary.png')
     expect(buildPngBundleFileName(legItems[0], 115, 223)).toBe('images/115-wp2-summary.png')
 
-    const originalImage = globalThis.Image
-    class ImmediateLoadImage {
-      onload: (() => void) | null = null
-      onerror: (() => void) | null = null
-      set src(_value: string) {
-        this.onload?.()
-      }
-    }
-    const stubContext = {
-      scale: vi.fn(),
-      fillStyle: '',
-      fillRect: vi.fn(),
-      drawImage: vi.fn(),
-    } as unknown as CanvasRenderingContext2D
-    const getContextSpy = vi
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue(stubContext as never)
-    const toDataURLSpy = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
-    globalThis.Image = ImmediateLoadImage as unknown as typeof Image
+    const canvasMock = installCanvasPngMock()
+    canvasMock.toDataURLSpy.mockReturnValueOnce('data:,')
+    await expect(renderCartToPngFiles(data, [quickItems[0]])).rejects.toThrow(
+      'Canvas PNG export failed or exceeded maximum dimensions',
+    )
 
-    try {
-      toDataURLSpy.mockReturnValueOnce('data:,')
-      await expect(renderCartToPngFiles(data, [quickItems[0]])).rejects.toThrow(
-        'Canvas PNG export failed or exceeded maximum dimensions',
-      )
+    canvasMock.toDataURLSpy.mockReturnValueOnce('data:image/png;base64,')
+    await expect(renderCartToPngFiles(data, [quickItems[0]])).rejects.toThrow(
+      'Canvas PNG export failed or exceeded maximum dimensions',
+    )
 
-      toDataURLSpy.mockReturnValueOnce('data:image/png;base64,')
-      await expect(renderCartToPngFiles(data, [quickItems[0]])).rejects.toThrow(
-        'Canvas PNG export failed or exceeded maximum dimensions',
-      )
-
-      toDataURLSpy.mockReturnValueOnce('data:image/png;base64,iVBORw0KGgo=')
-      await expect(renderCartToPngFiles(data, [quickItems[0]])).resolves.toEqual([
-        {
-          name: 'images/01-full-expedition-summary.png',
-          contentBase64: 'iVBORw0KGgo=',
-        },
-      ])
-    } finally {
-      globalThis.Image = originalImage
-      getContextSpy.mockRestore()
-      toDataURLSpy.mockRestore()
-    }
+    canvasMock.toDataURLSpy.mockReturnValueOnce('data:image/png;base64,iVBORw0KGgo=')
+    await expect(renderCartToPngFiles(data, [quickItems[0]])).resolves.toEqual([
+      {
+        name: 'images/01-full-expedition-summary.png',
+        contentBase64: 'iVBORw0KGgo=',
+      },
+    ])
   })
 
   it('reuses a single offscreen host and canvas across a multi-card PNG batch and cleans up on failure', async () => {
@@ -220,27 +196,10 @@ describe('export visual blocks and PNG SVG serializer', () => {
     const quickItems = createQuickShareCart(data)
     expect(quickItems).toHaveLength(3)
 
-    const originalImage = globalThis.Image
     let failOnImageIndex = -1
-    let loadedImageCount = 0
-    class BatchStubImage {
-      onload: (() => void) | null = null
-      onerror: (() => void) | null = null
-      set src(_value: string) {
-        const currentIndex = loadedImageCount++
-        if (currentIndex === failOnImageIndex) {
-          this.onerror?.()
-          return
-        }
-        this.onload?.()
-      }
-    }
-    const stubContext = {
-      scale: vi.fn(),
-      fillStyle: '',
-      fillRect: vi.fn(),
-      drawImage: vi.fn(),
-    } as unknown as CanvasRenderingContext2D
+    const canvasMock = installCanvasPngMock({
+      shouldFailImageAt: (imageIndex) => imageIndex === failOnImageIndex,
+    })
 
     const originalCreateElement = document.createElement.bind(document)
     let createdCanvasCount = 0
@@ -252,13 +211,6 @@ describe('export visual blocks and PNG SVG serializer', () => {
       }) as typeof document.createElement)
     const appendChildSpy = vi.spyOn(document.body, 'appendChild')
     const removeChildSpy = vi.spyOn(document.body, 'removeChild')
-    const getContextSpy = vi
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue(stubContext as never)
-    const toDataURLSpy = vi
-      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
-      .mockReturnValue('data:image/png;base64,iVBORw0KGgo=')
-    globalThis.Image = BatchStubImage as unknown as typeof Image
 
     try {
       const progressTicks: Array<[number, number]> = []
@@ -287,7 +239,7 @@ describe('export visual blocks and PNG SVG serializer', () => {
       appendChildSpy.mockClear()
       removeChildSpy.mockClear()
       createdCanvasCount = 0
-      loadedImageCount = 0
+      canvasMock.resetImageCounter()
       failOnImageIndex = 1
 
       await expect(renderCartToPngFiles(data, quickItems)).rejects.toThrow(
@@ -299,12 +251,9 @@ describe('export visual blocks and PNG SVG serializer', () => {
       const failedBatchHost = appendChildSpy.mock.calls[0][0] as HTMLElement
       expect(document.body.contains(failedBatchHost)).toBe(false)
     } finally {
-      globalThis.Image = originalImage
       createElementSpy.mockRestore()
       appendChildSpy.mockRestore()
       removeChildSpy.mockRestore()
-      getContextSpy.mockRestore()
-      toDataURLSpy.mockRestore()
     }
   })
 

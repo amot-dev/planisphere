@@ -4,62 +4,31 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/sources/eddiscovery"
 	"planisphere/internal/sources/journal"
+	"planisphere/internal/testutil/dbtest"
 )
 
 func TestImportEDDiscoveryDB(t *testing.T) {
-	temporaryDir := t.TempDir()
-	eddPath := filepath.Join(temporaryDir, "EDD.sqlite")
+	eddPath := buildEDDArchive(t, eddArchiveSeed{
+		FileName: "EDD.sqlite",
+		TravelLogs: []eddTravelLogSeed{
+			{ID: 1, Name: "Journal.2026-01-18T190000.01.log", Path: `C:\ED\Journal.2026-01-18T190000.01.log`},
+			{ID: 2, Name: "Journal.2026-01-19T200000.01.log", Path: `C:\ED\Journal.2026-01-19T200000.01.log`},
+		},
+		Entries: []eddJournalEntrySeed{
+			{ID: 1, TravelLogID: 1, EventType: "Location", EventData: `{"timestamp":"2026-01-18T19:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`},
+			{ID: 2, TravelLogID: 1, EventType: "LoadGame", EventData: `{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrOne","FID":"F001","Ship":"mandalay"}`},
+			{ID: 3, TravelLogID: 1, EventType: "FSDJump", EventData: `{"timestamp":"2026-01-18T19:20:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[0,0,100],"JumpDist":4.3}`},
+			{ID: 4, TravelLogID: 1, EventType: "Music", EventData: `{"timestamp":"2026-01-18T19:25:00Z","event":"Music","MusicTrack":"Exploration"}`},
+			{ID: 5, TravelLogID: 2, EventType: "Commander", EventData: `{"timestamp":"2026-01-19T20:00:00Z","event":"Commander","Commander":"CmdrTwo","FID":"F002"}`},
+			{ID: 6, TravelLogID: 2, EventType: "FSDJump", EventData: `{"timestamp":"2026-01-19T20:30:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2001,"StarPos":[100,200,300]}`},
+		},
+	})
 
-	eddConn, err := sql.Open("sqlite", eddPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer eddConn.Close()
-
-	_, err = eddConn.Exec(`
-		CREATE TABLE TravelLogUnit (
-			Id INTEGER PRIMARY KEY,
-			Name TEXT,
-			Path TEXT
-		);
-		CREATE TABLE JournalEntries (
-			Id INTEGER PRIMARY KEY,
-			TravelLogId INTEGER,
-			EventType TEXT,
-			EventData TEXT
-		);
-	`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = eddConn.Exec(`
-		INSERT INTO TravelLogUnit (Id, Name, Path) VALUES
-			(1, 'Journal.2026-01-18T190000.01.log', 'C:\ED\Journal.2026-01-18T190000.01.log'),
-			(2, 'Journal.2026-01-19T200000.01.log', 'C:\ED\Journal.2026-01-19T200000.01.log');
-		INSERT INTO JournalEntries (Id, TravelLogId, EventType, EventData) VALUES
-			(1, 1, 'Location', '{"timestamp":"2026-01-18T19:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}'),
-			(2, 1, 'LoadGame', '{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrOne","FID":"F001","Ship":"mandalay"}'),
-			(3, 1, 'FSDJump', '{"timestamp":"2026-01-18T19:20:00Z","event":"FSDJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[0,0,100],"JumpDist":4.3}'),
-			(4, 1, 'Music', '{"timestamp":"2026-01-18T19:25:00Z","event":"Music","MusicTrack":"Exploration"}'),
-			(5, 2, 'Commander', '{"timestamp":"2026-01-19T20:00:00Z","event":"Commander","Commander":"CmdrTwo","FID":"F002"}'),
-			(6, 2, 'FSDJump', '{"timestamp":"2026-01-19T20:30:00Z","event":"FSDJump","StarSystem":"Colonia","SystemAddress":2001,"StarPos":[100,200,300]}');
-	`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	destConn, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer destConn.Close()
+	destConn := dbtest.OpenMemory(t)
 
 	ingester := journal.NewIngester(destConn)
 
@@ -163,12 +132,7 @@ func TestImportEDDiscoveryDB(t *testing.T) {
 }
 
 func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
-	temporaryDatabaseConnection, databaseOpenError := db.Open(":memory:")
-	if databaseOpenError != nil {
-		t.Fatal(databaseOpenError)
-	}
-	defer temporaryDatabaseConnection.Close()
-
+	temporaryDatabaseConnection := dbtest.OpenMemory(t)
 	ingesterInstance := journal.NewIngester(temporaryDatabaseConnection)
 
 	cancelledContext, cancelFunction := context.WithCancel(context.Background())
@@ -181,45 +145,28 @@ func TestImportEDDiscoveryDB_ContextCancellation(t *testing.T) {
 }
 
 func TestImportEDDiscoveryCommanderFallbackAndRollover(testingContext *testing.T) {
-	temporaryDir := testingContext.TempDir()
-	eddPath := filepath.Join(temporaryDir, "EDDFallback.sqlite")
+	eddPath := buildEDDArchive(testingContext, eddArchiveSeed{
+		FileName: "EDDFallback.sqlite",
+		Commanders: []eddCommanderSeed{
+			{ID: 1, Name: "Trebor Johnson", Deleted: 0},
+			{ID: 2, Name: "DeletedCmdr", Deleted: 1},
+		},
+		TravelLogs: []eddTravelLogSeed{
+			{ID: 10, Name: "netLog.1605011200.01.log", Path: `C:\ED\Logs\netLog.1605011200.01.log`, CommanderID: 1},
+			{ID: 11, Name: "Journal.2026-03-01T100000.01.log", Path: `C:\ED\Journal.2026-03-01T100000.01.log`, CommanderID: 1},
+			{ID: 12, Name: "Journal.2026-03-01T120000.02.log", Path: `C:\ED\Journal.2026-03-01T120000.02.log`, CommanderID: 2},
+		},
+		Entries: []eddJournalEntrySeed{
+			{ID: 1, TravelLogID: 10, EventType: "FSDJump", EventData: `{"timestamp":"2016-05-01T12:05:00Z","event":"FSDJump","StarSystem":"Beagle Point","StarPos":[-1111.56,-134.21,65269.75]}`},
+			{ID: 2, TravelLogID: 11, EventType: "Fileheader", EventData: `{"timestamp":"2026-03-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`},
+			{ID: 3, TravelLogID: 11, EventType: "LoadGame", EventData: `{"timestamp":"2026-03-01T10:01:00Z","event":"LoadGame","Commander":"Trebor Johnson","FID":"F4293989","Ship":"Mandalay","Odyssey":true}`},
+			{ID: 4, TravelLogID: 11, EventType: "Continued", EventData: `{"timestamp":"2026-03-01T11:59:59Z","event":"Continued","Part":2}`},
+			{ID: 5, TravelLogID: 12, EventType: "Fileheader", EventData: `{"timestamp":"2026-03-01T12:00:00Z","event":"Fileheader","part":2,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}`},
+			{ID: 6, TravelLogID: 12, EventType: "FSDJump", EventData: `{"timestamp":"2026-03-01T12:10:00Z","event":"FSDJump","StarSystem":"Ishum's Reach","SystemAddress":9001,"StarPos":[-500,0,65600]}`},
+		},
+	})
 
-	eddConn, err := sql.Open("sqlite", eddPath)
-	if err != nil {
-		testingContext.Fatal(err)
-	}
-	defer eddConn.Close()
-
-	if _, err := eddConn.Exec(`
-		CREATE TABLE Commanders (Id INTEGER PRIMARY KEY, Name TEXT, Deleted INTEGER);
-		CREATE TABLE TravelLogUnit (Id INTEGER PRIMARY KEY, Name TEXT, Path TEXT, CommanderId INTEGER);
-		CREATE TABLE JournalEntries (Id INTEGER PRIMARY KEY, TravelLogId INTEGER, EventType TEXT, EventData TEXT);
-
-		INSERT INTO Commanders (Id, Name, Deleted) VALUES
-			(1, 'Trebor Johnson', 0),
-			(2, 'DeletedCmdr', 1);
-
-		INSERT INTO TravelLogUnit (Id, Name, Path, CommanderId) VALUES
-			(10, 'netLog.1605011200.01.log', 'C:\ED\Logs\netLog.1605011200.01.log', 1),
-			(11, 'Journal.2026-03-01T100000.01.log', 'C:\ED\Journal.2026-03-01T100000.01.log', 1),
-			(12, 'Journal.2026-03-01T120000.02.log', 'C:\ED\Journal.2026-03-01T120000.02.log', 2);
-
-		INSERT INTO JournalEntries (Id, TravelLogId, EventType, EventData) VALUES
-			(1, 10, 'FSDJump', '{"timestamp":"2016-05-01T12:05:00Z","event":"FSDJump","StarSystem":"Beagle Point","StarPos":[-1111.56,-134.21,65269.75]}'),
-			(2, 11, 'Fileheader', '{"timestamp":"2026-03-01T10:00:00Z","event":"Fileheader","part":1,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}'),
-			(3, 11, 'LoadGame', '{"timestamp":"2026-03-01T10:01:00Z","event":"LoadGame","Commander":"Trebor Johnson","FID":"F4293989","Ship":"Mandalay","Odyssey":true}'),
-			(4, 11, 'Continued', '{"timestamp":"2026-03-01T11:59:59Z","event":"Continued","Part":2}'),
-			(5, 12, 'Fileheader', '{"timestamp":"2026-03-01T12:00:00Z","event":"Fileheader","part":2,"gameversion":"4.0.0.1800","build":"r301234/r0 ","Odyssey":true}'),
-			(6, 12, 'FSDJump', '{"timestamp":"2026-03-01T12:10:00Z","event":"FSDJump","StarSystem":"Ishum''s Reach","SystemAddress":9001,"StarPos":[-500,0,65600]}');
-	`); err != nil {
-		testingContext.Fatal(err)
-	}
-
-	destConn, err := db.Open(":memory:")
-	if err != nil {
-		testingContext.Fatal(err)
-	}
-	defer destConn.Close()
+	destConn := dbtest.OpenMemory(testingContext)
 
 	if _, err := eddiscovery.Import(context.Background(), journal.NewIngester(destConn), eddPath, nil); err != nil {
 		testingContext.Fatalf("Import failed: %v", err)

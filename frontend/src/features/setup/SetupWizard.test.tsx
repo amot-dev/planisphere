@@ -1,42 +1,15 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { app } from '../../api/models'
-
-const mockSetDatabasePath = vi.fn()
-const mockSetupConfigureJournals = vi.fn()
-const mockGetSettings = vi.fn()
-const mockGetIngestStatus = vi.fn()
-const mockSetOnlineLookups = vi.fn()
-const mockRefreshGEC = vi.fn()
-
-vi.mock('../../api/backend', () => ({
-  BrowseDBPath: vi.fn(),
-  BrowseEDDiscoveryDB: vi.fn(),
-  BrowseJournalDir: vi.fn(),
-  CompleteSetup: vi.fn(),
-  GetIngestStatus: (...args: unknown[]) => mockGetIngestStatus(...args),
-  GetSettings: (...args: unknown[]) => mockGetSettings(...args),
-  ImportEDDiscoveryHistory: vi.fn(),
-  RefreshGEC: (...args: unknown[]) => mockRefreshGEC(...args),
-  SetCommanderEnabled: vi.fn(),
-  SetDatabasePath: (...args: unknown[]) => mockSetDatabasePath(...args),
-  SetOnlineLookups: (...args: unknown[]) => mockSetOnlineLookups(...args),
-  SetupConfigureJournals: (...args: unknown[]) => mockSetupConfigureJournals(...args),
-}))
-
+import { makeSettings } from '../../test/fixtures'
+import { mountTestRoot } from '../../test/render'
+import { installWailsAppMock } from '../../test/wailsMock'
 import { SetupWizardModal } from './SetupWizard'
 
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
 describe('SetupWizardModal async edge safety', () => {
-  afterEach(() => {
-    vi.resetAllMocks()
-  })
-
   it('rolls back onlineLookups when SetOnlineLookups rejects and blocks Back, close, and checkboxes during GEC sync', async () => {
-    const initialSettings = app.Settings.createFrom({
+    const initialSettings = makeSettings({
       dbPath: '/tmp/planisphere.db',
       defaultDbPath: '/tmp/planisphere.db',
       journalDir: '/tmp/journals',
@@ -46,69 +19,74 @@ describe('SetupWizardModal async edge safety', () => {
       commanders: [{ name: 'Jameson', enabled: true, eventCount: 42 }],
     })
     const initialIngest = app.IngestStatus.createFrom({ filesTracked: 1, eventsStored: 42 })
-    mockSetDatabasePath.mockResolvedValue(initialSettings)
-    mockGetIngestStatus.mockResolvedValue(initialIngest)
-    mockSetupConfigureJournals.mockResolvedValue(initialIngest)
-    mockGetSettings.mockResolvedValue(initialSettings)
-    mockSetOnlineLookups.mockRejectedValueOnce(new Error('settings write failed'))
 
     let resolveGecSync!: (count: number) => void
-    mockRefreshGEC.mockImplementationOnce(
-      () => new Promise<number>((resolve) => { resolveGecSync = resolve }),
-    )
+    const { spies } = installWailsAppMock({
+      SetDatabasePath: async () => initialSettings,
+      GetIngestStatus: async () => initialIngest,
+      SetupConfigureJournals: async () => initialIngest,
+      GetSettings: async () => initialSettings,
+      SetOnlineLookups: async () => {
+        throw new Error('settings write failed')
+      },
+      RefreshGEC: () =>
+        new Promise<number>((resolve) => {
+          resolveGecSync = resolve
+        }),
+    })
 
     const onClose = vi.fn()
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    const findButton = (label: string) =>
-      Array.from(container.querySelectorAll('button')).find((button) =>
-        button.textContent?.includes(label),
-      ) as HTMLButtonElement
+    const mounted = mountTestRoot(
+      createElement(SetupWizardModal, {
+        settings: initialSettings,
+        ingestStatus: initialIngest,
+        onComplete: () => {},
+        onClose,
+      }),
+    )
 
-    try {
-      act(() => {
-        root.render(
-          createElement(SetupWizardModal, {
-            settings: initialSettings,
-            ingestStatus: initialIngest,
-            onComplete: () => {},
-            onClose,
-          }),
-        )
-      })
-      await act(async () => { findButton('NEXT').click(); await Promise.resolve() })
-      await act(async () => { findButton('NEXT').click(); await Promise.resolve() })
-      act(() => findButton('NEXT').click())
-      expect(container.textContent).toContain('Step 4 of 4')
+    await act(async () => {
+      mounted.findButtonByText('NEXT').click()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      mounted.findButtonByText('NEXT').click()
+      await Promise.resolve()
+    })
+    act(() => mounted.findButtonByText('NEXT').click())
+    expect(mounted.container.textContent).toContain('Step 4 of 4')
 
-      const checkboxes = () =>
-        Array.from(container.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[]
-      await act(async () => { checkboxes()[1].click(); await Promise.resolve() })
-      expect(mockSetOnlineLookups).toHaveBeenCalledWith(false)
-      expect(checkboxes()[1].checked).toBe(true)
-      expect(container.textContent).toContain('settings write failed')
+    const checkboxes = () =>
+      Array.from(mounted.container.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[]
+    await act(async () => {
+      checkboxes()[1].click()
+      await Promise.resolve()
+    })
+    expect(spies.SetOnlineLookups).toHaveBeenCalledWith(false)
+    expect(checkboxes()[1].checked).toBe(true)
+    expect(mounted.container.textContent).toContain('settings write failed')
 
-      act(() => findButton('SYNC CATALOG NOW').click())
-      const closeHeaderButton = container.querySelector('button[title="Close setup wizard"]') as HTMLButtonElement
-      expect(findButton('SYNCING...').disabled).toBe(true)
-      expect(findButton('BACK').disabled).toBe(true)
-      expect(closeHeaderButton.disabled).toBe(true)
-      expect(checkboxes()[0].disabled).toBe(true)
-      expect(checkboxes()[1].disabled).toBe(true)
+    act(() => mounted.findButtonByText('SYNC CATALOG NOW').click())
+    const closeHeaderButton = mounted.container.querySelector(
+      'button[title="Close setup wizard"]',
+    ) as HTMLButtonElement
+    expect(mounted.findButtonByText('SYNCING...').disabled).toBe(true)
+    expect(mounted.findButtonByText('BACK').disabled).toBe(true)
+    expect(closeHeaderButton.disabled).toBe(true)
+    expect(checkboxes()[0].disabled).toBe(true)
+    expect(checkboxes()[1].disabled).toBe(true)
 
-      act(() => { findButton('BACK').click(); closeHeaderButton.click() })
-      expect(container.textContent).toContain('Step 4 of 4')
-      expect(onClose).not.toHaveBeenCalled()
+    act(() => {
+      mounted.findButtonByText('BACK').click()
+      closeHeaderButton.click()
+    })
+    expect(mounted.container.textContent).toContain('Step 4 of 4')
+    expect(onClose).not.toHaveBeenCalled()
 
-      act(() => root.unmount())
-      container.remove()
-      await act(async () => { resolveGecSync(1200); await Promise.resolve() })
-    } finally {
-      if (container.isConnected) {
-        act(() => root.unmount())
-        container.remove()
-      }
-    }
+    mounted.unmount()
+    await act(async () => {
+      resolveGecSync(1200)
+      await Promise.resolve()
+    })
   })
 })

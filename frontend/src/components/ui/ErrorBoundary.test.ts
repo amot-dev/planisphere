@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createElement } from 'react'
+import { createElement, type ErrorInfo, type ReactElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { ErrorBoundary } from './ErrorBoundary'
 
@@ -34,14 +34,15 @@ describe('ErrorBoundary', () => {
     })
 
     const testError = new Error('Critical telemetry failure')
+    const errorInfo: ErrorInfo = { componentStack: ' at WaypointTable\n at App' }
     boundary.state = {
       hasError: true,
       error: testError,
-      errorInfo: { componentStack: ' at WaypointTable\n at App' } as any,
+      errorInfo,
     }
 
     const rendered = boundary.render()
-    const html = renderToString(rendered as any)
+    const html = renderToString(rendered as ReactElement)
 
     expect(html).toContain('SUBSYSTEM EXCEPTION')
     expect(html).toContain('Subsystem Sensor Malfunction')

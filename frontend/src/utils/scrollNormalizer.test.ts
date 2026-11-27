@@ -1,20 +1,46 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { findScrollable, initScrollSpeedNormalizer } from './scrollNormalizer'
 
-function createMockElement(classes: string[], dimensions: {
+interface MockScrollableDimensions {
   clientHeight?: number
   scrollHeight?: number
   scrollTop?: number
   clientWidth?: number
   scrollWidth?: number
   scrollLeft?: number
-} = {}, parent: any = null): HTMLElement {
+}
+
+interface MockScrollableElement {
+  classList: { contains: (className: string) => boolean }
+  hasAttribute: (attributeName: string) => boolean
+  clientHeight: number
+  scrollHeight: number
+  scrollTop: number
+  clientWidth: number
+  scrollWidth: number
+  scrollLeft: number
+  parentElement: HTMLElement | null
+  contains: (target: Node | null) => boolean
+}
+
+type WheelEventHandler = (event: WheelEvent) => void
+
+interface MockWheelWindow {
+  addEventListener: (eventName: string, handler: WheelEventHandler) => void
+  removeEventListener: (eventName: string, handler: WheelEventHandler) => void
+}
+
+function createMockElement(
+  classes: string[],
+  dimensions: MockScrollableDimensions = {},
+  parent: HTMLElement | null = null,
+): HTMLElement {
   const classSet = new Set(classes)
-  const mockElement: any = {
+  const mockElement: MockScrollableElement = {
     classList: {
-      contains: (c: string) => classSet.has(c),
+      contains: (className: string) => classSet.has(className),
     },
-    hasAttribute: (_attr: string) => false,
+    hasAttribute: (_attributeName: string) => false,
     clientHeight: dimensions.clientHeight ?? 400,
     scrollHeight: dimensions.scrollHeight ?? 400,
     scrollTop: dimensions.scrollTop ?? 0,
@@ -22,9 +48,11 @@ function createMockElement(classes: string[], dimensions: {
     scrollWidth: dimensions.scrollWidth ?? 600,
     scrollLeft: dimensions.scrollLeft ?? 0,
     parentElement: parent,
-    contains: (target: any) => target === mockElement || (parent && typeof parent.contains === 'function' && parent.contains(target)),
+    contains: (target: Node | null) =>
+      (target as unknown) === mockElement ||
+      (parent !== null && typeof parent.contains === 'function' && parent.contains(target)),
   }
-  return mockElement as HTMLElement
+  return mockElement as unknown as HTMLElement
 }
 
 describe('Scroll Performance and Normalizer', () => {
@@ -53,40 +81,42 @@ describe('Scroll Performance and Normalizer', () => {
   })
 
   it('safely handles non-element targets like window or document', () => {
-    expect(findScrollable(globalThis as any, 10, 0)).toBeNull()
+    expect(findScrollable(globalThis as unknown as EventTarget, 10, 0)).toBeNull()
     const nonNode = { someProp: true }
-    expect(findScrollable(nonNode as any, 10, 0)).toBeNull()
+    expect(findScrollable(nonNode as unknown as EventTarget, 10, 0)).toBeNull()
   })
 
   describe('Wheel Event Normalization and Scaling', () => {
-    let mockWindow: any
-    let listeners: Record<string, Function>
+    let mockWindow: MockWheelWindow
+    let listeners: Record<string, WheelEventHandler>
     let cleanup: () => void
-    let originalWindow: any
+    let originalWindow: (Window & typeof globalThis) | undefined
 
     beforeEach(() => {
       listeners = {}
-      originalWindow = (globalThis as any).window
+      const globalRecord = globalThis as { window?: Window & typeof globalThis }
+      originalWindow = globalRecord.window
       mockWindow = {
-        addEventListener: (event: string, handler: Function) => {
-          listeners[event] = handler
+        addEventListener: (eventName: string, handler: WheelEventHandler) => {
+          listeners[eventName] = handler
         },
-        removeEventListener: (event: string, handler: Function) => {
-          if (listeners[event] === handler) {
-            delete listeners[event]
+        removeEventListener: (eventName: string, handler: WheelEventHandler) => {
+          if (listeners[eventName] === handler) {
+            delete listeners[eventName]
           }
         },
       }
-      ;(globalThis as any).window = mockWindow
+      globalRecord.window = mockWindow as unknown as Window & typeof globalThis
       cleanup = initScrollSpeedNormalizer()
     })
 
     afterEach(() => {
       cleanup()
+      const globalRecord = globalThis as { window?: Window & typeof globalThis }
       if (originalWindow === undefined) {
-        delete (globalThis as Record<string, unknown>).window
+        delete globalRecord.window
       } else {
-        ;(globalThis as Record<string, unknown>).window = originalWindow
+        globalRecord.window = originalWindow
       }
     })
 
@@ -99,12 +129,12 @@ describe('Scroll Performance and Normalizer', () => {
     }
 
     function dispatchWheel(
-      wheelHandler: Function,
+      wheelHandler: WheelEventHandler,
       target: unknown,
-      overrides: Record<string, unknown> = {},
+      overrides: Partial<WheelEvent> = {},
     ): { prevented: boolean } {
       let prevented = false
-      wheelHandler({
+      const syntheticWheelEvent = {
         target,
         deltaY: 0,
         deltaX: 0,
@@ -116,7 +146,8 @@ describe('Scroll Performance and Normalizer', () => {
           prevented = true
         },
         ...overrides,
-      })
+      } as unknown as WheelEvent
+      wheelHandler(syntheticWheelEvent)
       return { prevented }
     }
 
@@ -185,4 +216,3 @@ describe('Scroll Performance and Normalizer', () => {
     })
   })
 })
-

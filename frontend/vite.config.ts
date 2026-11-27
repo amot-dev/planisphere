@@ -10,6 +10,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   test: {
+    setupFiles: ['./src/test/setup.ts'],
     clearMocks: true,
     restoreMocks: true,
     coverage: {

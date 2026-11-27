@@ -2,22 +2,11 @@ package db_test
 
 import (
 	"database/sql"
-	"fmt"
 	"testing"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/testutil/dbtest"
 )
-
-type seedEventRow struct {
-	uid        string
-	timestamp  string
-	event      string
-	commander  string
-	fid        string
-	universe   string
-	sourceFile string
-	rawJSON    string
-}
 
 type gotProfile struct {
 	id                int64
@@ -43,45 +32,6 @@ type gotAlias struct {
 	eventCount int
 	isCurrent  int
 	source     string
-}
-
-func openResolverTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	conn, err := db.Open(":memory:")
-	if err != nil {
-		testingContext.Fatalf("Open: %v", err)
-	}
-	testingContext.Cleanup(func() { _ = conn.Close() })
-	return conn
-}
-
-func insertSeedEvents(testingContext *testing.T, conn *sql.DB, events []seedEventRow) {
-	testingContext.Helper()
-	for index, item := range events {
-		uid := item.uid
-		if uid == "" {
-			uid = fmt.Sprintf("uid-%d-%s-%s", index, item.event, item.timestamp)
-		}
-		universe := item.universe
-		if universe == "" {
-			universe = "live"
-		}
-		rawJSON := item.rawJSON
-		if rawJSON == "" {
-			rawJSON = "{}"
-		}
-		var cmdrValue any
-		if item.commander != "" {
-			cmdrValue = item.commander
-		}
-		if _, err := conn.Exec(`
-			INSERT INTO journal_events (event_uid, timestamp, event, commander, fid, universe, source_file, raw_json, ingested_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			uid, item.timestamp, item.event, cmdrValue, item.fid, universe, item.sourceFile, rawJSON, item.timestamp,
-		); err != nil {
-			testingContext.Fatalf("insert seed event %s: %v", uid, err)
-		}
-	}
 }
 
 func runResolveCommanders(testingContext *testing.T, conn *sql.DB) {
@@ -142,17 +92,17 @@ func queryAliases(testingContext *testing.T, conn *sql.DB) []gotAlias {
 func TestResolveCommandersScenarios(testingContext *testing.T) {
 	testCases := []struct {
 		name         string
-		events       []seedEventRow
+		events       []dbtest.SeedEventRow
 		wantProfiles []gotProfile
 		wantAliases  []gotAlias
 	}{
 		{
 			name: "distinct FID alt accounts stay separate live profiles",
-			events: []seedEventRow{
-				{timestamp: "2025-01-01T10:00:00Z", event: "LoadGame", commander: "CmdrMain", fid: "F101", universe: "live"},
-				{timestamp: "2025-01-01T10:05:00Z", event: "FSDJump", commander: "CmdrMain", fid: "F101", universe: "live"},
-				{timestamp: "2025-02-01T10:00:00Z", event: "LoadGame", commander: "CmdrAlt", fid: "F202", universe: "live"},
-				{timestamp: "2025-02-01T10:05:00Z", event: "FSDJump", commander: "CmdrAlt", fid: "F202", universe: "live"},
+			events: []dbtest.SeedEventRow{
+				{Timestamp: "2025-01-01T10:00:00Z", Event: "LoadGame", Commander: "CmdrMain", FID: "F101", Universe: "live"},
+				{Timestamp: "2025-01-01T10:05:00Z", Event: "FSDJump", Commander: "CmdrMain", FID: "F101", Universe: "live"},
+				{Timestamp: "2025-02-01T10:00:00Z", Event: "LoadGame", Commander: "CmdrAlt", FID: "F202", Universe: "live"},
+				{Timestamp: "2025-02-01T10:05:00Z", Event: "FSDJump", Commander: "CmdrAlt", FID: "F202", Universe: "live"},
 			},
 			wantProfiles: []gotProfile{
 				{profileKey: "live:f101:era:0", displayName: "CmdrMain", fid: "F101", universe: "live", eraIndex: 0, isArchivedCareer: 0, enabled: 1},
@@ -161,12 +111,12 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 		},
 		{
 			name: "same FID rename with pre-v3 empty FID bridging unifies into one profile",
-			events: []seedEventRow{
-				{timestamp: "2017-06-01T10:00:00Z", event: "LoadGame", commander: "Trebor Johnson", fid: "", universe: "live"},
-				{timestamp: "2017-06-01T10:10:00Z", event: "FSDJump", commander: "Trebor Johnson", fid: "", universe: "live"},
-				{timestamp: "2020-03-01T10:00:00Z", event: "LoadGame", commander: "Trebor Johnson", fid: "F4293989", universe: "live"},
-				{timestamp: "2025-05-01T10:00:00Z", event: "LoadGame", commander: "Danielle Hudson", fid: "F4293989", universe: "live"},
-				{timestamp: "2025-05-01T10:15:00Z", event: "FSDJump", commander: "Danielle Hudson", fid: "F4293989", universe: "live"},
+			events: []dbtest.SeedEventRow{
+				{Timestamp: "2017-06-01T10:00:00Z", Event: "LoadGame", Commander: "Trebor Johnson", FID: "", Universe: "live"},
+				{Timestamp: "2017-06-01T10:10:00Z", Event: "FSDJump", Commander: "Trebor Johnson", FID: "", Universe: "live"},
+				{Timestamp: "2020-03-01T10:00:00Z", Event: "LoadGame", Commander: "Trebor Johnson", FID: "F4293989", Universe: "live"},
+				{Timestamp: "2025-05-01T10:00:00Z", Event: "LoadGame", Commander: "Danielle Hudson", FID: "F4293989", Universe: "live"},
+				{Timestamp: "2025-05-01T10:15:00Z", Event: "FSDJump", Commander: "Danielle Hudson", FID: "F4293989", Universe: "live"},
 			},
 			wantProfiles: []gotProfile{
 				{profileKey: "live:f4293989:era:0", displayName: "Danielle Hudson", fid: "F4293989", universe: "live", eraIndex: 0, isArchivedCareer: 0, enabled: 1},
@@ -178,13 +128,13 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 		},
 		{
 			name: "initial NewCommander stays era 0 and later ClearSavedGame plus NewCommander splits rename career",
-			events: []seedEventRow{
-				{uid: "init-new", timestamp: "2024-01-01T10:00:00Z", event: "NewCommander", commander: "StarterCmdr", fid: "F555", universe: "live"},
-				{uid: "init-load", timestamp: "2024-01-01T10:01:00Z", event: "LoadGame", commander: "StarterCmdr", fid: "F555", universe: "live"},
-				{uid: "init-jump", timestamp: "2024-01-01T10:10:00Z", event: "FSDJump", commander: "StarterCmdr", fid: "F555", universe: "live"},
-				{uid: "wipe-clear", timestamp: "2025-01-01T12:00:00Z", event: "ClearSavedGame", commander: "StarterCmdr", fid: "F555", universe: "live"},
-				{uid: "wipe-new", timestamp: "2025-01-01T12:00:00Z", event: "NewCommander", commander: "RebornCmdr", fid: "F555", universe: "live"},
-				{uid: "reborn-jump", timestamp: "2025-01-01T12:05:00Z", event: "FSDJump", commander: "RebornCmdr", fid: "F555", universe: "live"},
+			events: []dbtest.SeedEventRow{
+				{UID: "init-new", Timestamp: "2024-01-01T10:00:00Z", Event: "NewCommander", Commander: "StarterCmdr", FID: "F555", Universe: "live"},
+				{UID: "init-load", Timestamp: "2024-01-01T10:01:00Z", Event: "LoadGame", Commander: "StarterCmdr", FID: "F555", Universe: "live"},
+				{UID: "init-jump", Timestamp: "2024-01-01T10:10:00Z", Event: "FSDJump", Commander: "StarterCmdr", FID: "F555", Universe: "live"},
+				{UID: "wipe-clear", Timestamp: "2025-01-01T12:00:00Z", Event: "ClearSavedGame", Commander: "StarterCmdr", FID: "F555", Universe: "live"},
+				{UID: "wipe-new", Timestamp: "2025-01-01T12:00:00Z", Event: "NewCommander", Commander: "RebornCmdr", FID: "F555", Universe: "live"},
+				{UID: "reborn-jump", Timestamp: "2025-01-01T12:05:00Z", Event: "FSDJump", Commander: "RebornCmdr", FID: "F555", Universe: "live"},
 			},
 			wantProfiles: []gotProfile{
 				{profileKey: "live:f555:era:0", displayName: "StarterCmdr", fid: "F555", universe: "live", eraIndex: 0, isArchivedCareer: 1, enabled: 0},
@@ -197,11 +147,11 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 		},
 		{
 			name: "ClearSavedGame plus same-name NewCommander splits archived and active eras cleanly",
-			events: []seedEventRow{
-				{timestamp: "2024-03-01T10:00:00Z", event: "LoadGame", commander: "SameName", fid: "F777", universe: "live"},
-				{timestamp: "2024-03-01T12:00:00Z", event: "ClearSavedGame", commander: "SameName", fid: "F777", universe: "live"},
-				{timestamp: "2024-03-01T12:00:05Z", event: "NewCommander", commander: "SameName", fid: "F777", universe: "live"},
-				{timestamp: "2024-03-01T12:10:00Z", event: "FSDJump", commander: "SameName", fid: "F777", universe: "live"},
+			events: []dbtest.SeedEventRow{
+				{Timestamp: "2024-03-01T10:00:00Z", Event: "LoadGame", Commander: "SameName", FID: "F777", Universe: "live"},
+				{Timestamp: "2024-03-01T12:00:00Z", Event: "ClearSavedGame", Commander: "SameName", FID: "F777", Universe: "live"},
+				{Timestamp: "2024-03-01T12:00:05Z", Event: "NewCommander", Commander: "SameName", FID: "F777", Universe: "live"},
+				{Timestamp: "2024-03-01T12:10:00Z", Event: "FSDJump", Commander: "SameName", FID: "F777", Universe: "live"},
 			},
 			wantProfiles: []gotProfile{
 				{profileKey: "live:f777:era:0", displayName: "SameName", fid: "F777", universe: "live", eraIndex: 0, isArchivedCareer: 1, enabled: 0},
@@ -210,15 +160,15 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 		},
 		{
 			name: "unlogged Statistics drop splits at preceding session LoadGame",
-			events: []seedEventRow{
-				{timestamp: "2024-01-01T10:00:00Z", event: "LoadGame", commander: "StatsWipe", fid: "F888", universe: "live", sourceFile: "s1.log"},
-				{timestamp: "2024-01-01T10:01:00Z", event: "Statistics", commander: "StatsWipe", fid: "F888", universe: "live", sourceFile: "s1.log",
-					rawJSON: `{"Exploration":{"Systems_Visited":120,"Total_Hyperspace_Jumps":115}}`},
-				{timestamp: "2024-06-01T10:00:00Z", event: "Commander", commander: "StatsWipe", fid: "F888", universe: "live", sourceFile: "s2.log"},
-				{timestamp: "2024-06-01T10:00:01Z", event: "LoadGame", commander: "StatsWipe", fid: "F888", universe: "live", sourceFile: "s2.log"},
-				{timestamp: "2024-06-01T10:00:02Z", event: "Location", commander: "StatsWipe", fid: "F888", universe: "live", sourceFile: "s2.log"},
-				{timestamp: "2024-06-01T10:00:03Z", event: "Statistics", commander: "StatsWipe", fid: "F888", universe: "live", sourceFile: "s2.log",
-					rawJSON: `{"Exploration":{"Systems_Visited":1,"Total_Hyperspace_Jumps":0}}`},
+			events: []dbtest.SeedEventRow{
+				{Timestamp: "2024-01-01T10:00:00Z", Event: "LoadGame", Commander: "StatsWipe", FID: "F888", Universe: "live", SourceFile: "s1.log"},
+				{Timestamp: "2024-01-01T10:01:00Z", Event: "Statistics", Commander: "StatsWipe", FID: "F888", Universe: "live", SourceFile: "s1.log",
+					RawJSON: `{"Exploration":{"Systems_Visited":120,"Total_Hyperspace_Jumps":115}}`},
+				{Timestamp: "2024-06-01T10:00:00Z", Event: "Commander", Commander: "StatsWipe", FID: "F888", Universe: "live", SourceFile: "s2.log"},
+				{Timestamp: "2024-06-01T10:00:01Z", Event: "LoadGame", Commander: "StatsWipe", FID: "F888", Universe: "live", SourceFile: "s2.log"},
+				{Timestamp: "2024-06-01T10:00:02Z", Event: "Location", Commander: "StatsWipe", FID: "F888", Universe: "live", SourceFile: "s2.log"},
+				{Timestamp: "2024-06-01T10:00:03Z", Event: "Statistics", Commander: "StatsWipe", FID: "F888", Universe: "live", SourceFile: "s2.log",
+					RawJSON: `{"Exploration":{"Systems_Visited":1,"Total_Hyperspace_Jumps":0}}`},
 			},
 			wantProfiles: []gotProfile{
 				{profileKey: "live:f888:era:0", displayName: "StatsWipe", fid: "F888", universe: "live", eraIndex: 0, isArchivedCareer: 1, enabled: 0},
@@ -231,10 +181,10 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 		},
 		{
 			name: "live legacy and beta universes receive distinct profiles and default enabled states",
-			events: []seedEventRow{
-				{timestamp: "2025-01-01T10:00:00Z", event: "LoadGame", commander: "MultiVerse", fid: "F900", universe: "live"},
-				{timestamp: "2025-02-01T10:00:00Z", event: "LoadGame", commander: "MultiVerse", fid: "F900", universe: "legacy"},
-				{timestamp: "2025-03-01T10:00:00Z", event: "LoadGame", commander: "MultiVerse", fid: "F900", universe: "beta"},
+			events: []dbtest.SeedEventRow{
+				{Timestamp: "2025-01-01T10:00:00Z", Event: "LoadGame", Commander: "MultiVerse", FID: "F900", Universe: "live"},
+				{Timestamp: "2025-02-01T10:00:00Z", Event: "LoadGame", Commander: "MultiVerse", FID: "F900", Universe: "legacy"},
+				{Timestamp: "2025-03-01T10:00:00Z", Event: "LoadGame", Commander: "MultiVerse", FID: "F900", Universe: "beta"},
 			},
 			wantProfiles: []gotProfile{
 				{profileKey: "live:f900:era:0", displayName: "MultiVerse", fid: "F900", universe: "live", eraIndex: 0, isArchivedCareer: 0, enabled: 1},
@@ -246,8 +196,8 @@ func TestResolveCommandersScenarios(testingContext *testing.T) {
 
 	for _, testCase := range testCases {
 		testingContext.Run(testCase.name, func(subtest *testing.T) {
-			conn := openResolverTestDB(subtest)
-			insertSeedEvents(subtest, conn, testCase.events)
+			conn := dbtest.OpenMemory(subtest)
+			dbtest.InsertSeedEvents(subtest, conn, testCase.events...)
 			runResolveCommanders(subtest, conn)
 			runResolveCommanders(subtest, conn)
 
@@ -319,15 +269,15 @@ func TestClassifyJournalUniverse(testingContext *testing.T) {
 }
 
 func TestResolveCommandersDeclarativeOverridesAndIdempotency(testingContext *testing.T) {
-	conn := openResolverTestDB(testingContext)
-	insertSeedEvents(testingContext, conn, []seedEventRow{
+	conn := dbtest.OpenMemory(testingContext)
+	dbtest.InsertSeedEvents(testingContext, conn,
 		// Same FID shared by two names that user wants to unmerge, plus a manual split on Main, plus transitive merge A -> B -> Main with a cycle back to A.
-		{timestamp: "2024-01-01T10:00:00Z", event: "LoadGame", commander: "SharedOld", fid: "F300", universe: "live"},
-		{timestamp: "2024-06-01T10:00:00Z", event: "LoadGame", commander: "SharedMain", fid: "F300", universe: "live"},
-		{timestamp: "2025-01-01T10:00:00Z", event: "FSDJump", commander: "SharedMain", fid: "F300", universe: "live"},
-		{timestamp: "2023-01-01T10:00:00Z", event: "FSDJump", commander: "NetLogA", fid: "", universe: "live"},
-		{timestamp: "2023-06-01T10:00:00Z", event: "FSDJump", commander: "NetLogB", fid: "", universe: "live"},
-	})
+		dbtest.SeedEventRow{Timestamp: "2024-01-01T10:00:00Z", Event: "LoadGame", Commander: "SharedOld", FID: "F300", Universe: "live"},
+		dbtest.SeedEventRow{Timestamp: "2024-06-01T10:00:00Z", Event: "LoadGame", Commander: "SharedMain", FID: "F300", Universe: "live"},
+		dbtest.SeedEventRow{Timestamp: "2025-01-01T10:00:00Z", Event: "FSDJump", Commander: "SharedMain", FID: "F300", Universe: "live"},
+		dbtest.SeedEventRow{Timestamp: "2023-01-01T10:00:00Z", Event: "FSDJump", Commander: "NetLogA", FID: "", Universe: "live"},
+		dbtest.SeedEventRow{Timestamp: "2023-06-01T10:00:00Z", Event: "FSDJump", Commander: "NetLogB", FID: "", Universe: "live"},
+	)
 
 	if _, err := conn.Exec(`
 		INSERT INTO commander_overrides (rule_type, source_key, target_key, split_timestamp, created_at) VALUES
@@ -386,7 +336,7 @@ func TestResolveCommandersDeclarativeOverridesAndIdempotency(testingContext *tes
 }
 
 func TestMigrateCommanderProfilesV13ZeroRescanBackfill(testingContext *testing.T) {
-	conn := openResolverTestDB(testingContext)
+	conn := dbtest.OpenMemory(testingContext)
 
 	// Simulate pre-v13 archive: commander_profiles empty, byte_offset > 0, unbackfilled FID/universe, .02.log rollover, and disabled commander.
 	if _, err := conn.Exec(`

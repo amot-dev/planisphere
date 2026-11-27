@@ -8,43 +8,25 @@ import (
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func lookupDefaultModeIDs(testingContext *testing.T, databaseConnection *sql.DB) (explorationID, tourismID, travelID int64) {
-	testingContext.Helper()
-	modeList, listError := modes.List(databaseConnection)
-	if listError != nil {
-		testingContext.Fatalf("modes.List: %v", listError)
-	}
-	for _, modeItem := range modeList {
-		switch modeItem.Name {
-		case "Exploration":
-			explorationID = modeItem.ID
-		case "Tourism":
-			tourismID = modeItem.ID
-		case "Travel":
-			travelID = modeItem.ID
-		}
-	}
-	if explorationID == 0 || tourismID == 0 || travelID == 0 {
-		testingContext.Fatalf("missing default modes: exp=%d tour=%d travel=%d", explorationID, tourismID, travelID)
-	}
-	return explorationID, tourismID, travelID
-}
-
 func TestPerExpeditionLegModesEngageCascadeAndActiveSync(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
-	explorationID, tourismID, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, databaseConnection)
+	explorationID, tourismID, travelID := defaultModes.Exploration, defaultModes.Tourism, defaultModes.Travel
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":1002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":1003,"StarPos":[20,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-01T13:00:00Z","event":"FSDJump","StarSystem":"Gamma","SystemAddress":1004,"StarPos":[30,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-04-01T13:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Gamma 1","BodyID":1,"StarSystem":"Gamma","SystemAddress":1004,"PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 		`{"timestamp":"2026-04-01T13:30:00Z","event":"FSDJump","StarSystem":"Transit Out","SystemAddress":1005,"StarPos":[35,0,0],"JumpDist":5.0}`,
-	})
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Bulk Engage Test", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"},
@@ -133,15 +115,16 @@ func TestPerExpeditionLegModesEngageCascadeAndActiveSync(testingContext *testing
 }
 
 func TestHistoricalLegSplitInheritsSplitLegModeAndOverlappingExpeditionsIsolateStats(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
-	explorationID, tourismID, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, databaseConnection)
+	explorationID, tourismID, travelID := defaultModes.Exploration, defaultModes.Tourism, defaultModes.Travel
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-05-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":3001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-05-01T11:00:00Z","event":"FSDJump","StarSystem":"MidStop","SystemAddress":3002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-05-01T12:00:00Z","event":"FSDJump","StarSystem":"OuterStop","SystemAddress":3003,"StarPos":[35,0,0],"JumpDist":25.0}`,
-	})
+	)
 
 	expeditionA, createAError := expedition.CreateWithWaypoints(databaseConnection, "Expedition A", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"},
@@ -223,19 +206,19 @@ func TestHistoricalLegSplitInheritsSplitLegModeAndOverlappingExpeditionsIsolateS
 }
 
 func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, _, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	travelID := expeditiontest.LookupDefaultModes(testingContext, databaseConnection).Travel
 
 	customMode, createModeError := modes.Create(databaseConnection, "Exobio Sprint", "Fast biology loop", "#00E5A3")
 	if createModeError != nil {
 		testingContext.Fatalf("modes.Create: %v", createModeError)
 	}
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-07-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":4001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-07-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":4002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-07-01T12:00:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":4003,"StarPos":[20,0,0],"JumpDist":10.0}`,
-	})
+	)
 
 	activeExp, createActiveErr := expedition.CreateWithWaypoints(databaseConnection, "Active Custom", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"},
@@ -301,8 +284,9 @@ func TestCustomModeUsageAndDeleteReassignment(testingContext *testing.T) {
 }
 
 func TestMigrateLegModesV11BackfillFromLegacyModeWindows(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	explorationID, tourismID, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, databaseConnection)
+	explorationID, tourismID, travelID := defaultModes.Exploration, defaultModes.Tourism, defaultModes.Travel
 
 	expeditionRecord, createLegacyErr := expedition.CreateWithWaypoints(databaseConnection, "Legacy Upgrade", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"},
@@ -358,15 +342,16 @@ func TestMigrateLegModesV11BackfillFromLegacyModeWindows(testingContext *testing
 }
 
 func TestLoadModeLookupDepartureSpansAndInSystemFrontier(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
-	explorationID, _, travelID := lookupDefaultModeIDs(testingContext, databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, databaseConnection)
+	explorationID, travelID := defaultModes.Exploration, defaultModes.Travel
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-10-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":6001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-10-01T11:00:00Z","event":"FSDJump","StarSystem":"Vela","SystemAddress":6002,"StarPos":[10,0,0],"JumpDist":10.0}`,
 		`{"timestamp":"2026-10-01T11:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Vela 1","BodyID":1,"StarSystem":"Vela","SystemAddress":6002,"PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
-	})
+	)
 
 	expeditionRecord, createInSysErr := expedition.CreateWithWaypoints(databaseConnection, "In-System Mode Test", "", []expedition.SeedWaypoint{
 		{SystemName: "Sol"},
@@ -394,12 +379,9 @@ func TestLoadModeLookupDepartureSpansAndInSystemFrontier(testingContext *testing
 	}
 
 	// Depart Vela for Colonia: Vela's scan remains Exploration while the departure jump maps to Travel.
-	if _, execErr := databaseConnection.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, star_x, star_y, star_z, raw_json, source_file, ingested_at)
-		 VALUES ('ev-mode-depart-vela', '2026-10-01T11:30:00Z', 'FSDJump', 'Transit', 6003, 20, 0, 0, '{"timestamp":"2026-10-01T11:30:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":6003,"StarPos":[20,0,0],"JumpDist":10.0}', 't.log', '2026-10-01T11:30:00Z')`,
-	); execErr != nil {
-		testingContext.Fatalf("insert departure jump: %v", execErr)
-	}
+	journaltest.InsertParsedLines(testingContext, databaseConnection,
+		`{"timestamp":"2026-10-01T11:30:00Z","event":"FSDJump","StarSystem":"Transit","SystemAddress":6003,"StarPos":[20,0,0],"JumpDist":10.0}`,
+	)
 	if _, reevalErr := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalErr != nil {
 		testingContext.Fatalf("ReevaluateTx: %v", reevalErr)
 	}

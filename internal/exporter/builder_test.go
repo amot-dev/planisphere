@@ -2,27 +2,23 @@ package exporter_test
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"math"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
-	"planisphere/internal/projections"
-	"planisphere/internal/projections/realization"
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/reference"
 	replaystats "planisphere/internal/replay/stats"
-	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 type exportTestFixture struct {
@@ -31,34 +27,10 @@ type exportTestFixture struct {
 	expeditionProjections *expedition.Projections
 }
 
-func newTestProjections(databaseConnection *sql.DB, bus *projection.Bus) *expedition.Projections {
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, bus)
-	salesLedger := realization.NewSalesLedger(databaseConnection, bus)
-	return &expedition.Projections{
-		Arrivals:       projections.NewSystemArrivals(databaseConnection, bus),
-		VisitCounts:    projections.NewSystemVisitCounts(databaseConnection, bus, recoveredJumps),
-		ShipHistory:    projections.NewShipHistory(databaseConnection, bus),
-		TimeRangeStats: stats.NewTimeRangeStats(databaseConnection, bus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
-		SalesLedger:    salesLedger,
-		RecoveredJumps: recoveredJumps,
-	}
-}
-
 func setupExportFixture(testingContext *testing.T) *exportTestFixture {
 	testingContext.Helper()
-	databasePath := filepath.Join(testingContext.TempDir(), "export_test.sqlite")
-	databaseConnection, openError := db.Open(databasePath)
-	if openError != nil {
-		testingContext.Fatalf("open test db: %v", openError)
-	}
-	testingContext.Cleanup(func() {
-		if closeError := databaseConnection.Close(); closeError != nil {
-			testingContext.Errorf("close test db: %v", closeError)
-		}
-	})
-
-	bus := projection.NewBus()
-	expeditionProjections := newTestProjections(databaseConnection, bus)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	bus, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
 	return &exportTestFixture{
 		databaseConnection:    databaseConnection,
 		bus:                   bus,
@@ -66,39 +38,9 @@ func setupExportFixture(testingContext *testing.T) *exportTestFixture {
 	}
 }
 
-func (fixture *exportTestFixture) insertEvent(testingContext *testing.T, timestamp, eventName, keyIdentifier, rawJSON string) {
+func (fixture *exportTestFixture) insertLines(testingContext *testing.T, lines ...string) {
 	testingContext.Helper()
-	var systemEnvelope struct {
-		StarSystem string `json:"StarSystem"`
-	}
-	if unmarshalError := json.Unmarshal([]byte(rawJSON), &systemEnvelope); unmarshalError != nil {
-		testingContext.Fatalf("unmarshal test event %s: %v", eventName, unmarshalError)
-	}
-	eventUID := journal.ComputeUID(timestamp, eventName, keyIdentifier)
-	if _, execError := fixture.databaseConnection.Exec(
-		`INSERT INTO journal_events (event_uid, timestamp, event, system_name, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		eventUID, timestamp, eventName, systemEnvelope.StarSystem, rawJSON, timestamp,
-	); execError != nil {
-		testingContext.Fatalf("insert test event %s: %v", eventName, execError)
-	}
-	if parsedEvent, ok := journal.ParseEventType(eventName); ok {
-		fixture.bus.PublishJournal(journal.NewEventSet(parsedEvent))
-	}
-}
-
-func (fixture *exportTestFixture) lookupModeID(testingContext *testing.T, targetName string) int64 {
-	testingContext.Helper()
-	modeList, listError := modes.List(fixture.databaseConnection)
-	if listError != nil {
-		testingContext.Fatalf("list modes: %v", listError)
-	}
-	for _, modeItem := range modeList {
-		if modeItem.Name == targetName {
-			return modeItem.ID
-		}
-	}
-	testingContext.Fatalf("mode %q not found", targetName)
-	return 0
+	journaltest.PublishParsedLines(testingContext, fixture.databaseConnection, fixture.bus, lines...)
 }
 
 func (fixture *exportTestFixture) builderDeps(fixedTime time.Time) exporter.BuilderDeps {
@@ -113,8 +55,11 @@ func TestBuildRejectsPlanningAndStagedExpeditions(testingContext *testing.T) {
 	fixture := setupExportFixture(testingContext)
 	fixedTime := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	fixture.insertEvent(testingContext, "2026-04-01T10:00:00Z", "LoadGame", "cmdr", `{"timestamp":"2026-04-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Tester","Ship":"Mandalay"}`)
-	fixture.insertEvent(testingContext, "2026-04-01T10:05:00Z", "Location", "sol", `{"timestamp":"2026-04-01T10:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`)
+	fixture.insertLines(
+		testingContext,
+		`{"timestamp":"2026-04-01T10:00:00Z","event":"LoadGame","Commander":"CMDR Tester","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-04-01T10:05:00Z","event":"Location","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0]}`,
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(
 		fixture.databaseConnection,
@@ -130,8 +75,8 @@ func TestBuildRejectsPlanningAndStagedExpeditions(testingContext *testing.T) {
 		testingContext.Fatalf("expected ErrNotExportable for planning expedition, got %v", planningError)
 	}
 
-	explorationID := fixture.lookupModeID(testingContext, "Exploration")
-	if startError := expedition.StartTx(fixture.databaseConnection, expeditionRecord.ID, "2026-04-01T10:05:00Z", explorationID); startError != nil {
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, fixture.databaseConnection)
+	if startError := expedition.StartTx(fixture.databaseConnection, expeditionRecord.ID, "2026-04-01T10:05:00Z", defaultModes.Exploration); startError != nil {
 		testingContext.Fatalf("start expedition: %v", startError)
 	}
 	if _, stagedError := exporter.Build(fixture.databaseConnection, expeditionRecord.ID, fixture.builderDeps(fixedTime)); !errors.Is(stagedError, exporter.ErrNotExportable) {
@@ -142,24 +87,22 @@ func TestBuildRejectsPlanningAndStagedExpeditions(testingContext *testing.T) {
 func TestBuildCompletedExpeditionBoundariesAndModeBuckets(testingContext *testing.T) {
 	fixture := setupExportFixture(testingContext)
 	fixedTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	explorationID := fixture.lookupModeID(testingContext, "Exploration")
-	travelID := fixture.lookupModeID(testingContext, "Travel")
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, fixture.databaseConnection)
+	explorationID := defaultModes.Exploration
+	travelID := defaultModes.Travel
 
-	// Pre-expedition history including an in-system jump into origin Sol.
-	fixture.insertEvent(testingContext, "2026-03-01T08:00:00Z", "LoadGame", "cmdr", `{"timestamp":"2026-03-01T08:00:00Z","event":"LoadGame","Commander":"CMDR Tester","Ship":"Mandalay"}`)
-	fixture.insertEvent(testingContext, "2026-03-01T09:00:00Z", "FSDJump", "pre", `{"timestamp":"2026-03-01T09:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":25.0}`)
-
-	// Leg 1 (Exploration): depart Sol -> arrive Waypoint Alpha + in-system scan.
-	fixture.insertEvent(testingContext, "2026-04-01T10:00:00Z", "FSDJump", "leg1-a", `{"timestamp":"2026-04-01T10:00:00Z","event":"FSDJump","StarSystem":"Midpoint One","SystemAddress":1001,"StarPos":[50,0,0],"JumpDist":50.0}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:00:00Z", "FSDJump", "leg1-b", `{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha Waypoint","SystemAddress":2002,"StarPos":[120,0,0],"JumpDist":70.0}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:15:00Z", "Scan", "alpha-scan", `{"timestamp":"2026-04-01T11:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Alpha Waypoint A 1","BodyID":1,"StarSystem":"Alpha Waypoint","SystemAddress":2002,"PlanetClass":"High metal content body","MassEM":1.2,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`)
-
-	// Leg 2 (Travel): depart Alpha -> arrive Beta Waypoint + final in-system scan.
-	fixture.insertEvent(testingContext, "2026-04-02T10:00:00Z", "FSDJump", "leg2-a", `{"timestamp":"2026-04-02T10:00:00Z","event":"FSDJump","StarSystem":"Beta Waypoint","SystemAddress":3003,"StarPos":[200,0,0],"JumpDist":80.0}`)
-	fixture.insertEvent(testingContext, "2026-04-02T10:20:00Z", "Scan", "beta-scan", `{"timestamp":"2026-04-02T10:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta Waypoint A 1","BodyID":1,"StarSystem":"Beta Waypoint","SystemAddress":3003,"PlanetClass":"Water world","MassEM":1.5,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`)
-
-	// Subsequent post-expedition flight that must NOT leak into completed expedition telemetry.
-	fixture.insertEvent(testingContext, "2026-05-10T15:00:00Z", "FSDJump", "later-trip", `{"timestamp":"2026-05-10T15:00:00Z","event":"FSDJump","StarSystem":"Distant Star","SystemAddress":9009,"StarPos":[400,0,0],"JumpDist":200.0}`)
+	// Pre-expedition history including an in-system jump into origin Sol, followed by Leg 1 (Exploration), Leg 2 (Travel), and post-expedition flight.
+	fixture.insertLines(
+		testingContext,
+		`{"timestamp":"2026-03-01T08:00:00Z","event":"LoadGame","Commander":"CMDR Tester","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-03-01T09:00:00Z","event":"FSDJump","StarSystem":"Sol","SystemAddress":10477373803,"StarPos":[0,0,0],"JumpDist":25.0}`,
+		`{"timestamp":"2026-04-01T10:00:00Z","event":"FSDJump","StarSystem":"Midpoint One","SystemAddress":1001,"StarPos":[50,0,0],"JumpDist":50.0}`,
+		`{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha Waypoint","SystemAddress":2002,"StarPos":[120,0,0],"JumpDist":70.0}`,
+		`{"timestamp":"2026-04-01T11:15:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Alpha Waypoint A 1","BodyID":1,"StarSystem":"Alpha Waypoint","SystemAddress":2002,"PlanetClass":"High metal content body","MassEM":1.2,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-04-02T10:00:00Z","event":"FSDJump","StarSystem":"Beta Waypoint","SystemAddress":3003,"StarPos":[200,0,0],"JumpDist":80.0}`,
+		`{"timestamp":"2026-04-02T10:20:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta Waypoint A 1","BodyID":1,"StarSystem":"Beta Waypoint","SystemAddress":3003,"PlanetClass":"Water world","MassEM":1.5,"TerraformState":"","WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-05-10T15:00:00Z","event":"FSDJump","StarSystem":"Distant Star","SystemAddress":9009,"StarPos":[400,0,0],"JumpDist":200.0}`,
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(
 		fixture.databaseConnection,
@@ -255,8 +198,11 @@ func TestBuildPropagatesCommanderQueryError(testingContext *testing.T) {
 	fixture := setupExportFixture(testingContext)
 	fixedTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-	fixture.insertEvent(testingContext, "2026-04-01T10:00:00Z", "Location", "sol", `{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:00:00Z", "FSDJump", "alpha", `{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[30,0,0],"JumpDist":30.0}`)
+	fixture.insertLines(
+		testingContext,
+		`{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[30,0,0],"JumpDist":30.0}`,
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(
 		fixture.databaseConnection,
@@ -283,8 +229,9 @@ func TestBuildPropagatesCommanderQueryError(testingContext *testing.T) {
 func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingContext *testing.T) {
 	fixture := setupExportFixture(testingContext)
 	fixedTime := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
-	explorationID := fixture.lookupModeID(testingContext, "Exploration")
-	tourismID := fixture.lookupModeID(testingContext, "Tourism")
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, fixture.databaseConnection)
+	explorationID := defaultModes.Exploration
+	tourismID := defaultModes.Tourism
 	if _, createModeError := modes.Create(fixture.databaseConnection, "Unused Custom", "Never selected", "#123456"); createModeError != nil {
 		testingContext.Fatalf("create custom mode: %v", createModeError)
 	}
@@ -297,12 +244,15 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 		testingContext.Fatalf("seed commanders: %v", seedCmdrsError)
 	}
 
-	fixture.insertEvent(testingContext, "2026-04-01T09:00:00Z", "LoadGame", "lg", `{"timestamp":"2026-04-01T09:00:00Z","event":"LoadGame","Commander":"CMDR First","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`)
-	fixture.insertEvent(testingContext, "2026-04-01T10:00:00Z", "Location", "sol", `{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:00:00Z", "FSDJump", "mid", `{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Midway","SystemAddress":2001,"StarPos":[40,0,0],"JumpDist":40.0}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:10:00Z", "ShipyardSwap", "swap", `{"timestamp":"2026-04-01T11:10:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:20:00Z", "FSDJump", "alpha", `{"timestamp":"2026-04-01T11:20:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[90,0,0],"JumpDist":50.0}`)
-	fixture.insertEvent(testingContext, "2026-04-01T11:30:00Z", "Scan", "scan", `{"timestamp":"2026-04-01T11:30:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":2002,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"Water world","MassEM":1.1,"WasDiscovered":false,"WasMapped":false}`)
+	fixture.insertLines(
+		testingContext,
+		`{"timestamp":"2026-04-01T09:00:00Z","event":"LoadGame","Commander":"CMDR First","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1}`,
+		`{"timestamp":"2026-04-01T10:00:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Midway","SystemAddress":2001,"StarPos":[40,0,0],"JumpDist":40.0}`,
+		`{"timestamp":"2026-04-01T11:10:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}`,
+		`{"timestamp":"2026-04-01T11:20:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[90,0,0],"JumpDist":50.0}`,
+		`{"timestamp":"2026-04-01T11:30:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Alpha","SystemAddress":2002,"BodyID":1,"BodyName":"Alpha 1","PlanetClass":"Water world","MassEM":1.1,"WasDiscovered":false,"WasMapped":false}`,
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(
 		fixture.databaseConnection,
@@ -340,7 +290,7 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 	}
 
 	// Depart Alpha under Tourism: now Exploration (visited leg) and Tourism (trailing active leg) are active while Travel and Unused Custom are skipped.
-	fixture.insertEvent(testingContext, "2026-04-01T12:00:00Z", "FSDJump", "outbound", `{"timestamp":"2026-04-01T12:00:00Z","event":"FSDJump","StarSystem":"Outbound","SystemAddress":2009,"StarPos":[120,0,0],"JumpDist":30.0}`)
+	fixture.insertLines(testingContext, `{"timestamp":"2026-04-01T12:00:00Z","event":"FSDJump","StarSystem":"Outbound","SystemAddress":2009,"StarPos":[120,0,0],"JumpDist":30.0}`)
 	if _, reevalError := expedition.ReevaluateTx(fixture.databaseConnection, expeditionRecord.ID); reevalError != nil {
 		testingContext.Fatalf("reevaluate after departure: %v", reevalError)
 	}

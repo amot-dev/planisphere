@@ -249,46 +249,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 		testingContext.Fatalf("CreateExpedition: %v", createError)
 	}
 
-	var emittedMutex sync.Mutex
-	var emittedDataChanges []DataChanged
-	var emittedPendingStates []bool
-	var pendingTrueChan = make(chan struct{}, 4)
-
-	setTestEmitHook(testingContext, testApp, func(eventName string, payload ...any) {
-		emittedMutex.Lock()
-		defer emittedMutex.Unlock()
-		switch eventName {
-		case EventDataChanged:
-			if len(payload) > 0 {
-				if dataChanged, ok := payload[0].(DataChanged); ok {
-					emittedDataChanges = append(emittedDataChanges, dataChanged)
-				}
-			}
-		case EventSyncPending:
-			if len(payload) > 0 {
-				if pendingState, ok := payload[0].(bool); ok {
-					emittedPendingStates = append(emittedPendingStates, pendingState)
-					if pendingState {
-						select {
-						case pendingTrueChan <- struct{}{}:
-						default:
-						}
-					}
-				}
-			}
-		}
-	})
-
-	takeEmitted := func() ([]DataChanged, []bool) {
-		testingContext.Helper()
-		emittedMutex.Lock()
-		defer emittedMutex.Unlock()
-		changes := append([]DataChanged(nil), emittedDataChanges...)
-		pending := append([]bool(nil), emittedPendingStates...)
-		emittedDataChanges = nil
-		emittedPendingStates = nil
-		return changes, pending
-	}
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 
 	testApp.SetLiveSyncPaused(true)
 
@@ -302,7 +263,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 	if deleteError := testApp.DeleteExpedition(expeditionRecord.ID); deleteError != nil {
 		testingContext.Fatalf("DeleteExpedition while paused: %v", deleteError)
 	}
-	userChanges, pendingAfterUserMutations := takeEmitted()
+	userChanges, pendingAfterUserMutations := eventsRecorder.TakeAll()
 	if len(userChanges) != 3 {
 		testingContext.Fatalf("expected 3 immediate DataChanged emissions for user mutations while paused, got %d (%+v)", len(userChanges), userChanges)
 	}
@@ -318,7 +279,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 		LatestTimestamp:   "2026-04-03T12:00:00Z",
 	})
 	testApp.publishBackgroundApp(0, events.AppSettingsChanged)
-	deferredChanges, pendingAfterBackground := takeEmitted()
+	deferredChanges, pendingAfterBackground := eventsRecorder.TakeAll()
 	if len(deferredChanges) != 0 {
 		testingContext.Fatalf("expected 0 DataChanged emissions for background updates while paused, got %+v", deferredChanges)
 	}
@@ -328,7 +289,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 
 	// Resuming live sync clears sync:pending and emits one coalesced DataChanged union.
 	testApp.SetLiveSyncPaused(false)
-	flushedChanges, pendingAfterResume := takeEmitted()
+	flushedChanges, pendingAfterResume := eventsRecorder.TakeAll()
 	if !slices.Equal(pendingAfterResume, []bool{false}) {
 		testingContext.Fatalf("expected sync:pending [false] on resume, got %v", pendingAfterResume)
 	}
@@ -349,7 +310,7 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 		testingContext.Fatalf("write live journal while paused: %v", writeError)
 	}
 	select {
-	case <-pendingTrueChan:
+	case <-eventsRecorder.PendingTrue():
 	case <-time.After(2 * time.Second):
 		testingContext.Fatalf("timed out waiting for watcher sync:pending while paused")
 	}
@@ -361,12 +322,12 @@ func TestLiveSyncPauseAllowsUserMutationsAndDefersBackgroundUpdates(testingConte
 	if statusWhilePaused.EventsStored != 0 {
 		testingContext.Fatalf("expected 0 stored events while watcher is paused, got %d", statusWhilePaused.EventsStored)
 	}
-	_, _ = takeEmitted()
+	_, _ = eventsRecorder.TakeAll()
 
 	if rescanError := testApp.RescanJournals(); rescanError != nil {
 		testingContext.Fatalf("RescanJournals while paused: %v", rescanError)
 	}
-	rescanChanges, pendingAfterRescan := takeEmitted()
+	rescanChanges, pendingAfterRescan := eventsRecorder.TakeAll()
 	if len(rescanChanges) != 1 {
 		testingContext.Fatalf("expected explicit RescanJournals to emit DataChanged while paused, got %+v", rescanChanges)
 	}

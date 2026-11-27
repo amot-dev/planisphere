@@ -2,36 +2,24 @@ package projections_test
 
 import (
 	"context"
-	"database/sql"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
 	"planisphere/internal/replay"
 	"planisphere/internal/sources/journal"
 	"planisphere/internal/store/settings"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
 
-func openProjectionTestDB(testingContext *testing.T) *sql.DB {
-	testingContext.Helper()
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("open in-memory db: %v", openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-	return databaseConnection
-}
-
 func TestRecoveredJumpsPositiveAndBoostLifecycle(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
+	databaseConnection := dbtest.OpenMemory(testingContext)
 	temporaryDirectory := testingContext.TempDir()
 	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-11-16T180124.01.log")
 
@@ -175,11 +163,10 @@ func TestRecoveredJumpsPositiveAndBoostLifecycle(testingContext *testing.T) {
 }
 
 func TestRecoveredJumpsRejections(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-11-16T190000.01.log")
-
-	lines := []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-11-17T02:00:00Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F2","Ship":"Mandalay"}`,
 		`{"timestamp":"2026-11-17T02:00:05Z","event":"Location","StarSystem":"StartSys","SystemAddress":200,"StarPos":[0,0,0],"Docked":false}`,
 		// Missing StartJump (e.g. multi-machine gap without synced journals) -> rejected
@@ -207,13 +194,7 @@ func TestRecoveredJumpsRejections(testingContext *testing.T) {
 		`{"timestamp":"2026-11-17T02:12:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"ShuttleDest","SystemAddress":207,"Taxi":true}`,
 		`{"timestamp":"2026-11-17T02:12:30Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F2","Ship":"ExplorationSuit_Class1"}`,
 		`{"timestamp":"2026-11-17T02:12:40Z","event":"Location","StarSystem":"ShuttleDest","SystemAddress":207,"StarPos":[520,0,0],"Docked":false,"OnFoot":true,"Taxi":true}`,
-	}
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatal(scanError)
-	}
+	)
 
 	recovered, recoverError := replay.ComputeRecoveredJumpsInRangeScoped(databaseConnection, "", "", replay.ProfileScope{})
 	if recoverError != nil {
@@ -225,48 +206,25 @@ func TestRecoveredJumpsRejections(testingContext *testing.T) {
 }
 
 func TestRecoveredJumpsMultiCommanderIsolation(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-
-	sessions := []struct {
-		fileName string
-		lines    []string
-	}{
-		{
-			fileName: "Journal.2026-11-17T030000.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-17T03:00:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
-				`{"timestamp":"2026-11-17T03:00:05Z","event":"Location","StarSystem":"StartSystem","SystemAddress":1000,"StarPos":[1000,0,0],"Docked":false}`,
-				`{"timestamp":"2026-11-17T03:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"DeepDest","SystemAddress":1001}`,
-			},
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestFiles(testingContext, databaseConnection, map[string][]string{
+		"Journal.2026-11-17T030000.01.log": {
+			`{"timestamp":"2026-11-17T03:00:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
+			`{"timestamp":"2026-11-17T03:00:05Z","event":"Location","StarSystem":"StartSystem","SystemAddress":1000,"StarPos":[1000,0,0],"Docked":false}`,
+			`{"timestamp":"2026-11-17T03:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"DeepDest","SystemAddress":1001}`,
 		},
-		{
-			fileName: "Journal.2026-11-17T030200.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-17T03:02:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"CobraMkV"}`,
-				`{"timestamp":"2026-11-17T03:02:05Z","event":"Location","StarSystem":"Sol","SystemAddress":2000,"StarPos":[0,0,0],"Docked":false}`,
-				`{"timestamp":"2026-11-17T03:02:30Z","event":"JetConeBoost","BoostValue":4.0}`,
-				`{"timestamp":"2026-11-17T03:02:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"BubbleDest","SystemAddress":2001}`,
-				`{"timestamp":"2026-11-17T03:03:00Z","event":"FSDJump","StarSystem":"BubbleDest","SystemAddress":2001,"StarPos":[0,30,0],"JumpDist":30.0}`,
-			},
+		"Journal.2026-11-17T030200.01.log": {
+			`{"timestamp":"2026-11-17T03:02:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"CobraMkV"}`,
+			`{"timestamp":"2026-11-17T03:02:05Z","event":"Location","StarSystem":"Sol","SystemAddress":2000,"StarPos":[0,0,0],"Docked":false}`,
+			`{"timestamp":"2026-11-17T03:02:30Z","event":"JetConeBoost","BoostValue":4.0}`,
+			`{"timestamp":"2026-11-17T03:02:45Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"BubbleDest","SystemAddress":2001}`,
+			`{"timestamp":"2026-11-17T03:03:00Z","event":"FSDJump","StarSystem":"BubbleDest","SystemAddress":2001,"StarPos":[0,30,0],"JumpDist":30.0}`,
 		},
-		{
-			fileName: "Journal.2026-11-17T030500.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-17T03:05:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
-				`{"timestamp":"2026-11-17T03:05:10Z","event":"Location","StarSystem":"DeepDest","SystemAddress":1001,"StarPos":[1000,60,80],"Docked":false}`,
-			},
+		"Journal.2026-11-17T030500.01.log": {
+			`{"timestamp":"2026-11-17T03:05:00Z","event":"LoadGame","Commander":"CmdrExplorer","FID":"F10","Ship":"Mandalay"}`,
+			`{"timestamp":"2026-11-17T03:05:10Z","event":"Location","StarSystem":"DeepDest","SystemAddress":1001,"StarPos":[1000,60,80],"Docked":false}`,
 		},
-	}
-	for _, session := range sessions {
-		journalPath := filepath.Join(temporaryDirectory, session.fileName)
-		if writeError := os.WriteFile(journalPath, []byte(strings.Join(session.lines, "\n")+"\n"), 0o644); writeError != nil {
-			testingContext.Fatal(writeError)
-		}
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatal(scanError)
-	}
+	})
 
 	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
@@ -282,11 +240,10 @@ func TestRecoveredJumpsMultiCommanderIsolation(testingContext *testing.T) {
 }
 
 func TestRecoveredCarrierJumpsContinuousStayAndOnFootConcourse(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-11-23T173623.01.log")
-
-	lines := []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-11-23T22:00:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"Explorer_NX"}`,
 		`{"timestamp":"2026-11-23T22:00:58Z","event":"FSDJump","StarSystem":"OriginSys","SystemAddress":5001,"StarPos":[0,0,0],"JumpDist":50.0}`,
 		`{"timestamp":"2026-11-23T22:04:45Z","event":"Docked","StarSystem":"OriginSys","SystemAddress":5001,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
@@ -309,13 +266,7 @@ func TestRecoveredCarrierJumpsContinuousStayAndOnFootConcourse(testingContext *t
 		`{"timestamp":"2026-11-24T00:20:00Z","event":"CarrierJump","StarSystem":"CarrierOnline5","SystemAddress":5006,"StarPos":[500,100,0],"Docked":false,"OnFoot":true,"BodyType":"Star"}`,
 		`{"timestamp":"2026-11-24T00:45:00Z","event":"LoadGame","Commander":"CmdrCarrier","FID":"F30","Ship":"Explorer_NX"}`,
 		`{"timestamp":"2026-11-24T00:45:10Z","event":"Location","StarSystem":"CarrierHop5","SystemAddress":5007,"StarPos":[500,175,0],"Docked":true,"StationName":"K1V-6QB","StationType":"FleetCarrier","MarketID":3701199360}`,
-	}
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatal(scanError)
-	}
+	)
 
 	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
@@ -344,11 +295,10 @@ func TestRecoveredCarrierJumpsContinuousStayAndOnFootConcourse(testingContext *t
 }
 
 func TestRecoveredCarrierJumpsRejections(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-11-23T180000.01.log")
-
-	lines := []string{
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestLines(
+		testingContext,
+		databaseConnection,
 		`{"timestamp":"2026-11-23T18:00:00Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
 		`{"timestamp":"2026-11-23T18:00:05Z","event":"Location","StarSystem":"SysStart","SystemAddress":6001,"StarPos":[0,0,0],"Docked":true,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
 		// Undocked before logging in on same carrier in another system -> rejected
@@ -377,13 +327,7 @@ func TestRecoveredCarrierJumpsRejections(testingContext *testing.T) {
 		`{"timestamp":"2026-11-23T18:45:00Z","event":"Docked","StarSystem":"SysMissingArrival","SystemAddress":6008,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
 		`{"timestamp":"2026-11-23T18:49:50Z","event":"LoadGame","Commander":"CmdrGuard","FID":"F31","Ship":"Mandalay"}`,
 		`{"timestamp":"2026-11-23T18:50:00Z","event":"Location","StarSystem":"SysAfterGap","SystemAddress":6009,"StarPos":[700,0,0],"Docked":true,"StationName":"AAA-111","StationType":"FleetCarrier","MarketID":111}`,
-	}
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatal(writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatal(scanError)
-	}
+	)
 
 	recovered, recoverError := replay.ComputeRecoveredJumpsScoped(databaseConnection, replay.ProfileScope{})
 	if recoverError != nil {
@@ -395,63 +339,38 @@ func TestRecoveredCarrierJumpsRejections(testingContext *testing.T) {
 }
 
 func TestRecoveredJumpsMidJumpRenameAndSameNameWipeIsolation(testingContext *testing.T) {
-	databaseConnection := openProjectionTestDB(testingContext)
-	temporaryDirectory := testingContext.TempDir()
-
-	files := []struct {
-		name  string
-		lines []string
-	}{
-		{
-			// Mid-jump character rename under same FID F900 -> must recover jump with BoostUsed=4.
-			name: "Journal.2026-11-24T010000.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-24T01:00:00Z","event":"LoadGame","Commander":"CmdrBeforeRename","FID":"F900","Ship":"Mandalay"}`,
-				`{"timestamp":"2026-11-24T01:00:05Z","event":"Location","StarSystem":"RenameOrigin","SystemAddress":9001,"StarPos":[0,0,0],"Docked":false}`,
-				`{"timestamp":"2026-11-24T01:01:00Z","event":"JetConeBoost","BoostValue":4.0}`,
-				`{"timestamp":"2026-11-24T01:01:30Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"RenameDest","SystemAddress":9002}`,
-			},
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestFiles(testingContext, databaseConnection, map[string][]string{
+		// Mid-jump character rename under same FID F900 -> must recover jump with BoostUsed=4.
+		"Journal.2026-11-24T010000.01.log": {
+			`{"timestamp":"2026-11-24T01:00:00Z","event":"LoadGame","Commander":"CmdrBeforeRename","FID":"F900","Ship":"Mandalay"}`,
+			`{"timestamp":"2026-11-24T01:00:05Z","event":"Location","StarSystem":"RenameOrigin","SystemAddress":9001,"StarPos":[0,0,0],"Docked":false}`,
+			`{"timestamp":"2026-11-24T01:01:00Z","event":"JetConeBoost","BoostValue":4.0}`,
+			`{"timestamp":"2026-11-24T01:01:30Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"RenameDest","SystemAddress":9002}`,
 		},
-		{
-			// Interleaved second profile disconnecting and reconnecting between F900's StartJump (01:01:30Z) and F900's reconnect LoadGame (01:05:00Z).
-			name: "Journal.2026-11-24T010200.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-24T01:02:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
-				`{"timestamp":"2026-11-24T01:02:05Z","event":"Location","StarSystem":"InterleavedOrigin","SystemAddress":9201,"StarPos":[0,0,0],"Docked":false}`,
-				`{"timestamp":"2026-11-24T01:02:20Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"InterleavedDest","SystemAddress":9202}`,
-				`{"timestamp":"2026-11-24T01:03:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
-				`{"timestamp":"2026-11-24T01:03:10Z","event":"Location","StarSystem":"InterleavedDest","SystemAddress":9202,"StarPos":[0,0,90],"Docked":false}`,
-			},
+		// Interleaved second profile disconnecting and reconnecting between F900's StartJump (01:01:30Z) and F900's reconnect LoadGame (01:05:00Z).
+		"Journal.2026-11-24T010200.01.log": {
+			`{"timestamp":"2026-11-24T01:02:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
+			`{"timestamp":"2026-11-24T01:02:05Z","event":"Location","StarSystem":"InterleavedOrigin","SystemAddress":9201,"StarPos":[0,0,0],"Docked":false}`,
+			`{"timestamp":"2026-11-24T01:02:20Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"InterleavedDest","SystemAddress":9202}`,
+			`{"timestamp":"2026-11-24T01:03:00Z","event":"LoadGame","Commander":"CmdrInterleaved","FID":"F902","Ship":"Krait_Light"}`,
+			`{"timestamp":"2026-11-24T01:03:10Z","event":"Location","StarSystem":"InterleavedDest","SystemAddress":9202,"StarPos":[0,0,90],"Docked":false}`,
 		},
-		{
-			name: "Journal.2026-11-24T010500.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-24T01:05:00Z","event":"LoadGame","Commander":"CmdrAfterRename","FID":"F900","Ship":"Mandalay"}`,
-				`{"timestamp":"2026-11-24T01:05:10Z","event":"Location","StarSystem":"RenameDest","SystemAddress":9002,"StarPos":[0,150,0],"Docked":false}`,
-			},
+		"Journal.2026-11-24T010500.01.log": {
+			`{"timestamp":"2026-11-24T01:05:00Z","event":"LoadGame","Commander":"CmdrAfterRename","FID":"F900","Ship":"Mandalay"}`,
+			`{"timestamp":"2026-11-24T01:05:10Z","event":"Location","StarSystem":"RenameDest","SystemAddress":9002,"StarPos":[0,150,0],"Docked":false}`,
 		},
-		{
-			// Same-name Clear Save under FID F901 -> Era 0 StartJump must NEVER match Era 1 LoadGame/Location.
-			name: "Journal.2026-11-24T020000.01.log",
-			lines: []string{
-				`{"timestamp":"2026-11-24T02:00:00Z","event":"LoadGame","Commander":"CmdrSameWipe","FID":"F901","Ship":"Mandalay"}`,
-				`{"timestamp":"2026-11-24T02:00:05Z","event":"Location","StarSystem":"WipeOrigin","SystemAddress":9101,"StarPos":[0,0,0],"Docked":false}`,
-				`{"timestamp":"2026-11-24T02:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"WipeDest","SystemAddress":9102}`,
-				`{"timestamp":"2026-11-24T02:02:00Z","event":"ClearSavedGame","Name":"CmdrSameWipe","FID":"F901"}`,
-				`{"timestamp":"2026-11-24T02:02:10Z","event":"NewCommander","Name":"CmdrSameWipe","FID":"F901","Package":"Sidewinder"}`,
-				`{"timestamp":"2026-11-24T02:02:20Z","event":"LoadGame","Commander":"CmdrSameWipe","FID":"F901","Ship":"SideWinder"}`,
-				`{"timestamp":"2026-11-24T02:02:30Z","event":"Location","StarSystem":"WipeDest","SystemAddress":9102,"StarPos":[0,80,0],"Docked":false}`,
-			},
+		// Same-name Clear Save under FID F901 -> Era 0 StartJump must NEVER match Era 1 LoadGame/Location.
+		"Journal.2026-11-24T020000.01.log": {
+			`{"timestamp":"2026-11-24T02:00:00Z","event":"LoadGame","Commander":"CmdrSameWipe","FID":"F901","Ship":"Mandalay"}`,
+			`{"timestamp":"2026-11-24T02:00:05Z","event":"Location","StarSystem":"WipeOrigin","SystemAddress":9101,"StarPos":[0,0,0],"Docked":false}`,
+			`{"timestamp":"2026-11-24T02:01:00Z","event":"StartJump","JumpType":"Hyperspace","StarSystem":"WipeDest","SystemAddress":9102}`,
+			`{"timestamp":"2026-11-24T02:02:00Z","event":"ClearSavedGame","Name":"CmdrSameWipe","FID":"F901"}`,
+			`{"timestamp":"2026-11-24T02:02:10Z","event":"NewCommander","Name":"CmdrSameWipe","FID":"F901","Package":"Sidewinder"}`,
+			`{"timestamp":"2026-11-24T02:02:20Z","event":"LoadGame","Commander":"CmdrSameWipe","FID":"F901","Ship":"SideWinder"}`,
+			`{"timestamp":"2026-11-24T02:02:30Z","event":"Location","StarSystem":"WipeDest","SystemAddress":9102,"StarPos":[0,80,0],"Docked":false}`,
 		},
-	}
-	for _, spec := range files {
-		if err := os.WriteFile(filepath.Join(temporaryDirectory, spec.name), []byte(strings.Join(spec.lines, "\n")+"\n"), 0o644); err != nil {
-			testingContext.Fatal(err)
-		}
-	}
-	if _, err := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); err != nil {
-		testingContext.Fatal(err)
-	}
+	})
 
 	allRecovered, err := replay.ComputeRecoveredJumpsAll(databaseConnection)
 	if err != nil {

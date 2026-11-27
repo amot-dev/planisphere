@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"slices"
-	"sync"
 	"testing"
 
 	stats "planisphere/internal/replay/stats"
@@ -298,12 +296,8 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 			testingContext.Fatalf("ListExpeditions after %s: %v", trigger.name, listAfterErr)
 		}
 		if len(afterList) > 0 {
-			checkPlan, checkPlanErr := testApp.GetPlan(afterList[0].ID)
-			if checkPlanErr != nil {
-				testingContext.Fatalf("GetPlan after %s: %v", trigger.name, checkPlanErr)
-			}
-			if checkPlan.ActiveCarrierRoute != nil {
-				testingContext.Fatalf("%s: expected cancelled plot not to persist route, got %+v", trigger.name, checkPlan.ActiveCarrierRoute)
+			if activeRoute := mustGetActiveCarrierRoute(testingContext, testApp, afterList[0].ID); activeRoute != nil {
+				testingContext.Fatalf("%s: expected cancelled plot not to persist route, got %+v", trigger.name, activeRoute)
 			}
 		}
 	}
@@ -314,10 +308,7 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	if err != nil {
 		testingContext.Fatalf("createExpeditionWithWaypoints activeExp: %v", err)
 	}
-	activePlan, activePlanErr := testApp.GetPlan(activeExp.ID)
-	if activePlanErr != nil {
-		testingContext.Fatalf("GetPlan activeExp: %v", activePlanErr)
-	}
+	activePlan := mustGetPlan(testingContext, testApp, activeExp.ID)
 	beagleStopID := activePlan.Rows[1].Row.ID
 	if err := testApp.UpdateRow(expedition.RowPatch{ID: beagleStopID, FCStop: &fcStop}); err != nil {
 		testingContext.Fatalf("UpdateRow beagleStopID: %v", err)
@@ -332,25 +323,12 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	}
 
 	testApp.backgroundWg.Wait()
-	var emittedDomains [][]string
-	var emitMu sync.Mutex
-	setTestEmitHook(testingContext, testApp, func(event string, payload ...any) {
-		if event == EventDataChanged && len(payload) > 0 {
-			if changed, ok := payload[0].(DataChanged); ok {
-				emitMu.Lock()
-				emittedDomains = append(emittedDomains, changed.Domains)
-				emitMu.Unlock()
-			}
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 	if err := testApp.ClearActiveCarrierRouteWithUndo(activeExp.ID); err != nil {
 		testingContext.Fatalf("ClearActiveCarrierRouteWithUndo: %v", err)
 	}
-	emitMu.Lock()
-	sawPlanOnClear := len(emittedDomains) == 1 && slices.Contains(emittedDomains[0], "plan")
-	emitMu.Unlock()
-	if !sawPlanOnClear {
-		testingContext.Fatalf("expected ClearActiveCarrierRouteWithUndo to emit plan domain, got %+v", emittedDomains)
+	if len(eventsRecorder.DataChanges()) != 1 || eventsRecorder.CountDomain("plan") != 1 {
+		testingContext.Fatalf("expected ClearActiveCarrierRouteWithUndo to emit plan domain, got %+v", eventsRecorder.DataChanges())
 	}
 
 	if _, err := testApp.OpenManualCarrierRoute(activeExp.ID); err != nil {
@@ -359,10 +337,7 @@ func TestCarrierRoutePromptCancellationAndPlanEmissions(testingContext *testing.
 	if err := testApp.CompleteCarrierRouteArrival(activeExp.ID, 0, 0, 0); err != nil {
 		testingContext.Fatalf("CompleteCarrierRouteArrival(0): %v", err)
 	}
-	resolvedArrivalPlan, resolvedPlanErr := testApp.GetPlan(activeExp.ID)
-	if resolvedPlanErr != nil {
-		testingContext.Fatalf("GetPlan resolvedArrivalPlan: %v", resolvedPlanErr)
-	}
+	resolvedArrivalPlan := mustGetPlan(testingContext, testApp, activeExp.ID)
 	if !resolvedArrivalPlan.Rows[1].Row.FCArrived || resolvedArrivalPlan.ActiveCarrierRoute != nil {
 		testingContext.Fatalf("expected targetRowID=0 arrival to mark Beagle Point arrived and clear route, got row=%+v route=%+v",
 			resolvedArrivalPlan.Rows[1].Row, resolvedArrivalPlan.ActiveCarrierRoute)

@@ -1,10 +1,17 @@
 // @vitest-environment happy-dom
-import { act, createElement, useRef } from 'react'
-import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, useRef } from 'react'
+import { describe, expect, it, vi } from 'vitest'
 import { app, expedition, modes, stats } from '../../api/models'
 import {
-  type DataChangedDispatchContext,
+  createSyncDispatchHarness,
+  makeMode,
+  makePlanView,
+  makeSettings,
+  makeSidebarStats,
+} from '../../test/fixtures'
+import { renderHook } from '../../test/render'
+import { installWailsAppMock } from '../../test/wailsMock'
+import {
   type SyncBootLifecycleState,
   flushDeferredBootEvents,
   routeDataChangedEvent,
@@ -12,55 +19,7 @@ import {
 import { isExpeditionExportEnabled } from './useBackendSync'
 import { reconcileModeFilter, useDomainLoaders } from './useDomainLoaders'
 
-;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-afterEach(() => {
-  delete window.go
-})
-
-function createDispatchHarness(
-  bootOverrides: Partial<SyncBootLifecycleState> = {},
-  expeditionId = 4,
-) {
-  const filter = stats.Filter.createFrom({ enabled: false, modes: [] })
-  const refreshExpeditionListOnly = vi.fn()
-  const loadIngestStatusOnly = vi.fn(async () => null)
-  const loadSettingsOnly = vi.fn(async () => null)
-  const loadModesOnly = vi.fn(async () => null)
-  const loadPlanOnly = vi.fn(async () => {})
-  const loadStatsOnly = vi.fn(async () => {})
-  const refreshAll = vi.fn()
-
-  const dispatchContext: DataChangedDispatchContext = {
-    bootState: {
-      initialBootComplete: true,
-      bootCoreLoaded: true,
-      deferredPayloads: [],
-      ...bootOverrides,
-    },
-    currentActiveExpeditionId: expeditionId,
-    currentFilter: filter,
-    refreshExpeditionListOnly,
-    loadIngestStatusOnly,
-    loadSettingsOnly,
-    loadModesOnly,
-    loadPlanOnly,
-    loadStatsOnly,
-    refreshAll,
-  }
-
-  return {
-    filter,
-    dispatchContext,
-    refreshExpeditionListOnly,
-    loadIngestStatusOnly,
-    loadSettingsOnly,
-    loadModesOnly,
-    loadPlanOnly,
-    loadStatsOnly,
-    refreshAll,
-  }
-}
+const createDispatchHarness = createSyncDispatchHarness
 
 describe('routeDataChangedEvent', () => {
   it('ignores events emitted during initial boot before core state loads', () => {
@@ -308,49 +267,36 @@ describe('useDomainLoaders refreshAll', () => {
   it('skips prefetching old expedition plan and stats on skipPrefetch and reconciles filter against new database modes', async () => {
     let activeDbExpeditionId = 4
     let activeDbModes: modes.Mode[] = [
-      modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#ff8800' }),
-      modes.Mode.createFrom({ id: 3, name: 'Old Custom', color: '#44ff88' }),
+      makeMode({ id: 1, name: 'Travel', color: '#ff8800' }),
+      makeMode({ id: 3, name: 'Old Custom', color: '#44ff88' }),
     ]
-    const getPlanMock = vi.fn(async (expeditionId: number) =>
-      expedition.PlanView.createFrom({
-        expedition: { id: expeditionId, name: `Expedition ${expeditionId}`, status: 'active' },
-        rows: [],
-        modes: [],
-      }),
-    )
-    const getSidebarStatsMock = vi.fn(
-      async (expeditionId: number, _requestedFilter: stats.Filter) =>
-        app.SidebarStats.createFrom({ expeditionId }),
-    )
     const onRefreshAllFilterReconciled = vi.fn()
 
-    window.go = {
-      app: {
-        App: {
-          GetSettings: vi.fn(async () =>
-            app.Settings.createFrom({
-              setupCompleted: true,
-              activeExpeditionId: activeDbExpeditionId,
-            }),
-          ),
-          GetIngestStatus: vi.fn(async () => app.IngestStatus.createFrom({ scanning: false })),
-          GetModesState: vi.fn(async () => app.ModesState.createFrom({ modes: activeDbModes })),
-          ListExpeditions: vi.fn(async () => [
-            expedition.Expedition.createFrom({
-              id: activeDbExpeditionId,
-              name: `Expedition ${activeDbExpeditionId}`,
-              status: 'active',
-            }),
-          ]),
-          GetPlan: getPlanMock,
-          GetSidebarStats: getSidebarStatsMock,
-        } as unknown as NonNullable<NonNullable<typeof window.go>['app']>['App'],
-      },
-    }
+    const { spies } = installWailsAppMock({
+      GetSettings: async () =>
+        makeSettings({
+          setupCompleted: true,
+          activeExpeditionId: activeDbExpeditionId,
+        }),
+      GetIngestStatus: async () => app.IngestStatus.createFrom({ scanning: false }),
+      GetModesState: async () => app.ModesState.createFrom({ modes: activeDbModes }),
+      ListExpeditions: async () => [
+        expedition.Expedition.createFrom({
+          id: activeDbExpeditionId,
+          name: `Expedition ${activeDbExpeditionId}`,
+          status: 'active',
+        }),
+      ],
+      GetPlan: async (expeditionId: number) =>
+        makePlanView({
+          expedition: { id: expeditionId, name: `Expedition ${expeditionId}`, status: 'active' },
+        }),
+      GetSidebarStats: async (expeditionId: number, _requestedFilter: stats.Filter) =>
+        makeSidebarStats({ expeditionId }),
+    })
 
-    let loaders!: ReturnType<typeof useDomainLoaders>
     let sharedFilterRef!: { current: stats.Filter }
-    function LoaderProbe() {
+    const mountedHook = renderHook(() => {
       const filterRef = useRef(
         stats.Filter.createFrom({
           enabled: true,
@@ -367,75 +313,60 @@ describe('useDomainLoaders refreshAll', () => {
         deferredPayloads: [],
       })
       const lastEffectPlanExpeditionIdRef = useRef(9)
-      loaders = useDomainLoaders({
+      return useDomainLoaders({
         filterRef,
         bootStateRef,
         lastEffectPlanExpeditionIdRef,
         onRefreshAllFilterReconciled,
       })
-      return null
-    }
+    })
+    const loaders = mountedHook.getResult()
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    await act(async () => {
+      await loaders.loadCoreState()
+    })
+    expect(loaders.activeExpeditionIdRef.current).toBe(4)
 
-    try {
-      act(() => {
-        root.render(createElement(LoaderProbe))
-      })
+    // Default refreshAll() prefetches active expedition 4 immediately.
+    await act(async () => {
+      loaders.refreshAll()
+      await Promise.resolve()
+    })
+    expect(spies.GetPlan).toHaveBeenCalledWith(4)
+    expect(spies.GetSidebarStats).toHaveBeenCalledWith(4, expect.anything())
 
-      await act(async () => {
-        await loaders.loadCoreState()
-      })
-      expect(loaders.activeExpeditionIdRef.current).toBe(4)
+    // Database switch to active expedition 9 (matching lastEffectPlanExpeditionIdRef.current = 9)
+    // with different flight modes: skipPrefetch never queries stale expedition 4 and passes a
+    // filter reconciled against the new database's modes (dropping deleted mode 3, adding mode 2).
+    spies.GetPlan.mockClear()
+    spies.GetSidebarStats.mockClear()
+    onRefreshAllFilterReconciled.mockClear()
+    activeDbExpeditionId = 9
+    activeDbModes = [
+      makeMode({ id: 1, name: 'Travel', color: '#ff8800' }),
+      makeMode({ id: 2, name: 'Survey', color: '#00ccff' }),
+    ]
 
-      // Default refreshAll() prefetches active expedition 4 immediately.
-      await act(async () => {
-        loaders.refreshAll()
-        await Promise.resolve()
-      })
-      expect(getPlanMock).toHaveBeenCalledWith(4)
-      expect(getSidebarStatsMock).toHaveBeenCalledWith(4, expect.anything())
+    await act(async () => {
+      loaders.refreshAll({ skipPrefetch: true })
+      expect(loaders.activeExpeditionIdRef.current).toBe(0)
+      await Promise.resolve()
+    })
 
-      // Database switch to active expedition 9 (matching lastEffectPlanExpeditionIdRef.current = 9)
-      // with different flight modes: skipPrefetch never queries stale expedition 4 and passes a
-      // filter reconciled against the new database's modes (dropping deleted mode 3, adding mode 2).
-      getPlanMock.mockClear()
-      getSidebarStatsMock.mockClear()
-      onRefreshAllFilterReconciled.mockClear()
-      activeDbExpeditionId = 9
-      activeDbModes = [
-        modes.Mode.createFrom({ id: 1, name: 'Travel', color: '#ff8800' }),
-        modes.Mode.createFrom({ id: 2, name: 'Survey', color: '#00ccff' }),
-      ]
-
-      await act(async () => {
-        loaders.refreshAll({ skipPrefetch: true })
-        expect(loaders.activeExpeditionIdRef.current).toBe(0)
-        await Promise.resolve()
-      })
-
-      expect(getPlanMock).not.toHaveBeenCalledWith(4)
-      expect(getSidebarStatsMock).not.toHaveBeenCalledWith(4, expect.anything())
-      expect(getPlanMock).toHaveBeenCalledTimes(1)
-      expect(getPlanMock).toHaveBeenCalledWith(9)
-      expect(getSidebarStatsMock).toHaveBeenCalledTimes(1)
-      const [calledExpeditionId, calledFilter] = getSidebarStatsMock.mock.calls[0]
-      expect(calledExpeditionId).toBe(9)
-      expect(calledFilter.enabled).toBe(false)
-      expect(calledFilter.modes).toEqual([
-        expect.objectContaining({ modeId: 1, travel: true, discovery: true }),
-        expect.objectContaining({ modeId: 2, travel: true, discovery: true }),
-      ])
-      expect(sharedFilterRef.current).toBe(calledFilter)
-      expect(onRefreshAllFilterReconciled).toHaveBeenCalledWith(calledFilter, 9, false)
-    } finally {
-      act(() => {
-        root.unmount()
-      })
-      container.remove()
-    }
+    expect(spies.GetPlan).not.toHaveBeenCalledWith(4)
+    expect(spies.GetSidebarStats).not.toHaveBeenCalledWith(4, expect.anything())
+    expect(spies.GetPlan).toHaveBeenCalledTimes(1)
+    expect(spies.GetPlan).toHaveBeenCalledWith(9)
+    expect(spies.GetSidebarStats).toHaveBeenCalledTimes(1)
+    const [calledExpeditionId, calledFilter] = spies.GetSidebarStats.mock.calls[0]
+    expect(calledExpeditionId).toBe(9)
+    expect(calledFilter.enabled).toBe(false)
+    expect(calledFilter.modes).toEqual([
+      expect.objectContaining({ modeId: 1, travel: true, discovery: true }),
+      expect.objectContaining({ modeId: 2, travel: true, discovery: true }),
+    ])
+    expect(sharedFilterRef.current).toBe(calledFilter)
+    expect(onRefreshAllFilterReconciled).toHaveBeenCalledWith(calledFilter, 9, false)
   })
 })
 

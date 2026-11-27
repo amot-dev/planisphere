@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"planisphere/internal/store/expedition"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/expeditiontest"
+	"planisphere/internal/testutil/journaltest"
 )
 
 func parseDurationLabelMinutes(label string) (int, error) {
@@ -149,14 +152,14 @@ func assertBatchMatchesIndividualDetails(
 }
 
 func TestDetailsBatchParityAndEffectiveStartFromRows(testingContext *testing.T) {
-	databaseConnection := openExpeditionTestDB(testingContext)
-	_, expeditionProjections := newExpeditionProjections(databaseConnection)
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	_, expeditionProjections := expeditiontest.NewProjections(databaseConnection)
 
-	ingestJournalLines(testingContext, databaseConnection, []string{
+	journaltest.IngestLines(testingContext, databaseConnection,
 		`{"timestamp":"2026-02-01T08:00:00Z","event":"LoadGame","Commander":"CmdrBatch","FID":"FB1","Ship":"mandalay","Ship_Localised":"Mandalay","ShipID":1,"Odyssey":true}`,
 		`{"timestamp":"2026-02-01T08:30:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
 		`{"timestamp":"2026-02-01T08:45:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Sol","SystemAddress":1001,"BodyID":1,"BodyName":"Sol 3","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":true,"WasMapped":true}`,
-	})
+	)
 
 	expeditionRecord, createError := expedition.CreateWithWaypoints(databaseConnection, "Batch Route", "Parity check", []expedition.SeedWaypoint{
 		{SystemName: "Sol"},
@@ -207,24 +210,21 @@ func TestDetailsBatchParityAndEffectiveStartFromRows(testingContext *testing.T) 
 	// Leg 3 (Beta Carrier): 0 piloted jumps via CarrierJump (ShipsUsed stays empty).
 	// Leg 4 (Gamma Swap): multi-ship leg (Mandalay jump, ShipyardSwap to Anaconda, Anaconda jump).
 	// Leg 5 (Delta Current): departed Gamma Swap into open space with Cobra Mk III jump (VisitCurrent).
-	if _, execError := databaseConnection.Exec(`
-		INSERT INTO journal_events (event_uid, timestamp, event, system_name, system_address, body_id, body_name, star_x, star_y, star_z, commander, source_file, raw_json, ingested_at) VALUES
-		('b-leg2-j1', '2026-02-01T09:00:00Z', 'FSDJump', 'Alpha Leg', 2002, NULL, '', 40, 0, 0, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T09:00:00Z","event":"FSDJump","StarSystem":"Alpha Leg","SystemAddress":2002,"StarPos":[40,0,0],"JumpDist":40.0}', '2026-02-01T09:00:00Z'),
-		('b-leg3-fc', '2026-02-01T10:00:00Z', 'CarrierJump', 'Beta Carrier', 3003, NULL, '', 540, 0, 0, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T10:00:00Z","event":"CarrierJump","StarSystem":"Beta Carrier","SystemAddress":3003,"StarPos":[540,0,0]}', '2026-02-01T10:00:00Z'),
-		('b-leg4-j1', '2026-02-01T11:00:00Z', 'FSDJump', 'Mid Swap', 4001, NULL, '', 570, 0, 0, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T11:00:00Z","event":"FSDJump","StarSystem":"Mid Swap","SystemAddress":4001,"StarPos":[570,0,0],"JumpDist":30.0}', '2026-02-01T11:00:00Z'),
-		('b-leg4-sw', '2026-02-01T11:10:00Z', 'ShipyardSwap', '', NULL, NULL, '', NULL, NULL, NULL, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T11:10:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}', '2026-02-01T11:10:00Z'),
-		('b-leg4-j2', '2026-02-01T11:20:00Z', 'FSDJump', 'Gamma Swap', 4004, NULL, '', 620, 0, 0, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T11:20:00Z","event":"FSDJump","StarSystem":"Gamma Swap","SystemAddress":4004,"StarPos":[620,0,0],"JumpDist":50.0}', '2026-02-01T11:20:00Z'),
-		('b-leg4-sc', '2026-02-01T11:25:00Z', 'Scan', 'Gamma Swap', 4004, 1, 'Gamma Swap 1', NULL, NULL, NULL, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T11:25:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Gamma Swap","SystemAddress":4004,"BodyID":1,"BodyName":"Gamma Swap 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}', '2026-02-01T11:25:00Z'),
-		('b-leg5-sw', '2026-02-01T11:50:00Z', 'ShipyardSwap', '', NULL, NULL, '', NULL, NULL, NULL, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T11:50:00Z","event":"ShipyardSwap","ShipType":"cobramkiii","ShipType_Localised":"Cobra Mk III","ShipID":3}', '2026-02-01T11:50:00Z'),
-		('b-leg5-j1', '2026-02-01T12:00:00Z', 'FSDJump', 'Outpost Hop', 5001, NULL, '', 640, 0, 0, 'CmdrBatch', 'b.log', '{"timestamp":"2026-02-01T12:00:00Z","event":"FSDJump","StarSystem":"Outpost Hop","SystemAddress":5001,"StarPos":[640,0,0],"JumpDist":20.0}', '2026-02-01T12:00:00Z')
-	`); execError != nil {
-		testingContext.Fatalf("insert route events: %v", execError)
-	}
+	journaltest.InsertParsedLines(testingContext, databaseConnection,
+		`{"timestamp":"2026-02-01T09:00:00Z","event":"FSDJump","StarSystem":"Alpha Leg","SystemAddress":2002,"StarPos":[40,0,0],"JumpDist":40.0}`,
+		`{"timestamp":"2026-02-01T10:00:00Z","event":"CarrierJump","StarSystem":"Beta Carrier","SystemAddress":3003,"StarPos":[540,0,0]}`,
+		`{"timestamp":"2026-02-01T11:00:00Z","event":"FSDJump","StarSystem":"Mid Swap","SystemAddress":4001,"StarPos":[570,0,0],"JumpDist":30.0}`,
+		`{"timestamp":"2026-02-01T11:10:00Z","event":"ShipyardSwap","ShipType":"anaconda","ShipType_Localised":"Anaconda","ShipID":2}`,
+		`{"timestamp":"2026-02-01T11:20:00Z","event":"FSDJump","StarSystem":"Gamma Swap","SystemAddress":4004,"StarPos":[620,0,0],"JumpDist":50.0}`,
+		`{"timestamp":"2026-02-01T11:25:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"Gamma Swap","SystemAddress":4004,"BodyID":1,"BodyName":"Gamma Swap 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-02-01T11:50:00Z","event":"ShipyardSwap","ShipType":"cobramkiii","ShipType_Localised":"Cobra Mk III","ShipID":3}`,
+		`{"timestamp":"2026-02-01T12:00:00Z","event":"FSDJump","StarSystem":"Outpost Hop","SystemAddress":5001,"StarPos":[640,0,0],"JumpDist":20.0}`,
+	)
 	if _, reevalError := expedition.ReevaluateTx(databaseConnection, expeditionRecord.ID); reevalError != nil {
 		testingContext.Fatalf("ReevaluateTx: %v", reevalError)
 	}
 
-	_, freshActiveProjections := newExpeditionProjections(databaseConnection)
+	_, freshActiveProjections := expeditiontest.NewProjections(databaseConnection)
 	activePlan, activePlanError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, freshActiveProjections)
 	if activePlanError != nil {
 		testingContext.Fatalf("BuildPlan active: %v", activePlanError)
@@ -254,7 +254,7 @@ func TestDetailsBatchParityAndEffectiveStartFromRows(testingContext *testing.T) 
 	if completeError := expedition.CompleteTx(databaseConnection, expeditionRecord.ID); completeError != nil {
 		testingContext.Fatalf("CompleteTx: %v", completeError)
 	}
-	_, freshCompletedProjections := newExpeditionProjections(databaseConnection)
+	_, freshCompletedProjections := expeditiontest.NewProjections(databaseConnection)
 	completedPlan, completedPlanError := expedition.BuildPlan(databaseConnection, expeditionRecord.ID, nil, freshCompletedProjections)
 	if completedPlanError != nil {
 		testingContext.Fatalf("BuildPlan completed: %v", completedPlanError)
@@ -280,7 +280,7 @@ func TestDetailsBatchParityAndEffectiveStartFromRows(testingContext *testing.T) 
 	}
 
 	// Verify DetailsBatch executes zero queries against expeditions or expedition_rows on cold projections.
-	_, coldProjections := newExpeditionProjections(databaseConnection)
+	_, coldProjections := expeditiontest.NewProjections(databaseConnection)
 	if _, dropTablesError := databaseConnection.Exec(`DROP TABLE expedition_rows; DROP TABLE expeditions`); dropTablesError != nil {
 		testingContext.Fatalf("drop expedition tables: %v", dropTablesError)
 	}

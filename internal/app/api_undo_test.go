@@ -16,29 +16,9 @@ import (
 	"planisphere/internal/store/modes"
 )
 
-func mustGetPlan(testingContext *testing.T, testApp *App, expeditionID int64) expedition.PlanView {
-	testingContext.Helper()
-	planView, planError := testApp.GetPlan(expeditionID)
-	if planError != nil {
-		testingContext.Fatalf("GetPlan(%d): %v", expeditionID, planError)
-	}
-	return planView
-}
-
 func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
-
-	var emittedEvents []DataChanged
-	var emitMu sync.Mutex
-	setTestEmitHook(testingContext, testApp, func(event string, payload ...any) {
-		if event == EventDataChanged && len(payload) > 0 {
-			if changed, ok := payload[0].(DataChanged); ok {
-				emitMu.Lock()
-				emittedEvents = append(emittedEvents, changed)
-				emitMu.Unlock()
-			}
-		}
-	})
+	eventsRecorder := captureAppEvents(testingContext, testApp)
 
 	insertTestJournalEvent(testingContext, testApp, "2026-04-05T08:00:00Z", "LoadGame", "lg1",
 		`{"timestamp":"2026-04-05T08:00:00Z","event":"LoadGame","Commander":"CMDR Facade","FID":"F1","Ship":"mandalay"}`)
@@ -76,17 +56,13 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 		testingContext.Fatalf("UpdateRow notes: %v", err)
 	}
 	testApp.backgroundWg.Wait()
-	emitMu.Lock()
-	emittedEvents = nil
-	emitMu.Unlock()
+	eventsRecorder.Reset()
 	if err := testApp.UpdateRow(expedition.RowPatch{ID: coloniaRow.ID, Notes: &noteValue}); err != nil {
 		testingContext.Fatalf("UpdateRow no-op notes: %v", err)
 	}
-	emitMu.Lock()
-	if len(emittedEvents) != 0 {
-		testingContext.Fatalf("expected no DataChanged event on no-op UpdateRow, got %+v", emittedEvents)
+	if noopChanges := eventsRecorder.DataChanges(); len(noopChanges) != 0 {
+		testingContext.Fatalf("expected no DataChanged event on no-op UpdateRow, got %+v", noopChanges)
 	}
-	emitMu.Unlock()
 
 	if err := testApp.DeleteRow(coloniaRow.ID); err != nil {
 		testingContext.Fatalf("DeleteRow: %v", err)
@@ -126,26 +102,20 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 		testingContext.Fatalf("SetExpeditionFlightMode: %v", err)
 	}
 	testApp.backgroundWg.Wait()
-	emitMu.Lock()
-	emittedEvents = nil
-	emitMu.Unlock()
+	eventsRecorder.Reset()
 	if err := testApp.SetExpeditionFlightMode(createdExp.ID, modeTwoID); err != nil {
 		testingContext.Fatalf("SetExpeditionFlightMode no-op: %v", err)
 	}
-	emitMu.Lock()
-	if len(emittedEvents) != 0 {
-		testingContext.Fatalf("expected no DataChanged event on no-op SetExpeditionFlightMode, got %+v", emittedEvents)
+	if noopChanges := eventsRecorder.DataChanges(); len(noopChanges) != 0 {
+		testingContext.Fatalf("expected no DataChanged event on no-op SetExpeditionFlightMode, got %+v", noopChanges)
 	}
-	emitMu.Unlock()
 
 	if err := testApp.SetLegMode(coloniaRow.ID, modeTwoID, false); err != nil {
 		testingContext.Fatalf("SetLegMode: %v", err)
 	}
 
 	testApp.backgroundWg.Wait()
-	emitMu.Lock()
-	emittedEvents = nil
-	emitMu.Unlock()
+	eventsRecorder.Reset()
 
 	undoLegMode, err := testApp.UndoExpedition(createdExp.ID)
 	if err != nil || !undoLegMode.Applied || undoLegMode.Label != "Change Leg Mode" {
@@ -160,11 +130,10 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 		testingContext.Fatalf("expected modes restored to %d, got active=%d leg=%d",
 			modeOneID, planAfterModeUndo.Expedition.ActiveModeID, planAfterModeUndo.Rows[1].Row.LegModeID)
 	}
-	emitMu.Lock()
-	if len(emittedEvents) != 2 || !slices.Contains(emittedEvents[0].Domains, "stats") || !slices.Contains(emittedEvents[0].Domains, "plan") {
-		testingContext.Fatalf("expected mode undo to emit stats and plan domains, got %+v", emittedEvents)
+	modeUndoChanges := eventsRecorder.DataChanges()
+	if len(modeUndoChanges) != 2 || !slices.Contains(modeUndoChanges[0].Domains, "stats") || !slices.Contains(modeUndoChanges[0].Domains, "plan") {
+		testingContext.Fatalf("expected mode undo to emit stats and plan domains, got %+v", modeUndoChanges)
 	}
-	emitMu.Unlock()
 
 	// Add an empty region header and empty waypoint, then CompleteExpedition (which prunes both) and verify Undo restores them.
 	emptyRegion, err := testApp.AddRow(createdExp.ID, coloniaRow.ID, expedition.RowRegion, 1)
@@ -302,8 +271,8 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 	if err != nil || !undoPlot.Applied || undoPlot.Label != "Start Carrier Route" {
 		testingContext.Fatalf("Undo plot: res=%+v err=%v", undoPlot, err)
 	}
-	if planAfterUndoPlot := mustGetPlan(testingContext, testApp, createdExp.ID); planAfterUndoPlot.ActiveCarrierRoute != nil {
-		testingContext.Fatalf("expected active route cleared after undoing plot, got %+v", planAfterUndoPlot.ActiveCarrierRoute)
+	if activeRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID); activeRoute != nil {
+		testingContext.Fatalf("expected active route cleared after undoing plot, got %+v", activeRoute)
 	}
 
 	// Next undo must revert the row edit (not the no-op CompleteCarrierRouteArrival).
@@ -342,8 +311,8 @@ func TestAppUndoRedoCarrierRouteJumpsAndArrival(testingContext *testing.T) {
 	if err != nil || !undoClear.Applied || undoClear.Label != "Clear Carrier Route" {
 		testingContext.Fatalf("Undo clear route: res=%+v err=%v", undoClear, err)
 	}
-	if restoredPlan := mustGetPlan(testingContext, testApp, createdExp.ID); restoredPlan.ActiveCarrierRoute == nil || restoredPlan.ActiveCarrierRoute.ManualLegJumps != 1 {
-		testingContext.Fatalf("expected manual route restored with 1 jump after undoing clear, got %+v", restoredPlan.ActiveCarrierRoute)
+	if restoredRoute := mustGetActiveCarrierRoute(testingContext, testApp, createdExp.ID); restoredRoute == nil || restoredRoute.ManualLegJumps != 1 {
+		testingContext.Fatalf("expected manual route restored with 1 jump after undoing clear, got %+v", restoredRoute)
 	}
 }
 

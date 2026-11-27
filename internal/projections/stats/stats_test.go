@@ -1,72 +1,17 @@
 package stats_test
 
 import (
-	"context"
-	"database/sql"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
-	"planisphere/internal/core/projection"
-	"planisphere/internal/projections"
-	"planisphere/internal/projections/realization"
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/replay"
-	replaystats "planisphere/internal/replay/stats"
+	"planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
-	"planisphere/internal/store/modes"
+	"planisphere/internal/testutil/dbtest"
+	"planisphere/internal/testutil/journaltest"
 )
-
-func seedStatsDBFromLines(testingContext *testing.T, journalLines []string) *sql.DB {
-	testingContext.Helper()
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("open in-memory db: %v", openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
-	})
-
-	temporaryDirectory := testingContext.TempDir()
-	journalPath := filepath.Join(temporaryDirectory, "Journal.2026-01-18T180000.01.log")
-	if writeError := os.WriteFile(journalPath, []byte(strings.Join(journalLines, "\n")+"\n"), 0o644); writeError != nil {
-		testingContext.Fatalf("write journal file: %v", writeError)
-	}
-	if _, scanError := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); scanError != nil {
-		testingContext.Fatalf("ScanDir: %v", scanError)
-	}
-	return databaseConnection
-}
-
-func ingestTestLine(testingContext *testing.T, databaseConnection *sql.DB, rawJSON string) {
-	testingContext.Helper()
-	parsedEvent, ok, parseError := journal.ParseLine([]byte(rawJSON), "test.log")
-	if parseError != nil || !ok {
-		testingContext.Fatalf("ParseLine(%s) failed: ok=%v err=%v", rawJSON, ok, parseError)
-	}
-	if _, execError := databaseConnection.Exec(
-		`INSERT INTO journal_events(event_uid, timestamp, event, system_name, system_address, body_id, body_name, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		parsedEvent.UID, parsedEvent.Timestamp, parsedEvent.Event, parsedEvent.SystemName,
-		parsedEvent.SystemAddress, parsedEvent.BodyID, parsedEvent.BodyName, parsedEvent.Raw, parsedEvent.Timestamp,
-	); execError != nil {
-		testingContext.Fatalf("insert parsed event %s: %v", parsedEvent.Event, execError)
-	}
-}
-
-func insertEvent(testingContext *testing.T, databaseConnection *sql.DB, timestamp, eventName, rawJSON string) {
-	testingContext.Helper()
-	eventUID := journal.ComputeUID(timestamp, eventName, rawJSON)
-	if _, execError := databaseConnection.Exec(
-		`INSERT INTO journal_events(event_uid, timestamp, event, raw_json, ingested_at) VALUES (?, ?, ?, ?, ?)`,
-		eventUID, timestamp, eventName, rawJSON, timestamp,
-	); execError != nil {
-		testingContext.Fatalf("insert %s event: %v", eventName, execError)
-	}
-}
 
 func TestCareerStatsStrictStatisticsSourceAndStringParsing(testingContext *testing.T) {
 	lines := []string{
@@ -75,16 +20,11 @@ func TestCareerStatsStrictStatisticsSourceAndStringParsing(testingContext *testi
 		// Passenger ride aboard another commander's carrier (100 Ly)
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"CarrierJump","StarSystem":"Alpha Centauri","SystemAddress":1002,"StarPos":[0,0,100]}`,
 	}
-	databaseConnection := seedStatsDBFromLines(testingContext, lines)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	careerStats := stats.NewCareerStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
 
 	// Without any owned carrier Statistics event, passenger rides stay in CarrierPassengerLy and DistanceLy
 	// while Personal Carrier Operations (CarrierJumps, CarrierDistanceLy, TritiumUsed) stay 0 / nil.
-	unownedSummary, unownedError := careerStats.Get()
+	unownedSummary, unownedError := harness.careerStats.Get()
 	if unownedError != nil {
 		testingContext.Fatalf("CareerStats.Get without Statistics: %v", unownedError)
 	}
@@ -97,11 +37,14 @@ func TestCareerStatsStrictStatisticsSourceAndStringParsing(testingContext *testi
 	}
 
 	// Legacy string-formatted FLEETCARRIER_DISTANCE_TRAVELLED must parse cleanly after EventStatistics invalidation.
-	ingestTestLine(testingContext, databaseConnection,
-		`{"timestamp":"2026-01-19T10:00:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":12,"FLEETCARRIER_DISTANCE_TRAVELLED":"1,234.5 LY"}}`)
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventStatistics))
+	journaltest.PublishParsedLines(
+		testingContext,
+		harness.conn,
+		harness.bus,
+		`{"timestamp":"2026-01-19T10:00:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":12,"FLEETCARRIER_DISTANCE_TRAVELLED":"1,234.5 LY"}}`,
+	)
 
-	stringStatsSummary, stringStatsError := careerStats.Get()
+	stringStatsSummary, stringStatsError := harness.careerStats.Get()
 	if stringStatsError != nil {
 		testingContext.Fatalf("CareerStats.Get with string FLEETCARRIER distance: %v", stringStatsError)
 	}
@@ -111,11 +54,14 @@ func TestCareerStatsStrictStatisticsSourceAndStringParsing(testingContext *testi
 	}
 
 	// Numeric FLEETCARRIER fields overwrite on newer Statistics event.
-	ingestTestLine(testingContext, databaseConnection,
-		`{"timestamp":"2026-01-20T10:00:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":25,"FLEETCARRIER_DISTANCE_TRAVELLED":9876.25}}`)
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventStatistics))
+	journaltest.PublishParsedLines(
+		testingContext,
+		harness.conn,
+		harness.bus,
+		`{"timestamp":"2026-01-20T10:00:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":25,"FLEETCARRIER_DISTANCE_TRAVELLED":9876.25}}`,
+	)
 
-	numericStatsSummary, numericStatsError := careerStats.Get()
+	numericStatsSummary, numericStatsError := harness.careerStats.Get()
 	if numericStatsError != nil {
 		testingContext.Fatalf("CareerStats.Get with numeric FLEETCARRIER distance: %v", numericStatsError)
 	}
@@ -130,17 +76,11 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 		`{"timestamp":"2026-01-18T19:05:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-01-18T19:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":1,"BodyName":"RangeSys 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 	}
-	databaseConnection := seedStatsDBFromLines(testingContext, lines)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	careerStats := stats.NewCareerStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
-	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
-	staticModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
-		return func(_ string) int64 { return fallbackModeID }, nil
-	}
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, staticModeLoader)
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
+	databaseConnection := harness.conn
+	eventBus := harness.bus
+	careerStats := harness.careerStats
+	timeRangeStats := harness.timeRangeStats
 
 	if _, careerWarmError := careerStats.Get(); careerWarmError != nil {
 		testingContext.Fatalf("initial CareerStats.Get: %v", careerWarmError)
@@ -158,8 +98,11 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	initialRangeGeneration := timeRangeStats.Generation()
 
 	// Insert second scan and publish replay-context/carrier-stats/pre-jump/swap events: neither CareerStats nor TimeRangeStats should invalidate.
-	ingestTestLine(testingContext, databaseConnection,
-		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":2,"BodyName":"RangeSys 2","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":2,"BodyName":"RangeSys 2","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	)
 	eventBus.PublishJournal(journal.NewEventSet(
 		journal.EventLoadGame,
 		journal.EventCarrierStats,
@@ -191,9 +134,12 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	}
 
 	// Insert third scan and publish EventScan: only Cartographics and Realization invalidate; Travel, CarrierOps, and Exobiology stay valid.
-	ingestTestLine(testingContext, databaseConnection,
-		`{"timestamp":"2026-01-18T19:30:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":3,"BodyName":"RangeSys 3","PlanetClass":"Ammonia world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventScan))
+	journaltest.PublishParsedLines(
+		testingContext,
+		databaseConnection,
+		eventBus,
+		`{"timestamp":"2026-01-18T19:30:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":3,"BodyName":"RangeSys 3","PlanetClass":"Ammonia world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	)
 	if !careerStats.Travel().IsValid() || !careerStats.CarrierOps().IsValid() || !careerStats.Exobiology().IsValid() {
 		testingContext.Fatalf("expected EventScan to preserve CareerTravel, CareerCarrierOps, and CareerExobiology")
 	}
@@ -215,7 +161,7 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 	modeFilter := &stats.Filter{
 		Enabled:      true,
 		ExpeditionID: 1,
-		Modes:        []stats.ModeSelection{{ModeID: modes.DefaultFallbackModeID(databaseConnection), Travel: true, Discovery: true}},
+		Modes:        []stats.ModeSelection{{ModeID: harness.fallbackModeID, Travel: true, Discovery: true}},
 	}
 	filteredBeforeWindowChange, filteredBeforeError := timeRangeStats.Compute(timeRange, modeFilter)
 	if filteredBeforeError != nil || filteredBeforeWindowChange.Metrics.BodiesScanned != 3 {
@@ -226,8 +172,11 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 		testingContext.Fatalf("expected 2 cached entries (unfiltered and filtered), got %d", timeRangeStats.CachedCount())
 	}
 
-	ingestTestLine(testingContext, databaseConnection,
-		`{"timestamp":"2026-01-18T19:40:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":4,"BodyName":"RangeSys 4","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		databaseConnection,
+		`{"timestamp":"2026-01-18T19:40:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"RangeSys","SystemAddress":5555,"BodyID":4,"BodyName":"RangeSys 4","PlanetClass":"High metal content body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+	)
 	eventBus.PublishApp(events.AppExpeditionModesChanged)
 
 	if timeRangeStats.CachedCount() != 1 {
@@ -246,14 +195,13 @@ func TestTimeRangeStatsCachingAndInvalidation(testingContext *testing.T) {
 }
 
 func TestRealizationLedgerCaching(testingContext *testing.T) {
-	databaseConnection := seedStatsDBFromLines(testingContext, nil)
-
-	insertEvent(testingContext, databaseConnection, "2026-03-01T10:00:00Z", "ScanOrganic",
-		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	engineInstance := replaystats.NewEngineWithSources(databaseConnection, salesLedger, nil, nil)
+	harness := newTimeRangeStatsHarness(testingContext, nil, nil)
+	journaltest.InsertParsedLines(
+		testingContext,
+		harness.conn,
+		`{"timestamp":"2026-03-01T10:00:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":111,"Body":1}`,
+	)
+	engineInstance := stats.NewEngineWithSources(harness.conn, harness.salesLedger, nil, nil)
 
 	firstResult, firstComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
 	if firstComputeError != nil {
@@ -264,8 +212,11 @@ func TestRealizationLedgerCaching(testingContext *testing.T) {
 	}
 
 	// Insert second event directly into database without publishing to the bus
-	insertEvent(testingContext, databaseConnection, "2026-03-01T12:00:00Z", "SellOrganicData",
-		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`)
+	journaltest.InsertParsedLines(
+		testingContext,
+		harness.conn,
+		`{"timestamp":"2026-03-01T12:00:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":76043200}]}`,
+	)
 
 	// Query with cached ledger should still report pending because bus event has not fired
 	secondResult, secondComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
@@ -277,7 +228,7 @@ func TestRealizationLedgerCaching(testingContext *testing.T) {
 	}
 
 	// Publish matching journal event to invalidate ledger cache
-	eventBus.PublishJournal(journal.NewEventSet(journal.EventSellOrganicData))
+	harness.bus.PublishJournal(journal.NewEventSet(journal.EventSellOrganicData))
 
 	// Query after invalidation should pick up the sale
 	thirdResult, thirdComputeError := engineInstance.ComputeRealization(stats.Range{After: "2026-03-01T09:00:00Z", Until: "2026-03-01T11:00:00Z"}, nil)
@@ -299,16 +250,9 @@ func TestTimeRangeSelectiveInvalidationPreservesClosedWindowsExceptRetroactiveEv
 		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"ClosedSys","SystemAddress":1001,"BodyID":1,"BodyName":"ClosedSys 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":1001,"Body":1}`,
 	}
-	databaseConnection := seedStatsDBFromLines(testingContext, lines)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
-	staticModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
-		return func(_ string) int64 { return fallbackModeID }, nil
-	}
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, staticModeLoader)
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
+	eventBus := harness.bus
+	timeRangeStats := harness.timeRangeStats
 
 	closedRange := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
 	activeRange := stats.Range{After: "2026-01-18T20:00:00Z", Until: ""}
@@ -369,19 +313,16 @@ func TestTimeRangeStatsMemoizesModeLoaderOnColdFilteredCompute(testingContext *t
 		`{"timestamp":"2026-01-18T19:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"ModeSys","SystemAddress":2002,"BodyID":1,"BodyName":"ModeSys 1","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":false,"SystemAddress":2002,"Body":1}`,
 	}
-	databaseConnection := seedStatsDBFromLines(testingContext, lines)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
-
 	var loaderCalls atomic.Int32
+	var fallbackModeID int64
 	countingModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
 		loaderCalls.Add(1)
 		return func(_ string) int64 { return fallbackModeID }, nil
 	}
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, countingModeLoader)
+	harness := newTimeRangeStatsHarness(testingContext, lines, countingModeLoader)
+	fallbackModeID = harness.fallbackModeID
+	eventBus := harness.bus
+	timeRangeStats := harness.timeRangeStats
 
 	timeRange := stats.Range{After: "2026-01-18T19:00:00Z", Until: "2026-01-18T20:00:00Z"}
 	modeFilter := &stats.Filter{
@@ -422,12 +363,9 @@ func TestTimeRangeStatsClosedWindowRevisionWatermark(testingContext *testing.T) 
 		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"SeedSys","SystemAddress":1001,"StarPos":[10,0,0],"JumpDist":10.0}`,
 	}
-	databaseConnection := seedStatsDBFromLines(testingContext, lines)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, nil)
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
+	eventBus := harness.bus
+	timeRangeStats := harness.timeRangeStats
 
 	if gotRevision := timeRangeStats.ClosedWindowRevision(); gotRevision != 1 {
 		testingContext.Fatalf("expected initial ClosedWindowRevision 1, got %d", gotRevision)
@@ -496,12 +434,9 @@ func TestTimeRangeStatsClosedWindowRevisionRangeAndShipHistoryBackfill(testingCo
 		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
 		`{"timestamp":"2026-01-18T19:30:00Z","event":"FSDJump","StarSystem":"SeedSys","SystemAddress":1001,"StarPos":[10,0,0],"JumpDist":10.0}`,
 	}
-	databaseConnection := seedStatsDBFromLines(testingContext, lines)
-
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, nil)
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
+	eventBus := harness.bus
+	timeRangeStats := harness.timeRangeStats
 
 	// Multi-event forward batch [T1, T3] advances highWaterTimestamp to T3 without incrementing ClosedWindowRevision.
 	eventBus.PublishJournalRange(
@@ -533,52 +468,27 @@ func TestTimeRangeStatsClosedWindowRevisionRangeAndShipHistoryBackfill(testingCo
 }
 
 func TestScopedTimeRangeAndCareerStatsIsolateProfilesAndSupportDisabledArchive(testingContext *testing.T) {
-	databaseConnection, openError := db.Open(":memory:")
-	if openError != nil {
-		testingContext.Fatalf("open in-memory db: %v", openError)
-	}
-	testingContext.Cleanup(func() {
-		_ = databaseConnection.Close()
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	journaltest.IngestFiles(testingContext, databaseConnection, map[string][]string{
+		// FID F10 Era 0 (archived, disabled by default) + Era 1 (active, enabled).
+		"Journal.2026-02-01T100000.01.log": {
+			`{"timestamp":"2026-02-01T10:00:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
+			`{"timestamp":"2026-02-01T10:05:00Z","event":"Location","StarSystem":"ArchivedStart","SystemAddress":100,"StarPos":[0,0,0]}`,
+			`{"timestamp":"2026-02-01T10:10:00Z","event":"FSDJump","StarSystem":"ArchivedHop","SystemAddress":101,"StarPos":[40,0,0],"JumpDist":40.0}`,
+			`{"timestamp":"2026-02-01T10:15:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":7,"FLEETCARRIER_DISTANCE_TRAVELLED":3500.0}}`,
+			`{"timestamp":"2026-02-01T11:00:00Z","event":"ClearSavedGame","Name":"CmdrMain","FID":"F10"}`,
+			`{"timestamp":"2026-02-01T11:01:00Z","event":"NewCommander","Name":"CmdrMain","FID":"F10","Package":"Sidewinder"}`,
+			`{"timestamp":"2026-02-01T11:02:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
+			`{"timestamp":"2026-02-01T11:10:00Z","event":"FSDJump","StarSystem":"MainHop","SystemAddress":201,"StarPos":[0,60,0],"JumpDist":60.0}`,
+			`{"timestamp":"2026-02-01T11:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"MainHop","SystemAddress":201,"BodyID":1,"BodyName":"MainHop 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		},
+		// Interleaved second enabled save slot FID F20.
+		"Journal.2026-02-01T110500.01.log": {
+			`{"timestamp":"2026-02-01T11:05:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"Explorer_NX","Odyssey":true}`,
+			`{"timestamp":"2026-02-01T11:15:00Z","event":"FSDJump","StarSystem":"AltHop","SystemAddress":301,"StarPos":[0,0,25],"JumpDist":25.0}`,
+			`{"timestamp":"2026-02-01T11:25:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":301,"Body":1}`,
+		},
 	})
-
-	temporaryDirectory := testingContext.TempDir()
-	files := []struct {
-		name  string
-		lines []string
-	}{
-		{
-			// FID F10 Era 0 (archived, disabled by default) + Era 1 (active, enabled).
-			name: "Journal.2026-02-01T100000.01.log",
-			lines: []string{
-				`{"timestamp":"2026-02-01T10:00:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
-				`{"timestamp":"2026-02-01T10:05:00Z","event":"Location","StarSystem":"ArchivedStart","SystemAddress":100,"StarPos":[0,0,0]}`,
-				`{"timestamp":"2026-02-01T10:10:00Z","event":"FSDJump","StarSystem":"ArchivedHop","SystemAddress":101,"StarPos":[40,0,0],"JumpDist":40.0}`,
-				`{"timestamp":"2026-02-01T10:15:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":7,"FLEETCARRIER_DISTANCE_TRAVELLED":3500.0}}`,
-				`{"timestamp":"2026-02-01T11:00:00Z","event":"ClearSavedGame","Name":"CmdrMain","FID":"F10"}`,
-				`{"timestamp":"2026-02-01T11:01:00Z","event":"NewCommander","Name":"CmdrMain","FID":"F10","Package":"Sidewinder"}`,
-				`{"timestamp":"2026-02-01T11:02:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
-				`{"timestamp":"2026-02-01T11:10:00Z","event":"FSDJump","StarSystem":"MainHop","SystemAddress":201,"StarPos":[0,60,0],"JumpDist":60.0}`,
-				`{"timestamp":"2026-02-01T11:20:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"MainHop","SystemAddress":201,"BodyID":1,"BodyName":"MainHop 1","PlanetClass":"Earthlike body","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
-			},
-		},
-		{
-			// Interleaved second enabled save slot FID F20.
-			name: "Journal.2026-02-01T110500.01.log",
-			lines: []string{
-				`{"timestamp":"2026-02-01T11:05:00Z","event":"LoadGame","Commander":"CmdrAlt","FID":"F20","Ship":"Explorer_NX","Odyssey":true}`,
-				`{"timestamp":"2026-02-01T11:15:00Z","event":"FSDJump","StarSystem":"AltHop","SystemAddress":301,"StarPos":[0,0,25],"JumpDist":25.0}`,
-				`{"timestamp":"2026-02-01T11:25:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":301,"Body":1}`,
-			},
-		},
-	}
-	for _, spec := range files {
-		if err := os.WriteFile(filepath.Join(temporaryDirectory, spec.name), []byte(strings.Join(spec.lines, "\n")+"\n"), 0o644); err != nil {
-			testingContext.Fatal(err)
-		}
-	}
-	if _, err := journal.NewIngester(databaseConnection).ScanDir(context.Background(), temporaryDirectory); err != nil {
-		testingContext.Fatal(err)
-	}
 
 	commanders, err := replay.ListCommanders(databaseConnection)
 	if err != nil || len(commanders) != 3 {
@@ -588,15 +498,11 @@ func TestScopedTimeRangeAndCareerStatsIsolateProfilesAndSupportDisabledArchive(t
 	mainScope := replay.NewProfileScope([]int64{commanders[1].ID})
 	altScope := replay.NewProfileScope([]int64{commanders[2].ID})
 
-	eventBus := projection.NewBus()
-	salesLedger := realization.NewSalesLedger(databaseConnection, eventBus)
-	recoveredJumps := projections.NewRecoveredJumps(databaseConnection, eventBus)
-	careerStats := stats.NewCareerStats(databaseConnection, eventBus, salesLedger, recoveredJumps)
-	fallbackModeID := modes.DefaultFallbackModeID(databaseConnection)
-	staticModeLoader := func(_ db.Queryer, _ int64) (stats.ModeLookup, error) {
-		return func(_ string) int64 { return fallbackModeID }, nil
-	}
-	timeRangeStats := stats.NewTimeRangeStats(databaseConnection, eventBus, salesLedger, recoveredJumps, staticModeLoader)
+	harness := wireTimeRangeStatsHarness(databaseConnection, nil)
+	eventBus := harness.bus
+	careerStats := harness.careerStats
+	fallbackModeID := harness.fallbackModeID
+	timeRangeStats := harness.timeRangeStats
 
 	allCareer, err := careerStats.Get()
 	if err != nil {

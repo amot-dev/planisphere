@@ -1,24 +1,21 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { expedition, stats } from '../../../api/models'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  makeMode,
+  makeOriginRowView,
+  makeRowView,
+  makeWaypointDetails,
+} from '../../../test/fixtures'
+import { mountTestRoot } from '../../../test/render'
 import { ExpeditionPlanner } from '../ExpeditionPlanner'
 import { PlannerRouteTable } from '../table/PlannerRouteTable'
 import { WaypointDetailsDrawer } from './WaypointDetailsDrawer'
 
-function createOriginRowView() {
-  return expedition.RowView.createFrom({
-    row: { id: 1, expeditionId: 1, rowType: 'waypoint', systemName: 'Sol' },
-    number: 1,
-    visitState: 'visited',
-  })
-}
-
 describe('WaypointDetailsDrawer', () => {
   it('renders WaypointDetailsDrawer with matching border-l-2, Vessel Flown, and 1-Click Mode toggle for leg waypoints (number > 1)', () => {
-    const mockRowView = expedition.RowView.createFrom({
+    const mockRowView = makeRowView({
       row: {
         id: 15,
         expeditionId: 1,
@@ -32,7 +29,7 @@ describe('WaypointDetailsDrawer', () => {
       legModeColor: '#00D2FF',
     })
 
-    const mockDetails = expedition.WaypointDetails.createFrom({
+    const mockDetails = makeWaypointDetails({
       kind: 'historical',
       number: 2,
       shipsUsed: ['Anaconda'],
@@ -40,12 +37,12 @@ describe('WaypointDetailsDrawer', () => {
         distanceLy: 120.5,
         shipDistanceLy: 120.5,
         jumps: 3,
-      } as any,
+      },
     })
 
     const mockModes = [
-      { id: 10, name: 'Exploration', color: '#00D2FF' } as any,
-      { id: 20, name: 'Travel', color: '#FF7100' } as any,
+      makeMode({ id: 10, name: 'Exploration', color: '#00D2FF' }),
+      makeMode({ id: 20, name: 'Travel', color: '#FF7100' }),
     ]
 
     const html = renderToString(
@@ -83,7 +80,7 @@ describe('WaypointDetailsDrawer', () => {
   })
 
   it('colors origin drawers using muted neutral border for loading and loaded baseline views', () => {
-    const originRowView = createOriginRowView()
+    const originRowView = makeOriginRowView()
 
     const originLoadingDrawerHtml = renderToString(
       createElement(WaypointDetailsDrawer, {
@@ -96,7 +93,7 @@ describe('WaypointDetailsDrawer', () => {
 
     const originDrawerHtml = renderToString(
       createElement(WaypointDetailsDrawer, {
-        details: expedition.WaypointDetails.createFrom({ kind: 'origin', number: 1, metrics: {} }),
+        details: makeWaypointDetails({ kind: 'origin', number: 1 }),
         loading: false,
         rowView: originRowView,
       }),
@@ -105,12 +102,10 @@ describe('WaypointDetailsDrawer', () => {
   })
 
   it('omits Vessel Flown and Mode toggle in WaypointDetailsDrawer for origin baseline waypoint #1', () => {
-    const mockRowView = createOriginRowView()
-
-    const mockDetails = expedition.WaypointDetails.createFrom({
+    const mockRowView = makeOriginRowView()
+    const mockDetails = makeWaypointDetails({
       kind: 'origin',
       number: 1,
-      metrics: {} as any,
     })
 
     const html = renderToString(
@@ -127,7 +122,7 @@ describe('WaypointDetailsDrawer', () => {
   })
 
   it('renders Realized Value card with combined total sold and 6 orange negative lines without emojis', () => {
-    const mockRowView = expedition.RowView.createFrom({
+    const mockRowView = makeRowView({
       row: {
         id: 2,
         expeditionId: 1,
@@ -138,13 +133,13 @@ describe('WaypointDetailsDrawer', () => {
       visitState: 'visited',
     })
 
-    const mockDetails = expedition.WaypointDetails.createFrom({
+    const mockDetails = makeWaypointDetails({
       kind: 'leg',
       number: 2,
       metrics: {
         scanValueTotal: 50000000,
         organicValueTotal: 95000000,
-      } as any,
+      },
       realization: {
         totalRealized: 120000000,
         cartoLostDeath: 5000000,
@@ -153,7 +148,7 @@ describe('WaypointDetailsDrawer', () => {
         organicStolen: 8000000,
         carrierTariffLoss: 3500000,
         npcCrewLoss: 1200000,
-      } as any,
+      },
     })
 
     const html = renderToString(
@@ -197,7 +192,7 @@ describe('WaypointDetailsDrawer', () => {
   })
 
   it('renders WaypointDetailsDrawer for active current leg with IN PROGRESS and TBD fallback', () => {
-    const currentLegRowView = expedition.RowView.createFrom({
+    const currentLegRowView = makeRowView({
       row: {
         id: 22,
         expeditionId: 1,
@@ -208,14 +203,13 @@ describe('WaypointDetailsDrawer', () => {
       visitState: 'current',
     })
 
-    const currentLegDetails = expedition.WaypointDetails.createFrom({
+    const currentLegDetails = makeWaypointDetails({
       kind: 'leg',
       number: 3,
       prevSystem: 'Alpha Centauri',
       fromGalactic: '3312-01-19 12:00 UTC',
       toGalactic: '',
       elapsed: '4h 15m',
-      metrics: {} as any,
     })
 
     const html = renderToString(
@@ -236,12 +230,8 @@ describe('WaypointDetailsDrawer', () => {
     expect(html).toContain('[4h 15m]')
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('renders [IN SYSTEM]: duration for departed, completed, and live stays without arrived or departed indicators', () => {
-    const legRowView = expedition.RowView.createFrom({
+    const legRowView = makeRowView({
       row: { id: 25, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini' },
       number: 2,
       visitState: 'visited',
@@ -249,7 +239,7 @@ describe('WaypointDetailsDrawer', () => {
 
     const departedHtml = renderToString(
       createElement(WaypointDetailsDrawer, {
-        details: expedition.WaypointDetails.createFrom({
+        details: makeWaypointDetails({
           kind: 'leg',
           number: 2,
           prevSystem: 'Sol',
@@ -258,7 +248,6 @@ describe('WaypointDetailsDrawer', () => {
           arrivedAt: '2026-01-19T15:00:00Z',
           departedAt: '2026-01-19T16:30:00Z',
           elapsed: '4h 30m',
-          metrics: stats.Metrics.createFrom({}),
         }),
         loading: false,
         rowView: legRowView,
@@ -272,7 +261,7 @@ describe('WaypointDetailsDrawer', () => {
 
     const completedFinalHtml = renderToString(
       createElement(WaypointDetailsDrawer, {
-        details: expedition.WaypointDetails.createFrom({
+        details: makeWaypointDetails({
           kind: 'leg',
           number: 2,
           prevSystem: 'Sol',
@@ -283,7 +272,6 @@ describe('WaypointDetailsDrawer', () => {
           departedAt: '',
           inSystem: false,
           elapsed: '3h 40m',
-          metrics: stats.Metrics.createFrom({}),
         }),
         loading: false,
         rowView: legRowView,
@@ -296,7 +284,7 @@ describe('WaypointDetailsDrawer', () => {
 
     const unvisitedCurrentHtml = renderToString(
       createElement(WaypointDetailsDrawer, {
-        details: expedition.WaypointDetails.createFrom({
+        details: makeWaypointDetails({
           kind: 'leg',
           number: 2,
           prevSystem: 'Sol',
@@ -305,7 +293,6 @@ describe('WaypointDetailsDrawer', () => {
           arrivedAt: '',
           inSystem: false,
           elapsed: '2h 00m',
-          metrics: stats.Metrics.createFrom({}),
         }),
         loading: false,
         rowView: legRowView,
@@ -315,17 +302,16 @@ describe('WaypointDetailsDrawer', () => {
 
     const stagedOriginHtml = renderToString(
       createElement(WaypointDetailsDrawer, {
-        details: expedition.WaypointDetails.createFrom({
+        details: makeWaypointDetails({
           kind: 'origin',
           number: 1,
           fromGalactic: '3310-01-01 00:00 UTC',
           toGalactic: '',
           arrivedAt: '2026-01-19T10:00:00Z',
           inSystem: true,
-          metrics: stats.Metrics.createFrom({}),
         }),
         loading: false,
-        rowView: createOriginRowView(),
+        rowView: makeOriginRowView(),
       }),
     )
     expect(stagedOriginHtml).toContain(
@@ -335,7 +321,7 @@ describe('WaypointDetailsDrawer', () => {
   })
 
   it('renders computing placeholder when details has an empty kind so zero-valued payloads never render LEG #-1', () => {
-    const legRowView = expedition.RowView.createFrom({
+    const legRowView = makeRowView({
       row: { id: 30, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia' },
       number: 2,
       visitState: 'current',
@@ -343,7 +329,7 @@ describe('WaypointDetailsDrawer', () => {
 
     const html = renderToString(
       createElement(WaypointDetailsDrawer, {
-        details: expedition.WaypointDetails.createFrom({ rowId: 0, kind: '', number: 0 }),
+        details: makeWaypointDetails({ rowId: 0, kind: '', number: 0 }),
         loading: false,
         rowView: legRowView,
       }),
@@ -354,16 +340,15 @@ describe('WaypointDetailsDrawer', () => {
   })
 
   it('updates live [IN SYSTEM]: duration every minute while in system and pauses when clockSuspended is true', async () => {
-    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-19T15:10:00Z'))
 
-    const legRowView = expedition.RowView.createFrom({
+    const legRowView = makeRowView({
       row: { id: 26, expeditionId: 1, rowType: 'waypoint', systemName: 'Rohini' },
       number: 2,
       visitState: 'visited',
     })
-    const liveDetails = expedition.WaypointDetails.createFrom({
+    const liveDetails = makeWaypointDetails({
       kind: 'leg',
       number: 2,
       prevSystem: 'Sol',
@@ -372,64 +357,46 @@ describe('WaypointDetailsDrawer', () => {
       arrivedAt: '2026-01-19T15:00:00Z',
       inSystem: true,
       elapsed: '3h 10m',
-      metrics: stats.Metrics.createFrom({}),
     })
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
-      await act(async () => {
-        root.render(
-          createElement(WaypointDetailsDrawer, {
-            details: liveDetails,
-            loading: false,
-            rowView: legRowView,
-            clockSuspended: false,
-          }),
-        )
-      })
-      expect(container.textContent).toContain('[IN SYSTEM]:0h 10m')
+    const mounted = mountTestRoot(
+      createElement(WaypointDetailsDrawer, {
+        details: liveDetails,
+        loading: false,
+        rowView: legRowView,
+        clockSuspended: false,
+      }),
+    )
+    expect(mounted.container.textContent).toContain('[IN SYSTEM]:0h 10m')
 
-      await act(async () => {
-        vi.advanceTimersByTime(60_000)
-      })
-      expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
+    await act(async () => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(mounted.container.textContent).toContain('[IN SYSTEM]:0h 11m')
 
-      // Pausing live sync suspends the 60-second timer until resumed.
-      await act(async () => {
-        root.render(
-          createElement(WaypointDetailsDrawer, {
-            details: liveDetails,
-            loading: false,
-            rowView: legRowView,
-            clockSuspended: true,
-          }),
-        )
-      })
-      await act(async () => {
-        vi.advanceTimersByTime(180_000)
-      })
-      expect(container.textContent).toContain('[IN SYSTEM]:0h 11m')
+    // Pausing live sync suspends the 60-second timer until resumed.
+    mounted.rerender(
+      createElement(WaypointDetailsDrawer, {
+        details: liveDetails,
+        loading: false,
+        rowView: legRowView,
+        clockSuspended: true,
+      }),
+    )
+    await act(async () => {
+      vi.advanceTimersByTime(180_000)
+    })
+    expect(mounted.container.textContent).toContain('[IN SYSTEM]:0h 11m')
 
-      // Resuming immediately refreshes to current elapsed duration.
-      await act(async () => {
-        root.render(
-          createElement(WaypointDetailsDrawer, {
-            details: liveDetails,
-            loading: false,
-            rowView: legRowView,
-            clockSuspended: false,
-          }),
-        )
-      })
-      expect(container.textContent).toContain('[IN SYSTEM]:0h 14m')
-    } finally {
-      act(() => {
-        root.unmount()
-      })
-      container.remove()
-    }
+    // Resuming immediately refreshes to current elapsed duration.
+    mounted.rerender(
+      createElement(WaypointDetailsDrawer, {
+        details: liveDetails,
+        loading: false,
+        rowView: legRowView,
+        clockSuspended: false,
+      }),
+    )
+    expect(mounted.container.textContent).toContain('[IN SYSTEM]:0h 14m')
   })
 })
-
