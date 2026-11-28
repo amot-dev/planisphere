@@ -6,6 +6,7 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 )
@@ -24,11 +25,11 @@ var (
 	)
 )
 
-// CareerExobiology caches lifetime unfiltered Vista Genomics exobiology metrics.
+// CareerExobiology caches lifetime unfiltered Vista Genomics exobiology metrics per profile scope.
 type CareerExobiology struct {
 	database    *sql.DB
 	salesLedger *realization.SalesLedger
-	cache       *projection.Cache[ExobiologyMetrics]
+	cache       *projection.KeyedCache[string, ExobiologyMetrics]
 }
 
 // NewCareerExobiology creates a CareerExobiology projection and registers it on bus.
@@ -45,11 +46,10 @@ func NewCareerExobiology(
 		Journal: exobiologyJournalEvents,
 		App:     careerExobiologyAppEvents,
 	}
-	careerExo.cache = projection.NewCache[ExobiologyMetrics](
+	careerExo.cache = projection.NewKeyedCache[string, ExobiologyMetrics](
 		bus,
 		"CareerExobiology",
 		triggers,
-		careerExo.load,
 	)
 	return careerExo
 }
@@ -59,14 +59,21 @@ func (careerExo *CareerExobiology) Triggers() projection.Triggers {
 	return careerExo.cache.Triggers()
 }
 
-// Get returns the cached all-time exobiology metrics.
+// Get returns the cached all-time exobiology metrics for globally enabled profiles.
 func (careerExo *CareerExobiology) Get() (ExobiologyMetrics, error) {
-	return careerExo.cache.Get()
+	return careerExo.GetScoped(replay.ProfileScope{})
+}
+
+// GetScoped returns cached all-time exobiology metrics for scope.
+func (careerExo *CareerExobiology) GetScoped(scope replay.ProfileScope) (ExobiologyMetrics, error) {
+	return careerExo.cache.GetOrLoad(scope.CacheKeySuffix(), func() (ExobiologyMetrics, error) {
+		return careerExo.load(scope)
+	})
 }
 
 // IsValid reports whether CareerExobiology currently holds a warm cached value.
 func (careerExo *CareerExobiology) IsValid() bool {
-	return careerExo.cache.IsValid()
+	return careerExo.cache.Len() > 0
 }
 
 // Generation returns the monotonically increasing invalidation generation counter.
@@ -74,10 +81,11 @@ func (careerExo *CareerExobiology) Generation() uint64 {
 	return careerExo.cache.Generation()
 }
 
-func (careerExo *CareerExobiology) load() (ExobiologyMetrics, error) {
+func (careerExo *CareerExobiology) load(scope replay.ProfileScope) (ExobiologyMetrics, error) {
 	if careerExo.database == nil {
 		return ExobiologyMetrics{}, nil
 	}
 	engine := replaystats.NewEngineWithSources(careerExo.database, careerExo.salesLedger, nil, nil)
+	engine.Scope = scope
 	return engine.ComputeExobiology(Range{}, nil)
 }

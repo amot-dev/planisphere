@@ -35,12 +35,6 @@ var (
 	)
 )
 
-// QueryCareerCarrierOps loads lifetime Personal Carrier Operations jump and
-// distance totals from Frontier's latest Statistics event across enabled profiles.
-func QueryCareerCarrierOps(queryer db.Queryer) (CarrierOpsMetrics, error) {
-	return QueryCareerCarrierOpsScoped(queryer, replay.ProfileScope{})
-}
-
 // QueryCareerCarrierOpsScoped loads lifetime Personal Carrier Operations jump
 // and distance totals from Frontier's latest Statistics event matching scope.
 func QueryCareerCarrierOpsScoped(queryer db.Queryer, scope replay.ProfileScope) (CarrierOpsMetrics, error) {
@@ -65,12 +59,6 @@ func QueryCareerCarrierOpsScoped(queryer db.Queryer, scope replay.ProfileScope) 
 		CarrierJumps:      int(statisticsEvent.FleetCarrierNumber("FLEETCARRIER_TOTAL_JUMPS")),
 		CarrierDistanceLy: statisticsEvent.FleetCarrierNumber("FLEETCARRIER_DISTANCE_TRAVELLED"),
 	}, nil
-}
-
-// ComputeCarrierOps returns Personal Carrier Operations metrics for the
-// effective profile scope.
-func (engine *Engine) ComputeCarrierOps(filter *Filter) (CarrierOpsMetrics, error) {
-	return QueryCareerCarrierOpsScoped(engine.DB, effectiveScope(engine.Scope, filter))
 }
 
 // ComputeTravel returns Flight Operations navigation metrics for events in timeRange,

@@ -3,6 +3,8 @@ package stats_test
 import (
 	"testing"
 
+	"planisphere/internal/core/events"
+	"planisphere/internal/sources/journal"
 	"planisphere/internal/testutil/journaltest"
 )
 
@@ -82,5 +84,80 @@ func TestCareerStatsIsolatesProfilesAndSupportsDisabledArchive(testingContext *t
 	}
 	if archivedCareer.Metrics.Jumps != 1 || archivedCareer.Metrics.DistanceLy != 40.0 || archivedCareer.Metrics.CarrierJumps != 7 {
 		testingContext.Fatalf("expected explicit disabled archived CareerStats to return full era metrics, got %+v", archivedCareer.Metrics)
+	}
+}
+
+func TestCareerStatsScopedSectionIsolationAndCommanderFilterInvalidation(testingContext *testing.T) {
+	harness, _, mainScope, altScope := seedScopedMultiProfileArchive(testingContext)
+	careerStats := harness.careerStats
+
+	initialMain, initialError := careerStats.GetScoped(mainScope)
+	if initialError != nil {
+		testingContext.Fatalf("initial CareerStats.GetScoped(main): %v", initialError)
+	}
+	if initialMain.Metrics.Jumps != 1 || initialMain.Metrics.DistanceLy != 60.0 || initialMain.Metrics.BodiesScanned != 1 || initialMain.Metrics.OrganicSamples != 0 {
+		testingContext.Fatalf("unexpected initial mainScope metrics: %+v", initialMain.Metrics)
+	}
+	if altCareer, altError := careerStats.GetScoped(altScope); altError != nil || altCareer.Metrics.Jumps != 1 || altCareer.Metrics.OrganicSamples != 1 {
+		testingContext.Fatalf("unexpected altScope metrics: %+v err=%v", altCareer.Metrics, altError)
+	}
+
+	travelGen := careerStats.Travel().Generation()
+	carrierGen := careerStats.CarrierOps().Generation()
+	cartoGen := careerStats.Cartographics().Generation()
+	exoGen := careerStats.Exobiology().Generation()
+	realGen := careerStats.Realization().Generation()
+
+	// Insert new rows across all five career sections for mainScope, then publish only EventFSDJump.
+	journaltest.InsertParsedLines(
+		testingContext,
+		harness.conn,
+		`{"timestamp":"2026-02-01T12:00:00Z","event":"LoadGame","Commander":"CmdrMain","FID":"F10","Ship":"Mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-02-01T12:05:00Z","event":"FSDJump","StarSystem":"MainHop2","SystemAddress":202,"StarPos":[0,95,0],"JumpDist":35.0}`,
+		`{"timestamp":"2026-02-01T12:06:00Z","event":"Statistics","FLEETCARRIER":{"FLEETCARRIER_TOTAL_JUMPS":4,"FLEETCARRIER_DISTANCE_TRAVELLED":2000.0}}`,
+		`{"timestamp":"2026-02-01T12:10:00Z","event":"Scan","ScanType":"Detailed","StarSystem":"MainHop2","SystemAddress":202,"BodyID":2,"BodyName":"MainHop2 2","PlanetClass":"Water world","MassEM":1.0,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-02-01T12:15:00Z","event":"ScanOrganic","ScanType":"Analyse","Genus":"Stratum","Species":"$Codex_Ent_Stratum_07_Name;","Species_Localised":"Stratum Tectonicas","WasLogged":true,"SystemAddress":202,"Body":2}`,
+		`{"timestamp":"2026-02-01T12:20:00Z","event":"SellOrganicData","MarketID":123,"BioData":[{"Species":"$Codex_Ent_Stratum_07_Name;","Value":19010800,"Bonus":0}]}`,
+	)
+	harness.bus.PublishJournal(journal.NewEventSet(journal.EventFSDJump))
+
+	if careerStats.Travel().IsValid() || careerStats.Travel().Generation() != travelGen+1 {
+		testingContext.Fatalf("expected EventFSDJump to invalidate CareerTravel (valid=%v gen=%d->%d)",
+			careerStats.Travel().IsValid(), travelGen, careerStats.Travel().Generation())
+	}
+	if !careerStats.CarrierOps().IsValid() || !careerStats.Cartographics().IsValid() || !careerStats.Exobiology().IsValid() || !careerStats.Realization().IsValid() ||
+		careerStats.CarrierOps().Generation() != carrierGen || careerStats.Cartographics().Generation() != cartoGen ||
+		careerStats.Exobiology().Generation() != exoGen || careerStats.Realization().Generation() != realGen {
+		testingContext.Fatalf("expected non-travel sections to remain warm with unchanged generations on EventFSDJump")
+	}
+
+	afterJump, jumpError := careerStats.GetScoped(mainScope)
+	if jumpError != nil {
+		testingContext.Fatalf("CareerStats.GetScoped(main) after FSDJump: %v", jumpError)
+	}
+	if afterJump.Metrics.Jumps != 2 || afterJump.Metrics.DistanceLy != 95.0 {
+		testingContext.Fatalf("expected CareerTravel to reload Jumps=2 DistanceLy=95.0, got %+v", afterJump.Metrics)
+	}
+	if afterJump.Metrics.CarrierJumps != 0 || afterJump.Metrics.BodiesScanned != 1 || afterJump.Metrics.OrganicSamples != 0 || afterJump.Realization != initialMain.Realization {
+		testingContext.Fatalf("expected CarrierOps, Cartographics, Exobiology, and Realization to stay cached without reloading, got metrics=%+v real=%+v",
+			afterJump.Metrics, afterJump.Realization)
+	}
+
+	// AppCommanderFilterChanged must invalidate all five sections so subsequent GetScoped reloads every domain.
+	harness.bus.PublishApp(events.AppCommanderFilterChanged)
+	if careerStats.Travel().IsValid() || careerStats.CarrierOps().IsValid() || careerStats.Cartographics().IsValid() ||
+		careerStats.Exobiology().IsValid() || careerStats.Realization().IsValid() {
+		testingContext.Fatalf("expected AppCommanderFilterChanged to invalidate all five career sections")
+	}
+
+	afterFilterChange, filterError := careerStats.GetScoped(mainScope)
+	if filterError != nil {
+		testingContext.Fatalf("CareerStats.GetScoped(main) after AppCommanderFilterChanged: %v", filterError)
+	}
+	if afterFilterChange.Metrics.Jumps != 2 || afterFilterChange.Metrics.CarrierJumps != 4 ||
+		afterFilterChange.Metrics.BodiesScanned != 2 || afterFilterChange.Metrics.OrganicSamples != 1 ||
+		afterFilterChange.Realization.TotalRealized != 19010800 {
+		testingContext.Fatalf("expected all five career sections reloaded after AppCommanderFilterChanged, got metrics=%+v real=%+v",
+			afterFilterChange.Metrics, afterFilterChange.Realization)
 	}
 }

@@ -5,6 +5,7 @@ import (
 
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 )
@@ -23,10 +24,10 @@ var (
 	)
 )
 
-// CareerCartographics caches lifetime unfiltered Universal Cartographics metrics.
+// CareerCartographics caches lifetime unfiltered Universal Cartographics metrics per profile scope.
 type CareerCartographics struct {
 	database *sql.DB
-	cache    *projection.Cache[CartographicsMetrics]
+	cache    *projection.KeyedCache[string, CartographicsMetrics]
 }
 
 // NewCareerCartographics creates a CareerCartographics projection and registers it on bus.
@@ -36,11 +37,10 @@ func NewCareerCartographics(dbConn *sql.DB, bus *projection.Bus) *CareerCartogra
 		Journal: cartographicsJournalEvents,
 		App:     careerCartographicsAppEvents,
 	}
-	careerCarto.cache = projection.NewCache[CartographicsMetrics](
+	careerCarto.cache = projection.NewKeyedCache[string, CartographicsMetrics](
 		bus,
 		"CareerCartographics",
 		triggers,
-		careerCarto.load,
 	)
 	return careerCarto
 }
@@ -50,14 +50,21 @@ func (careerCarto *CareerCartographics) Triggers() projection.Triggers {
 	return careerCarto.cache.Triggers()
 }
 
-// Get returns the cached all-time cartographics metrics.
+// Get returns the cached all-time cartographics metrics for globally enabled profiles.
 func (careerCarto *CareerCartographics) Get() (CartographicsMetrics, error) {
-	return careerCarto.cache.Get()
+	return careerCarto.GetScoped(replay.ProfileScope{})
+}
+
+// GetScoped returns cached all-time cartographics metrics for scope.
+func (careerCarto *CareerCartographics) GetScoped(scope replay.ProfileScope) (CartographicsMetrics, error) {
+	return careerCarto.cache.GetOrLoad(scope.CacheKeySuffix(), func() (CartographicsMetrics, error) {
+		return careerCarto.load(scope)
+	})
 }
 
 // IsValid reports whether CareerCartographics currently holds a warm cached value.
 func (careerCarto *CareerCartographics) IsValid() bool {
-	return careerCarto.cache.IsValid()
+	return careerCarto.cache.Len() > 0
 }
 
 // Generation returns the monotonically increasing invalidation generation counter.
@@ -65,9 +72,11 @@ func (careerCarto *CareerCartographics) Generation() uint64 {
 	return careerCarto.cache.Generation()
 }
 
-func (careerCarto *CareerCartographics) load() (CartographicsMetrics, error) {
+func (careerCarto *CareerCartographics) load(scope replay.ProfileScope) (CartographicsMetrics, error) {
 	if careerCarto.database == nil {
 		return CartographicsMetrics{}, nil
 	}
-	return replaystats.NewEngine(careerCarto.database).ComputeCartographics(Range{}, nil)
+	engine := replaystats.NewEngine(careerCarto.database)
+	engine.Scope = scope
+	return engine.ComputeCartographics(Range{}, nil)
 }

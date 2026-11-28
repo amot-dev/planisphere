@@ -215,34 +215,3 @@ func (engine *Engine) ComputeRealization(timeRange Range, filter *Filter) (Reali
 	}
 	return ledger.BreakdownForScope(after, until, effectiveScope(engine.Scope, filter), allowDiscovery), nil
 }
-
-// ComputeAllTime computes all-time navigation, carrier operations, discovery,
-// and realization telemetry across the effective profile scope.
-func (engine *Engine) ComputeAllTime(filter *Filter) (TelemetrySummary, error) {
-	travel, err := engine.ComputeTravel(Range{}, filter)
-	if err != nil {
-		return TelemetrySummary{}, err
-	}
-	carrierOps, err := engine.ComputeCarrierOps(filter)
-	if err != nil {
-		return TelemetrySummary{}, err
-	}
-	carto, err := engine.ComputeCartographics(Range{}, filter)
-	if err != nil {
-		return TelemetrySummary{}, err
-	}
-	exo, err := engine.ComputeExobiology(Range{}, filter)
-	if err != nil {
-		return TelemetrySummary{}, err
-	}
-	realized, err := engine.ComputeRealization(Range{}, filter)
-	if err != nil {
-		return TelemetrySummary{}, err
-	}
-	var combined Metrics
-	travel.ApplyTo(&combined)
-	carrierOps.ApplyTo(&combined)
-	carto.ApplyTo(&combined)
-	exo.ApplyTo(&combined)
-	return TelemetrySummary{Metrics: combined, Realization: realized}, nil
-}

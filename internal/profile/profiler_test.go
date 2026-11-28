@@ -40,6 +40,9 @@ func seedProfileTestDatabase(t *testing.T) string {
 	if _, execErr := conn.Exec(`INSERT INTO commanders(name, fid, enabled, first_seen, last_seen) VALUES ('CmdrProfile', 'F100', 1, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z')`); execErr != nil {
 		t.Fatalf("insert seed commander: %v", execErr)
 	}
+	if _, execErr := conn.Exec(`INSERT INTO commander_profiles(id, profile_key, display_name, fid, universe, enabled, first_seen, last_seen) VALUES (1, 'live:f100:era:0', 'CmdrProfile', 'F100', 'live', 1, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z'), (2, 'live:f200:era:0', 'CmdrAlt', 'F200', 'live', 1, '2026-01-01T10:00:00Z', '2026-01-01T10:00:00Z')`); execErr != nil {
+		t.Fatalf("insert seed commander profiles: %v", execErr)
+	}
 	if _, execErr := conn.Exec(`INSERT INTO ingested_journals(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at) VALUES ('Journal.2026-01-01.log', '/tmp/Journal.2026-01-01.log', 1024, 9, 1024, 9, '2026-01-01T10:00:00Z', '2026-01-01T12:00:00Z', '2026-01-01T12:00:00Z')`); execErr != nil {
 		t.Fatalf("insert seed ingested_journals: %v", execErr)
 	}
@@ -59,6 +62,9 @@ func seedProfileTestDatabase(t *testing.T) string {
 		if execErr != nil {
 			t.Fatalf("insert seed event: %v", execErr)
 		}
+	}
+	if _, execErr := conn.Exec(`UPDATE journal_events SET profile_id = 1 WHERE commander = 'CmdrProfile'`); execErr != nil {
+		t.Fatalf("assign seed commander profile_id: %v", execErr)
 	}
 
 	createdExp, createErr := expedition.Create(conn, "Test Survey", "Profiler verification")
@@ -123,7 +129,15 @@ func TestRunSnapshotSuiteAndDiff(t *testing.T) {
 	foundExplainPlan := false
 	foundCachedProbe := false
 	foundSinglePassProbe := false
+	foundScopedColdWarm := false
+	foundScopedLiveJump := false
 	for _, probe := range report.Probes {
+		switch probe.Name {
+		case "Stats/CareerStatsScoped":
+			foundScopedColdWarm = true
+		case "Stats/LiveInvalidation/ScopedFSDJump":
+			foundScopedLiveJump = true
+		}
 		if probe.HasWarm {
 			foundCachedProbe = true
 			if !probe.ColdWarmMatch {
@@ -144,6 +158,9 @@ func TestRunSnapshotSuiteAndDiff(t *testing.T) {
 	}
 	if !foundCachedProbe || !foundSinglePassProbe {
 		t.Errorf("expected both cached Cold/Warm probes (%v) and single-pass stateless probes (%v)", foundCachedProbe, foundSinglePassProbe)
+	}
+	if !foundScopedColdWarm || !foundScopedLiveJump {
+		t.Errorf("expected scoped career probes to execute (coldWarm=%v liveJump=%v)", foundScopedColdWarm, foundScopedLiveJump)
 	}
 
 	baselinePath := filepath.Join(t.TempDir(), "baseline.json")

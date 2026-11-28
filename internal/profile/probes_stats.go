@@ -29,13 +29,11 @@ func runStatsProbes(
 		results = append(results, ledgerProbe)
 	}
 
-	if matchesFilter("Stats/CareerStats", options.FilterPattern) {
-		careerProbe, careerError := profileCareerStats(database, proj, recorder, dataset, options.Iterations)
-		if careerError != nil {
-			return nil, nil, careerError
-		}
-		results = append(results, careerProbe)
+	careerProbes, careerError := runCareerStatsProbes(database, proj, recorder, dataset, options)
+	if careerError != nil {
+		return nil, nil, careerError
 	}
+	results = append(results, careerProbes...)
 
 	windowProbes, computePoints, windowError := runTimeRangeWindowProbes(database, proj, recorder, dataset, options)
 	if windowError != nil {
@@ -102,34 +100,6 @@ func profileSalesLedger(
 	)
 }
 
-func profileCareerStats(
-	database *sql.DB,
-	proj *profileProjections,
-	recorder *treeRecorder,
-	dataset DatasetSummary,
-	iterations int,
-) (ProbeResult, error) {
-	return runColdWarmProbe(
-		database,
-		recorder,
-		"Stats/CareerStats",
-		"Stats",
-		"Assemble all-time commander telemetry across 5 cached career section projections",
-		"stats.(*CareerStats).Get",
-		"metric_events",
-		"discoveries",
-		iterations,
-		proj.invalidate,
-		func() (singleExecOutcome, error) {
-			telemetrySummary, getError := recordCareerStatsSections(recorder, proj.careerStats, dataset)
-			if getError != nil {
-				return singleExecOutcome{}, getError
-			}
-			return buildTelemetryExecOutcome(telemetrySummary, max(dataset.MetricEvents, 1)), nil
-		},
-	)
-}
-
 func runStatsSubSpan(
 	recorder *treeRecorder,
 	label string,
@@ -139,58 +109,6 @@ func runStatsSubSpan(
 	operation func() error,
 ) error {
 	return recorder.withSubSpan(label, location, max(items, 1), unit, operation)
-}
-
-func recordCareerStatsSections(
-	recorder *treeRecorder,
-	careerStats *projstats.CareerStats,
-	dataset DatasetSummary,
-) (projstats.TelemetrySummary, error) {
-	var (
-		travelMetrics        projstats.TravelMetrics
-		carrierOpsMetrics    projstats.CarrierOpsMetrics
-		cartographicsMetrics projstats.CartographicsMetrics
-		exobiologyMetrics    projstats.ExobiologyMetrics
-		realizationBreakdown projstats.RealizationBreakdown
-	)
-	steps := []struct {
-		label, location, unit string
-		items                 int
-		load                  func() error
-	}{
-		{"CareerTravel", "internal/projections/stats/career_travel.go:61", "events", dataset.MetricEvents, func() (loadError error) {
-			travelMetrics, loadError = careerStats.Travel().Get()
-			return loadError
-		}},
-		{"CareerCarrierOps", "internal/projections/stats/career_carrier_ops.go:50", "statistics", 1, func() (loadError error) {
-			carrierOpsMetrics, loadError = careerStats.CarrierOps().Get()
-			return loadError
-		}},
-		{"CareerCartographics", "internal/projections/stats/career_cartographics.go:54", "events", dataset.MetricEvents, func() (loadError error) {
-			cartographicsMetrics, loadError = careerStats.Cartographics().Get()
-			return loadError
-		}},
-		{"CareerExobiology", "internal/projections/stats/career_exobiology.go:63", "events", dataset.MetricEvents, func() (loadError error) {
-			exobiologyMetrics, loadError = careerStats.Exobiology().Get()
-			return loadError
-		}},
-		{"CareerRealization", "internal/projections/stats/career_realization.go:66", "real_events", dataset.RealizationEvents, func() (loadError error) {
-			realizationBreakdown, loadError = careerStats.Realization().Get()
-			return loadError
-		}},
-	}
-	for _, step := range steps {
-		if stepError := runStatsSubSpan(recorder, step.label, step.location, step.items, step.unit, step.load); stepError != nil {
-			return projstats.TelemetrySummary{}, stepError
-		}
-	}
-
-	var combinedMetrics projstats.Metrics
-	travelMetrics.ApplyTo(&combinedMetrics)
-	carrierOpsMetrics.ApplyTo(&combinedMetrics)
-	cartographicsMetrics.ApplyTo(&combinedMetrics)
-	exobiologyMetrics.ApplyTo(&combinedMetrics)
-	return projstats.TelemetrySummary{Metrics: combinedMetrics, Realization: realizationBreakdown}, nil
 }
 
 func runTimeRangeWindowProbes(

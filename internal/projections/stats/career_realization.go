@@ -6,6 +6,7 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections/realization"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 )
@@ -27,11 +28,11 @@ var (
 	)
 )
 
-// CareerRealization caches the all-time unfiltered Realized Value profit and loss breakdown.
+// CareerRealization caches the all-time unfiltered Realized Value profit and loss breakdown per profile scope.
 type CareerRealization struct {
 	database    *sql.DB
 	salesLedger *realization.SalesLedger
-	cache       *projection.Cache[RealizationBreakdown]
+	cache       *projection.KeyedCache[string, RealizationBreakdown]
 }
 
 // NewCareerRealization creates a CareerRealization projection and registers it on bus.
@@ -48,11 +49,10 @@ func NewCareerRealization(
 		Journal: realizationStatsJournalEvents,
 		App:     careerRealizationAppEvents,
 	}
-	careerReal.cache = projection.NewCache[RealizationBreakdown](
+	careerReal.cache = projection.NewKeyedCache[string, RealizationBreakdown](
 		bus,
 		"CareerRealization",
 		triggers,
-		careerReal.load,
 	)
 	return careerReal
 }
@@ -62,14 +62,21 @@ func (careerReal *CareerRealization) Triggers() projection.Triggers {
 	return careerReal.cache.Triggers()
 }
 
-// Get returns the cached all-time realization breakdown.
+// Get returns the cached all-time realization breakdown for globally enabled profiles.
 func (careerReal *CareerRealization) Get() (RealizationBreakdown, error) {
-	return careerReal.cache.Get()
+	return careerReal.GetScoped(replay.ProfileScope{})
+}
+
+// GetScoped returns cached all-time realization breakdown for scope.
+func (careerReal *CareerRealization) GetScoped(scope replay.ProfileScope) (RealizationBreakdown, error) {
+	return careerReal.cache.GetOrLoad(scope.CacheKeySuffix(), func() (RealizationBreakdown, error) {
+		return careerReal.load(scope)
+	})
 }
 
 // IsValid reports whether CareerRealization currently holds a warm cached value.
 func (careerReal *CareerRealization) IsValid() bool {
-	return careerReal.cache.IsValid()
+	return careerReal.cache.Len() > 0
 }
 
 // Generation returns the monotonically increasing invalidation generation counter.
@@ -77,10 +84,11 @@ func (careerReal *CareerRealization) Generation() uint64 {
 	return careerReal.cache.Generation()
 }
 
-func (careerReal *CareerRealization) load() (RealizationBreakdown, error) {
+func (careerReal *CareerRealization) load(scope replay.ProfileScope) (RealizationBreakdown, error) {
 	if careerReal.database == nil {
 		return RealizationBreakdown{}, nil
 	}
 	engine := replaystats.NewEngineWithSources(careerReal.database, careerReal.salesLedger, nil, nil)
+	engine.Scope = scope
 	return engine.ComputeRealization(Range{}, nil)
 }

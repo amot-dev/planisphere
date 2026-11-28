@@ -6,6 +6,7 @@ import (
 	"planisphere/internal/core/events"
 	"planisphere/internal/core/projection"
 	"planisphere/internal/projections"
+	"planisphere/internal/replay"
 	replaystats "planisphere/internal/replay/stats"
 	"planisphere/internal/sources/journal"
 )
@@ -22,11 +23,11 @@ var (
 	)
 )
 
-// CareerTravel caches lifetime unfiltered Flight Operations metrics.
+// CareerTravel caches lifetime unfiltered Flight Operations metrics per profile scope.
 type CareerTravel struct {
 	database       *sql.DB
 	recoveredJumps *projections.RecoveredJumps
-	cache          *projection.Cache[TravelMetrics]
+	cache          *projection.KeyedCache[string, TravelMetrics]
 }
 
 // NewCareerTravel creates a CareerTravel projection and registers it on bus.
@@ -43,11 +44,10 @@ func NewCareerTravel(
 		Journal: travelStatsJournalEvents,
 		App:     careerTravelAppEvents,
 	}
-	careerTravel.cache = projection.NewCache[TravelMetrics](
+	careerTravel.cache = projection.NewKeyedCache[string, TravelMetrics](
 		bus,
 		"CareerTravel",
 		triggers,
-		careerTravel.load,
 	)
 	return careerTravel
 }
@@ -57,14 +57,21 @@ func (careerTravel *CareerTravel) Triggers() projection.Triggers {
 	return careerTravel.cache.Triggers()
 }
 
-// Get returns the cached all-time travel metrics.
+// Get returns the cached all-time travel metrics for globally enabled profiles.
 func (careerTravel *CareerTravel) Get() (TravelMetrics, error) {
-	return careerTravel.cache.Get()
+	return careerTravel.GetScoped(replay.ProfileScope{})
+}
+
+// GetScoped returns cached all-time travel metrics for scope.
+func (careerTravel *CareerTravel) GetScoped(scope replay.ProfileScope) (TravelMetrics, error) {
+	return careerTravel.cache.GetOrLoad(scope.CacheKeySuffix(), func() (TravelMetrics, error) {
+		return careerTravel.load(scope)
+	})
 }
 
 // IsValid reports whether CareerTravel currently holds a warm cached value.
 func (careerTravel *CareerTravel) IsValid() bool {
-	return careerTravel.cache.IsValid()
+	return careerTravel.cache.Len() > 0
 }
 
 // Generation returns the monotonically increasing invalidation generation counter.
@@ -72,10 +79,11 @@ func (careerTravel *CareerTravel) Generation() uint64 {
 	return careerTravel.cache.Generation()
 }
 
-func (careerTravel *CareerTravel) load() (TravelMetrics, error) {
+func (careerTravel *CareerTravel) load(scope replay.ProfileScope) (TravelMetrics, error) {
 	if careerTravel.database == nil {
 		return TravelMetrics{}, nil
 	}
 	engine := replaystats.NewEngineWithSources(careerTravel.database, nil, careerTravel.recoveredJumps, nil)
+	engine.Scope = scope
 	return engine.ComputeTravel(Range{}, nil)
 }
