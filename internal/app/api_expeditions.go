@@ -10,7 +10,9 @@ import (
 	"planisphere/internal/store/settings"
 )
 
-// ListExpeditions returns all expeditions (newest first).
+// ListExpeditions returns all expeditions with planning expeditions first
+// (most recently created first), followed by active and completed expeditions
+// ordered by start timestamp (most recent first).
 func (app *App) ListExpeditions() ([]expedition.Expedition, error) {
 	app.dbMu.RLock()
 	defer app.dbMu.RUnlock()

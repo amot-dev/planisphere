@@ -296,14 +296,28 @@ describe('ExpeditionManageModal', () => {
       />,
     )
 
+    const cloneButton = modalView.container.querySelector(
+      'button[aria-label="Clone expedition"]',
+    ) as HTMLButtonElement
+    const editButton = modalView.container.querySelector(
+      'button[aria-label="Edit expedition"]',
+    ) as HTMLButtonElement
+    const deleteButton = modalView.container.querySelector(
+      'button[aria-label="Delete expedition"]',
+    ) as HTMLButtonElement
+    expect(cloneButton.querySelector('svg')).not.toBeNull()
+    expect(editButton.querySelector('svg')).not.toBeNull()
+    expect(deleteButton.querySelector('svg')).not.toBeNull()
+    expect(editButton.title).toBe('Edit expedition name and description')
+
     act(() => {
-      modalView.findButtonByText('CLONE').click()
+      cloneButton.click()
     })
 
     expect(spies.CloneExpedition).toHaveBeenCalledWith(1)
-    expect(modalView.findButtonByText('CLONE').disabled).toBe(true)
-    expect(modalView.findButtonByText('RENAME').disabled).toBe(true)
-    expect(modalView.findButtonByText('DELETE').disabled).toBe(true)
+    expect(cloneButton.disabled).toBe(true)
+    expect(editButton.disabled).toBe(true)
+    expect(deleteButton.disabled).toBe(true)
     expect(modalView.findButtonByText('Alpha').disabled).toBe(true)
     const closeHeaderButton = modalView.container.querySelector('button') as HTMLButtonElement
     expect(closeHeaderButton.disabled).toBe(true)
@@ -324,7 +338,57 @@ describe('ExpeditionManageModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('renders EDIT with single-commander save-slot selector when multiple commanders exist and calls UpdateExpeditionScoped', async () => {
+  it('supports canceling and saving single-commander inline edits from the edit icon button', async () => {
+    const { spies } = installWailsAppMock({
+      UpdateExpedition: async () => {},
+    })
+    const modalView = mountTestRoot(
+      <ExpeditionManageModal
+        expeditions={[
+          expedition.Expedition.createFrom({
+            id: 3,
+            name: 'Sagittarius Loop',
+            description: 'Draft notes',
+            status: 'planning',
+          }),
+        ]}
+        activeId={3}
+        onSelect={() => {}}
+        onClose={() => {}}
+      />,
+    )
+
+    const editButton = modalView.container.querySelector(
+      'button[aria-label="Edit expedition"]',
+    ) as HTMLButtonElement
+    act(() => editButton.click())
+    expect(modalView.findButtonByText('SAVE')).toBeTruthy()
+    expect(modalView.findButtonByText('CANCEL')).toBeTruthy()
+
+    act(() => modalView.findButtonByText('CANCEL').click())
+    expect(modalView.queryButtonByText('SAVE')).toBeNull()
+    expect(spies.UpdateExpedition).not.toHaveBeenCalled()
+
+    const reopenedEditButton = modalView.container.querySelector(
+      'button[aria-label="Edit expedition"]',
+    ) as HTMLButtonElement
+    act(() => reopenedEditButton.click())
+    const textInputs = Array.from(
+      modalView.container.querySelectorAll('input[type="text"]'),
+    ) as HTMLInputElement[]
+    act(() => {
+      setFormControlValue(textInputs[2], 'Sagittarius Core')
+      setFormControlValue(textInputs[3], 'Updated notes')
+    })
+
+    await act(async () => {
+      modalView.findButtonByText('SAVE').click()
+      await Promise.resolve()
+    })
+    expect(spies.UpdateExpedition).toHaveBeenCalledWith(3, 'Sagittarius Core', 'Updated notes')
+  })
+
+  it('renders edit icon button with single-commander save-slot selector when multiple commanders exist and calls UpdateExpeditionScoped', async () => {
     const { spies } = installWailsAppMock({
       UpdateExpedition: async () => {},
       UpdateExpeditionScoped: async () => {},
@@ -367,7 +431,11 @@ describe('ExpeditionManageModal', () => {
       />,
     )
 
-    act(() => modalView.findButtonByText('EDIT').click())
+    const editButton = modalView.container.querySelector(
+      'button[aria-label="Edit expedition"]',
+    ) as HTMLButtonElement
+    expect(editButton.title).toBe('Edit expedition name, description, and commander save slot')
+    act(() => editButton.click())
     expect(modalView.container.textContent).toContain('Commander Save Slot')
 
     const radios = Array.from(

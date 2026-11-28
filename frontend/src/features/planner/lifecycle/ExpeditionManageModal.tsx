@@ -10,6 +10,7 @@ import {
   UpdateExpeditionScoped,
 } from '../../../api/backend'
 import { expedition, replay } from '../../../api/models'
+import { CopyIcon, PencilIcon, TrashIcon } from '../../../components/ui/HudIcons'
 import { ModalShell } from '../../../components/ui/ModalShell'
 import {
   resolveSelectedCommanderProfileId,
@@ -315,7 +316,14 @@ export function ExpeditionManageModal({
 
       <div className="divide-y divide-ed-border-subtle border border-ed-border bg-ed-card">
         {expeditions.map((expeditionItem) => (
-          <div key={expeditionItem.id} className="p-2.5 flex items-center justify-between gap-2">
+          <div
+            key={expeditionItem.id}
+            className={
+              editingId === expeditionItem.id
+                ? 'p-2.5 flex items-center justify-between gap-2'
+                : 'flex items-stretch justify-between'
+            }
+          >
             {editingId === expeditionItem.id ? (
               hasMultipleCommanders ? (
                 <ScopedExpeditionInlineEditor
@@ -352,6 +360,17 @@ export function ExpeditionManageModal({
                   <button
                     type="button"
                     disabled={busy}
+                    onClick={() => {
+                      setEditingId(null)
+                      setErrorMessage('')
+                    }}
+                    className="ed-btn"
+                  >
+                    CANCEL
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
                     onClick={() => handleSaveEdit(expeditionItem.id)}
                     className="ed-btn-cyan"
                   >
@@ -368,9 +387,9 @@ export function ExpeditionManageModal({
                     onSelect(expeditionItem.id)
                     onClose()
                   }}
-                  className="flex-1 text-left cursor-pointer disabled:cursor-not-allowed"
+                  className="flex-1 min-w-0 px-2.5 py-2.5 text-left hover:bg-ed-hover transition-colors cursor-pointer disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <span
                       className={`font-bold uppercase tracking-wider ${
                         expeditionItem.id === activeId ? 'text-ed-amber' : 'text-ed-text-main'
@@ -378,7 +397,7 @@ export function ExpeditionManageModal({
                     >
                       {expeditionItem.name}
                     </span>
-                    <span className="text-[9px] font-mono-tabular uppercase px-1.5 py-0.5 bg-ed-control border border-ed-border text-ed-text-muted">
+                    <span className="shrink-0 text-[9px] font-mono-tabular uppercase px-1.5 py-0.5 bg-ed-control border border-ed-border text-ed-text-muted">
                       {expeditionItem.status}
                     </span>
                   </div>
@@ -386,7 +405,7 @@ export function ExpeditionManageModal({
                     <div className="text-[11px] text-ed-text-muted">{expeditionItem.description}</div>
                   )}
                 </button>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0 pl-2 pr-2.5 py-2">
                   {confirmDeleteId === expeditionItem.id ? (
                     <>
                       <span className="text-[10px] font-bold uppercase tracking-wider text-ed-danger-text mr-1">
@@ -416,9 +435,10 @@ export function ExpeditionManageModal({
                         disabled={busy}
                         onClick={() => handleClone(expeditionItem.id)}
                         title="Clone this expedition into a new expedition in the Planning phase"
-                        className="ed-btn-cyan"
+                        aria-label="Clone expedition"
+                        className="ed-btn-cyan p-1.5!"
                       >
-                        CLONE
+                        <CopyIcon />
                       </button>
                       <button
                         type="button"
@@ -436,9 +456,15 @@ export function ExpeditionManageModal({
                             ),
                           )
                         }}
-                        className="ed-btn"
+                        title={
+                          hasMultipleCommanders
+                            ? 'Edit expedition name, description, and commander save slot'
+                            : 'Edit expedition name and description'
+                        }
+                        aria-label="Edit expedition"
+                        className="ed-btn p-1.5!"
                       >
-                        {hasMultipleCommanders ? 'EDIT' : 'RENAME'}
+                        <PencilIcon />
                       </button>
                       {expeditions.length > 1 && (
                         <button
@@ -448,9 +474,11 @@ export function ExpeditionManageModal({
                             setEditingId(null)
                             setConfirmDeleteId(expeditionItem.id)
                           }}
-                          className="ed-btn-danger"
+                          title="Delete expedition"
+                          aria-label="Delete expedition"
+                          className="ed-btn-danger p-1.5!"
                         >
-                          DELETE
+                          <TrashIcon />
                         </button>
                       )}
                     </>

@@ -140,15 +140,12 @@ export default function App() {
     <div className="h-screen w-screen flex flex-col cockpit-grid-bg text-ed-text-main overflow-hidden">
       <CockpitTopBar
         sidebarCollapsed={sidebarCollapsed}
-        expeditions={expeditions}
-        activeExpeditionId={activeExpeditionId}
         activeStatusMessage={activeStatusMessage}
         syncPauseState={syncPauseState}
         hasPendingSyncUpdates={hasPendingSyncUpdates}
         ingest={ingest}
         settings={settings}
         onToggleSyncPause={handleToggleSyncPause}
-        onSelectExpedition={handleManualSelectExpedition}
         onOpenExpeditionsModal={() => setActiveModal('expeditions')}
         onOpenSettingsModal={handleOpenSettingsModal}
         onOpenSearchModal={handleOpenSearchModal}

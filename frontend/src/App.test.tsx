@@ -14,7 +14,7 @@ import {
   makeWaypointDetails,
 } from './test/fixtures'
 import { buildSampleExportData } from './test/fixtures/exportFixtures'
-import { mountTestRoot, setFormControlValue } from './test/render'
+import { mountTestRoot } from './test/render'
 import {
   installWailsAppMock,
   installWailsRuntimeMock,
@@ -263,12 +263,12 @@ describe('App top-level shell orchestration', () => {
       mounted.container.querySelector('input[aria-label="Search waypoints and visit history"]'),
     ).toBeNull()
 
-    // Switch active expedition via top-bar selector and open StartExpeditionModal on planning expedition #2.
-    const expeditionSelect = mounted.container.querySelector(
-      'select[title="Select active expedition"]',
-    ) as HTMLSelectElement
+    // Switch active expedition via Expeditions modal and open StartExpeditionModal on planning expedition #2.
+    act(() => {
+      mounted.findButtonByText('EXPEDITIONS').click()
+    })
     await act(async () => {
-      setFormControlValue(expeditionSelect, '2')
+      mounted.findButtonByText('Outer Arm Draft').click()
       await flushMicrotasks()
     })
     expect(spies.SetActiveExpedition).toHaveBeenCalledWith(2)

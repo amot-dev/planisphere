@@ -1,4 +1,4 @@
-import { app, expedition } from '../../api/models'
+import { app } from '../../api/models'
 import type { SyncPauseState } from '../../domain/syncState'
 import { APP_PRODUCT_NAME, APP_TAGLINE } from '../../version'
 import { CogIcon, SearchIcon } from './HudIcons'
@@ -6,20 +6,17 @@ import { SyncStatusButton } from './SyncStatusButton'
 import { VersionIndicator } from './VersionIndicator'
 
 /**
- * CockpitTopBarProps defines the sidebar collapse state, expedition selector
- * data, live ingestion telemetry, and modal trigger callbacks for the top bar.
+ * CockpitTopBarProps defines the sidebar collapse state, live ingestion
+ * telemetry, and modal trigger callbacks for the top bar.
  */
 export interface CockpitTopBarProps {
   sidebarCollapsed: boolean
-  expeditions: expedition.Expedition[]
-  activeExpeditionId: number
   activeStatusMessage: string | null
   syncPauseState: SyncPauseState
   hasPendingSyncUpdates: boolean
   ingest: app.IngestStatus | null
   settings: app.Settings | null
   onToggleSyncPause: () => void
-  onSelectExpedition: (selectedExpeditionId: number) => void
   onOpenExpeditionsModal: () => void
   onOpenSettingsModal: () => void
   onOpenSearchModal?: () => void
@@ -27,19 +24,16 @@ export interface CockpitTopBarProps {
 
 /**
  * CockpitTopBar renders the persistent 48px top cockpit header containing the
- * application emblem, version indicator, expedition switcher, and status strip.
+ * application emblem, version indicator, expedition and search triggers, and status strip.
  */
 export function CockpitTopBar({
   sidebarCollapsed,
-  expeditions,
-  activeExpeditionId,
   activeStatusMessage,
   syncPauseState,
   hasPendingSyncUpdates,
   ingest,
   settings,
   onToggleSyncPause,
-  onSelectExpedition,
   onOpenExpeditionsModal,
   onOpenSettingsModal,
   onOpenSearchModal,
@@ -70,32 +64,16 @@ export function CockpitTopBar({
 
       {/* Expedition Planner Header Row (flex-1, px-5 aligned with ExpeditionPlanner section below) */}
       <div className="flex-1 h-full px-5 flex items-center justify-between gap-4 min-w-0">
-        {/* Expedition selector */}
+        {/* Expedition and search actions */}
         <div className="flex items-center gap-1.5 min-w-0">
           <button
             type="button"
             onClick={onOpenExpeditionsModal}
             className="ed-btn shrink-0 h-[30px]"
-            title="Create, clone, rename, or manage expeditions"
+            title="Switch, create, clone, edit, or delete expeditions"
           >
             EXPEDITIONS
           </button>
-          <select
-            value={activeExpeditionId}
-            onChange={(event) => onSelectExpedition(Number(event.target.value))}
-            title="Select active expedition"
-            className="h-[30px] min-w-0 shrink bg-ed-header border border-ed-border-strong border-l-2 border-l-ed-amber px-2.5 text-xs font-bold uppercase tracking-wider text-ed-text-main focus:border-ed-amber focus:outline-none cursor-pointer max-w-[180px] sm:max-w-xs md:max-w-sm truncate"
-          >
-            {expeditions.map((expeditionItem) => (
-              <option
-                key={expeditionItem.id}
-                value={expeditionItem.id}
-                className="bg-ed-panel text-ed-text-main"
-              >
-                {expeditionItem.name} [{expeditionItem.status.toUpperCase()}]
-              </option>
-            ))}
-          </select>
           {onOpenSearchModal && (
             <button
               type="button"

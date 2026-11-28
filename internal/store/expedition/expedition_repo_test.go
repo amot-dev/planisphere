@@ -1,6 +1,7 @@
 package expedition_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,5 +122,102 @@ func TestScanExpeditionAdjustmentsDecodeError(testingContext *testing.T) {
 	}
 	if _, getCorruptError := expedition.Get(databaseConnection, createdExpedition.ID); getCorruptError == nil || !strings.Contains(getCorruptError.Error(), "decode expedition") {
 		testingContext.Fatalf("expected decode error for corrupt adjustments_json, got %v", getCorruptError)
+	}
+}
+
+func TestListOrdering(testingContext *testing.T) {
+	databaseConnection := dbtest.OpenMemory(testingContext)
+	if _, clearError := databaseConnection.Exec(`DELETE FROM expeditions`); clearError != nil {
+		testingContext.Fatalf("clear seeded expeditions: %v", clearError)
+	}
+
+	type seedExpedition struct {
+		name           string
+		status         string
+		startTimestamp string
+		createdAt      string
+	}
+	seedEntries := []seedExpedition{
+		{
+			name:           "Retroactive Completed",
+			status:         expedition.StatusCompleted,
+			startTimestamp: "2026-01-15T00:00:00Z",
+			createdAt:      "2026-03-20T00:00:00Z",
+		},
+		{
+			name:      "Planning Older",
+			status:    expedition.StatusPlanning,
+			createdAt: "2026-03-01T00:00:00Z",
+		},
+		{
+			name:           "Active Middle Earlier Created",
+			status:         expedition.StatusActive,
+			startTimestamp: "2026-02-10T00:00:00Z",
+			createdAt:      "2026-02-01T00:00:00Z",
+		},
+		{
+			name:           "Completed Latest Start",
+			status:         expedition.StatusCompleted,
+			startTimestamp: "2026-02-20T00:00:00Z",
+			createdAt:      "2026-02-22T00:00:00Z",
+		},
+		{
+			name:      "Planning Newer",
+			status:    expedition.StatusPlanning,
+			createdAt: "2026-03-10T00:00:00Z",
+		},
+		{
+			name:           "Legacy Active Missing Start",
+			status:         expedition.StatusActive,
+			startTimestamp: "",
+			createdAt:      "2026-03-05T00:00:00Z",
+		},
+		{
+			name:           "Active Middle Newer Created",
+			status:         expedition.StatusActive,
+			startTimestamp: "2026-02-10T00:00:00Z",
+			createdAt:      "2026-02-15T00:00:00Z",
+		},
+	}
+
+	for _, seedEntry := range seedEntries {
+		createdExpedition, createError := expedition.Create(databaseConnection, seedEntry.name, "")
+		if createError != nil {
+			testingContext.Fatalf("Create(%q): %v", seedEntry.name, createError)
+		}
+		var startTimestampValue any
+		if seedEntry.startTimestamp != "" {
+			startTimestampValue = seedEntry.startTimestamp
+		}
+		if _, updateError := databaseConnection.Exec(
+			`UPDATE expeditions SET status = ?, start_timestamp = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+			seedEntry.status, startTimestampValue, seedEntry.createdAt, seedEntry.createdAt, createdExpedition.ID,
+		); updateError != nil {
+			testingContext.Fatalf("update fixture %q: %v", seedEntry.name, updateError)
+		}
+	}
+
+	listedExpeditions, listError := expedition.List(databaseConnection)
+	if listError != nil {
+		testingContext.Fatalf("List: %v", listError)
+	}
+	actualNames := make([]string, 0, len(listedExpeditions))
+	for _, expeditionItem := range listedExpeditions {
+		actualNames = append(actualNames, expeditionItem.Name)
+	}
+	expectedNames := []string{
+		"Planning Newer",
+		"Legacy Active Missing Start",
+		"Planning Older",
+		"Completed Latest Start",
+		"Active Middle Newer Created",
+		"Active Middle Earlier Created",
+		"Retroactive Completed",
+	}
+	if !slices.Equal(actualNames, expectedNames) {
+		testingContext.Fatalf("unexpected List order:\ngot:  %v\nwant: %v", actualNames, expectedNames)
+	}
+	if listedExpeditions[1].Status != expedition.StatusPlanning {
+		testingContext.Fatalf("expected legacy active expedition without start timestamp to normalize to planning, got %q", listedExpeditions[1].Status)
 	}
 }

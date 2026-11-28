@@ -105,9 +105,22 @@ func scanExpedition(scanner interface{ Scan(...any) error }) (Expedition, error)
 	return expeditionRecord, nil
 }
 
-// List returns all expeditions, newest first.
+// List returns all expeditions with planning expeditions first (most recently
+// created first), followed by active and completed expeditions ordered by
+// expedition start timestamp (most recent first).
 func List(queryer db.Queryer) ([]Expedition, error) {
-	rows, queryError := queryer.Query(`SELECT ` + expeditionCols + ` FROM expeditions ORDER BY created_at DESC, id DESC`)
+	rows, queryError := queryer.Query(`SELECT ` + expeditionCols + ` FROM expeditions
+		ORDER BY
+			CASE
+				WHEN status = 'planning' OR (status = 'active' AND COALESCE(start_timestamp, '') = '') THEN 0
+				ELSE 1
+			END ASC,
+			CASE
+				WHEN status = 'planning' OR (status = 'active' AND COALESCE(start_timestamp, '') = '') THEN created_at
+				ELSE COALESCE(start_timestamp, '')
+			END DESC,
+			created_at DESC,
+			id DESC`)
 	if queryError != nil {
 		return nil, queryError
 	}
