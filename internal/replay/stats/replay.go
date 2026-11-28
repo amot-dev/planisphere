@@ -69,7 +69,8 @@ type computeAccumulator struct {
 	until                   string
 	filterSet               *filterSets
 	session                 *replay.SessionState
-	previousPosition        *reference.Vec3
+	previousPosition        reference.Vec3
+	hasPreviousPosition     bool
 	previousPositionSeeded  bool
 	realizationLedger       *realization.Ledger
 	realizationLedgerLoaded bool
@@ -83,13 +84,13 @@ type computeAccumulator struct {
 func (accumulator *computeAccumulator) processTravelEvent(rowItem replay.Row, metrics *Metrics) error {
 	switch rowItem.Type {
 	case journal.EventLocation:
-		if rowItem.RawJSON != "" {
+		if len(rowItem.RawJSON) > 0 {
 			var locationEvent journal.LocationEvent
-			if json.Unmarshal([]byte(rowItem.RawJSON), &locationEvent) == nil && locationEvent.Multicrew {
+			if json.Unmarshal(rowItem.RawJSON, &locationEvent) == nil && locationEvent.Multicrew {
 				return nil
 			}
 		}
-		accumulator.recordStarPosition(rowItem.StarPos)
+		accumulator.recordStarPosition(rowItem.StarPos, rowItem.HasStarPos)
 	case journal.EventFSDJump:
 		accumulator.processFSDJump(rowItem, metrics)
 	case journal.EventCarrierJump:
@@ -98,16 +99,16 @@ func (accumulator *computeAccumulator) processTravelEvent(rowItem replay.Row, me
 	return nil
 }
 
-func (accumulator *computeAccumulator) recordStarPosition(starPos *reference.Vec3) {
-	if starPos == nil {
+func (accumulator *computeAccumulator) recordStarPosition(starPos reference.Vec3, hasStarPos bool) {
+	if !hasStarPos {
 		return
 	}
-	positionCopy := *starPos
-	accumulator.previousPosition = &positionCopy
+	accumulator.previousPosition = starPos
+	accumulator.hasPreviousPosition = true
 }
 
 func (accumulator *computeAccumulator) ensurePreviousPosition() error {
-	if accumulator.previousPosition != nil || accumulator.previousPositionSeeded {
+	if accumulator.hasPreviousPosition || accumulator.previousPositionSeeded {
 		return nil
 	}
 	accumulator.previousPositionSeeded = true
@@ -123,7 +124,8 @@ func (accumulator *computeAccumulator) ensurePreviousPosition() error {
 		return fmt.Errorf("seed previous star position before %s: %w", accumulator.after, queryError)
 	}
 	if starX.Valid && starY.Valid && starZ.Valid {
-		accumulator.previousPosition = &reference.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
+		accumulator.previousPosition = reference.Vec3{X: starX.Float64, Y: starY.Float64, Z: starZ.Float64}
+		accumulator.hasPreviousPosition = true
 	}
 	return nil
 }
@@ -149,7 +151,7 @@ func creditJump(timestamp string, distanceLy float64, boostUsed int, filterSet *
 
 func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metrics *Metrics) {
 	var jumpEvent journal.FSDJumpEvent
-	if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) != nil {
+	if json.Unmarshal(rowItem.RawJSON, &jumpEvent) != nil {
 		return
 	}
 	if jumpEvent.Multicrew {
@@ -158,7 +160,7 @@ func (accumulator *computeAccumulator) processFSDJump(rowItem replay.Row, metric
 	// Apex Interstellar Taxis physically move the player across systems, whereas
 	// Telepresence Multicrew leaves the player's ship behind, so Taxi jumps still
 	// update previousPosition while Multicrew jumps must not.
-	accumulator.recordStarPosition(rowItem.StarPos)
+	accumulator.recordStarPosition(rowItem.StarPos, rowItem.HasStarPos)
 	if jumpEvent.Taxi {
 		return
 	}
@@ -178,17 +180,17 @@ func (accumulator *computeAccumulator) processCarrierJump(rowItem replay.Row, me
 		return seedError
 	}
 	var legDistanceLy float64
-	if accumulator.previousPosition != nil && rowItem.StarPos != nil {
-		legDistanceLy = reference.Distance(*accumulator.previousPosition, *rowItem.StarPos)
+	if accumulator.hasPreviousPosition && rowItem.HasStarPos {
+		legDistanceLy = reference.Distance(accumulator.previousPosition, rowItem.StarPos)
 	}
-	accumulator.recordStarPosition(rowItem.StarPos)
+	accumulator.recordStarPosition(rowItem.StarPos, rowItem.HasStarPos)
 	creditCarrierPassengerDistance(rowItem.Timestamp, legDistanceLy, accumulator.filterSet, metrics)
 	return nil
 }
 
 func (accumulator *computeAccumulator) processScan(rowItem replay.Row, metrics *Metrics) {
 	var scanEvent journal.ScanEvent
-	if json.Unmarshal([]byte(rowItem.RawJSON), &scanEvent) != nil || scanEvent.IsBeltCluster() {
+	if json.Unmarshal(rowItem.RawJSON, &scanEvent) != nil || scanEvent.IsBeltCluster() {
 		return
 	}
 	key := bodyKey{scanEvent.SystemAddress, scanEvent.BodyID}
@@ -214,7 +216,7 @@ func (accumulator *computeAccumulator) processScan(rowItem replay.Row, metrics *
 
 func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metrics *Metrics) error {
 	var saaEvent journal.SAAScanCompleteEvent
-	if json.Unmarshal([]byte(rowItem.RawJSON), &saaEvent) != nil {
+	if json.Unmarshal(rowItem.RawJSON, &saaEvent) != nil {
 		return nil
 	}
 	key := bodyKey{saaEvent.SystemAddress, saaEvent.BodyID}
@@ -247,7 +249,7 @@ func (accumulator *computeAccumulator) processMapping(rowItem replay.Row, metric
 
 func (accumulator *computeAccumulator) processOrganic(rowItem replay.Row, metrics *Metrics) error {
 	var organicEvent journal.ScanOrganicEvent
-	if json.Unmarshal([]byte(rowItem.RawJSON), &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
+	if json.Unmarshal(rowItem.RawJSON, &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
 		return nil
 	}
 	if !accumulator.filterSet.allow(rowItem.Timestamp, true) {

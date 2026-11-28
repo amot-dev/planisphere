@@ -31,7 +31,7 @@ func LoadLatestCarrierStats(queryer db.Queryer) (CarrierStatsSnapshot, error) {
 		return CarrierStatsSnapshot{}, queryError
 	}
 	var parsedEvent journal.CarrierStatsEvent
-	if json.Unmarshal([]byte(latestRow.RawJSON), &parsedEvent) != nil {
+	if json.Unmarshal(latestRow.RawJSON, &parsedEvent) != nil {
 		return CarrierStatsSnapshot{}, nil
 	}
 	return CarrierStatsSnapshot{

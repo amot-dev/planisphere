@@ -10,9 +10,9 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
-func (builder *ledgerBuilder) recordSingleCartoSale(rawJSON string) {
+func (builder *ledgerBuilder) recordSingleCartoSale(rawJSON []byte) {
 	var sellEvent journal.SellExplorationDataEvent
-	if json.Unmarshal([]byte(rawJSON), &sellEvent) != nil {
+	if json.Unmarshal(rawJSON, &sellEvent) != nil {
 		return
 	}
 	saleKey := saleDedupKey{
@@ -63,9 +63,9 @@ func (builder *ledgerBuilder) recordSingleCartoSale(rawJSON string) {
 // directly into BaseValue on bulk pages and uses Bonus exclusively for flat
 // system-completion bonuses, so stolen-bonus shortfalls cannot be inferred from
 // MultiSellExplorationData.Bonus.
-func (builder *ledgerBuilder) recordMultiCartoSale(rawJSON string) {
+func (builder *ledgerBuilder) recordMultiCartoSale(rawJSON []byte) {
 	var multiSellEvent journal.MultiSellExplorationDataEvent
-	if json.Unmarshal([]byte(rawJSON), &multiSellEvent) != nil {
+	if json.Unmarshal(rawJSON, &multiSellEvent) != nil {
 		return
 	}
 	saleKey := saleDedupKey{

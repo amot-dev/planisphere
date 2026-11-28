@@ -73,12 +73,6 @@ func actorKeyForRow(row replay.Row) actorKey {
 	return actorKey{nocaseCommander: replay.SqliteNocaseKey(strings.TrimSpace(row.Commander))}
 }
 
-// LoadEnabledActorSet queries globally enabled commander profiles and legacy
-// commander flags for filtering default AllEnabled ledger breakdowns.
-func LoadEnabledActorSet(queryer db.Queryer) (replay.EnabledProfileMatcher, error) {
-	return replay.LoadProfileMatcher(queryer, replay.ProfileScope{})
-}
-
 // BuildLedger constructs the full chronological lifecycle realization ledger
 // across all commander save-slot profiles from queryer.
 func BuildLedger(queryer db.Queryer, defaultOdyssey bool) (*Ledger, error) {
@@ -92,7 +86,7 @@ func BuildLedger(queryer db.Queryer, defaultOdyssey bool) (*Ledger, error) {
 // BuildLedgerState constructs the full chronological realization ledger and
 // retains per-actor replay state and primary-key watermark for incremental advances.
 func BuildLedgerState(queryer db.Queryer, defaultOdyssey bool) (*LedgerState, error) {
-	enabledActors, actorErr := LoadEnabledActorSet(queryer)
+	enabledActors, actorErr := replay.LoadProfileMatcher(queryer, replay.ProfileScope{})
 	if actorErr != nil {
 		return nil, actorErr
 	}
@@ -161,7 +155,7 @@ func (state *LedgerState) Advance(queryer db.Queryer) (*LedgerState, error) {
 	if !canIncrement {
 		return BuildLedgerState(queryer, state.defaultOdyssey)
 	}
-	enabledActors, actorErr := LoadEnabledActorSet(queryer)
+	enabledActors, actorErr := replay.LoadProfileMatcher(queryer, replay.ProfileScope{})
 	if actorErr != nil {
 		return nil, actorErr
 	}
@@ -271,7 +265,7 @@ func (builder *ledgerBuilder) processEvent(journalEvent replay.Row) {
 		builder.session.ApplyLocation(journalEvent.RawJSON)
 	case journal.EventFSDJump:
 		var jumpEvent journal.FSDJumpEvent
-		if json.Unmarshal([]byte(journalEvent.RawJSON), &jumpEvent) == nil {
+		if json.Unmarshal(journalEvent.RawJSON, &jumpEvent) == nil {
 			builder.session.ApplyFSDJumpEvent(&jumpEvent)
 		}
 	case journal.EventCarrierJump:
@@ -299,7 +293,7 @@ func (builder *ledgerBuilder) processEvent(journalEvent replay.Row) {
 
 func (builder *ledgerBuilder) recordCartoScan(journalEvent replay.Row) {
 	var scanEvent journal.ScanEvent
-	if json.Unmarshal([]byte(journalEvent.RawJSON), &scanEvent) != nil || scanEvent.IsBeltCluster() {
+	if json.Unmarshal(journalEvent.RawJSON, &scanEvent) != nil || scanEvent.IsBeltCluster() {
 		return
 	}
 	key := bodyKey{systemAddress: scanEvent.SystemAddress, bodyID: scanEvent.BodyID}
@@ -355,7 +349,7 @@ func (builder *ledgerBuilder) recordCartoScan(journalEvent replay.Row) {
 
 func (builder *ledgerBuilder) recordCartoMapping(journalEvent replay.Row) {
 	var mappingEvent journal.SAAScanCompleteEvent
-	if json.Unmarshal([]byte(journalEvent.RawJSON), &mappingEvent) != nil {
+	if json.Unmarshal(journalEvent.RawJSON, &mappingEvent) != nil {
 		return
 	}
 	key := bodyKey{systemAddress: mappingEvent.SystemAddress, bodyID: mappingEvent.BodyID}
@@ -444,7 +438,7 @@ func (builder *ledgerBuilder) noteSaleTimestamp(saleTimestamp string) {
 
 func (builder *ledgerBuilder) recordOrganicScan(journalEvent replay.Row) {
 	var scanOrganicEvent journal.ScanOrganicEvent
-	if json.Unmarshal([]byte(journalEvent.RawJSON), &scanOrganicEvent) != nil || !strings.EqualFold(scanOrganicEvent.ScanType, "Analyse") {
+	if json.Unmarshal(journalEvent.RawJSON, &scanOrganicEvent) != nil || !strings.EqualFold(scanOrganicEvent.ScanType, "Analyse") {
 		return
 	}
 	parentKey := bodyKey{systemAddress: scanOrganicEvent.SystemAddress, bodyID: scanOrganicEvent.Body}

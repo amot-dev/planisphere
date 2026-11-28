@@ -76,7 +76,7 @@ func buildActorWageMatchersAndCounts(loadedEvents []replay.Row) (map[actorKey]*c
 			continue
 		}
 		var wageEvent journal.NpcCrewPaidWageEvent
-		if json.Unmarshal([]byte(journalEvent.RawJSON), &wageEvent) != nil {
+		if json.Unmarshal(journalEvent.RawJSON, &wageEvent) != nil {
 			continue
 		}
 		if unixSeconds, parsedOk := parseUnixSeconds(wageEvent.Timestamp); parsedOk {
@@ -131,9 +131,9 @@ func parseUnixSeconds(timestamp string) (int64, bool) {
 	return parsedTime.Unix(), true
 }
 
-func (builder *ledgerBuilder) recordOrganicSale(rawJSON string) {
+func (builder *ledgerBuilder) recordOrganicSale(rawJSON []byte) {
 	var sellOrganicEvent journal.SellOrganicDataEvent
-	if json.Unmarshal([]byte(rawJSON), &sellOrganicEvent) != nil {
+	if json.Unmarshal(rawJSON, &sellOrganicEvent) != nil {
 		return
 	}
 	var totalSaleValue, totalSaleBonus int64

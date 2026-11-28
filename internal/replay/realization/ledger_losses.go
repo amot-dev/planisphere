@@ -7,9 +7,9 @@ import (
 	"planisphere/internal/sources/journal"
 )
 
-func (builder *ledgerBuilder) recordResurrect(rawJSON string) {
+func (builder *ledgerBuilder) recordResurrect(rawJSON []byte) {
 	var resurrectEvent journal.ResurrectEvent
-	if json.Unmarshal([]byte(rawJSON), &resurrectEvent) != nil {
+	if json.Unmarshal(rawJSON, &resurrectEvent) != nil {
 		return
 	}
 	builder.session.ApplyResurrect(resurrectEvent.Option)

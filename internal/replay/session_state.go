@@ -61,9 +61,9 @@ func (state *SessionState) IsDockedOnFleetCarrier() bool {
 }
 
 // ApplyLoadGame updates Odyssey session state from a LoadGame JSON payload.
-func (state *SessionState) ApplyLoadGame(rawJSON string) {
+func (state *SessionState) ApplyLoadGame(rawJSON []byte) {
 	var loadGameEvent journal.LoadGameEvent
-	if json.Unmarshal([]byte(rawJSON), &loadGameEvent) != nil {
+	if json.Unmarshal(rawJSON, &loadGameEvent) != nil {
 		return
 	}
 	state.hasSeenLoadGame = true
@@ -73,9 +73,9 @@ func (state *SessionState) ApplyLoadGame(rawJSON string) {
 
 // ApplyLocation updates system population and carrier concourse docking state
 // from a Location JSON payload.
-func (state *SessionState) ApplyLocation(rawJSON string) {
+func (state *SessionState) ApplyLocation(rawJSON []byte) {
 	var locationEvent journal.LocationEvent
-	if json.Unmarshal([]byte(rawJSON), &locationEvent) != nil || locationEvent.Multicrew {
+	if json.Unmarshal(rawJSON, &locationEvent) != nil || locationEvent.Multicrew {
 		return
 	}
 	wasPendingConcourseRespawn := state.pendingConcourseRespawn
@@ -108,9 +108,9 @@ func (state *SessionState) ApplyLocation(rawJSON string) {
 }
 
 // ApplyDocked updates carrier docking state from a Docked JSON payload.
-func (state *SessionState) ApplyDocked(rawJSON string) {
+func (state *SessionState) ApplyDocked(rawJSON []byte) {
 	var dockedEvent journal.DockedEvent
-	if json.Unmarshal([]byte(rawJSON), &dockedEvent) != nil {
+	if json.Unmarshal(rawJSON, &dockedEvent) != nil {
 		return
 	}
 	state.setFleetCarrierDocked(
@@ -136,9 +136,9 @@ func (state *SessionState) ApplyFSDJumpEvent(jumpEvent *journal.FSDJumpEvent) {
 }
 
 // ApplyCarrierJump updates system population and onboard carrier docking state.
-func (state *SessionState) ApplyCarrierJump(rawJSON string) {
+func (state *SessionState) ApplyCarrierJump(rawJSON []byte) {
 	var carrierJumpEvent journal.CarrierJumpEvent
-	if json.Unmarshal([]byte(rawJSON), &carrierJumpEvent) != nil {
+	if json.Unmarshal(rawJSON, &carrierJumpEvent) != nil {
 		return
 	}
 	if carrierJumpEvent.SystemAddress != 0 {
@@ -192,7 +192,7 @@ func SeedLoadGameBeforeScoped(queryer db.Queryer, afterTimestamp string, state *
 	if afterTimestamp == "" {
 		return nil
 	}
-	var rawLoadGame string
+	var rawLoadGame []byte
 	queryError := queryer.QueryRow(`SELECT raw_json FROM journal_events
 		WHERE event = 'LoadGame' AND timestamp <= ? AND `+scope.SQLPredicate("")+`
 		ORDER BY timestamp DESC, id DESC LIMIT 1`, afterTimestamp).Scan(&rawLoadGame)

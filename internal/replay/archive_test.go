@@ -33,7 +33,7 @@ func TestLoadEventsAndQueryLatestEvent(testingContext *testing.T) {
 	if loadError != nil {
 		testingContext.Fatalf("LoadEventsScoped: %v", loadError)
 	}
-	if len(loadedRows) != 1 || loadedRows[0].Type != journal.EventFSDJump || loadedRows[0].SystemName != "Alpha Centauri" || loadedRows[0].StarPos == nil {
+	if len(loadedRows) != 1 || loadedRows[0].Type != journal.EventFSDJump || loadedRows[0].SystemName != "Alpha Centauri" || !loadedRows[0].HasStarPos {
 		testingContext.Fatalf("unexpected loadedRows: %+v", loadedRows)
 	}
 

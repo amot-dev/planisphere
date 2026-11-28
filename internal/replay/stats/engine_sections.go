@@ -156,7 +156,7 @@ func (accumulator *computeAccumulator) processCartographicsEvent(rowItem replay.
 		accumulator.session.ApplyLocation(rowItem.RawJSON)
 	case journal.EventFSDJump:
 		var jumpEvent journal.FSDJumpEvent
-		if json.Unmarshal([]byte(rowItem.RawJSON), &jumpEvent) == nil {
+		if json.Unmarshal(rowItem.RawJSON, &jumpEvent) == nil {
 			accumulator.session.ApplyFSDJumpEvent(&jumpEvent)
 		}
 	case journal.EventCarrierJump:
@@ -222,7 +222,7 @@ func (engine *Engine) prepareExobiologyScans(untilTimestamp string, loadedEvents
 			continue
 		}
 		var organicEvent journal.ScanOrganicEvent
-		if json.Unmarshal([]byte(rowItem.RawJSON), &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
+		if json.Unmarshal(rowItem.RawJSON, &organicEvent) != nil || !strings.EqualFold(organicEvent.ScanType, "Analyse") {
 			continue
 		}
 		key := bodyKey{organicEvent.SystemAddress, organicEvent.Body}

@@ -21,10 +21,10 @@ func TestSessionStateMulticrewIsolation(testingContext *testing.T) {
 			firstAddress:  9001,
 			secondAddress: 9002,
 			applyBeforeRespawn: func(sessionState *replay.SessionState) {
-				sessionState.ApplyLocation(`{"timestamp":"2026-08-01T10:05:00Z","event":"Location","StarSystem":"HostBubble","SystemAddress":9001,"Population":4500000,"Docked":false,"Multicrew":true}`)
+				sessionState.ApplyLocation([]byte(`{"timestamp":"2026-08-01T10:05:00Z","event":"Location","StarSystem":"HostBubble","SystemAddress":9001,"Population":4500000,"Docked":false,"Multicrew":true}`))
 			},
 			applyDuringRespawn: func(sessionState *replay.SessionState) {
-				sessionState.ApplyLocation(`{"timestamp":"2026-08-01T10:10:00Z","event":"Location","StarSystem":"HostBubble","SystemAddress":9002,"Population":12345,"Docked":false,"OnFoot":false,"Multicrew":true}`)
+				sessionState.ApplyLocation([]byte(`{"timestamp":"2026-08-01T10:10:00Z","event":"Location","StarSystem":"HostBubble","SystemAddress":9002,"Population":12345,"Docked":false,"OnFoot":false,"Multicrew":true}`))
 			},
 		},
 		{
@@ -59,7 +59,7 @@ func TestSessionStateMulticrewIsolation(testingContext *testing.T) {
 			if testCase.applyBeforeDock != nil {
 				testCase.applyBeforeDock(sessionState)
 			}
-			sessionState.ApplyDocked(`{"timestamp":"2026-08-01T10:00:00Z","event":"Docked","StationName":"K9F-8TQ","StationType":"FleetCarrier","StarSystem":"CarrierSys","SystemAddress":1001}`)
+			sessionState.ApplyDocked([]byte(`{"timestamp":"2026-08-01T10:00:00Z","event":"Docked","StationName":"K9F-8TQ","StationType":"FleetCarrier","StarSystem":"CarrierSys","SystemAddress":1001}`))
 			if !sessionState.IsDockedOnFleetCarrier() {
 				subTest.Fatal("expected docked on fleet carrier before multicrew arrival")
 			}
@@ -82,7 +82,7 @@ func TestSessionStateMulticrewIsolation(testingContext *testing.T) {
 			}
 
 			// Physical concourse respawn immediately following must still find pendingConcourseRespawn intact.
-			sessionState.ApplyLocation(`{"timestamp":"2026-08-01T10:12:00Z","event":"Location","StarSystem":"CarrierSys","SystemAddress":1001,"Population":0,"Docked":false,"OnFoot":true,"BodyType":"Planet"}`)
+			sessionState.ApplyLocation([]byte(`{"timestamp":"2026-08-01T10:12:00Z","event":"Location","StarSystem":"CarrierSys","SystemAddress":1001,"Population":0,"Docked":false,"OnFoot":true,"BodyType":"Planet"}`))
 			if !sessionState.IsDockedOnFleetCarrier() {
 				subTest.Fatal("expected pending concourse respawn to survive multicrew arrival and restore fleet carrier docking")
 			}
