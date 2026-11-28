@@ -234,7 +234,6 @@ func (app *App) SetCommanderEnabled(name string, enabled bool) (Settings, error)
 	}); toggleError != nil {
 		return Settings{}, toggleError
 	}
-	app.clearExportSnapshot()
 	app.publishApp(0, events.AppCommanderFilterChanged)
 	return app.GetSettings()
 }

@@ -133,7 +133,7 @@ func TestAppUndoRedoRowsModesAndCompletePrune(testingContext *testing.T) {
 	}
 }
 
-func TestAppUndoInvalidatesExportSnapshotScopeChangeAndDBSwitch(testingContext *testing.T) {
+func TestAppUndoExportSnapshotPinningScopeChangeAndDBSwitch(testingContext *testing.T) {
 	testApp := setupTestApp(testingContext)
 
 	currentExportTime := time.Date(2026, 4, 6, 10, 0, 0, 0, time.UTC)
@@ -176,18 +176,18 @@ func TestAppUndoInvalidatesExportSnapshotScopeChangeAndDBSwitch(testingContext *
 	if err != nil || !undoRes.Applied {
 		testingContext.Fatalf("UndoExpedition before export check: res=%+v err=%v", undoRes, err)
 	}
-	if _, matched := testApp.matchingExportSnapshot(createdExp.ID, exportBeforeUndo.ExportedAt); matched {
-		testingContext.Fatalf("expected UndoExpedition to invalidate cached export snapshot")
+	if _, matched := testApp.matchingExportSnapshot(createdExp.ID, exportBeforeUndo.ExportedAt); !matched {
+		testingContext.Fatalf("expected UndoExpedition to preserve pinned export snapshot")
 	}
 	rebuiltExport := writeAndDecodeCanonicalExport(
 		testingContext,
 		testApp,
 		filepath.Join(testingContext.TempDir(), "after-undo.json"),
 		createdExp.ID,
-		exportBeforeUndo.ExportedAt,
+		"",
 	)
 	if rebuiltExport.Plan.Rows[0].Row.Notes != "" {
-		testingContext.Fatalf("expected rebuilt export to contain undone empty notes, got %q", rebuiltExport.Plan.Rows[0].Row.Notes)
+		testingContext.Fatalf("expected unpinned export after undo to contain undone empty notes, got %q", rebuiltExport.Plan.Rows[0].Row.Notes)
 	}
 
 	res, execErr := testApp.db.Exec(

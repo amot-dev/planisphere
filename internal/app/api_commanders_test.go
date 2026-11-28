@@ -215,7 +215,8 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 	if err != nil || statsBeforeWipe.AllJournals.BodiesScanned != 1 {
 		testingContext.Fatalf("expected 1 pre-wipe scanned body in warm AllJournals, got %+v err=%v", statsBeforeWipe.AllJournals, err)
 	}
-	if _, err := testApp.GetExpeditionExportData(exp.ID); err != nil {
+	exportBeforeWipe, err := testApp.GetExpeditionExportData(exp.ID)
+	if err != nil {
 		testingContext.Fatalf("warm export snapshot: %v", err)
 	}
 	ingestBefore, err := testApp.GetIngestStatus()
@@ -236,8 +237,11 @@ func TestIngestingCareerWipeInvalidatesWarmCareerProjectionsAndExportSnapshot(te
 		testingContext.Fatalf("RescanJournals after wipe: %v", err)
 	}
 
-	if _, hasCachedExport := testApp.matchingExportSnapshot(exp.ID, ""); hasCachedExport {
-		testingContext.Fatal("expected ClearSavedGame/NewCommander ingestion to clear cached export snapshot")
+	if _, hasPinnedExport := testApp.matchingExportSnapshot(exp.ID, exportBeforeWipe.ExportedAt); !hasPinnedExport {
+		testingContext.Fatal("expected ClearSavedGame/NewCommander ingestion to preserve pinned modal export snapshot")
+	}
+	if _, hasUnpinnedExport := testApp.matchingExportSnapshot(exp.ID, ""); hasUnpinnedExport {
+		testingContext.Fatal("expected unpinned export lookup to miss cached snapshot")
 	}
 	ingestAfter, err := testApp.GetIngestStatus()
 	if err != nil || ingestAfter.ClosedWindowRevision <= ingestBefore.ClosedWindowRevision {

@@ -45,10 +45,13 @@ func (app *App) clearExportSnapshot() {
 }
 
 func (app *App) matchingExportSnapshot(expeditionID int64, exportedAt string) (exporter.ExpeditionExport, bool) {
+	if exportedAt == "" {
+		return exporter.ExpeditionExport{}, false
+	}
 	app.exportSnapshotMu.Lock()
 	defer app.exportSnapshotMu.Unlock()
 	cached := app.lastExportSnapshot
-	if cached != nil && cached.Plan.Expedition.ID == expeditionID && (exportedAt == "" || cached.ExportedAt == exportedAt) {
+	if cached != nil && cached.Plan.Expedition.ID == expeditionID && cached.ExportedAt == exportedAt {
 		return *cached, true
 	}
 	return exporter.ExpeditionExport{}, false

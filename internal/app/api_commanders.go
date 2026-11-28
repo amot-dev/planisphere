@@ -19,7 +19,6 @@ func (app *App) applyCommanderOverride(mutation func() error) (Settings, error) 
 	}); err != nil {
 		return Settings{}, err
 	}
-	app.clearExportSnapshot()
 	app.publishApp(0, events.AppCommanderFilterChanged, events.AppSettingsChanged, events.AppExpeditionPlanChanged)
 	return app.GetSettings()
 }
@@ -80,7 +79,6 @@ func (app *App) SetCareerBaselineScope(scope string) (Settings, error) {
 	}); saveError != nil {
 		return Settings{}, saveError
 	}
-	app.clearExportSnapshot()
 	app.publishApp(0, events.AppCommanderFilterChanged, events.AppSettingsChanged)
 	return app.GetSettings()
 }
@@ -108,7 +106,6 @@ func (app *App) UpdateExpeditionScoped(
 	if updateError != nil {
 		return updateError
 	}
-	app.clearExportSnapshot()
 	if profileChanged {
 		app.publishApp(id, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
 		return nil
@@ -136,7 +133,6 @@ func (app *App) StartExpeditionScoped(
 		return startError
 	}
 	if applied {
-		app.clearExportSnapshot()
 		app.publishApp(expeditionID, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
 	}
 	return nil

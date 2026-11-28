@@ -278,6 +278,11 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 	if !reflect.DeepEqual(singleModeSnapshot.Commanders, []string{"CMDR First", "CMDR Second"}) {
 		testingContext.Fatalf("unexpected enabled commanders: %v", singleModeSnapshot.Commanders)
 	}
+	if singleModeSnapshot.Duration != "91d" || singleModeSnapshot.CareerDuration != "92d" ||
+		len(singleModeSnapshot.RowDetails) != 1 || singleModeSnapshot.RowDetails[0].Elapsed != "91d 01h 00m" {
+		testingContext.Fatalf("expected Deps.Now durations (91d / 92d / 91d 01h 00m), got duration=%q career=%q legElapsed=%q",
+			singleModeSnapshot.Duration, singleModeSnapshot.CareerDuration, singleModeSnapshot.RowDetails[0].Elapsed)
+	}
 	if len(singleModeSnapshot.ModeBuckets) != 1 || singleModeSnapshot.ModeBuckets[0].ModeID != explorationID ||
 		!reflect.DeepEqual(singleModeSnapshot.ModeBuckets[0].Metrics, singleModeSnapshot.Live) ||
 		!reflect.DeepEqual(singleModeSnapshot.ModeBuckets[0].Realization, singleModeSnapshot.Expedition.Realization) {
@@ -320,13 +325,17 @@ func TestBuildSingleModeReuseUnusedModeSkippingAndBatchDetailsParity(testingCont
 	}
 	alphaLegDetail := multiModeSnapshot.RowDetails[0]
 	if alphaLegDetail.From != "2026-04-01T11:00:00Z" || alphaLegDetail.To != "2026-04-01T12:00:00Z" ||
-		alphaLegDetail.Elapsed == "" || !reflect.DeepEqual(alphaLegDetail.ShipsUsed, []string{"Mandalay", "Anaconda"}) {
+		alphaLegDetail.Elapsed != "1h 00m" || !reflect.DeepEqual(alphaLegDetail.ShipsUsed, []string{"Mandalay", "Anaconda"}) {
 		testingContext.Fatalf("unexpected closed Alpha RowDetails[0]: %+v", alphaLegDetail)
 	}
 	openLegDetail := multiModeSnapshot.RowDetails[1]
 	if openLegDetail.From != "2026-04-01T12:00:00Z" || openLegDetail.To != "" ||
-		openLegDetail.Elapsed == "" || !reflect.DeepEqual(openLegDetail.ShipsUsed, []string{"Anaconda"}) {
+		openLegDetail.Elapsed != "91d 00h 00m" || !reflect.DeepEqual(openLegDetail.ShipsUsed, []string{"Anaconda"}) {
 		testingContext.Fatalf("unexpected VisitCurrent RowDetails[1]: %+v", openLegDetail)
+	}
+	if multiModeSnapshot.Duration != "91d" || multiModeSnapshot.CareerDuration != "92d" {
+		testingContext.Fatalf("expected Deps.Now header durations 91d / 92d, got duration=%q career=%q",
+			multiModeSnapshot.Duration, multiModeSnapshot.CareerDuration)
 	}
 }
 
@@ -346,9 +355,10 @@ func TestBuildArchivedPreWipeCareerSelectedExpedition(testingContext *testing.T)
 	if !reflect.DeepEqual(exportSnapshot.Commanders, []string{"CMDR Pioneer"}) {
 		testingContext.Fatalf("expected Commanders=[CMDR Pioneer], got %v", exportSnapshot.Commanders)
 	}
-	if exportSnapshot.CareerStart != "2024-05-01T10:00:00Z" || exportSnapshot.OriginBaseline == nil || math.Abs(exportSnapshot.OriginBaseline.Metrics.DistanceLy-20.0) > 0.01 {
-		testingContext.Fatalf("expected pre-wipe CareerStart and OriginBaseline 20.0 Ly, got start=%q baseline=%+v",
-			exportSnapshot.CareerStart, exportSnapshot.OriginBaseline)
+	if exportSnapshot.CareerStart != "2024-05-01T10:00:00Z" || exportSnapshot.CareerDuration != "2y" ||
+		exportSnapshot.OriginBaseline == nil || math.Abs(exportSnapshot.OriginBaseline.Metrics.DistanceLy-20.0) > 0.01 {
+		testingContext.Fatalf("expected pre-wipe CareerStart, 2y CareerDuration, and OriginBaseline 20.0 Ly, got start=%q duration=%q baseline=%+v",
+			exportSnapshot.CareerStart, exportSnapshot.CareerDuration, exportSnapshot.OriginBaseline)
 	}
 	if math.Abs(exportSnapshot.Live.DistanceLy-22000.0) > 0.01 || len(exportSnapshot.RowDetails) != 1 || !reflect.DeepEqual(exportSnapshot.RowDetails[0].ShipsUsed, []string{"Anaconda"}) {
 		testingContext.Fatalf("expected 22000 Ly Anaconda leg on archived expedition export, got live=%+v details=%+v",

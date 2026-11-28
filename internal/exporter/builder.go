@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"cmp"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -85,17 +86,18 @@ func initializeExportHeader(
 		baselineScope = replay.ProfileScope{}
 	}
 	careerStart, careerStartGalactic := replay.CareerStartScoped(databaseConnection, baselineScope)
+	exportedAt := reference.FormatISO(currentTime)
 	careerDuration := ""
 	if careerStart != "" {
-		careerDuration = reference.Elapsed(careerStart, "")
+		careerDuration = reference.Elapsed(careerStart, exportedAt)
 	}
 	durationLabel := ""
 	if departed && displayStart != "" {
-		durationLabel = reference.Elapsed(displayStart, effectiveEnd)
+		durationLabel = reference.Elapsed(displayStart, cmp.Or(effectiveEnd, exportedAt))
 	}
 	return ExpeditionExport{
 		SchemaVersion:          SchemaVersion,
-		ExportedAt:             reference.FormatISO(currentTime),
+		ExportedAt:             exportedAt,
 		ExportedAtGalactic:     reference.TimeToGalactic(currentTime),
 		AppVersion:             dependencies.AppVersion,
 		Commanders:             commanders,
@@ -166,6 +168,10 @@ func populateRowDetailsAndBaseline(
 	if detailsError != nil {
 		return fmt.Errorf("compute waypoint details batch: %w", detailsError)
 	}
+	resolveOpenWaypointElapsed(originBaseline, currentTime)
+	for index := range rowDetails {
+		resolveOpenWaypointElapsed(&rowDetails[index], currentTime)
+	}
 	exportSnapshot.OriginBaseline = originBaseline
 	exportSnapshot.RowDetails = rowDetails
 	exportSnapshot.Expedition.ShipsFlown = CollectShipsForVisitedLegs(planView, rowDetails, nil)
@@ -183,6 +189,14 @@ func populateRowDetailsAndBaseline(
 		exportSnapshot.CareerDiff = BuildCareerDiff(originBaseline, exportSnapshot.Live, exportSnapshot.Expedition.Realization)
 	}
 	return nil
+}
+
+func resolveOpenWaypointElapsed(details *expedition.WaypointDetails, currentTime time.Time) {
+	if details != nil && details.To == "" && details.From != "" {
+		if startTime, parseError := reference.ParseISO(details.From); parseError == nil {
+			details.Elapsed = reference.DurationLabel(currentTime.Sub(startTime))
+		}
+	}
 }
 
 func populateModeBuckets(

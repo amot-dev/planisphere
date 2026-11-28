@@ -164,7 +164,6 @@ func (app *App) publishJournalBatch(journalEvents journal.EventSet, earliestTime
 	}
 	targets := bus.PublishJournalRange(journalEvents, earliestTimestamp, latestTimestamp)
 	if journalEvents.Intersects(careerWipeJournalEvents) {
-		app.clearExportSnapshot()
 		targets = targets.Union(bus.PublishApp(events.AppCommanderFilterChanged))
 	}
 	return targets
@@ -179,7 +178,6 @@ func (app *App) publishIngestResult(ingestResult journal.Result) events.UITarget
 		return app.publishJournalBatch(ingestResult.Events, ingestResult.EarliestTimestamp, ingestResult.LatestTimestamp)
 	}
 	targets := bus.PublishJournalRange(ingestResult.Events, ingestResult.EarliestTimestamp, ingestResult.LatestTimestamp)
-	app.clearExportSnapshot()
 	return targets.Union(bus.PublishApp(
 		events.AppCommanderFilterChanged,
 		events.AppSettingsChanged,

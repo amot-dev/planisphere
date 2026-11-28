@@ -232,11 +232,8 @@ func (app *App) runExpeditionUndoStep(expeditionID int64, isRedo bool) (UndoActi
 	if !stepOutcome.Applied {
 		return actionResult, nil
 	}
-	if app.isCurrentDB(targetDB) {
-		app.clearExportSnapshot()
-		if stepOutcome.NeedsCoordResolution {
-			app.kickResolutionForDB(targetDB, expeditionID, false)
-		}
+	if stepOutcome.NeedsCoordResolution && app.isCurrentDB(targetDB) {
+		app.kickResolutionForDB(targetDB, expeditionID, false)
 	}
 	app.publishAppSetForDB(targetDB, expeditionID, stepOutcome.ChangedEvents)
 	return actionResult, nil
