@@ -234,6 +234,7 @@ export default function App() {
       {activeModal === 'export' && activeExpeditionId > 0 && (
         <ExportExpeditionModal
           expeditionId={activeExpeditionId}
+          durationDisplayMode={durationDisplayMode}
           onClose={() => setActiveModal(null)}
         />
       )}

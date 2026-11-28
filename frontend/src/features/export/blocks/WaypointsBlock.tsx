@@ -88,6 +88,7 @@ function WaypointsTableRow({ row, selectedColumns, columnCount }: WaypointsTable
       {selectedColumns.has('timestamps') && <td className="ed-exp-mono" style={{ fontSize: '11px' }}>{row.timestampText}</td>}
       {selectedColumns.has('legDistance') && <td className="ed-exp-mono" style={{ fontSize: '11px' }}>{row.legDistanceText}</td>}
       {selectedColumns.has('duration') && <td className="ed-exp-mono" style={{ fontSize: '11px' }}>{row.durationText}</td>}
+      {selectedColumns.has('inGameDuration') && <td className="ed-exp-mono" style={{ fontSize: '11px' }}>{row.inGameDurationText}</td>}
       {selectedColumns.has('shipsFlown') && <td className="ed-exp-mono" style={{ fontSize: '11px' }}>{row.shipsText}</td>}
       {selectedColumns.has('flightMode') && (
         <td className="ed-exp-mono" style={{ fontSize: '11px' }}>

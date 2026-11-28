@@ -2,6 +2,7 @@
 import { act, type ComponentProps, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { exporter } from '../../api/models'
+import type { DurationDisplayMode } from '../../domain/durationDisplay'
 import { createDeferred, flushMicrotasks } from '../../test/async'
 import { installCanvasPngMock, installResizeObserverMock } from '../../test/domMocks'
 import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
@@ -16,11 +17,18 @@ interface MemoComponentInternal<TProps> {
   type: (props: TProps) => ReactElement | null
 }
 
-async function mountExportModal(expeditionId = 7): Promise<MountedTestRoot> {
+async function mountExportModal(
+  expeditionId = 7,
+  durationDisplayMode?: DurationDisplayMode,
+): Promise<MountedTestRoot> {
   let mounted!: MountedTestRoot
   await act(async () => {
     mounted = mountTestRoot(
-      <ExportExpeditionModal expeditionId={expeditionId} onClose={() => {}} />,
+      <ExportExpeditionModal
+        expeditionId={expeditionId}
+        durationDisplayMode={durationDisplayMode}
+        onClose={() => {}}
+      />,
     )
     await flushMicrotasks()
   })
@@ -299,5 +307,55 @@ describe('ExportExpeditionModal', () => {
       cartQueueRenderSpy.mockRestore()
       previewPaneRenderSpy.mockRestore()
     }
+  })
+
+  it('defaults Waypoints table duration column from durationDisplayMode setting', async () => {
+    installResizeObserverMock()
+    const baseData = buildSampleExportData()
+    const playtimeData = buildSampleExportData({
+      rowDetails: baseData.rowDetails.map((detail) =>
+        detail.rowId === 2 ? { ...detail, inGameSeconds: 11700, inGameDuration: '3h 15m' } : detail,
+      ) as typeof baseData.rowDetails,
+    })
+    installWailsAppMock({ GetExpeditionExportData: async () => playtimeData })
+
+    const inGameMounted = await mountExportModal(7, 'in_game')
+    // Preloaded Quick Share Waypoints cart item must align with in_game durationDisplayMode.
+    await act(async () => {
+      inGameMounted.findButtonByText('Waypoints (Visited Only)', { exact: false }).click()
+      await flushMicrotasks()
+    })
+    const quickInGameHeaders = Array.from(inGameMounted.container.querySelectorAll('th')).map((cell) => cell.textContent)
+    expect(quickInGameHeaders).toContain('In-Game')
+    expect(quickInGameHeaders).not.toContain('Duration')
+
+    await act(async () => {
+      inGameMounted.findButtonByText('Waypoints', { exact: true }).click()
+      await flushMicrotasks()
+    })
+    const inGameHeaders = Array.from(inGameMounted.container.querySelectorAll('th')).map((cell) => cell.textContent)
+    expect(inGameHeaders).toContain('In-Game')
+    expect(inGameHeaders).not.toContain('Duration')
+    expect(inGameMounted.container.textContent).toContain('3h 15m')
+    inGameMounted.unmount()
+
+    const calendarMounted = await mountExportModal(7, 'calendar')
+    // Preloaded Quick Share Waypoints cart item must align with calendar durationDisplayMode.
+    await act(async () => {
+      calendarMounted.findButtonByText('Waypoints (Visited Only)', { exact: false }).click()
+      await flushMicrotasks()
+    })
+    const quickCalendarHeaders = Array.from(calendarMounted.container.querySelectorAll('th')).map((cell) => cell.textContent)
+    expect(quickCalendarHeaders).toContain('Duration')
+    expect(quickCalendarHeaders).not.toContain('In-Game')
+
+    await act(async () => {
+      calendarMounted.findButtonByText('Waypoints', { exact: true }).click()
+      await flushMicrotasks()
+    })
+    const calendarHeaders = Array.from(calendarMounted.container.querySelectorAll('th')).map((cell) => cell.textContent)
+    expect(calendarHeaders).toContain('Duration')
+    expect(calendarHeaders).not.toContain('In-Game')
+    calendarMounted.unmount()
   })
 })

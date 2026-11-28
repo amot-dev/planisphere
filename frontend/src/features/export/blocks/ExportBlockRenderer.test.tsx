@@ -201,4 +201,90 @@ describe('ExportBlockRenderer', () => {
     expect(sanitizedEntryColors).not.toContain('red;bad:1')
     expect(sanitizedEntryColors).toContain('#FF7100')
   })
+
+  it('renders ELAPSED and IN-GAME headers, 2-row In-Game Playtime card, and Waypoints In-Game column', () => {
+    const baseData = buildSampleExportData()
+    const playtimeData = buildSampleExportData({
+      inGameSeconds: 45000,
+      inGameDuration: '12h 30m',
+      transitInGameSeconds: 36000,
+      transitInGameDuration: '10h 00m',
+      inSystemInGameSeconds: 9000,
+      inSystemInGameDuration: '2h 30m',
+      rowDetails: baseData.rowDetails.map((detail) =>
+        detail.rowId === 2 ? { ...detail, inGameSeconds: 11700, inGameDuration: '3h 15m' } : detail,
+      ) as typeof baseData.rowDetails,
+    })
+
+    const summaryMarkup = renderToStaticMarkup(
+      <ExportBlockRenderer
+        exportData={playtimeData}
+        config={{ kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }}
+      />,
+    )
+    expect(summaryMarkup).toContain('ELAPSED: 4d · IN-GAME: 12h 30m')
+
+    const inGameOnlyMarkup = renderToStaticMarkup(
+      <ExportBlockRenderer
+        exportData={buildSampleExportData({
+          duration: '',
+          effectiveStart: '',
+          effectiveEnd: '',
+          inGameSeconds: 45000,
+          inGameDuration: '12h 30m',
+        })}
+        config={{ kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }}
+      />,
+    )
+    expect(inGameOnlyMarkup).toContain('IN-GAME: 12h 30m')
+    expect(inGameOnlyMarkup).not.toContain('ELAPSED:')
+
+    const flightMarkup = renderToStaticMarkup(
+      <ExportBlockRenderer
+        exportData={playtimeData}
+        config={{
+          kind: 'details',
+          section: 'flight',
+          scope: { kind: 'full' },
+          modeGrouping: 'combined',
+          selectedMetrics: ['inGamePlaytimeBreakdown'],
+        }}
+      />,
+    )
+    expect(flightMarkup).toContain('ELAPSED: 4d · IN-GAME: 12h 30m')
+    expect(flightMarkup).toContain('In-Game Playtime')
+    expect(flightMarkup).toContain('12h 30m')
+    expect(flightMarkup).toContain('In Transit (Between Waypoints)')
+    expect(flightMarkup).toContain('10h 00m')
+    expect(flightMarkup).toContain('In System (At Waypoints)')
+    expect(flightMarkup).toContain('2h 30m')
+
+    const baselineNoPlaytimeCard = renderToStaticMarkup(
+      <ExportBlockRenderer
+        exportData={playtimeData}
+        config={{
+          kind: 'details',
+          section: 'flight',
+          scope: { kind: 'baseline' },
+          modeGrouping: 'combined',
+          selectedMetrics: ['inGamePlaytimeBreakdown'],
+        }}
+      />,
+    )
+    expect(baselineNoPlaytimeCard).toContain('Select at least one applicable data point')
+
+    const waypointsMarkup = renderToStaticMarkup(
+      <ExportBlockRenderer
+        exportData={playtimeData}
+        config={{
+          kind: 'waypoints',
+          waypointsScope: 'visited',
+          selectedColumns: ['duration', 'inGameDuration'],
+        }}
+      />,
+    )
+    expect(waypointsMarkup).toContain('<th>Duration</th><th>In-Game</th>')
+    expect(waypointsMarkup).toContain('1d 02h 00m')
+    expect(waypointsMarkup).toContain('3h 15m')
+  })
 })

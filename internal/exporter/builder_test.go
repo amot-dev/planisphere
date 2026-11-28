@@ -365,3 +365,101 @@ func TestBuildArchivedPreWipeCareerSelectedExpedition(testingContext *testing.T)
 			exportSnapshot.Live, exportSnapshot.RowDetails)
 	}
 }
+
+func TestBuildPlaytimeAdditiveAndSingleWaypointFallback(testingContext *testing.T) {
+	fixture := setupExportFixture(testingContext)
+	fixedTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	defaultModes := expeditiontest.LookupDefaultModes(testingContext, fixture.databaseConnection)
+	explorationID := defaultModes.Exploration
+	travelID := defaultModes.Travel
+
+	// Session 1 (10:00-11:15): Leg 1 transit 10:00-11:00 (3600s) + in-system 11:00-11:15 (900s).
+	// Session 2 (10:00-10:50 next day): Leg 2 transit 10:00-10:30 (1800s) + in-system 10:30-10:50 (1200s).
+	fixture.insertLines(
+		testingContext,
+		`{"timestamp":"2026-04-01T09:50:00Z","event":"LoadGame","Commander":"CMDR Tester","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-04-01T09:55:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`,
+		`{"timestamp":"2026-04-01T10:00:00Z","event":"FSDJump","StarSystem":"Midpoint","SystemAddress":1002,"StarPos":[50,0,0],"JumpDist":50.0}`,
+		`{"timestamp":"2026-04-01T11:00:00Z","event":"FSDJump","StarSystem":"Alpha","SystemAddress":2002,"StarPos":[120,0,0],"JumpDist":70.0}`,
+		`{"timestamp":"2026-04-01T11:15:00Z","event":"Shutdown"}`,
+		`{"timestamp":"2026-04-02T10:00:00Z","event":"LoadGame","Commander":"CMDR Tester","Ship":"Mandalay"}`,
+		`{"timestamp":"2026-04-02T10:00:00Z","event":"FSDJump","StarSystem":"Relay","SystemAddress":2003,"StarPos":[160,0,0],"JumpDist":40.0}`,
+		`{"timestamp":"2026-04-02T10:30:00Z","event":"FSDJump","StarSystem":"Beta","SystemAddress":3003,"StarPos":[220,0,0],"JumpDist":60.0}`,
+		`{"timestamp":"2026-04-02T10:50:00Z","event":"Scan","ScanType":"Detailed","BodyName":"Beta 1","BodyID":1,"StarSystem":"Beta","SystemAddress":3003,"PlanetClass":"Water world","MassEM":1.5,"WasDiscovered":false,"WasMapped":false}`,
+		`{"timestamp":"2026-04-02T10:50:00Z","event":"Shutdown"}`,
+	)
+
+	multiExp, createError := expedition.CreateWithWaypoints(
+		fixture.databaseConnection,
+		"Playtime Multi",
+		"",
+		[]expedition.SeedWaypoint{{SystemName: "Sol"}, {SystemName: "Alpha"}, {SystemName: "Beta"}},
+	)
+	if createError != nil {
+		testingContext.Fatalf("create multi-leg expedition: %v", createError)
+	}
+	if startError := expedition.StartTx(fixture.databaseConnection, multiExp.ID, "2026-04-01T09:55:00Z", explorationID); startError != nil {
+		testingContext.Fatalf("start multi-leg expedition: %v", startError)
+	}
+	rows, listError := expedition.ListRows(fixture.databaseConnection, multiExp.ID)
+	if listError != nil {
+		testingContext.Fatalf("list rows: %v", listError)
+	}
+	if _, modeError := expedition.SetLegModeTx(fixture.databaseConnection, rows[2].ID, travelID, false); modeError != nil {
+		testingContext.Fatalf("set leg 2 travel mode: %v", modeError)
+	}
+	if completeError := expedition.CompleteTx(fixture.databaseConnection, multiExp.ID); completeError != nil {
+		testingContext.Fatalf("complete multi-leg expedition: %v", completeError)
+	}
+
+	snapshot, buildError := exporter.Build(fixture.databaseConnection, multiExp.ID, fixture.builderDeps(fixedTime))
+	if buildError != nil {
+		testingContext.Fatalf("exporter.Build multi-leg playtime: %v", buildError)
+	}
+	if snapshot.InGameSeconds == nil || *snapshot.InGameSeconds != 7500 || snapshot.InGameDuration != "2h 05m" ||
+		snapshot.TransitInGameSeconds == nil || *snapshot.TransitInGameSeconds != 5400 || snapshot.TransitInGameDuration != "1h 30m" ||
+		snapshot.InSystemInGameSeconds == nil || *snapshot.InSystemInGameSeconds != 2100 || snapshot.InSystemInGameDuration != "35m" {
+		testingContext.Fatalf("unexpected top-level playtime: total=%v(%q) transit=%v(%q) inSystem=%v(%q)",
+			snapshot.InGameSeconds, snapshot.InGameDuration, snapshot.TransitInGameSeconds, snapshot.TransitInGameDuration, snapshot.InSystemInGameSeconds, snapshot.InSystemInGameDuration)
+	}
+	if snapshot.Expedition.InGameSeconds == nil || *snapshot.Expedition.InGameSeconds != 7500 || snapshot.Expedition.InGameDuration != "2h 05m" {
+		testingContext.Fatalf("expected Expedition playtime parity with top-level, got %+v", snapshot.Expedition)
+	}
+	if len(snapshot.ModeBuckets) != 2 ||
+		snapshot.ModeBuckets[0].InGameDuration != "1h 15m" || snapshot.ModeBuckets[0].TransitInGameDuration != "1h 00m" || snapshot.ModeBuckets[0].InSystemInGameDuration != "15m" ||
+		snapshot.ModeBuckets[1].InGameDuration != "50m" || snapshot.ModeBuckets[1].TransitInGameDuration != "30m" || snapshot.ModeBuckets[1].InSystemInGameDuration != "20m" {
+		testingContext.Fatalf("unexpected ModeBuckets playtime split: %+v", snapshot.ModeBuckets)
+	}
+	if len(snapshot.LegTelemetry) != 2 || snapshot.LegTelemetry[0].InGameDuration != "1h 15m" || snapshot.LegTelemetry[1].InGameDuration != "50m" {
+		testingContext.Fatalf("unexpected LegTelemetry playtime: %+v", snapshot.LegTelemetry)
+	}
+	if len(snapshot.RegionBuckets) != 1 || snapshot.RegionBuckets[0].InGameDuration != "2h 05m" || len(snapshot.RegionBuckets[0].ModeBuckets) != 2 ||
+		snapshot.RegionBuckets[0].ModeBuckets[0].InGameDuration != "1h 15m" || snapshot.RegionBuckets[0].ModeBuckets[1].InGameDuration != "50m" {
+		testingContext.Fatalf("unexpected RegionBuckets playtime: %+v", snapshot.RegionBuckets)
+	}
+
+	// Single-waypoint departed expedition (no WP #2 row in plan) falls back to PlaySessions.SessionsScoped and copies onto single ModeBucket.
+	singleExp, singleCreateError := expedition.CreateWithWaypoints(
+		fixture.databaseConnection,
+		"Solo Departure",
+		"",
+		[]expedition.SeedWaypoint{{SystemName: "Sol"}},
+	)
+	if singleCreateError != nil {
+		testingContext.Fatalf("create single-waypoint expedition: %v", singleCreateError)
+	}
+	if startError := expedition.StartTx(fixture.databaseConnection, singleExp.ID, "2026-04-01T09:55:00Z", explorationID); startError != nil {
+		testingContext.Fatalf("start single-waypoint expedition: %v", startError)
+	}
+	singleSnapshot, singleBuildError := exporter.Build(fixture.databaseConnection, singleExp.ID, fixture.builderDeps(fixedTime))
+	if singleBuildError != nil {
+		testingContext.Fatalf("exporter.Build single-waypoint fallback: %v", singleBuildError)
+	}
+	if len(singleSnapshot.RowDetails) != 0 ||
+		singleSnapshot.InGameSeconds == nil || *singleSnapshot.InGameSeconds != 7500 || singleSnapshot.InGameDuration != "2h 05m" ||
+		singleSnapshot.TransitInGameDuration != "2h 05m" || singleSnapshot.InSystemInGameDuration != "0m" ||
+		len(singleSnapshot.ModeBuckets) != 1 || singleSnapshot.ModeBuckets[0].InGameDuration != "2h 05m" {
+		testingContext.Fatalf("unexpected single-waypoint fallback playtime: rows=%d total=%q transit=%q inSystem=%q modes=%+v",
+			len(singleSnapshot.RowDetails), singleSnapshot.InGameDuration, singleSnapshot.TransitInGameDuration, singleSnapshot.InSystemInGameDuration, singleSnapshot.ModeBuckets)
+	}
+}

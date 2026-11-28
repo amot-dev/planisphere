@@ -33,6 +33,7 @@ Plan your route stop by stop without maintaining a spreadsheet on the side.
 - **Retroactive Start and Live Progression:** Start an expedition from a past visit to Waypoint #1 to replay your flight history, or launch fresh. As you fly, Planisphere watches your journal and advances through stops automatically.
 - **Live Route Editing:** Insert, reorder, or remove waypoints mid-expedition. Planisphere keeps your visited history intact while letting you slot in missed stops or rework the unvisited route ahead.
 - **Per-Leg Telemetry:** Expand any visited leg (or the active leg) to inspect its travel time, jumps, ships flown, scans, and estimated vs. realized earnings. Expanding Waypoint #1 shows your pre-expedition baseline.
+- **In-Game Playtime Tracking:** Reconstructs your actual in-game play time for the active expedition, each leg (split into non-overlapping In-Transit and In-System durations), your pre-expedition baseline, and your all-time career. Switch Config between `Calendar` and `In-Game` duration display anytime, and hover any duration to see the alternate value in a tooltip.
 - **Session Undo and Redo:** Press `Ctrl+Z` (`Cmd+Z` on macOS) outside text inputs to undo recent route edits, flight mode changes, Fleet Carrier plotter actions, and expedition lifecycle changes, and press `Ctrl+Y` or `Ctrl+Shift+Z` (`Cmd+Shift+Z`) to redo them.
 - **Waypoint and Visit Search:** Search star systems and POI names across all saved expeditions from the top bar, or click any green visited-system indicator to inspect its journal visit history (including non-waypoint visits) and jump straight to the matching stop.
 - **Live Sync Pause:** Pause live journal watching from the top bar anytime without losing incoming events; queued writes ingest in order when you resume.
@@ -169,6 +170,12 @@ Planisphere checks GitHub Releases for newer versions on startup, even when **On
 - **Chronologically Bounded Waypoint Reordering:** During an active expedition, you can insert, reorder, or remove waypoints on the fly (except Origin Waypoint #1 and any active Spansh carrier target). Once a waypoint is visited, marked `ARRIVED` as a carrier stop, or targeted by an active Spansh route, its star system locks while notes and POI names stay editable.
 
   Dragging a waypoint checks candidate slots against your journal history: dropping it between two visited stops (or right after the last visited stop) binds the earliest recorded arrival in that time window, while dropping it below all visited stops clears its visit timestamp and moves it back to the unvisited plan.
+
+### In-Game Playtime Reconstruction
+
+- **Session-Interval Reconstruction and Crash Resilience:** Frontier does not log a play-time delta on every jump or waypoint, so Planisphere reconstructs contiguous in-game sessions from `LoadGame` through `Shutdown` or a return to `MainMenu` (`Music` track changes), carrying sessions across multi-part journal rollovers. When Elite crashes or disconnects without writing `Shutdown`, Planisphere anchors the unclosed session against your last logged event and reconciles missing tail time from subsequent `Statistics` `Time_Played` jumps without ever overlapping the next session.
+
+- **Codex AFK Semantics and Additive Leg Splits:** Frontier's in-game Codex `Time_Played` counter ticks whenever your commander is loaded into the galaxy, including time spent docked or AFK while logged in. Planisphere matches that convention so expedition and all-time totals stay consistent with your Codex. Each leg splits reconstructed session overlap at your waypoint arrival timestamp into non-overlapping **In Transit** (departure from the previous stop to arrival) and **In System** (arrival to departure) durations so leg totals add cleanly to your full expedition play time.
 
 ### Galactic Regions and Coordinate Resolution
 

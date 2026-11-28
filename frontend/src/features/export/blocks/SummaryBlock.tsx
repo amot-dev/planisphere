@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { ExpeditionExportData, SummaryBlockConfig } from '../exportTypes'
 import {
   buildSummaryViewModel,
+  formatTelemetryHeaderDurationLine,
   SummaryKpiTileViewModel,
   SummaryRouteSegment,
   TelemetryHeaderViewModel,
@@ -56,6 +57,7 @@ export const SummaryBlock = memo(function SummaryBlock({ exportData, config }: S
 })
 
 function SummaryCardHeader({ header }: { header: TelemetryHeaderViewModel }) {
+  const durationLine = formatTelemetryHeaderDurationLine(header)
   return (
     <div className="ed-exp-header">
       <div>
@@ -79,7 +81,7 @@ function SummaryCardHeader({ header }: { header: TelemetryHeaderViewModel }) {
         <div>
           {header.fromGalactic} → {header.toGalactic}
         </div>
-        {header.durationLabel && <div className="ed-exp-muted">ELAPSED: {header.durationLabel}</div>}
+        {durationLine && <div className="ed-exp-muted">{durationLine}</div>}
       </div>
     </div>
   )

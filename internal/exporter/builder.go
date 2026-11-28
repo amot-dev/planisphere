@@ -49,6 +49,9 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 	if detailsError := populateRowDetailsAndBaseline(databaseConnection, planView, currentTime, dependencies.Projections, &exportSnapshot); detailsError != nil {
 		return ExpeditionExport{}, detailsError
 	}
+	if playtimeError := populateExpeditionPlaytime(expeditionRecord, displayStart, departed, dependencies.Projections, &exportSnapshot); playtimeError != nil {
+		return ExpeditionExport{}, playtimeError
+	}
 	if bucketsError := populateModeBuckets(planView, queryAfter, departed, dependencies.Projections, &exportSnapshot); bucketsError != nil {
 		return ExpeditionExport{}, bucketsError
 	}
@@ -199,6 +202,42 @@ func resolveOpenWaypointElapsed(details *expedition.WaypointDetails, currentTime
 	}
 }
 
+func populateExpeditionPlaytime(
+	expeditionRecord expedition.Expedition,
+	displayStart string,
+	departed bool,
+	expeditionProjections *expedition.Projections,
+	exportSnapshot *ExpeditionExport,
+) error {
+	if !departed {
+		return nil
+	}
+	var accumulated playtimeAccumulator
+	for index := range exportSnapshot.RowDetails {
+		accumulated.addWaypointDetails(&exportSnapshot.RowDetails[index])
+	}
+	if !accumulated.hasInGame && expeditionProjections.PlaySessions != nil && displayStart != "" {
+		sessions, sessionError := expeditionProjections.PlaySessions.SessionsScoped(displayStart, expeditionRecord.EndTimestamp, expeditionRecord.ProfileScope())
+		if sessionError != nil {
+			return fmt.Errorf("compute expedition play sessions: %w", sessionError)
+		}
+		if playDuration, hasPlay := replay.SumPlayDuration(sessions, displayStart, expeditionRecord.EndTimestamp); hasPlay {
+			totalSeconds := int64(playDuration / time.Second)
+			accumulated = playtimeAccumulator{
+				totalSeconds:   totalSeconds,
+				transitSeconds: totalSeconds,
+				hasInGame:      true,
+			}
+		}
+	}
+	if !accumulated.hasInGame {
+		return nil
+	}
+	exportSnapshot.InGameSeconds, exportSnapshot.InGameDuration, exportSnapshot.TransitInGameSeconds, exportSnapshot.TransitInGameDuration, exportSnapshot.InSystemInGameSeconds, exportSnapshot.InSystemInGameDuration = accumulated.labelsAndPtrs()
+	exportSnapshot.Expedition.InGameSeconds, exportSnapshot.Expedition.InGameDuration, exportSnapshot.Expedition.TransitInGameSeconds, exportSnapshot.Expedition.TransitInGameDuration, exportSnapshot.Expedition.InSystemInGameSeconds, exportSnapshot.Expedition.InSystemInGameDuration = accumulated.labelsAndPtrs()
+	return nil
+}
+
 func populateModeBuckets(
 	planView expedition.PlanView,
 	queryAfter string,
@@ -215,14 +254,20 @@ func populateModeBuckets(
 			singleMode := candidateModes[0]
 			modeID := singleMode.ID
 			exportSnapshot.ModeBuckets = []ModeBucket{{
-				ModeID:      modeID,
-				ModeName:    singleMode.Name,
-				ModeColor:   singleMode.Color,
-				ElapsedDays: exportSnapshot.Expedition.ElapsedDays,
-				ShipsFlown:  CollectShipsForVisitedLegs(planView, exportSnapshot.RowDetails, &modeID),
-				Metrics:     exportSnapshot.Live,
-				Realization: exportSnapshot.Expedition.Realization,
-				Derived:     ComputeDerivedMetrics(exportSnapshot.Live, exportSnapshot.Expedition.Realization, nil, exportSnapshot.Expedition.ElapsedDays),
+				ModeID:                 modeID,
+				ModeName:               singleMode.Name,
+				ModeColor:              singleMode.Color,
+				ElapsedDays:            exportSnapshot.Expedition.ElapsedDays,
+				InGameSeconds:          cloneInt64Ptr(exportSnapshot.Expedition.InGameSeconds),
+				InGameDuration:         exportSnapshot.Expedition.InGameDuration,
+				TransitInGameSeconds:   cloneInt64Ptr(exportSnapshot.Expedition.TransitInGameSeconds),
+				TransitInGameDuration:  exportSnapshot.Expedition.TransitInGameDuration,
+				InSystemInGameSeconds:  cloneInt64Ptr(exportSnapshot.Expedition.InSystemInGameSeconds),
+				InSystemInGameDuration: exportSnapshot.Expedition.InSystemInGameDuration,
+				ShipsFlown:             CollectShipsForVisitedLegs(planView, exportSnapshot.RowDetails, &modeID),
+				Metrics:                exportSnapshot.Live,
+				Realization:            exportSnapshot.Expedition.Realization,
+				Derived:                ComputeDerivedMetrics(exportSnapshot.Live, exportSnapshot.Expedition.Realization, nil, exportSnapshot.Expedition.ElapsedDays),
 			}}
 		}
 		return nil
@@ -233,6 +278,26 @@ func populateModeBuckets(
 	}
 	exportSnapshot.ModeBuckets = buckets
 	return nil
+}
+
+func accumulateModePlaytime(planView expedition.PlanView, rowDetails []expedition.WaypointDetails) map[int64]playtimeAccumulator {
+	modeIDByRowID := make(map[int64]int64, len(planView.Rows))
+	for _, rowView := range planView.Rows {
+		if rowView.Row.RowType == expedition.RowWaypoint && rowView.Number > 1 && rowView.LegModeID > 0 {
+			modeIDByRowID[rowView.Row.ID] = rowView.LegModeID
+		}
+	}
+	playtimeByModeID := make(map[int64]playtimeAccumulator)
+	for index := range rowDetails {
+		modeID := modeIDByRowID[rowDetails[index].RowID]
+		if modeID <= 0 {
+			continue
+		}
+		accumulator := playtimeByModeID[modeID]
+		accumulator.addWaypointDetails(&rowDetails[index])
+		playtimeByModeID[modeID] = accumulator
+	}
+	return playtimeByModeID
 }
 
 func computeFilteredModeBuckets(
@@ -246,6 +311,7 @@ func computeFilteredModeBuckets(
 	expeditionRecord := planView.Expedition
 	expScope := expeditionRecord.ProfileScope()
 	expeditionRange := replaystats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
+	playtimeByModeID := accumulateModePlaytime(planView, rowDetails)
 	buckets := make([]ModeBucket, 0, len(candidateModes))
 	for _, modeItem := range candidateModes {
 		modeID := modeItem.ID
@@ -262,7 +328,7 @@ func computeFilteredModeBuckets(
 		if !hasTelemetryActivity(summary.Metrics, summary.Realization) {
 			continue
 		}
-		buckets = append(buckets, ModeBucket{
+		modeBucket := ModeBucket{
 			ModeID:      modeID,
 			ModeName:    modeItem.Name,
 			ModeColor:   modeItem.Color,
@@ -271,7 +337,9 @@ func computeFilteredModeBuckets(
 			Metrics:     summary.Metrics,
 			Realization: summary.Realization,
 			Derived:     ComputeDerivedMetrics(summary.Metrics, summary.Realization, nil, expeditionElapsedDays),
-		})
+		}
+		modeBucket.InGameSeconds, modeBucket.InGameDuration, modeBucket.TransitInGameSeconds, modeBucket.TransitInGameDuration, modeBucket.InSystemInGameSeconds, modeBucket.InSystemInGameDuration = playtimeByModeID[modeID].labelsAndPtrs()
+		buckets = append(buckets, modeBucket)
 	}
 	return buckets, nil
 }

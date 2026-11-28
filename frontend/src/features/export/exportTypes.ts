@@ -1,4 +1,5 @@
 import { expedition, exporter } from '../../api/models'
+import { DurationDisplayMode, normalizeDurationDisplayMode } from '../../domain/durationDisplay'
 
 /**
  * Strips Wails class-hydration helper methods from generated DTO classes so both
@@ -117,6 +118,7 @@ export interface ExportScopeSpec {
 /** Toggleable metric identifiers across all six Details sections. */
 export type DetailsMetricId =
   | 'distanceBreakdown'
+  | 'inGamePlaytimeBreakdown'
   | 'jumps'
   | 'shipsFlown'
   | 'distinctRegions'
@@ -168,6 +170,7 @@ export type WaypointsColumnId =
   | 'timestamps'
   | 'legDistance'
   | 'duration'
+  | 'inGameDuration'
   | 'shipsFlown'
   | 'flightMode'
   | 'fcStops'
@@ -295,6 +298,7 @@ export const DETAILS_SECTIONS: ReadonlyArray<{
 export const DETAILS_SECTION_METRICS: Record<DetailsSection, ReadonlyArray<DetailsMetricDescriptor>> = {
   flight: [
     { id: 'distanceBreakdown', label: 'Distance Travelled (Ship / Carrier)', zone: 'card', defaultChecked: true },
+    { id: 'inGamePlaytimeBreakdown', label: 'In-Game Playtime (Transit / In System)', zone: 'card', defaultChecked: true, requiresVisitedRoute: true },
     { id: 'jumps', label: 'Hyperspace Jumps', zone: 'kpi', defaultChecked: true },
     { id: 'shipsFlown', label: 'Ships Flown', zone: 'kpi', defaultChecked: true, requiresVisitedRoute: true },
     { id: 'distinctRegions', label: 'Distinct Galactic Regions', zone: 'kpi', defaultChecked: true, fullExpeditionCombinedOnly: true },
@@ -362,6 +366,7 @@ export const WAYPOINTS_COLUMNS: ReadonlyArray<{
   { id: 'timestamps', label: 'Galactic Timestamps', defaultChecked: true },
   { id: 'legDistance', label: 'Leg Distance (Ly)', defaultChecked: true },
   { id: 'duration', label: 'Leg Duration', defaultChecked: true },
+  { id: 'inGameDuration', label: 'In-Game Time', defaultChecked: false },
   { id: 'shipsFlown', label: 'Ships Flown', defaultChecked: true },
   { id: 'flightMode', label: 'Flight Mode', defaultChecked: true },
   { id: 'fcStops', label: 'Fleet Carrier Stops', defaultChecked: true },
@@ -395,7 +400,10 @@ export function defaultMetricsForSection(section: DetailsSection): DetailsMetric
 }
 
 /** Creates a default configuration object for the requested block kind. */
-export function createDefaultBlockConfig(kind: ExportBlockKind): ExportBlockConfig {
+export function createDefaultBlockConfig(
+  kind: ExportBlockKind,
+  durationDisplayMode?: DurationDisplayMode,
+): ExportBlockConfig {
   switch (kind) {
     case 'summary':
       return {
@@ -412,14 +420,18 @@ export function createDefaultBlockConfig(kind: ExportBlockKind): ExportBlockConf
         modeGrouping: 'combined',
         selectedMetrics: defaultMetricsForSection('flight'),
       }
-    case 'waypoints':
+    case 'waypoints': {
+      const preferInGame = normalizeDurationDisplayMode(durationDisplayMode) === 'in_game'
       return {
         kind: 'waypoints',
         waypointsScope: 'visited',
-        selectedColumns: WAYPOINTS_COLUMNS.filter((column) => column.defaultChecked).map(
-          (column) => column.id,
-        ),
+        selectedColumns: WAYPOINTS_COLUMNS.filter((column) => {
+          if (column.id === 'duration') return !preferInGame
+          if (column.id === 'inGameDuration') return preferInGame
+          return column.defaultChecked
+        }).map((column) => column.id),
       }
+    }
     case 'highlights':
       return {
         kind: 'highlights',

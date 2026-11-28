@@ -1,5 +1,6 @@
 import { ModalShell } from '../../components/ui/ModalShell'
 import { SquareCheckbox } from '../../components/ui/SquareCheckbox'
+import { DurationDisplayMode } from '../../domain/durationDisplay'
 import { BlockConfigurator } from './BlockConfigurator'
 import { EXPORT_CARD_CSS } from './exportCardStyles'
 import { ExportCartQueue } from './ExportCartQueue'
@@ -10,6 +11,7 @@ import { ExportOutputPlan, ExportStudioState, useExportStudio } from './useExpor
 /** Props for the Export Studio modal dialog. */
 export interface ExportExpeditionModalProps {
   expeditionId: number
+  durationDisplayMode?: DurationDisplayMode
   onClose: () => void
 }
 
@@ -26,8 +28,12 @@ const OUTPUT_FORMAT_TOGGLES: ReadonlyArray<{
  * ExportExpeditionModal hosts the split-screen Export Studio with sticky block
  * configuration, Quick Share preset, Live Preview, and PNG, HTML, and JSON export dispatch.
  */
-export function ExportExpeditionModal({ expeditionId, onClose }: ExportExpeditionModalProps) {
-  const studio = useExportStudio(expeditionId)
+export function ExportExpeditionModal({
+  expeditionId,
+  durationDisplayMode,
+  onClose,
+}: ExportExpeditionModalProps) {
+  const studio = useExportStudio(expeditionId, durationDisplayMode)
   const { exportData, loading, exporting } = studio
   const subtitle = exportData
     ? `${exportData.plan.expedition.name} · ${exportData.plan.visitedWaypointCount} / ${exportData.plan.waypointCount} Waypoints Visited`

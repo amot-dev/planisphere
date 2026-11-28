@@ -1314,6 +1314,12 @@ export namespace exporter {
 	    inSystem: boolean;
 	    duration: string;
 	    elapsedDays?: number;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    coveredLy: number;
 	    shipsFlown: string[];
 	    metrics: stats.Metrics;
@@ -1335,6 +1341,12 @@ export namespace exporter {
 	        this.inSystem = source["inSystem"];
 	        this.duration = source["duration"];
 	        this.elapsedDays = source["elapsedDays"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.coveredLy = source["coveredLy"];
 	        this.shipsFlown = source["shipsFlown"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
@@ -1369,6 +1381,12 @@ export namespace exporter {
 	    inSystem: boolean;
 	    duration: string;
 	    elapsedDays?: number;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    coveredLy: number;
 	    shipsFlown: string[];
 	    metrics: stats.Metrics;
@@ -1390,6 +1408,12 @@ export namespace exporter {
 	        this.inSystem = source["inSystem"];
 	        this.duration = source["duration"];
 	        this.elapsedDays = source["elapsedDays"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.coveredLy = source["coveredLy"];
 	        this.shipsFlown = source["shipsFlown"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
@@ -1420,6 +1444,12 @@ export namespace exporter {
 	    rowId: number;
 	    regionName: string;
 	    elapsedDays?: number;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    shipsFlown: string[];
 	    derived: DerivedMetrics;
 	
@@ -1432,6 +1462,12 @@ export namespace exporter {
 	        this.rowId = source["rowId"];
 	        this.regionName = source["regionName"];
 	        this.elapsedDays = source["elapsedDays"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.shipsFlown = source["shipsFlown"];
 	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
 	    }
@@ -1459,6 +1495,12 @@ export namespace exporter {
 	    modeName: string;
 	    modeColor: string;
 	    elapsedDays?: number;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    shipsFlown: string[];
 	    metrics: stats.Metrics;
 	    realization: realization.Breakdown;
@@ -1474,6 +1516,12 @@ export namespace exporter {
 	        this.modeName = source["modeName"];
 	        this.modeColor = source["modeColor"];
 	        this.elapsedDays = source["elapsedDays"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.shipsFlown = source["shipsFlown"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
@@ -1502,6 +1550,12 @@ export namespace exporter {
 	    metrics: stats.Metrics;
 	    realization: realization.Breakdown;
 	    elapsedDays?: number;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    shipsFlown: string[];
 	    derived: DerivedMetrics;
 	
@@ -1514,6 +1568,12 @@ export namespace exporter {
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);
 	        this.realization = this.convertValues(source["realization"], realization.Breakdown);
 	        this.elapsedDays = source["elapsedDays"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.shipsFlown = source["shipsFlown"];
 	        this.derived = this.convertValues(source["derived"], DerivedMetrics);
 	    }
@@ -1549,6 +1609,12 @@ export namespace exporter {
 	    effectiveEndGalactic: string;
 	    endIsNow: boolean;
 	    duration: string;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    careerStart: string;
 	    careerStartGalactic: string;
 	    careerDuration: string;
@@ -1586,6 +1652,12 @@ export namespace exporter {
 	        this.effectiveEndGalactic = source["effectiveEndGalactic"];
 	        this.endIsNow = source["endIsNow"];
 	        this.duration = source["duration"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.careerStart = source["careerStart"];
 	        this.careerStartGalactic = source["careerStartGalactic"];
 	        this.careerDuration = source["careerDuration"];

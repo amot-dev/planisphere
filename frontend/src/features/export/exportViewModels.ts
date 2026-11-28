@@ -61,6 +61,7 @@ export interface WaypointEntryRowViewModel {
   timestampText: string
   legDistanceText: string
   durationText: string
+  inGameDurationText: string
   shipsText: string
   modeBadge: WaypointModeBadgeViewModel | null
   fcStatusText: string
@@ -111,6 +112,7 @@ const WAYPOINT_OPTIONAL_COLUMNS: ReadonlyArray<WaypointsColumnDescriptor> = [
   { id: 'timestamps', headerLabel: 'Galactic Time' },
   { id: 'legDistance', headerLabel: 'Leg Ly' },
   { id: 'duration', headerLabel: 'Duration' },
+  { id: 'inGameDuration', headerLabel: 'In-Game' },
   { id: 'shipsFlown', headerLabel: 'Ships' },
   { id: 'flightMode', headerLabel: 'Mode' },
   { id: 'fcStops', headerLabel: 'FC' },
@@ -319,6 +321,7 @@ function buildWaypointEntryRow(
     timestampText: formatWaypointTimestampCell(rowView, detail),
     legDistanceText: rowView.distFromPrevLy != null ? formatLy(rowView.distFromPrevLy, 1) : '—',
     durationText: detail?.elapsed || '—',
+    inGameDurationText: detail?.inGameDuration || '—',
     shipsText: (detail?.shipsUsed ?? []).join(', ') || '—',
     modeBadge,
     fcStatusText: rowView.row.fcStop ? (rowView.row.fcArrived ? 'ARRIVED' : 'STOP') : '—',

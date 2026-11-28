@@ -62,6 +62,12 @@ export interface ResolvedTelemetryContext {
   inSystem: boolean
   durationLabel: string
   elapsedDays: number | null
+  inGameSeconds: number | null
+  inGameDurationLabel: string
+  transitInGameSeconds: number | null
+  transitInGameDurationLabel: string
+  inSystemInGameSeconds: number | null
+  inSystemInGameDurationLabel: string
   metrics: stats.Metrics
   realization: realization.Breakdown
   carrierCost: ExportCarrierCost | null
@@ -119,6 +125,12 @@ export function isDetailsMetricAvailable(
   if (descriptor.fullExpeditionCombinedOnly && !context.isFullExpeditionCombined) return false
   if (descriptor.requiresVisitedRoute && scopeKind === 'baseline') return false
   if (descriptor.requiresElapsed24h && (context.elapsedDays == null || context.elapsedDays < 1)) return false
+  if (
+    descriptor.id === 'inGamePlaytimeBreakdown' &&
+    (context.inGameSeconds == null || context.inGameDurationLabel === '')
+  ) {
+    return false
+  }
   return true
 }
 
@@ -208,6 +220,37 @@ function normalizeCareerDiff(items: ReadonlyArray<ExportCareerDiffItem> | null |
   }))
 }
 
+interface PlaytimeFieldsSource {
+  inGameSeconds?: number | null
+  inGameDuration?: string | null
+  transitInGameSeconds?: number | null
+  transitInGameDuration?: string | null
+  inSystemInGameSeconds?: number | null
+  inSystemInGameDuration?: string | null
+}
+
+function extractPlaytimeContextFields(
+  primary?: PlaytimeFieldsSource | null,
+  fallback?: PlaytimeFieldsSource | null,
+): Pick<
+  ResolvedTelemetryContext,
+  | 'inGameSeconds'
+  | 'inGameDurationLabel'
+  | 'transitInGameSeconds'
+  | 'transitInGameDurationLabel'
+  | 'inSystemInGameSeconds'
+  | 'inSystemInGameDurationLabel'
+> {
+  return {
+    inGameSeconds: primary?.inGameSeconds ?? fallback?.inGameSeconds ?? null,
+    inGameDurationLabel: primary?.inGameDuration || fallback?.inGameDuration || '',
+    transitInGameSeconds: primary?.transitInGameSeconds ?? fallback?.transitInGameSeconds ?? null,
+    transitInGameDurationLabel: primary?.transitInGameDuration || fallback?.transitInGameDuration || '',
+    inSystemInGameSeconds: primary?.inSystemInGameSeconds ?? fallback?.inSystemInGameSeconds ?? null,
+    inSystemInGameDurationLabel: primary?.inSystemInGameDuration || fallback?.inSystemInGameDuration || '',
+  }
+}
+
 function buildContextBase(
   scopeLabel: string,
   routeTitle: string,
@@ -220,7 +263,10 @@ function buildContextBase(
 ): ResolvedTelemetryContext {
   return {
     scopeLabel, routeTitle, modeBadge: null, fromGalactic: '', toGalactic: '', inSystem: false,
-    durationLabel: '', elapsedDays, metrics, realization: realizationBreakdown, carrierCost,
+    durationLabel: '', elapsedDays, inGameSeconds: null, inGameDurationLabel: '',
+    transitInGameSeconds: null, transitInGameDurationLabel: '',
+    inSystemInGameSeconds: null, inSystemInGameDurationLabel: '',
+    metrics, realization: realizationBreakdown, carrierCost,
     shipsFlown: [], distinctRegionCount: null, visitedWaypoints: null, plannedWaypoints: null,
     coveredLy: null, plannedLy: null, careerDiff: null, isFullExpeditionCombined: false,
     derived,
@@ -246,6 +292,7 @@ function resolveFullExpeditionContext(
     fromGalactic: exportData.effectiveStartGalactic || 'Unknown',
     toGalactic: exportData.endIsNow ? 'ACTIVE' : exportData.effectiveEndGalactic || 'Unknown',
     durationLabel: exportData.duration || formatElapsedDuration(exportData.effectiveStart, exportData.effectiveEnd, nowMs),
+    ...extractPlaytimeContextFields(slice, isCombined ? exportData : null),
     shipsFlown: slice.shipsFlown ?? [],
     distinctRegionCount: isCombined ? dataIndex.visitedRegions.length : null,
     visitedWaypoints: exportData.plan.visitedWaypointCount,
@@ -268,6 +315,7 @@ function resolveBaselineContext(exportData: ExpeditionExportData, nowMs: number)
     toGalactic: baseline?.toGalactic || exportData.effectiveStartGalactic || 'Unknown',
     inSystem: Boolean(baseline?.inSystem),
     durationLabel: baseline?.elapsed || formatElapsedDuration(baseline?.from, baseline?.to, nowMs),
+    ...extractPlaytimeContextFields(baseline),
   })
 }
 
@@ -287,6 +335,7 @@ function resolveLegContext(exportData: ExpeditionExportData, rowId: number | und
     toGalactic: leg.details.toGalactic || (leg.details.inSystem ? 'IN SYSTEM' : 'IN PROGRESS'),
     inSystem: Boolean(leg.details.inSystem),
     durationLabel: leg.details.elapsed || formatElapsedDuration(leg.details.from, leg.details.to, nowMs),
+    ...extractPlaytimeContextFields(leg.telemetry, leg.details),
     shipsFlown: leg.telemetry.shipsFlown ?? [],
     coveredLy: leg.rowView.distFromPrevLy ?? null,
   })
@@ -318,6 +367,7 @@ function resolveRegionContext(
     toGalactic: slice.toGalactic,
     inSystem: slice.inSystem,
     durationLabel: slice.duration,
+    ...extractPlaytimeContextFields(slice),
     shipsFlown: slice.shipsFlown ?? [],
     visitedWaypoints: slice.legCount,
     coveredLy: slice.coveredLy,

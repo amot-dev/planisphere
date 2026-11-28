@@ -43,6 +43,7 @@ export interface TelemetryHeaderViewModel {
   fromGalactic: string
   toGalactic: string
   durationLabel: string
+  inGameDurationLabel: string
   exportedAtGalactic: string
 }
 
@@ -100,6 +101,16 @@ export function formatOptionalCredits(value: number | null): string {
   return value != null ? formatCredits(value) : '—'
 }
 
+/** Formats the combined elapsed and in-game duration metadata line for telemetry headers. */
+export function formatTelemetryHeaderDurationLine(
+  header: Pick<TelemetryHeaderViewModel, 'durationLabel' | 'inGameDurationLabel'>,
+): string {
+  const parts: string[] = []
+  if (header.durationLabel) parts.push(`ELAPSED: ${header.durationLabel}`)
+  if (header.inGameDurationLabel) parts.push(`IN-GAME: ${header.inGameDurationLabel}`)
+  return parts.join(' · ')
+}
+
 /** Builds the sanitized telemetry header shared by Summary and Details view-models. */
 export function buildTelemetryHeaderViewModel(
   eyebrowLabel: string,
@@ -122,6 +133,7 @@ export function buildTelemetryHeaderViewModel(
     fromGalactic: context.fromGalactic,
     toGalactic: context.toGalactic,
     durationLabel: context.durationLabel,
+    inGameDurationLabel: context.inGameDurationLabel,
     exportedAtGalactic,
   }
 }
@@ -317,6 +329,16 @@ const DETAILS_BREAKDOWN_CARD_BUILDERS: Partial<Record<DetailsMetricId, Breakdown
     rows: [
       bdRow('By Ship (FSD)', formatLy(context.derived.shipDistanceLy)),
       bdRow('By Carrier (Passenger)', formatLy(context.metrics.carrierPassengerLy)),
+    ],
+  }),
+  inGamePlaytimeBreakdown: (context) => ({
+    title: 'In-Game Playtime',
+    headerValue: context.inGameDurationLabel || '0m',
+    borderAccent: 'amber',
+    headerTone: 'amber',
+    rows: [
+      bdRow('In Transit (Between Waypoints)', context.transitInGameDurationLabel || '0m'),
+      bdRow('In System (At Waypoints)', context.inSystemInGameDurationLabel || '0m'),
     ],
   }),
   fsdBoosts: (context) => ({

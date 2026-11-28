@@ -12,6 +12,7 @@ import (
 )
 
 func float64Ptr(value float64) *float64 { return &value }
+func int64Ptr(value int64) *int64       { return &value }
 
 func TestBuildLegAndRegionTelemetryAttributionAndModeBuckets(testingContext *testing.T) {
 	pinnedNow := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
@@ -67,28 +68,40 @@ func TestBuildLegAndRegionTelemetryAttributionAndModeBuckets(testingContext *tes
 
 	rowDetails := []expedition.WaypointDetails{
 		{
-			RowID:        2,
-			Kind:         "leg",
-			Number:       2,
-			From:         "2026-04-01T08:00:00Z",
-			To:           "2026-04-01T14:00:00Z",
-			FromGalactic: "3312-04-01 08:00 UTC",
-			ToGalactic:   "3312-04-01 14:00 UTC",
-			ShipsUsed:    []string{"  Mandalay ", "", "Mandalay"},
-			Metrics:      replaystats.Metrics{DistanceLy: 300, ShipDistanceLy: 300, Jumps: 6, ScanValueTotal: 3_000_000},
-			Realization:  replaystats.RealizationBreakdown{TotalRealized: 3_000_000},
+			RowID:                  2,
+			Kind:                   "leg",
+			Number:                 2,
+			From:                   "2026-04-01T08:00:00Z",
+			To:                     "2026-04-01T14:00:00Z",
+			FromGalactic:           "3312-04-01 08:00 UTC",
+			ToGalactic:             "3312-04-01 14:00 UTC",
+			InGameSeconds:          int64Ptr(3600),
+			InGameDuration:         "1h 00m",
+			TransitInGameSeconds:   int64Ptr(2700),
+			TransitInGameDuration:  "45m",
+			InSystemInGameSeconds:  int64Ptr(900),
+			InSystemInGameDuration: "15m",
+			ShipsUsed:              []string{"  Mandalay ", "", "Mandalay"},
+			Metrics:                replaystats.Metrics{DistanceLy: 300, ShipDistanceLy: 300, Jumps: 6, ScanValueTotal: 3_000_000},
+			Realization:            replaystats.RealizationBreakdown{TotalRealized: 3_000_000},
 		},
 		{
-			RowID:        3,
-			Kind:         "leg",
-			Number:       3,
-			From:         "2026-04-01T14:00:00Z",
-			To:           "2026-04-03T14:00:00Z",
-			FromGalactic: "3312-04-01 14:00 UTC",
-			ToGalactic:   "3312-04-03 14:00 UTC",
-			ShipsUsed:    []string{"Mandalay", "Anaconda"},
-			Metrics:      replaystats.Metrics{DistanceLy: 1200, ShipDistanceLy: 1200, Jumps: 20, ScanValueTotal: 20_000_000},
-			Realization:  replaystats.RealizationBreakdown{TotalRealized: 18_000_000, CarrierTariffLoss: 2_000_000},
+			RowID:                  3,
+			Kind:                   "leg",
+			Number:                 3,
+			From:                   "2026-04-01T14:00:00Z",
+			To:                     "2026-04-03T14:00:00Z",
+			FromGalactic:           "3312-04-01 14:00 UTC",
+			ToGalactic:             "3312-04-03 14:00 UTC",
+			InGameSeconds:          int64Ptr(7200),
+			InGameDuration:         "2h 00m",
+			TransitInGameSeconds:   int64Ptr(5400),
+			TransitInGameDuration:  "1h 30m",
+			InSystemInGameSeconds:  int64Ptr(1800),
+			InSystemInGameDuration: "30m",
+			ShipsUsed:              []string{"Mandalay", "Anaconda"},
+			Metrics:                replaystats.Metrics{DistanceLy: 1200, ShipDistanceLy: 1200, Jumps: 20, ScanValueTotal: 20_000_000},
+			Realization:            replaystats.RealizationBreakdown{TotalRealized: 18_000_000, CarrierTariffLoss: 2_000_000},
 		},
 		{
 			RowID:        4,
@@ -103,16 +116,22 @@ func TestBuildLegAndRegionTelemetryAttributionAndModeBuckets(testingContext *tes
 			Realization:  replaystats.RealizationBreakdown{PendingValue: 30_000_000},
 		},
 		{
-			RowID:        5,
-			Kind:         "leg",
-			Number:       5,
-			From:         "2026-04-04T14:00:00Z",
-			To:           "",
-			FromGalactic: "3312-04-04 14:00 UTC",
-			InSystem:     true,
-			ShipsUsed:    []string{"Cobra Mk V"},
-			Metrics:      replaystats.Metrics{DistanceLy: 500, ShipDistanceLy: 500, Jumps: 10, ScanValueTotal: 10_000_000},
-			Realization:  replaystats.RealizationBreakdown{TotalRealized: 10_000_000},
+			RowID:                  5,
+			Kind:                   "leg",
+			Number:                 5,
+			From:                   "2026-04-04T14:00:00Z",
+			To:                     "",
+			FromGalactic:           "3312-04-04 14:00 UTC",
+			InSystem:               true,
+			InGameSeconds:          int64Ptr(2400),
+			InGameDuration:         "40m",
+			TransitInGameSeconds:   int64Ptr(1800),
+			TransitInGameDuration:  "30m",
+			InSystemInGameSeconds:  int64Ptr(600),
+			InSystemInGameDuration: "10m",
+			ShipsUsed:              []string{"Cobra Mk V"},
+			Metrics:                replaystats.Metrics{DistanceLy: 500, ShipDistanceLy: 500, Jumps: 10, ScanValueTotal: 10_000_000},
+			Realization:            replaystats.RealizationBreakdown{TotalRealized: 10_000_000},
 		},
 		{
 			RowID:   6,
@@ -159,6 +178,17 @@ func TestBuildLegAndRegionTelemetryAttributionAndModeBuckets(testingContext *tes
 	}
 	if len(temple.ModeBuckets) != 2 || temple.ModeBuckets[0].ModeID != 1 || temple.ModeBuckets[1].ModeID != 2 {
 		testingContext.Fatalf("expected 2 ordered Temple mode buckets [1, 2], got %+v", temple.ModeBuckets)
+	}
+	if legs[0].InGameDuration != "1h 00m" || legs[0].TransitInGameDuration != "45m" || legs[0].InSystemInGameDuration != "15m" || legs[2].InGameSeconds != nil {
+		testingContext.Fatalf("unexpected per-leg playtime copy: leg0=%+v leg2=%+v", legs[0], legs[2])
+	}
+	if temple.InGameSeconds == nil || *temple.InGameSeconds != 9600 || temple.InGameDuration != "2h 40m" ||
+		temple.TransitInGameDuration != "2h 00m" || temple.InSystemInGameDuration != "40m" ||
+		temple.ModeBuckets[0].InGameDuration != "2h 00m" || temple.ModeBuckets[1].InGameDuration != "40m" {
+		testingContext.Fatalf("unexpected Temple region/mode playtime aggregation: %+v", temple)
+	}
+	if regions[2].InGameSeconds != nil || regions[2].InGameDuration != "" {
+		testingContext.Fatalf("expected nil playtime for region without session data, got %+v", regions[2])
 	}
 
 	allShips := exporter.CollectShipsForVisitedLegs(planView, rowDetails, nil)

@@ -7,6 +7,7 @@ import {
   buildDetailsViewModel,
   DetailsBreakdownCardViewModel,
   DetailsKpiTileViewModel,
+  formatTelemetryHeaderDurationLine,
   TelemetryHeaderViewModel,
 } from '../exportViewModels'
 
@@ -67,6 +68,7 @@ export const DetailsBlock = memo(function DetailsBlock({
 function DetailsCardHeader({ header }: { header: TelemetryHeaderViewModel }) {
   const headerAccentClass =
     header.accent === 'amber' ? 'ed-exp-header' : `ed-exp-header ed-exp-header-${header.accent}`
+  const durationLine = formatTelemetryHeaderDurationLine(header)
   return (
     <div className={headerAccentClass}>
       <div>
@@ -95,9 +97,7 @@ function DetailsCardHeader({ header }: { header: TelemetryHeaderViewModel }) {
         <div>
           {header.fromGalactic} → {header.toGalactic}
         </div>
-        {header.durationLabel && (
-          <div className="ed-exp-muted">ELAPSED: {header.durationLabel}</div>
-        )}
+        {durationLine && <div className="ed-exp-muted">{durationLine}</div>}
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GetExpeditionExportData, PickExportSavePath, WriteExportOutput } from '../../api/backend'
 import { exporter } from '../../api/models'
+import { DurationDisplayMode } from '../../domain/durationDisplay'
 import {
   computeAvailableDetailsMetricIds, createQuickShareCart, expandConfigToCartItems, slugify,
 } from './exportMetrics'
@@ -66,17 +67,23 @@ export function createExportStatusStore(): ExportStatusStore {
  * useExportStudio manages expedition export snapshot loading, configurator and cart
  * state, memoized preview expansion, and isolated PNG, HTML, and JSON export dispatch.
  */
-export function useExportStudio(expeditionId: number) {
+export function useExportStudio(expeditionId: number, durationDisplayMode?: DurationDisplayMode) {
   const statusStoreRef = useRef<ExportStatusStore | null>(null)
   if (!statusStoreRef.current) statusStoreRef.current = createExportStatusStore()
   const statusStore = statusStoreRef.current
 
-  const [config, setConfig] = useState<ConfiguratorBlockConfig>(() => createDefaultBlockConfig('summary'))
+  const [config, setConfig] = useState<ConfiguratorBlockConfig>(() =>
+    createDefaultBlockConfig('summary', durationDisplayMode),
+  )
   const [cartItems, setCartItems] = useState<CartBlockItem[]>([])
   const [inspectedCartItemId, setInspectedCartItemId] = useState<string | null>(null)
   const [outputs, setOutputs] = useState<ExportOutputOptions>({ includePng: true, includeHtml: false, includeJson: false })
   const [exporting, setExporting] = useState(false)
-  const { exportData, loading, loadError } = useExpeditionExportSnapshot(expeditionId, setCartItems)
+  const { exportData, loading, loadError } = useExpeditionExportSnapshot(
+    expeditionId,
+    durationDisplayMode,
+    setCartItems,
+  )
 
   const expandedPreviewItems = useMemo(
     () => (exportData ? expandConfigToCartItems(exportData, config, 'preview') : []),
@@ -97,7 +104,7 @@ export function useExportStudio(expeditionId: number) {
   const outputPlan = useMemo(() => computeExportOutputPlan(cartItems.length, outputs), [cartItems.length, outputs])
   const cartActions = useExportCartActions(
     exportData, canAddToCart, expandedPreviewItems, cartItems, inspectedCartItemId,
-    statusStore, setConfig, setCartItems, setInspectedCartItemId, setOutputs,
+    statusStore, durationDisplayMode, setConfig, setCartItems, setInspectedCartItemId, setOutputs,
   )
   const handleRunExport = useCallback(
     () => executeStudioExport(exportData, cartItems, outputPlan, statusStore, setExporting),
@@ -111,10 +118,34 @@ export function useExportStudio(expeditionId: number) {
   }
 }
 
-function useExpeditionExportSnapshot(expeditionId: number, setCartItems: Dispatch<SetStateAction<CartBlockItem[]>>) {
+function buildQuickShareCart(
+  exportData: ExpeditionExportData,
+  durationDisplayMode?: DurationDisplayMode,
+): CartBlockItem[] {
+  const quickItems = createQuickShareCart(exportData)
+  const defaultWaypointsConfig = createDefaultBlockConfig('waypoints', durationDisplayMode)
+  if (defaultWaypointsConfig.kind !== 'waypoints') return quickItems
+  return quickItems.map((item) => {
+    if (item.config.kind !== 'waypoints') return item
+    const selectedColumns = [...defaultWaypointsConfig.selectedColumns]
+    return {
+      ...item,
+      subtitle: `${selectedColumns.length} columns`,
+      config: { ...item.config, selectedColumns },
+    }
+  })
+}
+
+function useExpeditionExportSnapshot(
+  expeditionId: number,
+  durationDisplayMode: DurationDisplayMode | undefined,
+  setCartItems: Dispatch<SetStateAction<CartBlockItem[]>>,
+) {
   const [exportData, setExportData] = useState<ExpeditionExportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const durationDisplayModeRef = useRef(durationDisplayMode)
+  durationDisplayModeRef.current = durationDisplayMode
 
   useEffect(() => {
     let cancelled = false
@@ -124,7 +155,7 @@ function useExpeditionExportSnapshot(expeditionId: number, setCartItems: Dispatc
       .then((payload) => {
         if (cancelled) return
         setExportData(payload)
-        setCartItems(createQuickShareCart(payload))
+        setCartItems(buildQuickShareCart(payload, durationDisplayModeRef.current))
       })
       .catch((error: unknown) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error)) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -137,11 +168,12 @@ function useExpeditionExportSnapshot(expeditionId: number, setCartItems: Dispatc
 function useExportCartActions(
   exportData: ExpeditionExportData | null, canAddToCart: boolean, expandedPreviewItems: ReadonlyArray<CartBlockItem>,
   cartItems: CartBlockItem[], inspectedCartItemId: string | null, statusStore: ExportStatusStore,
+  durationDisplayMode: DurationDisplayMode | undefined,
   setConfig: Dispatch<SetStateAction<ConfiguratorBlockConfig>>, setCartItems: Dispatch<SetStateAction<CartBlockItem[]>>,
   setInspectedCartItemId: Dispatch<SetStateAction<string | null>>, setOutputs: Dispatch<SetStateAction<ExportOutputOptions>>,
 ) {
   const addCounterRef = useRef(1)
-  const handleSelectBlockKind = useCallback((nextKind: ExportBlockKind) => { setInspectedCartItemId(null); setConfig(createDefaultBlockConfig(nextKind)) }, [setConfig, setInspectedCartItemId])
+  const handleSelectBlockKind = useCallback((nextKind: ExportBlockKind) => { setInspectedCartItemId(null); setConfig(createDefaultBlockConfig(nextKind, durationDisplayMode)) }, [durationDisplayMode, setConfig, setInspectedCartItemId])
   const handleConfigChange = useCallback((nextConfig: ConfiguratorBlockConfig) => { setInspectedCartItemId(null); setConfig(nextConfig) }, [setConfig, setInspectedCartItemId])
   const handleAddToCart = useCallback(() => {
     if (!exportData || !canAddToCart || expandedPreviewItems.length === 0) return
@@ -153,8 +185,8 @@ function useExportCartActions(
   const handleApplyQuickShare = useCallback(() => {
     if (!exportData) return
     setInspectedCartItemId(null)
-    setCartItems(createQuickShareCart(exportData))
-  }, [exportData, setCartItems, setInspectedCartItemId])
+    setCartItems(buildQuickShareCart(exportData, durationDisplayMode))
+  }, [durationDisplayMode, exportData, setCartItems, setInspectedCartItemId])
   const handleClearCart = useCallback(() => { setInspectedCartItemId(null); setCartItems([]) }, [setCartItems, setInspectedCartItemId])
   const handleInspectCartItem = useCallback((itemId: string) => setInspectedCartItemId(itemId), [setInspectedCartItemId])
   const handleExitInspectMode = useCallback(() => setInspectedCartItemId(null), [setInspectedCartItemId])

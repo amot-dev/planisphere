@@ -54,69 +54,99 @@ type CareerDiffItem struct {
 // ExportLegTelemetry holds precomputed region attribution, elapsed days, ships flown,
 // and derived rates for a visited non-origin waypoint leg.
 type ExportLegTelemetry struct {
-	RowID       int64          `json:"rowId"`
-	RegionName  string         `json:"regionName"`
-	ElapsedDays *float64       `json:"elapsedDays"`
-	ShipsFlown  []string       `json:"shipsFlown"`
-	Derived     DerivedMetrics `json:"derived"`
+	RowID                  int64          `json:"rowId"`
+	RegionName             string         `json:"regionName"`
+	ElapsedDays            *float64       `json:"elapsedDays"`
+	InGameSeconds          *int64         `json:"inGameSeconds,omitempty"`
+	InGameDuration         string         `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds   *int64         `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration  string         `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds  *int64         `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration string         `json:"inSystemInGameDuration,omitempty"`
+	ShipsFlown             []string       `json:"shipsFlown"`
+	Derived                DerivedMetrics `json:"derived"`
 }
 
 // RegionModeBucket holds telemetry aggregated for a single flight mode within a Galactic Region.
 type RegionModeBucket struct {
-	ModeID       int64                            `json:"modeId"`
-	ModeName     string                           `json:"modeName"`
-	ModeColor    string                           `json:"modeColor"`
-	LegCount     int                              `json:"legCount"`
-	FromGalactic string                           `json:"fromGalactic"`
-	ToGalactic   string                           `json:"toGalactic"`
-	InSystem     bool                             `json:"inSystem"`
-	Duration     string                           `json:"duration"`
-	ElapsedDays  *float64                         `json:"elapsedDays"`
-	CoveredLy    float64                          `json:"coveredLy"`
-	ShipsFlown   []string                         `json:"shipsFlown"`
-	Metrics      replaystats.Metrics              `json:"metrics"`
-	Realization  replaystats.RealizationBreakdown `json:"realization"`
-	Derived      DerivedMetrics                   `json:"derived"`
+	ModeID                 int64                            `json:"modeId"`
+	ModeName               string                           `json:"modeName"`
+	ModeColor              string                           `json:"modeColor"`
+	LegCount               int                              `json:"legCount"`
+	FromGalactic           string                           `json:"fromGalactic"`
+	ToGalactic             string                           `json:"toGalactic"`
+	InSystem               bool                             `json:"inSystem"`
+	Duration               string                           `json:"duration"`
+	ElapsedDays            *float64                         `json:"elapsedDays"`
+	InGameSeconds          *int64                           `json:"inGameSeconds,omitempty"`
+	InGameDuration         string                           `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds   *int64                           `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration  string                           `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds  *int64                           `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration string                           `json:"inSystemInGameDuration,omitempty"`
+	CoveredLy              float64                          `json:"coveredLy"`
+	ShipsFlown             []string                         `json:"shipsFlown"`
+	Metrics                replaystats.Metrics              `json:"metrics"`
+	Realization            replaystats.RealizationBreakdown `json:"realization"`
+	Derived                DerivedMetrics                   `json:"derived"`
 }
 
 // RegionBucket holds combined and per-mode telemetry aggregated across visited legs in a Galactic Region.
 type RegionBucket struct {
-	RegionName   string                           `json:"regionName"`
-	LegRowIDs    []int64                          `json:"legRowIds"`
-	LegCount     int                              `json:"legCount"`
-	FromGalactic string                           `json:"fromGalactic"`
-	ToGalactic   string                           `json:"toGalactic"`
-	InSystem     bool                             `json:"inSystem"`
-	Duration     string                           `json:"duration"`
-	ElapsedDays  *float64                         `json:"elapsedDays"`
-	CoveredLy    float64                          `json:"coveredLy"`
-	ShipsFlown   []string                         `json:"shipsFlown"`
-	Metrics      replaystats.Metrics              `json:"metrics"`
-	Realization  replaystats.RealizationBreakdown `json:"realization"`
-	Derived      DerivedMetrics                   `json:"derived"`
-	ModeBuckets  []RegionModeBucket               `json:"modeBuckets"`
+	RegionName             string                           `json:"regionName"`
+	LegRowIDs              []int64                          `json:"legRowIds"`
+	LegCount               int                              `json:"legCount"`
+	FromGalactic           string                           `json:"fromGalactic"`
+	ToGalactic             string                           `json:"toGalactic"`
+	InSystem               bool                             `json:"inSystem"`
+	Duration               string                           `json:"duration"`
+	ElapsedDays            *float64                         `json:"elapsedDays"`
+	InGameSeconds          *int64                           `json:"inGameSeconds,omitempty"`
+	InGameDuration         string                           `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds   *int64                           `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration  string                           `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds  *int64                           `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration string                           `json:"inSystemInGameDuration,omitempty"`
+	CoveredLy              float64                          `json:"coveredLy"`
+	ShipsFlown             []string                         `json:"shipsFlown"`
+	Metrics                replaystats.Metrics              `json:"metrics"`
+	Realization            replaystats.RealizationBreakdown `json:"realization"`
+	Derived                DerivedMetrics                   `json:"derived"`
+	ModeBuckets            []RegionModeBucket               `json:"modeBuckets"`
 }
 
 // TelemetrySnapshot pairs navigation and discovery metrics with their realized
 // payout, deduction breakdown, ships flown, and derived rates for JSON serialization.
 type TelemetrySnapshot struct {
-	Metrics     replaystats.Metrics              `json:"metrics"`
-	Realization replaystats.RealizationBreakdown `json:"realization"`
-	ElapsedDays *float64                         `json:"elapsedDays"`
-	ShipsFlown  []string                         `json:"shipsFlown"`
-	Derived     DerivedMetrics                   `json:"derived"`
+	Metrics                replaystats.Metrics              `json:"metrics"`
+	Realization            replaystats.RealizationBreakdown `json:"realization"`
+	ElapsedDays            *float64                         `json:"elapsedDays"`
+	InGameSeconds          *int64                           `json:"inGameSeconds,omitempty"`
+	InGameDuration         string                           `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds   *int64                           `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration  string                           `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds  *int64                           `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration string                           `json:"inSystemInGameDuration,omitempty"`
+	ShipsFlown             []string                         `json:"shipsFlown"`
+	Derived                DerivedMetrics                   `json:"derived"`
 }
 
 // ModeBucket holds expedition telemetry aggregated for a single flight mode.
 type ModeBucket struct {
-	ModeID      int64                            `json:"modeId"`
-	ModeName    string                           `json:"modeName"`
-	ModeColor   string                           `json:"modeColor"`
-	ElapsedDays *float64                         `json:"elapsedDays"`
-	ShipsFlown  []string                         `json:"shipsFlown"`
-	Metrics     replaystats.Metrics              `json:"metrics"`
-	Realization replaystats.RealizationBreakdown `json:"realization"`
-	Derived     DerivedMetrics                   `json:"derived"`
+	ModeID                 int64                            `json:"modeId"`
+	ModeName               string                           `json:"modeName"`
+	ModeColor              string                           `json:"modeColor"`
+	ElapsedDays            *float64                         `json:"elapsedDays"`
+	InGameSeconds          *int64                           `json:"inGameSeconds,omitempty"`
+	InGameDuration         string                           `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds   *int64                           `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration  string                           `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds  *int64                           `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration string                           `json:"inSystemInGameDuration,omitempty"`
+	ShipsFlown             []string                         `json:"shipsFlown"`
+	Metrics                replaystats.Metrics              `json:"metrics"`
+	Realization            replaystats.RealizationBreakdown `json:"realization"`
+	Derived                DerivedMetrics                   `json:"derived"`
 }
 
 // HighlightRankingEntry holds one ranked leg or waypoint row inside a Highlight leaderboard.
@@ -156,6 +186,12 @@ type ExpeditionExport struct {
 	EffectiveEndGalactic      string                       `json:"effectiveEndGalactic"`
 	EndIsNow                  bool                         `json:"endIsNow"`
 	Duration                  string                       `json:"duration"`
+	InGameSeconds             *int64                       `json:"inGameSeconds,omitempty"`
+	InGameDuration            string                       `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds      *int64                       `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration     string                       `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds     *int64                       `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration    string                       `json:"inSystemInGameDuration,omitempty"`
 	CareerStart               string                       `json:"careerStart"`
 	CareerStartGalactic       string                       `json:"careerStartGalactic"`
 	CareerDuration            string                       `json:"careerDuration"`

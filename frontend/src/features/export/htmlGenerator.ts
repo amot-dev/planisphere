@@ -14,6 +14,7 @@ import {
   buildWaypointsViewModel,
   DetailsBreakdownCardViewModel,
   DetailsKpiTileViewModel,
+  formatTelemetryHeaderDurationLine,
   SummaryKpiTileViewModel,
   TelemetryHeaderViewModel,
   WaypointTableRowViewModel,
@@ -59,6 +60,7 @@ function renderTelemetryHeader(header: TelemetryHeaderViewModel): string {
     ? `<span class="badge badge-cyan">IN SYSTEM</span>`
     : ''
   const fullTitle = `${header.routeTitle} — ${header.scopeLabel}`
+  const durationLine = formatTelemetryHeaderDurationLine(header)
   return `<div class="block-header accent-${header.accent}">
     <div>
       <div class="eyebrow">${escapeHtml(header.eyebrowLabel)}</div>
@@ -69,7 +71,7 @@ function renderTelemetryHeader(header: TelemetryHeaderViewModel): string {
     </div>
     <div class="header-dates mono">
       <div>${escapeHtml(header.fromGalactic)} -> ${escapeHtml(header.toGalactic)}</div>
-      ${header.durationLabel ? `<div class="muted">ELAPSED: ${escapeHtml(header.durationLabel)}</div>` : ''}
+      ${durationLine ? `<div class="muted">${escapeHtml(durationLine)}</div>` : ''}
     </div>
   </div>`
 }
@@ -202,6 +204,7 @@ function renderWaypointTableRow(
   if (selectedColumns.has('timestamps')) cells.push(`<td class="mono small">${escapeHtml(row.timestampText)}</td>`)
   if (selectedColumns.has('legDistance')) cells.push(`<td class="mono small">${escapeHtml(row.legDistanceText)}</td>`)
   if (selectedColumns.has('duration')) cells.push(`<td class="mono small">${escapeHtml(row.durationText)}</td>`)
+  if (selectedColumns.has('inGameDuration')) cells.push(`<td class="mono small">${escapeHtml(row.inGameDurationText)}</td>`)
   if (selectedColumns.has('shipsFlown')) cells.push(`<td class="mono small">${escapeHtml(row.shipsText)}</td>`)
   if (selectedColumns.has('flightMode')) {
     const modeHtml = row.modeBadge

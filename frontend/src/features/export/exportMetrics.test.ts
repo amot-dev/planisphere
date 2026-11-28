@@ -10,11 +10,12 @@ import {
   getVisitedLegByRowId,
   getVisitedLegs,
   getVisitedRegions,
+  isDetailsMetricAvailable,
   resolveFormattedNetProfit,
   resolveTelemetryContext,
   scopeSupportsModeSplit,
 } from './exportMetrics'
-import { CartBlockItem, defaultMetricsForSection } from './exportTypes'
+import { CartBlockItem, createDefaultBlockConfig, DETAILS_SECTION_METRICS, defaultMetricsForSection } from './exportTypes'
 import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 
 describe('exportMetrics', () => {
@@ -382,8 +383,15 @@ describe('exportMetrics', () => {
       slug: 'wp3',
     })
 
-    // Flight section has 8 descriptors, 1 of which (distinctRegions) is fullExpeditionCombinedOnly.
-    // On allLegs, Slice 0 (>= 24h) unlocks all 7 achievable metrics so Slice 1 rowId is never resolved.
+    // Flight section has 9 descriptors, 1 of which (distinctRegions) is fullExpeditionCombinedOnly.
+    // On allLegs, Slice 0 (>= 24h + playtime) unlocks all 8 achievable metrics so Slice 1 rowId is never resolved.
+    const dataWithPlaytime = buildSampleExportData({
+      rowDetails: data.rowDetails.map((detail) =>
+        detail.rowId === 2
+          ? { ...detail, inGameSeconds: 7200, inGameDuration: '2h 00m', transitInGameSeconds: 5400, transitInGameDuration: '1h 30m', inSystemInGameSeconds: 1800, inSystemInGameDuration: '30m' }
+          : detail,
+      ) as typeof data.rowDetails,
+    })
     let slice1RowIdReads = 0
     const slice1Scope = {
       kind: 'leg' as const,
@@ -422,7 +430,7 @@ describe('exportMetrics', () => {
     ]
 
     const available = computeAvailableDetailsMetricIds(
-      data,
+      dataWithPlaytime,
       {
         kind: 'details',
         section: 'flight',
@@ -433,9 +441,36 @@ describe('exportMetrics', () => {
       syntheticItems,
       Date.parse('2026-04-05T12:00:00Z'),
     )
-    expect(available?.size).toBe(7)
+    expect(available?.size).toBe(8)
     expect(available?.has('distinctRegions')).toBe(false)
+    expect(available?.has('inGamePlaytimeBreakdown')).toBe(true)
     expect(available?.has('avgDistancePerDay')).toBe(true)
     expect(slice1RowIdReads).toBe(0)
+  })
+
+  it('resolves playtime context, gates inGamePlaytimeBreakdown, and aligns Waypoints default columns with durationDisplayMode', () => {
+    const calendarDefaults = createDefaultBlockConfig('waypoints', 'calendar')
+    const inGameDefaults = createDefaultBlockConfig('waypoints', 'in_game')
+    expect(calendarDefaults.kind === 'waypoints' && calendarDefaults.selectedColumns).toContain('duration')
+    expect(calendarDefaults.kind === 'waypoints' && calendarDefaults.selectedColumns).not.toContain('inGameDuration')
+    expect(inGameDefaults.kind === 'waypoints' && inGameDefaults.selectedColumns).toContain('inGameDuration')
+    expect(inGameDefaults.kind === 'waypoints' && inGameDefaults.selectedColumns).not.toContain('duration')
+
+    const playtimeDescriptor = DETAILS_SECTION_METRICS.flight.find((metric) => metric.id === 'inGamePlaytimeBreakdown')!
+    const baseData = buildSampleExportData()
+    expect(isDetailsMetricAvailable(playtimeDescriptor, resolveTelemetryContext(baseData, { kind: 'full' }), 'full')).toBe(false)
+
+    const withPlaytime = buildSampleExportData({
+      inGameSeconds: 45000, inGameDuration: '12h 30m', transitInGameSeconds: 36000, transitInGameDuration: '10h 00m', inSystemInGameSeconds: 9000, inSystemInGameDuration: '2h 30m',
+      originBaseline: { ...baseData.originBaseline!, inGameSeconds: 360000, inGameDuration: '100h 00m' } as typeof baseData.originBaseline,
+    })
+    const fullContext = resolveTelemetryContext(withPlaytime, { kind: 'full' })
+    expect(fullContext.inGameDurationLabel).toBe('12h 30m')
+    expect(fullContext.transitInGameDurationLabel).toBe('10h 00m')
+    expect(fullContext.inSystemInGameDurationLabel).toBe('2h 30m')
+    expect(isDetailsMetricAvailable(playtimeDescriptor, fullContext, 'full')).toBe(true)
+    const baselineContext = resolveTelemetryContext(withPlaytime, { kind: 'baseline' })
+    expect(baselineContext.inGameDurationLabel).toBe('100h 00m')
+    expect(isDetailsMetricAvailable(playtimeDescriptor, baselineContext, 'baseline')).toBe(false)
   })
 })

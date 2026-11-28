@@ -16,8 +16,61 @@ const (
 	defaultRegionModeColor      = "#FF7100"
 )
 
+type playtimeAccumulator struct {
+	totalSeconds    int64
+	transitSeconds  int64
+	inSystemSeconds int64
+	hasInGame       bool
+}
+
+func (accumulator *playtimeAccumulator) addWaypointDetails(details *expedition.WaypointDetails) {
+	if details == nil || details.InGameSeconds == nil {
+		return
+	}
+	accumulator.hasInGame = true
+	accumulator.totalSeconds += *details.InGameSeconds
+	if details.TransitInGameSeconds != nil {
+		accumulator.transitSeconds += *details.TransitInGameSeconds
+	}
+	if details.InSystemInGameSeconds != nil {
+		accumulator.inSystemSeconds += *details.InSystemInGameSeconds
+	}
+}
+
+func (accumulator playtimeAccumulator) labelsAndPtrs() (
+	inGameSeconds *int64,
+	inGameDuration string,
+	transitInGameSeconds *int64,
+	transitInGameDuration string,
+	inSystemInGameSeconds *int64,
+	inSystemInGameDuration string,
+) {
+	if !accumulator.hasInGame {
+		return nil, "", nil, "", nil, ""
+	}
+	return int64Ptr(accumulator.totalSeconds), formatPlaySeconds(accumulator.totalSeconds),
+		int64Ptr(accumulator.transitSeconds), formatPlaySeconds(accumulator.transitSeconds),
+		int64Ptr(accumulator.inSystemSeconds), formatPlaySeconds(accumulator.inSystemSeconds)
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func cloneInt64Ptr(source *int64) *int64 {
+	if source == nil {
+		return nil
+	}
+	return int64Ptr(*source)
+}
+
+func formatPlaySeconds(totalSeconds int64) string {
+	return reference.PlayDurationLabel(time.Duration(totalSeconds) * time.Second)
+}
+
 type sliceTrackState struct {
 	totalElapsedMs int64
+	playtime       playtimeAccumulator
 	seenShips      map[string]bool
 }
 
@@ -66,11 +119,17 @@ func BuildLegAndRegionTelemetry(
 			legElapsedDays = floatPtr(float64(legElapsedMs) / millisecondsPerDay)
 		}
 		legTelemetry = append(legTelemetry, ExportLegTelemetry{
-			RowID:       rowView.Row.ID,
-			RegionName:  regionName,
-			ElapsedDays: legElapsedDays,
-			ShipsFlown:  shipsFlown,
-			Derived:     ComputeDerivedMetrics(details.Metrics, details.Realization, nil, legElapsedDays),
+			RowID:                  rowView.Row.ID,
+			RegionName:             regionName,
+			ElapsedDays:            legElapsedDays,
+			InGameSeconds:          cloneInt64Ptr(details.InGameSeconds),
+			InGameDuration:         details.InGameDuration,
+			TransitInGameSeconds:   cloneInt64Ptr(details.TransitInGameSeconds),
+			TransitInGameDuration:  details.TransitInGameDuration,
+			InSystemInGameSeconds:  cloneInt64Ptr(details.InSystemInGameSeconds),
+			InSystemInGameDuration: details.InSystemInGameDuration,
+			ShipsFlown:             shipsFlown,
+			Derived:                ComputeDerivedMetrics(details.Metrics, details.Realization, nil, legElapsedDays),
 		})
 
 		regionIndex, exists := regionIndexByName[regionName]
@@ -202,13 +261,16 @@ func accumulateLegSlice(
 	if hasElapsed {
 		state.totalElapsedMs += legElapsedMs
 	}
+	state.playtime.addWaypointDetails(&details)
 }
 
 func finalizeRegionBucket(bucket *RegionBucket, state *regionTrackState) {
 	bucket.ElapsedDays, bucket.Duration, bucket.Derived = finalizeSliceTimingAndDerived(bucket.Metrics, bucket.Realization, state.combined.totalElapsedMs)
+	bucket.InGameSeconds, bucket.InGameDuration, bucket.TransitInGameSeconds, bucket.TransitInGameDuration, bucket.InSystemInGameSeconds, bucket.InSystemInGameDuration = state.combined.playtime.labelsAndPtrs()
 	for index := range bucket.ModeBuckets {
 		modeBucket := &bucket.ModeBuckets[index]
 		modeBucket.ElapsedDays, modeBucket.Duration, modeBucket.Derived = finalizeSliceTimingAndDerived(modeBucket.Metrics, modeBucket.Realization, state.modeStates[index].totalElapsedMs)
+		modeBucket.InGameSeconds, modeBucket.InGameDuration, modeBucket.TransitInGameSeconds, modeBucket.TransitInGameDuration, modeBucket.InSystemInGameSeconds, modeBucket.InSystemInGameDuration = state.modeStates[index].playtime.labelsAndPtrs()
 	}
 }
 

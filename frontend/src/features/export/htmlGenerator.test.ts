@@ -117,4 +117,36 @@ describe('htmlGenerator', () => {
     expect(html).toContain('border-left:3px solid #FF7100')
     expect(html).toContain('border-left:3px solid #3d2816')
   })
+
+  it('renders ELAPSED and IN-GAME headers, In-Game Playtime breakdown card, and Waypoints In-Game column in HTML reports', () => {
+    const baseData = buildSampleExportData()
+    const playtimeData = buildSampleExportData({
+      inGameSeconds: 45000,
+      inGameDuration: '12h 30m',
+      transitInGameSeconds: 36000,
+      transitInGameDuration: '10h 00m',
+      inSystemInGameSeconds: 9000,
+      inSystemInGameDuration: '2h 30m',
+      rowDetails: baseData.rowDetails.map((detail) =>
+        detail.rowId === 2 ? { ...detail, inGameSeconds: 11700, inGameDuration: '3h 15m' } : detail,
+      ) as typeof baseData.rowDetails,
+    })
+
+    const cartItems = [
+      expandCartItem(playtimeData, { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'hide' }, 'sum'),
+      expandCartItem(playtimeData, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['inGamePlaytimeBreakdown'] }, 'flight'),
+      expandCartItem(playtimeData, { kind: 'waypoints', waypointsScope: 'visited', selectedColumns: ['duration', 'inGameDuration'] }, 'wp'),
+    ]
+
+    const html = generateSelfContainedHtmlReport(playtimeData, cartItems)
+
+    expect(html).toContain('<div class="muted">ELAPSED: 4d · IN-GAME: 12h 30m</div>')
+    expect(html).toContain('<span>In-Game Playtime</span><span class="mono amber">12h 30m</span>')
+    expect(html).toContain('In Transit (Between Waypoints)')
+    expect(html).toContain('10h 00m')
+    expect(html).toContain('In System (At Waypoints)')
+    expect(html).toContain('2h 30m')
+    expect(html).toContain('<th>Duration</th><th>In-Game</th>')
+    expect(html).toContain('<td class="mono small">3h 15m</td>')
+  })
 })
