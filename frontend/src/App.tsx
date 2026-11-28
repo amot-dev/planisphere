@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CockpitTopBar } from './components/ui/CockpitTopBar'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { TerminalBootScreen } from './components/ui/TerminalBootScreen'
+import { normalizeDurationDisplayMode } from './domain/durationDisplay'
 import { ExportExpeditionModal } from './features/export/ExportExpeditionModal'
 import { ExpeditionPlanner } from './features/planner/ExpeditionPlanner'
 import { ExpeditionManageModal } from './features/planner/lifecycle/ExpeditionManageModal'
@@ -117,6 +118,7 @@ export default function App() {
   }, [refreshIngestStatus, refreshSettings, setIncludeArchiveIngest])
 
   const exportEnabled = isExpeditionExportEnabled(activeExpeditionId, plan, sidebarStats)
+  const durationDisplayMode = normalizeDurationDisplayMode(settings?.durationDisplayMode)
 
   if (booting) {
     return <TerminalBootScreen />
@@ -162,6 +164,7 @@ export default function App() {
             collapsed={sidebarCollapsed}
             carrierRouteOpen={carrierRouteOpen}
             clockSuspended={isClockSuspended}
+            durationDisplayMode={durationDisplayMode}
             onFilterChange={setFilter}
             onViewScopeChange={setSidebarViewScope}
             onToggleCollapse={toggleSidebarCollapsed}
@@ -176,6 +179,7 @@ export default function App() {
             telemetryRevision={ingest?.telemetryRevision ?? 0}
             closedWindowRevision={ingest?.closedWindowRevision ?? 0}
             clockSuspended={isClockSuspended}
+            durationDisplayMode={durationDisplayMode}
             externalLinkInara={settings?.externalLinkInara}
             externalLinkEdsm={settings?.externalLinkEdsm}
             externalLinkGec={settings?.externalLinkGec}

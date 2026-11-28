@@ -18,11 +18,7 @@ import (
 
 	"planisphere/internal/core/db"
 	"planisphere/internal/core/events"
-	"planisphere/internal/core/projection"
 	"planisphere/internal/exporter"
-	"planisphere/internal/projections"
-	"planisphere/internal/projections/realization"
-	"planisphere/internal/projections/stats"
 	"planisphere/internal/sources/edsm"
 	"planisphere/internal/sources/gec"
 	"planisphere/internal/sources/journal"
@@ -90,15 +86,7 @@ type App struct {
 	resolvingExpeditions map[int64]bool
 	resolutionSemaphore  chan struct{}
 
-	bus               *projection.Bus
-	recoveredJumps    *projections.RecoveredJumps
-	systemArrivals    *projections.SystemArrivals
-	systemVisitCounts *projections.SystemVisitCounts
-	shipHistory       *projections.ShipHistory
-	carrierState      *projections.CarrierState
-	salesLedger       *realization.SalesLedger
-	careerStats       *stats.CareerStats
-	timeRangeStats    *stats.TimeRangeStats
+	appProjections
 
 	// Latest GitHub release version check fields protected by versionCheckMu.
 	versionCheckMu     sync.Mutex

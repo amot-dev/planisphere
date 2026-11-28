@@ -29,6 +29,7 @@ type profileProjections struct {
 	visitCounts    *projections.SystemVisitCounts
 	shipHistory    *projections.ShipHistory
 	carrierState   *projections.CarrierState
+	playSessions   *projections.PlaySessions
 	salesLedger    *realization.SalesLedger
 	careerStats    *stats.CareerStats
 	timeRangeStats *stats.TimeRangeStats
@@ -46,6 +47,7 @@ func newProfileProjections(database *sql.DB) *profileProjections {
 		visitCounts:    projections.NewSystemVisitCounts(database, bus, recoveredJumps),
 		shipHistory:    projections.NewShipHistory(database, bus),
 		carrierState:   projections.NewCarrierState(database, bus),
+		playSessions:   projections.NewPlaySessions(database, bus),
 		salesLedger:    salesLedger,
 		careerStats:    stats.NewCareerStats(database, bus, salesLedger, recoveredJumps),
 		timeRangeStats: stats.NewTimeRangeStats(database, bus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
@@ -57,6 +59,7 @@ func (proj *profileProjections) expeditionProjections() *expedition.Projections 
 		Arrivals:       proj.systemArrivals,
 		VisitCounts:    proj.visitCounts,
 		ShipHistory:    proj.shipHistory,
+		PlaySessions:   proj.playSessions,
 		TimeRangeStats: proj.timeRangeStats,
 		SalesLedger:    proj.salesLedger,
 		RecoveredJumps: proj.recoveredJumps,

@@ -67,6 +67,9 @@ func NewTimeRangeStats(
 					journal.EventShipyardSwap,
 					journal.EventClearSavedGame,
 					journal.EventNewCommander,
+					journal.EventShutdown,
+					journal.EventMusic,
+					journal.EventStatistics,
 				).
 				WithApp(events.AppExpeditionModesChanged),
 			timeRangeStats.observeTrigger,

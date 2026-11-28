@@ -437,3 +437,27 @@ func TestShutdownWaitsForBackgroundWorkersBeforeClosingDatabase(testingContext *
 		}
 	}
 }
+
+func TestSetDurationDisplayModePersistsAndEmitsSettingsDomain(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+
+	initialSettings, initialErr := testApp.GetSettings()
+	if initialErr != nil || initialSettings.DurationDisplayMode != "calendar" {
+		testingContext.Fatalf("initial DurationDisplayMode = %q err=%v, want calendar", initialSettings.DurationDisplayMode, initialErr)
+	}
+	if err := testApp.SetDurationDisplayMode("invalid"); err == nil {
+		testingContext.Fatal("expected error for invalid duration display mode")
+	}
+	if err := testApp.SetDurationDisplayMode("in_game"); err != nil {
+		testingContext.Fatalf("SetDurationDisplayMode(in_game): %v", err)
+	}
+	updatedSettings, updatedErr := testApp.GetSettings()
+	if updatedErr != nil || updatedSettings.DurationDisplayMode != "in_game" {
+		testingContext.Fatalf("updated DurationDisplayMode = %q err=%v, want in_game", updatedSettings.DurationDisplayMode, updatedErr)
+	}
+	dataChanges := eventsRecorder.DataChanges()
+	if len(dataChanges) == 0 || !slices.Contains(dataChanges[len(dataChanges)-1].Domains, "settings") {
+		testingContext.Fatalf("expected settings domain emitted on SetDurationDisplayMode, got %+v", dataChanges)
+	}
+}

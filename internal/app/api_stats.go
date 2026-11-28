@@ -22,9 +22,11 @@ type SidebarStats struct {
 	EndGalactic            string                     `json:"endGalactic"`
 	EndIsNow               bool                       `json:"endIsNow"`
 	Duration               string                     `json:"duration"`
+	InGameDuration         string                     `json:"inGameDuration,omitempty"`
 	CareerStart            string                     `json:"careerStart"`
 	CareerStartGalactic    string                     `json:"careerStartGalactic"`
 	CareerDuration         string                     `json:"careerDuration"`
+	CareerInGameDuration   string                     `json:"careerInGameDuration,omitempty"`
 	FilterActive           bool                       `json:"filterActive"`
 	AllTimeLoaded          bool                       `json:"allTimeLoaded"`
 	Live                   stats.Metrics              `json:"live"`                   // from journals (mode-filtered)
@@ -83,6 +85,15 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter, include
 			sidebar.CareerStartGalactic = careerStartGalactic
 			sidebar.CareerDuration = reference.Elapsed(careerStart, "")
 		}
+		if app.playSessions != nil {
+			careerPlayDuration, hasCareerPlay, careerPlayError := app.playSessions.CareerDurationScoped(careerScope)
+			if careerPlayError != nil {
+				return sidebar, fmt.Errorf("compute career play duration: %w", careerPlayError)
+			}
+			if hasCareerPlay {
+				sidebar.CareerInGameDuration = reference.PlayDurationLabel(careerPlayDuration)
+			}
+		}
 		sidebar.AllTimeLoaded = true
 	}
 
@@ -104,6 +115,15 @@ func (app *App) GetSidebarStats(expeditionID int64, filter stats.Filter, include
 				sidebar.EndGalactic = reference.ToGalactic(sidebar.End)
 			}
 			sidebar.Duration = reference.Elapsed(displayStart, sidebar.End)
+			if app.playSessions != nil {
+				expeditionSessions, sessionError := app.playSessions.SessionsScoped(displayStart, sidebar.End, expScope)
+				if sessionError != nil {
+					return sidebar, fmt.Errorf("compute expedition play sessions: %w", sessionError)
+				}
+				if expeditionPlayDuration, hasExpeditionPlay := replay.SumPlayDuration(expeditionSessions, displayStart, sidebar.End); hasExpeditionPlay {
+					sidebar.InGameDuration = reference.PlayDurationLabel(expeditionPlayDuration)
+				}
+			}
 
 			expeditionRange := stats.Range{After: queryAfter, Until: expeditionRecord.EndTimestamp}
 			filter.Scope = expScope

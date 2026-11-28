@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { expedition } from '../../api/models'
+import type { DurationDisplayMode } from '../../domain/durationDisplay'
 import type { ExternalLinkVisibilityConfig } from '../../domain/externalLinks'
 import { computePlannerTableDimensions } from '../../domain/planTableItems'
 import { createBusyTaskTracker } from '../../hooks/useBusyTasks'
@@ -37,6 +38,7 @@ export interface ExpeditionPlannerProps {
   telemetryRevision?: number
   closedWindowRevision?: number
   clockSuspended?: boolean
+  durationDisplayMode?: DurationDisplayMode
   externalLinkInara?: string
   externalLinkEdsm?: string
   externalLinkGec?: string
@@ -63,7 +65,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   dbPath = '',
   telemetryRevision = 0,
   closedWindowRevision = 0,
-  clockSuspended = false,
+  clockSuspended = false, durationDisplayMode = 'calendar',
   externalLinkInara,
   externalLinkEdsm,
   externalLinkGec,
@@ -413,7 +415,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
           plan={plan}
           isPlanning={Boolean(isPlanning)}
           isCompleted={Boolean(isCompleted)}
-          clockSuspended={clockSuspended}
+          clockSuspended={clockSuspended} durationDisplayMode={durationDisplayMode}
           columns={tableColumns}
           externalLinks={externalLinks}
           drawerState={drawerState}

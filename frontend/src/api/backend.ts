@@ -54,6 +54,7 @@ export {
   SetCareerBaselineScope,
   SetCommanderEnabled,
   SetDatabasePath,
+  SetDurationDisplayMode,
   SetExpeditionFlightMode,
   SetExternalLinks,
   SetJournalDebounceMs,

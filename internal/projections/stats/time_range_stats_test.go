@@ -458,3 +458,36 @@ func TestTimeRangeSectionDirectComputeMatchesCompositeSummary(testingContext *te
 			travelMetrics, cartoMetrics, exoMetrics, realizationMetrics, composite)
 	}
 }
+
+func TestTimeRangeSessionEventsAdvanceTelemetryAndClosedRevisions(testingContext *testing.T) {
+	lines := []string{
+		`{"timestamp":"2026-01-18T19:00:00Z","event":"LoadGame","Commander":"CmdrTest","FID":"F1","Ship":"mandalay","Odyssey":true}`,
+		`{"timestamp":"2026-01-18T19:10:00Z","event":"FSDJump","StarSystem":"RevSys","SystemAddress":4004,"StarPos":[10,0,0],"JumpDist":10.0}`,
+	}
+	harness := newTimeRangeStatsHarness(testingContext, lines, nil)
+	eventBus := harness.bus
+	timeRangeStats := harness.timeRangeStats
+
+	for _, testCase := range []struct {
+		eventType journal.EventType
+		forwardTS string
+	}{
+		{journal.EventStatistics, "2026-01-18T19:20:00Z"},
+		{journal.EventMusic, "2026-01-18T19:30:00Z"},
+		{journal.EventShutdown, "2026-01-18T19:40:00Z"},
+	} {
+		beforeTelemetry, beforeClosed := timeRangeStats.TelemetryRevision(), timeRangeStats.ClosedWindowRevision()
+		eventBus.PublishJournalRange(journal.NewEventSet(testCase.eventType), testCase.forwardTS, testCase.forwardTS)
+		if timeRangeStats.TelemetryRevision() != beforeTelemetry+1 || timeRangeStats.ClosedWindowRevision() != beforeClosed {
+			testingContext.Fatalf("forward %s: telemetry %d->%d, closed %d->%d",
+				journal.EventName(testCase.eventType), beforeTelemetry, timeRangeStats.TelemetryRevision(), beforeClosed, timeRangeStats.ClosedWindowRevision())
+		}
+	}
+
+	beforeTelemetry, beforeClosed := timeRangeStats.TelemetryRevision(), timeRangeStats.ClosedWindowRevision()
+	eventBus.PublishJournalRange(journal.NewEventSet(journal.EventShutdown), "2026-01-18T19:15:00Z", "2026-01-18T19:15:00Z")
+	if timeRangeStats.TelemetryRevision() != beforeTelemetry+1 || timeRangeStats.ClosedWindowRevision() != beforeClosed+1 {
+		testingContext.Fatalf("out-of-order Shutdown backfill: telemetry %d->%d, closed %d->%d",
+			beforeTelemetry, timeRangeStats.TelemetryRevision(), beforeClosed, timeRangeStats.ClosedWindowRevision())
+	}
+}

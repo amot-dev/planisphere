@@ -115,6 +115,8 @@ export function SetCommanderEnabled(arg1:string,arg2:boolean):Promise<app.Settin
 
 export function SetDatabasePath(arg1:string):Promise<app.Settings>;
 
+export function SetDurationDisplayMode(arg1:string):Promise<void>;
+
 export function SetExpeditionFlightMode(arg1:number,arg2:number):Promise<void>;
 
 export function SetExternalLinks(arg1:string,arg2:string,arg3:string):Promise<app.Settings>;

@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useRef, type CSSProperties, type DragEvent } from 'react'
 import { expedition, modes } from '../../../api/models'
+import type { DurationDisplayMode } from '../../../domain/durationDisplay'
 import type { ExternalLinkVisibilityConfig } from '../../../domain/externalLinks'
 import {
   computeRegionBorderColors,
@@ -94,6 +95,7 @@ export interface PlannerRouteTableProps {
   isPlanning: boolean
   isCompleted: boolean
   clockSuspended?: boolean
+  durationDisplayMode?: DurationDisplayMode
   columns: PlannerColumnLayout
   externalLinks: ExternalLinkVisibilityConfig
   drawerState: WaypointDetailsState
@@ -111,6 +113,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
   isPlanning,
   isCompleted,
   clockSuspended = false,
+  durationDisplayMode = 'calendar',
   columns,
   externalLinks,
   drawerState,
@@ -372,6 +375,7 @@ export const PlannerRouteTable = memo(function PlannerRouteTable({
                     modesList={modesList}
                     canCascade={Boolean(rowView.permissions?.canCascadeLegMode)}
                     clockSuspended={clockSuspended}
+                    durationDisplayMode={durationDisplayMode}
                     onChangeLegMode={handleChangeLegMode}
                   />
                 </td>

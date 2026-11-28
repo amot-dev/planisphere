@@ -168,8 +168,59 @@ func DetailsBatch(dbConn *sql.DB, planView PlanView, expeditionProjections *Proj
 	if shipsError := populateBatchLegShipsUsed(dbConn, expeditionProjections, rowDetails, legRanges, expScope); shipsError != nil {
 		return nil, nil, shipsError
 	}
+	if playError := populateBatchLegPlayDurations(expeditionProjections, rowDetails, expScope); playError != nil {
+		return nil, nil, playError
+	}
 	for index := range rowDetails {
 		rowDetails[index].Elapsed = formatLegElapsed(rowDetails[index].From, rowDetails[index].To)
+		applyLegTransitElapsed(&rowDetails[index])
 	}
 	return originBaseline, rowDetails, nil
+}
+
+func computeBatchPlaySpan(rowDetails []WaypointDetails) (string, string) {
+	earliestFrom := ""
+	latestTo := ""
+	hasOpenEnd := false
+	hasUnboundedStart := false
+	for index := range rowDetails {
+		legFrom := rowDetails[index].From
+		if legFrom == "" {
+			hasUnboundedStart = true
+		} else if !hasUnboundedStart && (earliestFrom == "" || legFrom < earliestFrom) {
+			earliestFrom = legFrom
+		}
+		legTo := rowDetails[index].To
+		if legTo == "" {
+			hasOpenEnd = true
+		} else if !hasOpenEnd && (latestTo == "" || legTo > latestTo) {
+			latestTo = legTo
+		}
+	}
+	if hasUnboundedStart {
+		earliestFrom = ""
+	}
+	if hasOpenEnd {
+		latestTo = ""
+	}
+	return earliestFrom, latestTo
+}
+
+func populateBatchLegPlayDurations(
+	expeditionProjections *Projections,
+	rowDetails []WaypointDetails,
+	scope replay.ProfileScope,
+) error {
+	if expeditionProjections.PlaySessions == nil || len(rowDetails) == 0 {
+		return nil
+	}
+	earliestFrom, latestTo := computeBatchPlaySpan(rowDetails)
+	sharedSessions, sessionError := expeditionProjections.PlaySessions.SessionsScoped(earliestFrom, latestTo, scope)
+	if sessionError != nil {
+		return sessionError
+	}
+	for index := range rowDetails {
+		applyLegPlayDurations(&rowDetails[index], sharedSessions)
+	}
+	return nil
 }

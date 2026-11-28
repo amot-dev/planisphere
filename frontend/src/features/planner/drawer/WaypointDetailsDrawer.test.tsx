@@ -198,7 +198,10 @@ describe('WaypointDetailsDrawer', () => {
     expect(html).toContain(
       '3312-01-19 12:00 UTC <span class="relative -top-0.5">→</span> <span class="text-ed-cyan font-bold">IN PROGRESS</span>',
     )
-    expect(html).toContain('[4h 15m]')
+    expect(html).not.toContain('[4h 15m]')
+    expect(html).toContain('[IN TRANSIT]:')
+    expect(html).toContain('4h 15m')
+    expect(html).not.toContain('[IN SYSTEM]:')
   })
 
   it('renders [IN SYSTEM]: duration for departed, completed, and live stays without arrived or departed indicators', () => {
@@ -369,5 +372,77 @@ describe('WaypointDetailsDrawer', () => {
       }),
     )
     expect(mounted.container.textContent).toContain('[IN SYSTEM]:0h 14m')
+  })
+
+  it('places [IN TRANSIT]: left of [IN SYSTEM]: with plain-text primary/hover swap and keeps origin header duration swap', () => {
+    const legRowView = makeRowView({
+      row: { id: 40, expeditionId: 1, rowType: 'waypoint', systemName: 'Colonia' },
+      number: 2,
+      visitState: 'visited',
+    })
+    const legDetails = makeWaypointDetails({
+      kind: 'leg',
+      number: 2,
+      prevSystem: 'Sol',
+      from: '2026-01-19T12:00:00Z',
+      arrivedAt: '2026-01-19T15:00:00Z',
+      departedAt: '2026-01-19T16:30:00Z',
+      to: '2026-01-19T16:30:00Z',
+      fromGalactic: '3312-01-19 12:00 UTC',
+      toGalactic: '3312-01-19 16:30 UTC',
+      elapsed: '4h 30m',
+      transitElapsed: '3h 00m',
+      transitInGameDuration: '1h 10m',
+      inSystemInGameDuration: '45m',
+      inGameDuration: '1h 55m',
+    })
+
+    const calendarHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: legDetails,
+        loading: false,
+        rowView: legRowView,
+        durationDisplayMode: 'calendar',
+      }),
+    )
+    expect(calendarHtml).not.toContain('[4h 30m]')
+    expect(calendarHtml).not.toContain('underline')
+    const transitIndex = calendarHtml.indexOf('[IN TRANSIT]:')
+    const inSystemIndex = calendarHtml.indexOf('[IN SYSTEM]:')
+    expect(transitIndex).toBeGreaterThan(-1)
+    expect(inSystemIndex).toBeGreaterThan(transitIndex)
+    expect(calendarHtml).toContain('title="In-game time: 1h 10m"')
+    expect(calendarHtml).toContain('>3h 00m</span>')
+    expect(calendarHtml).toContain('title="In-game time: 45m"')
+    expect(calendarHtml).toContain('>1h 30m</span>')
+
+    const inGameHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: legDetails,
+        loading: false,
+        rowView: legRowView,
+        durationDisplayMode: 'in_game',
+      }),
+    )
+    expect(inGameHtml).toContain('title="Calendar elapsed: 3h 00m"')
+    expect(inGameHtml).toContain('>1h 10m</span>')
+    expect(inGameHtml).toContain('title="Calendar elapsed: 1h 30m"')
+    expect(inGameHtml).toContain('>45m</span>')
+
+    const originInGameHtml = renderToString(
+      createElement(WaypointDetailsDrawer, {
+        details: makeWaypointDetails({
+          kind: 'origin',
+          number: 1,
+          elapsed: '45d 02h 10m',
+          inGameDuration: '110h 15m',
+        }),
+        loading: false,
+        rowView: makeOriginRowView(),
+        durationDisplayMode: 'in_game',
+      }),
+    )
+    expect(originInGameHtml).toContain('title="Calendar elapsed: 45d 02h 10m"')
+    expect(originInGameHtml).toContain('[110h 15m]')
   })
 })

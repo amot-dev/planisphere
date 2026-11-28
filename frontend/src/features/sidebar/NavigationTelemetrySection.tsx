@@ -4,6 +4,10 @@ import { CollapsibleSectionCard } from '../../components/ui/CollapsibleSectionCa
 import { ExpandableMetricRow } from '../../components/ui/ExpandableMetricRow'
 import { CogIcon } from '../../components/ui/HudIcons'
 import {
+  resolvePrimaryAndTooltipDuration,
+  type DurationDisplayMode,
+} from '../../domain/durationDisplay'
+import {
   formatCredits,
   formatInt,
   formatLy,
@@ -21,6 +25,7 @@ export interface NavigationTelemetrySectionProps {
   displayedMetrics: stats.Metrics
   carrierRouteOpen: boolean
   clockSuspended?: boolean
+  durationDisplayMode?: DurationDisplayMode
   flightOpsExpanded?: boolean
   carrierOpsExpanded?: boolean
   carrierCostExpanded?: boolean
@@ -41,6 +46,7 @@ export function NavigationTelemetrySection({
   displayedMetrics,
   carrierRouteOpen,
   clockSuspended = false,
+  durationDisplayMode = 'calendar',
   flightOpsExpanded = true,
   carrierOpsExpanded = true,
   carrierCostExpanded = true,
@@ -55,6 +61,16 @@ export function NavigationTelemetrySection({
   )
   const [currentGalacticTime, setCurrentGalacticTime] = useState<string>(() => nowGalacticTime())
   const carrierCost = sidebarStats?.carrierCost ?? new expedition.CarrierCost()
+  const careerDurationDisplay = resolvePrimaryAndTooltipDuration(
+    sidebarStats?.careerDuration,
+    sidebarStats?.careerInGameDuration,
+    durationDisplayMode,
+  )
+  const expeditionDurationDisplay = resolvePrimaryAndTooltipDuration(
+    sidebarStats?.duration,
+    sidebarStats?.inGameDuration,
+    durationDisplayMode,
+  )
 
   useEffect(() => {
     if (!isActiveExpeditionClock || clockSuspended) {
@@ -108,8 +124,11 @@ export function NavigationTelemetrySection({
           <>
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
               <span>Career Duration</span>
-              <span className="font-mono-tabular text-ed-text-main font-bold">
-                {sidebarStats?.careerStart ? sidebarStats.careerDuration : 'UNKNOWN'}
+              <span
+                title={sidebarStats?.careerStart ? careerDurationDisplay.tooltip : undefined}
+                className="font-mono-tabular text-ed-text-main font-bold"
+              >
+                {sidebarStats?.careerStart ? careerDurationDisplay.primary : 'UNKNOWN'}
               </span>
             </div>
             {sidebarStats?.careerStart && (
@@ -128,6 +147,11 @@ export function NavigationTelemetrySection({
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.12em] text-ed-text-muted">
               <span>Expedition Duration</span>
               <span
+                title={
+                  sidebarStats?.started && sidebarStats?.departed
+                    ? expeditionDurationDisplay.tooltip
+                    : undefined
+                }
                 className={`font-mono-tabular font-bold ${
                   sidebarStats?.started && !sidebarStats?.departed
                     ? 'text-ed-cyan'
@@ -137,7 +161,7 @@ export function NavigationTelemetrySection({
                 {!sidebarStats?.started
                   ? 'NOT STARTED'
                   : sidebarStats.departed
-                    ? sidebarStats.duration
+                    ? expeditionDurationDisplay.primary
                     : 'AWAITING DEPARTURE'}
               </span>
             </div>

@@ -14,6 +14,19 @@ import (
 	"planisphere/internal/store/settings"
 )
 
+type appProjections struct {
+	bus               *projection.Bus
+	recoveredJumps    *projections.RecoveredJumps
+	systemArrivals    *projections.SystemArrivals
+	systemVisitCounts *projections.SystemVisitCounts
+	shipHistory       *projections.ShipHistory
+	carrierState      *projections.CarrierState
+	playSessions      *projections.PlaySessions
+	salesLedger       *realization.SalesLedger
+	careerStats       *stats.CareerStats
+	timeRangeStats    *stats.TimeRangeStats
+}
+
 func (app *App) wireProjections(dbConn *sql.DB) {
 	var (
 		previousClosedRevision    uint64
@@ -31,6 +44,7 @@ func (app *App) wireProjections(dbConn *sql.DB) {
 	app.systemVisitCounts = projections.NewSystemVisitCounts(dbConn, bus, app.recoveredJumps)
 	app.shipHistory = projections.NewShipHistory(dbConn, bus)
 	app.carrierState = projections.NewCarrierState(dbConn, bus)
+	app.playSessions = projections.NewPlaySessions(dbConn, bus)
 	app.salesLedger = realization.NewSalesLedger(dbConn, bus)
 	app.careerStats = stats.NewCareerStats(dbConn, bus, app.salesLedger, app.recoveredJumps)
 	app.timeRangeStats = stats.NewTimeRangeStats(dbConn, bus, app.salesLedger, app.recoveredJumps, expedition.LoadModeLookup)
@@ -59,6 +73,9 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 				journal.EventLoadGame,
 				journal.EventClearSavedGame,
 				journal.EventNewCommander,
+				journal.EventShutdown,
+				journal.EventMusic,
+				journal.EventStatistics,
 			).
 			WithApp(
 				events.AppCommanderFilterChanged,
@@ -69,7 +86,14 @@ func (app *App) registerUISubscriptions(bus *projection.Bus) {
 	bus.SubscribeUI(
 		events.UITargetStats,
 		projection.TriggersFrom(app.careerStats, app.timeRangeStats).
-			WithJournal(journal.EventCommander, journal.EventLoadGame, journal.EventClearSavedGame, journal.EventNewCommander).
+			WithJournal(
+				journal.EventCommander,
+				journal.EventLoadGame,
+				journal.EventClearSavedGame,
+				journal.EventNewCommander,
+				journal.EventShutdown,
+				journal.EventMusic,
+			).
 			WithApp(events.AppAdjustmentsChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged),
 	)
 	bus.SubscribeUI(
@@ -127,6 +151,7 @@ func (app *App) expeditionProjections() *expedition.Projections {
 		Arrivals:       app.systemArrivals,
 		VisitCounts:    app.systemVisitCounts,
 		ShipHistory:    app.shipHistory,
+		PlaySessions:   app.playSessions,
 		TimeRangeStats: app.timeRangeStats,
 		SalesLedger:    app.salesLedger,
 		RecoveredJumps: app.recoveredJumps,

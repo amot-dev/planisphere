@@ -360,6 +360,27 @@ func TestDurationDaysLabel(t *testing.T) {
 	}
 }
 
+func TestPlayDurationLabel(t *testing.T) {
+	playDurationCases := []struct {
+		duration time.Duration
+		want     string
+	}{
+		{-5 * time.Minute, "0m"},
+		{0, "0m"},
+		{59 * time.Second, "0m"},
+		{42 * time.Minute, "42m"},
+		{time.Hour + 5*time.Minute + 45*time.Second, "1h 05m"},
+		{9*time.Hour + 13*time.Minute, "9h 13m"},
+		{110*time.Hour + 15*time.Minute, "110h 15m"},
+		{1954*time.Hour + 58*time.Minute, "1,954h 58m"},
+	}
+	for _, testCase := range playDurationCases {
+		if actual := PlayDurationLabel(testCase.duration); actual != testCase.want {
+			t.Errorf("PlayDurationLabel(%v) = %q, want %q", testCase.duration, actual, testCase.want)
+		}
+	}
+}
+
 func TestShipDisplayName(t *testing.T) {
 	shipDisplayCases := []struct {
 		internalID    string

@@ -120,6 +120,41 @@ func DurationLabel(durationVal time.Duration) string {
 	return fmt.Sprintf("%dh %02dm", hours, mins)
 }
 
+// PlayDurationLabel renders an in-game play duration strictly in total hours and
+// minutes without rolling into days or years, flooring to whole minutes and
+// comma-grouping hours at 1,000 or above (for example "0m", "42m", "1h 05m",
+// "110h 15m", "1,954h 58m").
+func PlayDurationLabel(durationVal time.Duration) string {
+	if durationVal < 0 {
+		durationVal = 0
+	}
+	totalMinutes := int64(durationVal / time.Minute)
+	totalHours := totalMinutes / 60
+	remainingMinutes := totalMinutes % 60
+	if totalHours == 0 {
+		return fmt.Sprintf("%dm", remainingMinutes)
+	}
+	return fmt.Sprintf("%sh %02dm", formatGroupedInt64(totalHours), remainingMinutes)
+}
+
+func formatGroupedInt64(value int64) string {
+	digits := fmt.Sprintf("%d", value)
+	if len(digits) <= 3 {
+		return digits
+	}
+	var builder strings.Builder
+	leadingCount := len(digits) % 3
+	if leadingCount == 0 {
+		leadingCount = 3
+	}
+	builder.WriteString(digits[:leadingCount])
+	for offset := leadingCount; offset < len(digits); offset += 3 {
+		builder.WriteByte(',')
+		builder.WriteString(digits[offset : offset+3])
+	}
+	return builder.String()
+}
+
 // DurationDaysLabel renders an elapsed duration in rounded days, including years if >= 365 days (no hours/mins).
 // Examples: "0d", "1d", "42d", "1y", "1y 15d", "3y 120d", "2y".
 func DurationDaysLabel(durationVal time.Duration) string {

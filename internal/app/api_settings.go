@@ -39,6 +39,7 @@ type Settings struct {
 	GECFetchedAt                string             `json:"gecFetchedAt"`
 	Commanders                  []replay.Commander `json:"commanders"`
 	CareerBaselineScope         string             `json:"careerBaselineScope"`
+	DurationDisplayMode         string             `json:"durationDisplayMode"`
 	EDDiscoveryDBPath           string             `json:"edDiscoveryDbPath"`
 	DefaultEDDiscoveryDBPath    string             `json:"defaultEdDiscoveryDbPath"`
 	EDDiscoveryDBExists         bool               `json:"edDiscoveryDbExists"`
@@ -91,6 +92,7 @@ func (app *App) GetSettings() (Settings, error) {
 		GECFetchedAt:                gecFetched,
 		Commanders:                  commanders,
 		CareerBaselineScope:         settings.CareerBaselineScope(app.db),
+		DurationDisplayMode:         settings.DurationDisplayMode(app.db),
 		EDDiscoveryDBPath:           discoveredEDDPath,
 		DefaultEDDiscoveryDBPath:    defaultEDDPath,
 		EDDiscoveryDBExists:         discoveredEDDPath != "" || fileExists(defaultEDDPath),
@@ -384,4 +386,16 @@ func (app *App) SetExternalLinks(inaraMode, edsmMode, gecMode string) (Settings,
 	}
 	app.publishApp(0, events.AppSettingsChanged)
 	return app.GetSettings()
+}
+
+// SetDurationDisplayMode updates whether durations default to calendar elapsed
+// time ("calendar") or in-game play time ("in_game").
+func (app *App) SetDurationDisplayMode(mode string) error {
+	if saveError := app.withReadyReadLock(func() error {
+		return settings.SetDurationDisplayMode(app.db, mode)
+	}); saveError != nil {
+		return fmt.Errorf("persist duration display mode: %w", saveError)
+	}
+	app.publishApp(0, events.AppSettingsChanged)
+	return nil
 }

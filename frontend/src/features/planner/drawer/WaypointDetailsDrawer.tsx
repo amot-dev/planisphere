@@ -4,6 +4,10 @@ import { CartographicsValueBreakdown } from '../../../components/ui/Cartographic
 import { ExobiologyValueBreakdown } from '../../../components/ui/ExobiologyValueBreakdown'
 import { RealizationLossBreakdown } from '../../../components/ui/RealizationLossBreakdown'
 import {
+  resolvePrimaryAndTooltipDuration,
+  type DurationDisplayMode,
+} from '../../../domain/durationDisplay'
+import {
   formatCredits,
   formatElapsedDuration,
   formatInt,
@@ -26,6 +30,7 @@ export interface WaypointDetailsDrawerProps {
   modesList?: modes.Mode[]
   canCascade?: boolean
   clockSuspended?: boolean
+  durationDisplayMode?: DurationDisplayMode
   onChangeLegMode?: (rowId: number, nextModeId: number, cascade?: boolean) => void
 }
 
@@ -42,6 +47,7 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
   modesList,
   canCascade = false,
   clockSuspended = false,
+  durationDisplayMode = 'calendar',
   onChangeLegMode,
 }: WaypointDetailsDrawerProps) {
   const rowId = rowView.row.id
@@ -74,6 +80,11 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
 
   const shipsUsed = Array.from(
     new Set((details.shipsUsed ?? []).filter((ship) => ship.trim() !== '')),
+  )
+  const originDurationDisplay = resolvePrimaryAndTooltipDuration(
+    details.elapsed,
+    details.inGameDuration,
+    durationDisplayMode,
   )
 
   return (
@@ -110,7 +121,12 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
           <span className="text-ed-cyan font-bold">
             {details.toGalactic || (details.inSystem ? 'IN SYSTEM' : 'IN PROGRESS')}
           </span>
-          {details.elapsed && <span className="ml-2 text-ed-text-main">{`[${details.elapsed}]`}</span>}
+          {isOrigin && originDurationDisplay.primary && (
+            <span
+              title={originDurationDisplay.tooltip}
+              className="ml-2 text-ed-text-main"
+            >{`[${originDurationDisplay.primary}]`}</span>
+          )}
         </div>
       </div>
 
@@ -135,10 +151,23 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
             />
           )}
 
+          <WaypointInTransitBadge
+            from={details.from}
+            arrivedAt={details.arrivedAt}
+            to={details.to}
+            transitElapsed={details.transitElapsed}
+            elapsed={details.elapsed}
+            transitInGameDuration={details.transitInGameDuration}
+            durationDisplayMode={durationDisplayMode}
+            clockSuspended={clockSuspended}
+          />
+
           <WaypointInSystemBadge
             arrivedAt={details.arrivedAt}
             endAt={details.departedAt || details.to}
             inSystem={details.inSystem}
+            inSystemInGameDuration={details.inSystemInGameDuration}
+            durationDisplayMode={durationDisplayMode}
             clockSuspended={clockSuspended}
           />
         </div>
@@ -171,22 +200,11 @@ export const WaypointDetailsDrawer = memo(function WaypointDetailsDrawer({
   )
 })
 
-function WaypointInSystemBadge({
-  arrivedAt,
-  endAt,
-  inSystem,
-  clockSuspended,
-}: {
-  arrivedAt?: string
-  endAt?: string
-  inSystem?: boolean
-  clockSuspended: boolean
-}) {
-  const isLiveInSystem = Boolean(inSystem && arrivedAt)
+function useMinuteClock(active: boolean, clockSuspended: boolean): number {
   const [nowMs, setNowMs] = useState<number>(() => Date.now())
 
   useEffect(() => {
-    if (!isLiveInSystem || clockSuspended) {
+    if (!active || clockSuspended) {
       return
     }
     setNowMs(Date.now())
@@ -194,21 +212,95 @@ function WaypointInSystemBadge({
       setNowMs(Date.now())
     }, 60_000)
     return () => clearInterval(intervalHandle)
-  }, [clockSuspended, isLiveInSystem])
+  }, [active, clockSuspended])
 
-  const inSystemDuration = isLiveInSystem
+  return nowMs
+}
+
+function WaypointInTransitBadge({
+  from,
+  arrivedAt,
+  to,
+  transitElapsed,
+  elapsed,
+  transitInGameDuration,
+  durationDisplayMode,
+  clockSuspended,
+}: {
+  from?: string
+  arrivedAt?: string
+  to?: string
+  transitElapsed?: string
+  elapsed?: string
+  transitInGameDuration?: string
+  durationDisplayMode: DurationDisplayMode
+  clockSuspended: boolean
+}) {
+  const isLiveTransit = Boolean(!arrivedAt && !to && from)
+  const nowMs = useMinuteClock(isLiveTransit, clockSuspended)
+
+  const calendarTransit = arrivedAt
+    ? transitElapsed || formatElapsedDuration(from, arrivedAt)
+    : isLiveTransit
+      ? formatElapsedDuration(from, '', nowMs)
+      : transitElapsed || (from && to ? formatElapsedDuration(from, to) : elapsed || '')
+  const transitDisplay = resolvePrimaryAndTooltipDuration(
+    calendarTransit,
+    transitInGameDuration,
+    durationDisplayMode,
+  )
+  if (!transitDisplay.primary) {
+    return null
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular tracking-wider border border-ed-border-strong border-l-2 border-l-ed-cyan bg-ed-control text-ed-cyan">
+      <span className="font-bold uppercase">[IN TRANSIT]:</span>
+      <span title={transitDisplay.tooltip} className="font-bold text-ed-text-main">
+        {transitDisplay.primary}
+      </span>
+    </div>
+  )
+}
+
+function WaypointInSystemBadge({
+  arrivedAt,
+  endAt,
+  inSystem,
+  inSystemInGameDuration,
+  durationDisplayMode,
+  clockSuspended,
+}: {
+  arrivedAt?: string
+  endAt?: string
+  inSystem?: boolean
+  inSystemInGameDuration?: string
+  durationDisplayMode: DurationDisplayMode
+  clockSuspended: boolean
+}) {
+  const isLiveInSystem = Boolean(inSystem && arrivedAt)
+  const nowMs = useMinuteClock(isLiveInSystem, clockSuspended)
+
+  const calendarInSystem = isLiveInSystem
     ? formatElapsedDuration(arrivedAt, '', nowMs)
     : endAt
       ? formatElapsedDuration(arrivedAt, endAt)
       : ''
-  if (!inSystemDuration) {
+  const inSystemDisplay = resolvePrimaryAndTooltipDuration(
+    calendarInSystem,
+    inSystemInGameDuration,
+    durationDisplayMode,
+  )
+  if (!inSystemDisplay.primary) {
     return null
   }
 
   return (
     <div className="inline-flex items-center gap-2 px-2.5 py-0.5 text-[10px] font-mono-tabular tracking-wider border border-ed-border-strong border-l-2 border-l-ed-cyan bg-ed-control text-ed-cyan">
       <span className="font-bold uppercase">[IN SYSTEM]:</span>
-      <span className="font-bold text-ed-text-main">{inSystemDuration}</span>
+      <span title={inSystemDisplay.tooltip} className="font-bold text-ed-text-main">
+        {inSystemDisplay.primary}
+      </span>
     </div>
   )
 }

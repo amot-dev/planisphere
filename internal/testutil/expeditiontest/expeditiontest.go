@@ -32,6 +32,7 @@ func NewProjections(conn *sql.DB) (*projection.Bus, *expedition.Projections) {
 		Arrivals:       projections.NewSystemArrivals(conn, bus),
 		VisitCounts:    projections.NewSystemVisitCounts(conn, bus, recoveredJumps),
 		ShipHistory:    projections.NewShipHistory(conn, bus),
+		PlaySessions:   projections.NewPlaySessions(conn, bus),
 		TimeRangeStats: stats.NewTimeRangeStats(conn, bus, salesLedger, recoveredJumps, expedition.LoadModeLookup),
 		SalesLedger:    salesLedger,
 		RecoveredJumps: recoveredJumps,

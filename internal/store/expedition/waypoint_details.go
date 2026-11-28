@@ -14,21 +14,28 @@ import (
 
 // WaypointDetails is the content of a waypoint's expandable drawer.
 type WaypointDetails struct {
-	RowID              int64                            `json:"rowId"`
-	Kind               string                           `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
-	Number             int                              `json:"number"`
-	From               string                           `json:"from"`
-	To                 string                           `json:"to"`
-	FromGalactic       string                           `json:"fromGalactic"`
-	ToGalactic         string                           `json:"toGalactic"`
-	ArrivedAt   string                           `json:"arrivedAt,omitempty"`
-	DepartedAt  string                           `json:"departedAt,omitempty"`
-	InSystem    bool                             `json:"inSystem,omitempty"`
-	Elapsed            string                           `json:"elapsed"`
-	PrevSystem         string                           `json:"prevSystem"`
-	ShipsUsed          []string                         `json:"shipsUsed"`
-	Metrics            replaystats.Metrics              `json:"metrics"`
-	Realization        replaystats.RealizationBreakdown `json:"realization"`
+	RowID                  int64                            `json:"rowId"`
+	Kind                   string                           `json:"kind"` // "origin" (waypoint #1), "leg" (visited N>1 or active current leg)
+	Number                 int                              `json:"number"`
+	From                   string                           `json:"from"`
+	To                     string                           `json:"to"`
+	FromGalactic           string                           `json:"fromGalactic"`
+	ToGalactic             string                           `json:"toGalactic"`
+	ArrivedAt              string                           `json:"arrivedAt,omitempty"`
+	DepartedAt             string                           `json:"departedAt,omitempty"`
+	InSystem               bool                             `json:"inSystem,omitempty"`
+	Elapsed                string                           `json:"elapsed"`
+	TransitElapsed         string                           `json:"transitElapsed,omitempty"`
+	InGameSeconds          *int64                           `json:"inGameSeconds,omitempty"`
+	InGameDuration         string                           `json:"inGameDuration,omitempty"`
+	TransitInGameSeconds   *int64                           `json:"transitInGameSeconds,omitempty"`
+	TransitInGameDuration  string                           `json:"transitInGameDuration,omitempty"`
+	InSystemInGameSeconds  *int64                           `json:"inSystemInGameSeconds,omitempty"`
+	InSystemInGameDuration string                           `json:"inSystemInGameDuration,omitempty"`
+	PrevSystem             string                           `json:"prevSystem"`
+	ShipsUsed              []string                         `json:"shipsUsed"`
+	Metrics                replaystats.Metrics              `json:"metrics"`
+	Realization            replaystats.RealizationBreakdown `json:"realization"`
 }
 
 func resolveOriginBaselineScope(dbConn *sql.DB, expeditionRecord Expedition) replay.ProfileScope {
@@ -73,7 +80,67 @@ func populateOriginWaypointDetails(
 	} else {
 		waypointDetails.InSystem = true
 	}
-	return populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: untilQuery}, baselineScope, waypointDetails)
+	if telemetryError := populateWindowTelemetry(expeditionProjections, replaystats.Range{After: "", Until: untilQuery}, baselineScope, waypointDetails); telemetryError != nil {
+		return telemetryError
+	}
+	if expeditionProjections.PlaySessions != nil {
+		originSessions, sessionError := expeditionProjections.PlaySessions.SessionsScoped(waypointDetails.From, waypointDetails.To, baselineScope)
+		if sessionError != nil {
+			return sessionError
+		}
+		if originPlayDuration, hasPlay := replay.SumPlayDuration(originSessions, waypointDetails.From, waypointDetails.To); hasPlay {
+			applyOriginPlayDuration(waypointDetails, originPlayDuration)
+		}
+	}
+	return nil
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func applyOriginPlayDuration(waypointDetails *WaypointDetails, duration time.Duration) {
+	totalSeconds := int64(duration / time.Second)
+	waypointDetails.InGameSeconds = int64Ptr(totalSeconds)
+	waypointDetails.InGameDuration = reference.PlayDurationLabel(time.Duration(totalSeconds) * time.Second)
+}
+
+func applyLegTransitElapsed(waypointDetails *WaypointDetails) {
+	if waypointDetails.ArrivedAt != "" {
+		waypointDetails.TransitElapsed = formatLegElapsed(waypointDetails.From, waypointDetails.ArrivedAt)
+	} else {
+		waypointDetails.TransitElapsed = formatLegElapsed(waypointDetails.From, waypointDetails.To)
+	}
+}
+
+func applyLegPlayDurations(waypointDetails *WaypointDetails, sessions []replay.PlaySession) {
+	if waypointDetails.ArrivedAt != "" {
+		transitDuration, hasTransit := replay.SumPlayDuration(sessions, waypointDetails.From, waypointDetails.ArrivedAt)
+		inSystemDuration, hasInSystem := replay.SumPlayDuration(sessions, waypointDetails.ArrivedAt, waypointDetails.To)
+		if !hasTransit && !hasInSystem {
+			return
+		}
+		transitSeconds := int64(transitDuration / time.Second)
+		inSystemSeconds := int64(inSystemDuration / time.Second)
+		fullSeconds := transitSeconds + inSystemSeconds
+		waypointDetails.TransitInGameSeconds = int64Ptr(transitSeconds)
+		waypointDetails.TransitInGameDuration = reference.PlayDurationLabel(time.Duration(transitSeconds) * time.Second)
+		waypointDetails.InSystemInGameSeconds = int64Ptr(inSystemSeconds)
+		waypointDetails.InSystemInGameDuration = reference.PlayDurationLabel(time.Duration(inSystemSeconds) * time.Second)
+		waypointDetails.InGameSeconds = int64Ptr(fullSeconds)
+		waypointDetails.InGameDuration = reference.PlayDurationLabel(time.Duration(fullSeconds) * time.Second)
+		return
+	}
+	transitDuration, hasTransit := replay.SumPlayDuration(sessions, waypointDetails.From, waypointDetails.To)
+	if !hasTransit {
+		return
+	}
+	transitSeconds := int64(transitDuration / time.Second)
+	transitLabel := reference.PlayDurationLabel(time.Duration(transitSeconds) * time.Second)
+	waypointDetails.TransitInGameSeconds = int64Ptr(transitSeconds)
+	waypointDetails.TransitInGameDuration = transitLabel
+	waypointDetails.InGameSeconds = int64Ptr(transitSeconds)
+	waypointDetails.InGameDuration = transitLabel
 }
 
 func distinctTimelineHulls(shipTimeline []replay.ShipSwitch) ([]string, bool) {
@@ -255,6 +322,14 @@ func populateLegDetails(dbConn *sql.DB, expeditionRecord Expedition, targetRow R
 		return shipsError
 	}
 	waypointDetails.ShipsUsed = shipsUsed
+	applyLegTransitElapsed(waypointDetails)
+	if expeditionProjections.PlaySessions != nil {
+		legSessions, sessionError := expeditionProjections.PlaySessions.SessionsScoped(waypointDetails.From, waypointDetails.To, expScope)
+		if sessionError != nil {
+			return sessionError
+		}
+		applyLegPlayDurations(waypointDetails, legSessions)
+	}
 	return nil
 }
 

@@ -85,6 +85,26 @@ func TestSettingsRoundTripsAndNormalization(testingContext *testing.T) {
 		testingContext.Fatalf("expected fallback %q on invalid stored value, got %q", settings.CareerScopeExpedition, fallbackScope)
 	}
 
+	// Duration display mode default, round-trip, and validation
+	if defaultDisplay := settings.DurationDisplayMode(dbConn); defaultDisplay != settings.DurationDisplayCalendar {
+		testingContext.Fatalf("expected default duration display mode %q, got %q", settings.DurationDisplayCalendar, defaultDisplay)
+	}
+	if err := settings.SetDurationDisplayMode(dbConn, settings.DurationDisplayInGame); err != nil {
+		testingContext.Fatalf("SetDurationDisplayMode in_game: %v", err)
+	}
+	if gotDisplay := settings.DurationDisplayMode(dbConn); gotDisplay != settings.DurationDisplayInGame {
+		testingContext.Fatalf("expected %q, got %q", settings.DurationDisplayInGame, gotDisplay)
+	}
+	if err := settings.SetDurationDisplayMode(dbConn, "invalid_mode"); err == nil {
+		testingContext.Fatal("expected error for invalid duration display mode")
+	}
+	if err := settings.Set(dbConn, "duration_display_mode", "corrupt"); err != nil {
+		testingContext.Fatal(err)
+	}
+	if fallbackDisplay := settings.DurationDisplayMode(dbConn); fallbackDisplay != settings.DurationDisplayCalendar {
+		testingContext.Fatalf("expected fallback %q on invalid stored value, got %q", settings.DurationDisplayCalendar, fallbackDisplay)
+	}
+
 	// Legacy commander toggle
 	if _, execError := dbConn.Exec(`INSERT INTO commanders(name, fid, enabled) VALUES ('CmdrAlpha', 'F1', 1)`); execError != nil {
 		testingContext.Fatalf("insert commander: %v", execError)

@@ -132,6 +132,7 @@ export namespace app {
 	    gecFetchedAt: string;
 	    commanders: replay.Commander[];
 	    careerBaselineScope: string;
+	    durationDisplayMode: string;
 	    edDiscoveryDbPath: string;
 	    defaultEdDiscoveryDbPath: string;
 	    edDiscoveryDbExists: boolean;
@@ -163,6 +164,7 @@ export namespace app {
 	        this.gecFetchedAt = source["gecFetchedAt"];
 	        this.commanders = this.convertValues(source["commanders"], replay.Commander);
 	        this.careerBaselineScope = source["careerBaselineScope"];
+	        this.durationDisplayMode = source["durationDisplayMode"];
 	        this.edDiscoveryDbPath = source["edDiscoveryDbPath"];
 	        this.defaultEdDiscoveryDbPath = source["defaultEdDiscoveryDbPath"];
 	        this.edDiscoveryDbExists = source["edDiscoveryDbExists"];
@@ -199,9 +201,11 @@ export namespace app {
 	    endGalactic: string;
 	    endIsNow: boolean;
 	    duration: string;
+	    inGameDuration?: string;
 	    careerStart: string;
 	    careerStartGalactic: string;
 	    careerDuration: string;
+	    careerInGameDuration?: string;
 	    filterActive: boolean;
 	    allTimeLoaded: boolean;
 	    live: stats.Metrics;
@@ -228,9 +232,11 @@ export namespace app {
 	        this.endGalactic = source["endGalactic"];
 	        this.endIsNow = source["endIsNow"];
 	        this.duration = source["duration"];
+	        this.inGameDuration = source["inGameDuration"];
 	        this.careerStart = source["careerStart"];
 	        this.careerStartGalactic = source["careerStartGalactic"];
 	        this.careerDuration = source["careerDuration"];
+	        this.careerInGameDuration = source["careerInGameDuration"];
 	        this.filterActive = source["filterActive"];
 	        this.allTimeLoaded = source["allTimeLoaded"];
 	        this.live = this.convertValues(source["live"], stats.Metrics);
@@ -1067,6 +1073,13 @@ export namespace expedition {
 	    departedAt?: string;
 	    inSystem?: boolean;
 	    elapsed: string;
+	    transitElapsed?: string;
+	    inGameSeconds?: number;
+	    inGameDuration?: string;
+	    transitInGameSeconds?: number;
+	    transitInGameDuration?: string;
+	    inSystemInGameSeconds?: number;
+	    inSystemInGameDuration?: string;
 	    prevSystem: string;
 	    shipsUsed: string[];
 	    metrics: stats.Metrics;
@@ -1089,6 +1102,13 @@ export namespace expedition {
 	        this.departedAt = source["departedAt"];
 	        this.inSystem = source["inSystem"];
 	        this.elapsed = source["elapsed"];
+	        this.transitElapsed = source["transitElapsed"];
+	        this.inGameSeconds = source["inGameSeconds"];
+	        this.inGameDuration = source["inGameDuration"];
+	        this.transitInGameSeconds = source["transitInGameSeconds"];
+	        this.transitInGameDuration = source["transitInGameDuration"];
+	        this.inSystemInGameSeconds = source["inSystemInGameSeconds"];
+	        this.inSystemInGameDuration = source["inSystemInGameDuration"];
 	        this.prevSystem = source["prevSystem"];
 	        this.shipsUsed = source["shipsUsed"];
 	        this.metrics = this.convertValues(source["metrics"], stats.Metrics);

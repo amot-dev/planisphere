@@ -29,6 +29,7 @@ const (
 	keyEDDDisconnectsDone   = "edd_history_disconnects_v7"
 	keyEDDDatabasePath      = "edd_db_path"
 	keyCareerBaselineScope  = "career_baseline_scope"
+	keyDurationDisplayMode  = "duration_display_mode"
 )
 
 // External link visibility modes.
@@ -42,6 +43,12 @@ const (
 const (
 	CareerScopeExpedition = "expedition"
 	CareerScopeAllEnabled = "all_enabled"
+)
+
+// Duration display preference modes.
+const (
+	DurationDisplayCalendar = "calendar"
+	DurationDisplayInGame   = "in_game"
 )
 
 // Get returns the persisted setting value for key, or "" when absent.
@@ -307,6 +314,28 @@ func SetCareerBaselineScope(queryer db.Queryer, scope string) error {
 		return fmt.Errorf("invalid career baseline scope %q", scope)
 	}
 	return Set(queryer, keyCareerBaselineScope, normalized)
+}
+
+// DurationDisplayMode returns the configured duration display preference
+// ("calendar" by default when unset or invalid, or "in_game").
+func DurationDisplayMode(queryer db.Queryer) string {
+	if queryer == nil {
+		return DurationDisplayCalendar
+	}
+	rawMode, _ := Get(queryer, keyDurationDisplayMode)
+	if strings.EqualFold(strings.TrimSpace(rawMode), DurationDisplayInGame) {
+		return DurationDisplayInGame
+	}
+	return DurationDisplayCalendar
+}
+
+// SetDurationDisplayMode validates and stores the duration display preference.
+func SetDurationDisplayMode(queryer db.Queryer, mode string) error {
+	normalized := strings.ToLower(strings.TrimSpace(mode))
+	if normalized != DurationDisplayCalendar && normalized != DurationDisplayInGame {
+		return fmt.Errorf("invalid duration display mode %q", mode)
+	}
+	return Set(queryer, keyDurationDisplayMode, normalized)
 }
 
 // SetCommanderEnabled enables or disables a commander profile (by profileKey or

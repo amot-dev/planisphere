@@ -1,5 +1,6 @@
 import { memo, useState } from 'react'
 import { app, realization, stats } from '../../api/models'
+import type { DurationDisplayMode } from '../../domain/durationDisplay'
 import { CarrierConfigModal } from '../carrier/CarrierConfigModal'
 import { ExplorationValuationSection } from './ExplorationValuationSection'
 import { ModeFilterPanel } from './ModeFilterPanel'
@@ -17,6 +18,7 @@ export interface StatsSidebarProps {
   collapsed?: boolean
   carrierRouteOpen?: boolean
   clockSuspended?: boolean
+  durationDisplayMode?: DurationDisplayMode
   onFilterChange: (next: stats.Filter) => void
   onViewScopeChange?: (nextScope: 'expedition' | 'allTime') => void
   onToggleCollapse?: () => void
@@ -35,6 +37,7 @@ export const StatsSidebar = memo(function StatsSidebar({
   collapsed = false,
   carrierRouteOpen = false,
   clockSuspended = false,
+  durationDisplayMode = 'calendar',
   onFilterChange,
   onViewScopeChange,
   onToggleCollapse,
@@ -135,6 +138,7 @@ export const StatsSidebar = memo(function StatsSidebar({
           displayedMetrics={displayedMetrics}
           carrierRouteOpen={carrierRouteOpen}
           clockSuspended={clockSuspended}
+          durationDisplayMode={durationDisplayMode}
           flightOpsExpanded={flightOpsExpanded}
           carrierOpsExpanded={carrierOpsExpanded}
           carrierCostExpanded={carrierCostExpanded}

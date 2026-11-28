@@ -3,6 +3,7 @@ import { app, type EddImportProgress } from '../../api/models'
 import { ModalShell } from '../../components/ui/ModalShell'
 import { CommandersSection } from './CommandersSection'
 import { DatabaseArchiveSection } from './DatabaseArchiveSection'
+import { DisplayPreferencesSection } from './DisplayPreferencesSection'
 import { EDDiscoveryImportSection } from './EDDiscoveryImportSection'
 import { ExternalLinksSection } from './ExternalLinksSection'
 import { FleetCarrierSection } from './FleetCarrierSection'
@@ -84,6 +85,11 @@ export function SettingsModal({
       />
 
       <OnlineServicesSection
+        settings={settings}
+        onSetError={setError}
+      />
+
+      <DisplayPreferencesSection
         settings={settings}
         onSetError={setError}
       />

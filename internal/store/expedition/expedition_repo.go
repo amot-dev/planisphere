@@ -48,6 +48,7 @@ type Projections struct {
 	Arrivals       *projections.SystemArrivals
 	VisitCounts    *projections.SystemVisitCounts
 	ShipHistory    *projections.ShipHistory
+	PlaySessions   *projections.PlaySessions
 	TimeRangeStats *stats.TimeRangeStats
 	SalesLedger    *realization.SalesLedger
 	RecoveredJumps *projections.RecoveredJumps

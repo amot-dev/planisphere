@@ -218,6 +218,10 @@ export function SetDatabasePath(arg1) {
   return window['go']['app']['App']['SetDatabasePath'](arg1);
 }
 
+export function SetDurationDisplayMode(arg1) {
+  return window['go']['app']['App']['SetDurationDisplayMode'](arg1);
+}
+
 export function SetExpeditionFlightMode(arg1, arg2) {
   return window['go']['app']['App']['SetExpeditionFlightMode'](arg1, arg2);
 }
