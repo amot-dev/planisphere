@@ -118,3 +118,63 @@ func TestWithTxRollbackOnPanic(t *testing.T) {
 		t.Fatalf("expected setting to be %q, got %q", "committed_value", finalValue)
 	}
 }
+
+func TestMigrateSessionEventsV14ResetsOffsetsAndIsIdempotent(testingContext *testing.T) {
+	databaseConnection := dbtest.OpenMemory(testingContext)
+
+	initialMigrationFlag, flagError := getSettingForTest(databaseConnection, "session_events_v14")
+	if flagError != nil {
+		testingContext.Fatalf("getSettingForTest(session_events_v14): %v", flagError)
+	}
+	if initialMigrationFlag != "1" {
+		testingContext.Fatalf("session_events_v14 setting = %q, want 1", initialMigrationFlag)
+	}
+
+	if _, seedError := databaseConnection.Exec(`
+		INSERT INTO ingested_journals
+			(file_name, file_path, byte_offset, line_count, file_size, events_stored, first_timestamp, last_timestamp, updated_at)
+		VALUES
+			('Journal.2026-05-01T100000.01.log', '/tmp/a.log', 4096, 42, 4096, 12, '2026-05-01T10:00:00Z', '2026-05-01T10:30:00Z', '2026-05-01T10:30:00Z'),
+			('Journal.2026-05-02T120000.01.log', '/tmp/b.log', 8192, 99, 8192, 25, '2026-05-02T12:00:00Z', '2026-05-02T13:00:00Z', '2026-05-02T13:00:00Z');
+		DELETE FROM settings WHERE key = 'session_events_v14';
+	`); seedError != nil {
+		testingContext.Fatalf("seed pre-v14 ingested_journals: %v", seedError)
+	}
+
+	if migrateError := db.Migrate(databaseConnection); migrateError != nil {
+		testingContext.Fatalf("db.Migrate session_events_v14: %v", migrateError)
+	}
+
+	var offsetA, linesA, storedA int64
+	var firstA, lastA string
+	if scanError := databaseConnection.QueryRow(`
+		SELECT byte_offset, line_count, events_stored, COALESCE(first_timestamp, ''), COALESCE(last_timestamp, '')
+		FROM ingested_journals WHERE file_name = 'Journal.2026-05-01T100000.01.log'`,
+	).Scan(&offsetA, &linesA, &storedA, &firstA, &lastA); scanError != nil {
+		testingContext.Fatalf("query migrated journal row: %v", scanError)
+	}
+	if offsetA != 0 || linesA != 0 || storedA != 12 || firstA != "2026-05-01T10:00:00Z" || lastA != "2026-05-01T10:30:00Z" {
+		testingContext.Fatalf("post-migration row = (offset=%d lines=%d stored=%d first=%q last=%q), want (0, 0, 12, 2026-05-01T10:00:00Z, 2026-05-01T10:30:00Z)",
+			offsetA, linesA, storedA, firstA, lastA)
+	}
+
+	// Simulate subsequent ingestion advancing offsets, then re-run Migrate to confirm idempotency.
+	if _, updateError := databaseConnection.Exec(`
+		UPDATE ingested_journals
+		SET byte_offset = 2048, line_count = 25
+		WHERE file_name = 'Journal.2026-05-01T100000.01.log'`); updateError != nil {
+		testingContext.Fatalf("advance offset before second Migrate: %v", updateError)
+	}
+	if secondMigrateError := db.Migrate(databaseConnection); secondMigrateError != nil {
+		testingContext.Fatalf("second db.Migrate: %v", secondMigrateError)
+	}
+	if scanError := databaseConnection.QueryRow(`
+		SELECT byte_offset, line_count
+		FROM ingested_journals WHERE file_name = 'Journal.2026-05-01T100000.01.log'`,
+	).Scan(&offsetA, &linesA); scanError != nil {
+		testingContext.Fatalf("query journal row after second Migrate: %v", scanError)
+	}
+	if offsetA != 2048 || linesA != 25 {
+		testingContext.Fatalf("expected second Migrate to preserve byte_offset=2048 line_count=25, got (%d, %d)", offsetA, linesA)
+	}
+}

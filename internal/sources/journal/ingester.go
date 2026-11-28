@@ -320,6 +320,13 @@ func processAppendedJournalLine(
 		}
 		return false, nil
 	}
+	if keepEvent {
+		state.advanceLastTimestamp(parsedEvent.Timestamp)
+	} else if rawTimestamp := PeekTimestamp(trimmedLine); rawTimestamp != "" {
+		if normalizedTimestamp, normalizeError := reference.NormalizeISO(rawTimestamp); normalizeError == nil {
+			state.advanceLastTimestamp(normalizedTimestamp)
+		}
+	}
 	if !keepEvent {
 		return false, nil
 	}
@@ -356,6 +363,12 @@ func processAppendedJournalLine(
 	return backfilledCount > 0 || inserted || updatedRows > 0, nil
 }
 
+func (state *fileState) advanceLastTimestamp(normalizedTimestamp string) {
+	if normalizedTimestamp != "" && (!state.last.Valid || normalizedTimestamp > state.last.String) {
+		state.last = sql.NullString{String: normalizedTimestamp, Valid: true}
+	}
+}
+
 func (state *fileState) recordInsertedEvent(parsedEvent *Event, result *Result) {
 	state.stored++
 	result.NewEvents++
@@ -364,9 +377,7 @@ func (state *fileState) recordInsertedEvent(parsedEvent *Event, result *Result) 
 	if !state.first.Valid || parsedEvent.Timestamp < state.first.String {
 		state.first = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
 	}
-	if !state.last.Valid || parsedEvent.Timestamp > state.last.String {
-		state.last = sql.NullString{String: parsedEvent.Timestamp, Valid: true}
-	}
+	state.advanceLastTimestamp(parsedEvent.Timestamp)
 }
 
 func finalizeSessionState(statements *lineIngestStatements, tracker *SessionTracker, state *fileState) error {

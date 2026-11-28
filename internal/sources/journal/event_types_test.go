@@ -31,8 +31,11 @@ func TestJournalEventTypeAndSetOperations(testingContext *testing.T) {
 	if len(RelevantEvents) != int(eventTypeCount) {
 		testingContext.Fatalf("len(RelevantEvents) = %d, want %d", len(RelevantEvents), eventTypeCount)
 	}
-	if _, found := ParseEventType("Music"); found {
-		testingContext.Fatalf("expected non-relevant event Music not to parse")
+	if EventName(EventShutdown) != "Shutdown" || EventName(EventMusic) != "Music" {
+		testingContext.Fatalf("expected EventShutdown/EventMusic names, got %q/%q", EventName(EventShutdown), EventName(EventMusic))
+	}
+	if _, found := ParseEventType("FuelScoop"); found {
+		testingContext.Fatalf("expected non-relevant event FuelScoop not to parse")
 	}
 	if invalidName := EventName(EventType(250)); invalidName != "" {
 		testingContext.Fatalf("expected empty string for out-of-range EventType, got %q", invalidName)

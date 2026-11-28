@@ -114,6 +114,11 @@ var migrations = []migration{
 		description: "Backfill single commander_profile_id per expedition from selected scope or latest commander",
 		apply:       migrateSingleExpeditionCommanderV14,
 	},
+	{
+		key:         "session_events_v14",
+		description: "Reset ingested_journals byte offsets once to backfill Shutdown, Music MainMenu, and exact last_timestamp",
+		apply:       migrateSessionEventsV14,
+	},
 }
 
 // Migrate applies the embedded schema and runs all pending migrations. Idempotent.
@@ -284,6 +289,13 @@ func migrateSourceFileIndexV7(dbConn *sql.DB) error {
 func migrateDisconnectEventsV10(dbConn *sql.DB) error {
 	if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
 		return fmt.Errorf("reset ingested_journals offsets (v10): %w", updateError)
+	}
+	return nil
+}
+
+func migrateSessionEventsV14(dbConn *sql.DB) error {
+	if _, updateError := dbConn.Exec(`UPDATE ingested_journals SET byte_offset = 0, line_count = 0`); updateError != nil {
+		return fmt.Errorf("reset ingested_journals offsets (session_events_v14): %w", updateError)
 	}
 	return nil
 }

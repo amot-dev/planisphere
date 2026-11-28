@@ -204,6 +204,7 @@ type StatisticsEvent struct {
 		TotalHyperspaceDist    float64 `json:"Total_Hyperspace_Distance"`
 		TotalHyperspaceJumps   float64 `json:"Total_Hyperspace_Jumps"`
 		SystemsVisited         float64 `json:"Systems_Visited"`
+		TimePlayed             float64 `json:"Time_Played"`
 	} `json:"Exploration"`
 	Exobiology struct {
 		OrganicData        float64 `json:"Organic_Data"`

@@ -16,7 +16,9 @@ import (
 // ProgressFunc receives progress updates during an EDDiscovery archive import.
 type ProgressFunc func(current, total, files int, stage string)
 
-var relevantEventFilterSQL = "journalEntry.EventType IN (" + journal.FormatSQLInClause(journal.AllEvents) + ",'Fileheader','FileHeader','Continued')"
+var relevantEventFilterSQL = "(journalEntry.EventType IN (" +
+	journal.FormatSQLInClause(journal.AllEvents&^journal.NewEventSet(journal.EventMusic)) +
+	",'Fileheader','FileHeader','Continued') OR (journalEntry.EventType = 'Music' AND journalEntry.EventData LIKE '%MainMenu%'))"
 
 type importStatements struct {
 	insertEventStmt       *sql.Stmt

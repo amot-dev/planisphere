@@ -239,3 +239,61 @@ func TestImportProgressSuppressesCompleteOnFailure(testingContext *testing.T) {
 		testingContext.Fatalf("expected final progress stage Complete on success, got %v", succeededStages)
 	}
 }
+
+func TestImportEDDiscoverySessionExitEvents(testingContext *testing.T) {
+	eddPath := eddtest.BuildArchive(testingContext, eddtest.ArchiveSeed{
+		FileName: "EDDSessionExits.sqlite",
+		TravelLogs: []eddtest.TravelLogSeed{
+			{ID: 1, Name: "Journal.2026-06-05T100000.01.log", Path: "/logs/Journal.2026-06-05T100000.01.log"},
+		},
+		Entries: []eddtest.JournalEntrySeed{
+			{ID: 1, TravelLogID: 1, EventType: "LoadGame", EventData: `{"timestamp":"2026-06-05T10:00:00Z","event":"LoadGame","Commander":"CmdrEDD","FID":"F555","Ship":"Mandalay","Odyssey":true}`},
+			{ID: 2, TravelLogID: 1, EventType: "Location", EventData: `{"timestamp":"2026-06-05T10:01:00Z","event":"Location","StarSystem":"Sol","SystemAddress":1001,"StarPos":[0,0,0]}`},
+			{ID: 3, TravelLogID: 1, EventType: "Music", EventData: `{"timestamp":"2026-06-05T10:05:00Z","event":"Music","MusicTrack":"Exploration"}`},
+			{ID: 4, TravelLogID: 1, EventType: "Music", EventData: `{"timestamp":"2026-06-05T10:06:00Z","event":"Music","MusicTrack":"NoTrack"}`},
+			{ID: 5, TravelLogID: 1, EventType: "Music", EventData: `{"timestamp":"2026-06-05T10:07:00Z","event":"Music","MusicTrack":"MainMenu_Extra"}`},
+			{ID: 6, TravelLogID: 1, EventType: "Music", EventData: `{"timestamp":"2026-06-05T10:10:00Z","event":"Music","MusicTrack":"MainMenu"}`},
+			{ID: 7, TravelLogID: 1, EventType: "Shutdown", EventData: `{"timestamp":"2026-06-05T10:11:00Z","event":"Shutdown"}`},
+		},
+	})
+
+	destConn := dbtest.OpenMemory(testingContext)
+	importResult, importError := eddiscovery.Import(context.Background(), journal.NewIngester(destConn), eddPath, nil)
+	if importError != nil {
+		testingContext.Fatalf("Import failed: %v", importError)
+	}
+	// Exploration and NoTrack Music rows are filtered out in SQL; MainMenu_Extra is filtered out by journal.ParseLine.
+	if importResult.LinesRead != 5 {
+		testingContext.Fatalf("LinesRead = %d, want 5", importResult.LinesRead)
+	}
+
+	rows, queryError := destConn.Query(`SELECT event, COALESCE(commander, ''), timestamp FROM journal_events ORDER BY timestamp ASC, id ASC`)
+	if queryError != nil {
+		testingContext.Fatal(queryError)
+	}
+	defer rows.Close()
+
+	type importedRow struct {
+		eventName, commanderName, timestamp string
+	}
+	var actualRows []importedRow
+	for rows.Next() {
+		var row importedRow
+		if scanError := rows.Scan(&row.eventName, &row.commanderName, &row.timestamp); scanError != nil {
+			testingContext.Fatal(scanError)
+		}
+		actualRows = append(actualRows, row)
+	}
+	if rowsError := rows.Err(); rowsError != nil {
+		testingContext.Fatal(rowsError)
+	}
+	expectedRows := []importedRow{
+		{"LoadGame", "CmdrEDD", "2026-06-05T10:00:00Z"},
+		{"Location", "CmdrEDD", "2026-06-05T10:01:00Z"},
+		{"Music", "CmdrEDD", "2026-06-05T10:10:00Z"},
+		{"Shutdown", "CmdrEDD", "2026-06-05T10:11:00Z"},
+	}
+	if !slices.Equal(actualRows, expectedRows) {
+		testingContext.Fatalf("imported rows = %+v, want %+v", actualRows, expectedRows)
+	}
+}

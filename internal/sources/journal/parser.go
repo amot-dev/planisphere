@@ -72,28 +72,53 @@ type commonFields struct {
 	Cost          *int64          `json:"Cost"`
 	NpcCrewID     *int64          `json:"NpcCrewId"`
 	Amount        *int64          `json:"Amount"`
+	MusicTrack    string          `json:"MusicTrack"`
 }
 
-var eventKey = []byte(`"event"`)
+var (
+	eventKey     = []byte(`"event"`)
+	timestampKey = []byte(`"timestamp"`)
+	utf8BOM      = []byte("\xef\xbb\xbf")
+)
+
+func peekJSONStringField(line, fieldKey []byte) string {
+	remaining := bytes.TrimSpace(bytes.TrimPrefix(line, utf8BOM))
+	if len(remaining) == 0 || remaining[0] != '{' {
+		return ""
+	}
+	for {
+		fieldKeyIndex := bytes.Index(remaining, fieldKey)
+		if fieldKeyIndex < 0 {
+			return ""
+		}
+		afterKey := remaining[fieldKeyIndex+len(fieldKey):]
+		trimmed := bytes.TrimLeft(afterKey, " \t\r\n")
+		if len(trimmed) > 0 && trimmed[0] == ':' {
+			valueStart := bytes.TrimLeft(trimmed[1:], " \t\r\n")
+			if len(valueStart) == 0 || valueStart[0] != '"' {
+				return ""
+			}
+			valueBody := valueStart[1:]
+			quoteEnd := bytes.IndexByte(valueBody, '"')
+			if quoteEnd < 0 {
+				return ""
+			}
+			return string(valueBody[:quoteEnd])
+		}
+		remaining = afterKey
+	}
+}
 
 // PeekEventName extracts the "event" value from a journal line without a full
 // JSON decode. Returns "" when not found.
 func PeekEventName(line []byte) string {
-	eventKeyIndex := bytes.Index(line, eventKey)
-	if eventKeyIndex < 0 {
-		return ""
-	}
-	rest := line[eventKeyIndex+len(eventKey):]
-	quoteStart := bytes.IndexByte(rest, '"')
-	if quoteStart < 0 {
-		return ""
-	}
-	rest = rest[quoteStart+1:]
-	quoteEnd := bytes.IndexByte(rest, '"')
-	if quoteEnd < 0 {
-		return ""
-	}
-	return string(rest[:quoteEnd])
+	return peekJSONStringField(line, eventKey)
+}
+
+// PeekTimestamp extracts the raw "timestamp" value from a journal line without
+// a full JSON decode. Returns "" when not found.
+func PeekTimestamp(line []byte) string {
+	return peekJSONStringField(line, timestampKey)
 }
 
 func optInt(intValue *int64) string {
@@ -196,8 +221,10 @@ func keyIdentifiers(eventType EventType, fields *commonFields, raw []byte) []str
 		return []string{fields.Option, optInt(fields.Cost)}
 	case EventNpcCrewPaidWage:
 		return []string{optInt(fields.NpcCrewID), optInt(fields.Amount)}
-	case EventStatistics:
+	case EventStatistics, EventShutdown:
 		return nil
+	case EventMusic:
+		return []string{strings.ToLower(strings.TrimSpace(fields.MusicTrack))}
 	default:
 		// Unknown shape: fall back to the whole canonical line.
 		sum := sha256.Sum256(raw)
@@ -215,6 +242,8 @@ func shouldPersistRelevantEvent(fields *commonFields) (EventType, bool) {
 		return eventType, strings.EqualFold(strings.TrimSpace(fields.JumpType), "Hyperspace")
 	case EventSynthesis:
 		return eventType, reference.FSDSynthesisBoostTier(fields.Name) > 0
+	case EventMusic:
+		return eventType, strings.EqualFold(strings.TrimSpace(fields.MusicTrack), "MainMenu")
 	default:
 		return eventType, true
 	}

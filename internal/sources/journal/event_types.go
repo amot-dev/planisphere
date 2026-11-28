@@ -42,6 +42,8 @@ const (
 	EventNpcCrewPaidWage
 	EventClearSavedGame
 	EventNewCommander
+	EventShutdown
+	EventMusic
 	eventTypeCount
 )
 
@@ -74,6 +76,8 @@ var eventTypeNames = [eventTypeCount]string{
 	EventNpcCrewPaidWage:          "NpcCrewPaidWage",
 	EventClearSavedGame:           "ClearSavedGame",
 	EventNewCommander:             "NewCommander",
+	EventShutdown:                 "Shutdown",
+	EventMusic:                    "Music",
 }
 
 var eventTypeByName map[string]EventType
