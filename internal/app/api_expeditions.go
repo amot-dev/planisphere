@@ -64,9 +64,13 @@ func (app *App) CloneExpedition(id int64) (expedition.Expedition, error) {
 
 // UpdateExpedition renames an expedition.
 func (app *App) UpdateExpedition(id int64, name, description string) error {
-	if updateError := app.withReadyReadLock(func() error {
-		return expedition.UpdateMeta(app.db, id, name, description)
-	}); updateError != nil {
+	applied, updateError := app.recordExpeditionMetaMutation(id, "Edit Expedition", func(targetDB *sql.DB, before expedition.Expedition) (bool, error) {
+		if execError := expedition.UpdateMeta(targetDB, id, name, description); execError != nil {
+			return false, execError
+		}
+		return expeditionMetaChanged(before, name, description), nil
+	})
+	if updateError != nil || !applied {
 		return updateError
 	}
 	app.publishApp(id, events.AppExpeditionPlanChanged)

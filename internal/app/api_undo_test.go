@@ -327,3 +327,126 @@ func TestAppConcurrentCommanderOverrideScopeChangeAndUndo(testingContext *testin
 		testingContext.Fatalf("expected empty undo history after final MergeCommanders, got res=%+v err=%v", finalUndo, err)
 	}
 }
+
+func TestAppUndoRedoExpeditionMetadataAndScopedUpdates(testingContext *testing.T) {
+	testApp := setupTestApp(testingContext)
+	eventsRecorder := captureAppEvents(testingContext, testApp)
+
+	seededExpeditions, listError := testApp.ListExpeditions()
+	if listError != nil || len(seededExpeditions) != 1 {
+		testingContext.Fatalf("ListExpeditions: len=%d err=%v", len(seededExpeditions), listError)
+	}
+	inactiveExpedition := seededExpeditions[0]
+
+	activeExpedition, createError := testApp.CreateExpedition("Initial Title", "Initial Description")
+	if createError != nil {
+		testingContext.Fatalf("CreateExpedition: %v", createError)
+	}
+	originRowID := mustGetPlan(testingContext, testApp, activeExpedition.ID).Rows[0].Row.ID
+	setTestRowSystemName(testingContext, testApp, originRowID, "Sol")
+
+	if updateError := testApp.UpdateExpedition(activeExpedition.ID, "Renamed Title", "Updated Description"); updateError != nil {
+		testingContext.Fatalf("UpdateExpedition: %v", updateError)
+	}
+	// Whitespace-equivalent no-op save must not push a duplicate undo entry or emit DataChanged.
+	eventsRecorder.Reset()
+	if updateError := testApp.UpdateExpedition(activeExpedition.ID, "  Renamed Title  ", "  Updated Description  "); updateError != nil {
+		testingContext.Fatalf("UpdateExpedition no-op: %v", updateError)
+	}
+	if noopChanges := eventsRecorder.DataChanges(); len(noopChanges) != 0 {
+		testingContext.Fatalf("expected no DataChanged on no-op UpdateExpedition, got %+v", noopChanges)
+	}
+
+	// Updating an inactive expedition must leave the active expedition's undo stack intact.
+	if updateError := testApp.UpdateExpedition(inactiveExpedition.ID, "Inactive Renamed", "Inactive Description"); updateError != nil {
+		testingContext.Fatalf("UpdateExpedition(inactive): %v", updateError)
+	}
+	eventsRecorder.Reset()
+
+	undoMeta, undoError := testApp.UndoExpedition(activeExpedition.ID)
+	if undoError != nil || !undoMeta.Applied || undoMeta.Label != "Edit Expedition" || !undoMeta.CanUndo || !undoMeta.CanRedo {
+		testingContext.Fatalf("UndoExpedition(meta): res=%+v err=%v", undoMeta, undoError)
+	}
+	metaUndoChanges := eventsRecorder.TakeDataChanges()
+	if len(metaUndoChanges) != 1 || !slices.Contains(metaUndoChanges[0].Domains, "plan") || !slices.Contains(metaUndoChanges[0].Domains, "expeditions") {
+		testingContext.Fatalf("expected meta undo to emit plan and expeditions domains, got %+v", metaUndoChanges)
+	}
+	afterFirstUndo := mustGetPlan(testingContext, testApp, activeExpedition.ID)
+	if afterFirstUndo.Expedition.Name != "Initial Title" || afterFirstUndo.Expedition.Description != "Initial Description" || afterFirstUndo.Rows[0].Row.SystemName != "Sol" {
+		testingContext.Fatalf("expected title/description reverted while preserving Sol waypoint, got exp=%+v row=%+v",
+			afterFirstUndo.Expedition, afterFirstUndo.Rows[0].Row)
+	}
+	if inactivePlan := mustGetPlan(testingContext, testApp, inactiveExpedition.ID); inactivePlan.Expedition.Name != "Inactive Renamed" {
+		testingContext.Fatalf("expected inactive expedition rename preserved, got %q", inactivePlan.Expedition.Name)
+	}
+
+	undoWaypoint, undoError := testApp.UndoExpedition(activeExpedition.ID)
+	if undoError != nil || !undoWaypoint.Applied || undoWaypoint.Label != "Edit System" {
+		testingContext.Fatalf("UndoExpedition(waypoint): res=%+v err=%v", undoWaypoint, undoError)
+	}
+	if afterSecondUndo := mustGetPlan(testingContext, testApp, activeExpedition.ID); afterSecondUndo.Rows[0].Row.SystemName != "" {
+		testingContext.Fatalf("expected waypoint system reverted to empty, got %q", afterSecondUndo.Rows[0].Row.SystemName)
+	}
+
+	if redoWaypoint, redoError := testApp.RedoExpedition(activeExpedition.ID); redoError != nil || !redoWaypoint.Applied || redoWaypoint.Label != "Edit System" {
+		testingContext.Fatalf("RedoExpedition(waypoint): res=%+v err=%v", redoWaypoint, redoError)
+	}
+	if redoMeta, redoError := testApp.RedoExpedition(activeExpedition.ID); redoError != nil || !redoMeta.Applied || redoMeta.Label != "Edit Expedition" {
+		testingContext.Fatalf("RedoExpedition(meta): res=%+v err=%v", redoMeta, redoError)
+	}
+	afterRedoBoth := mustGetPlan(testingContext, testApp, activeExpedition.ID)
+	if afterRedoBoth.Expedition.Name != "Renamed Title" || afterRedoBoth.Expedition.Description != "Updated Description" || afterRedoBoth.Rows[0].Row.SystemName != "Sol" {
+		testingContext.Fatalf("expected both waypoint and metadata restored after redo, got exp=%+v row=%+v",
+			afterRedoBoth.Expedition, afterRedoBoth.Rows[0].Row)
+	}
+
+	// Same-profile UpdateExpeditionScoped records in UndoHistory, whereas profile-changing clears it.
+	insertProfile := func(profileKey, displayName, fid string) int64 {
+		insertResult, execError := testApp.db.Exec(
+			`INSERT INTO commander_profiles (profile_key, display_name, fid, universe, enabled) VALUES (?, ?, ?, 'live', 1)`,
+			profileKey, displayName, fid,
+		)
+		if execError != nil {
+			testingContext.Fatalf("insert profile %s: %v", profileKey, execError)
+		}
+		profileID, idError := insertResult.LastInsertId()
+		if idError != nil {
+			testingContext.Fatalf("read profile %s id: %v", profileKey, idError)
+		}
+		return profileID
+	}
+	profileOneID := insertProfile("live:f301:era:0", "CMDR One", "F301")
+	profileTwoID := insertProfile("live:f302:era:0", "CMDR Two", "F302")
+
+	if scopedError := testApp.UpdateExpeditionScoped(activeExpedition.ID, "Scoped Base", "Base Desc", profileOneID); scopedError != nil {
+		testingContext.Fatalf("UpdateExpeditionScoped(profileOne): %v", scopedError)
+	}
+	noteText := "Scoped waypoint note"
+	if rowError := testApp.UpdateRow(expedition.RowPatch{ID: originRowID, Notes: &noteText}); rowError != nil {
+		testingContext.Fatalf("UpdateRow(notes): %v", rowError)
+	}
+	if scopedError := testApp.UpdateExpeditionScoped(activeExpedition.ID, "Scoped Renamed", "Scoped Desc", profileOneID); scopedError != nil {
+		testingContext.Fatalf("UpdateExpeditionScoped(same profile): %v", scopedError)
+	}
+	if scopedError := testApp.UpdateExpeditionScoped(activeExpedition.ID, "Scoped Renamed", "Scoped Desc", profileOneID); scopedError != nil {
+		testingContext.Fatalf("UpdateExpeditionScoped(same profile no-op): %v", scopedError)
+	}
+
+	undoScopedMeta, undoError := testApp.UndoExpedition(activeExpedition.ID)
+	if undoError != nil || !undoScopedMeta.Applied || undoScopedMeta.Label != "Edit Expedition" {
+		testingContext.Fatalf("UndoExpedition(same-profile scoped): res=%+v err=%v", undoScopedMeta, undoError)
+	}
+	afterScopedUndo := mustGetPlan(testingContext, testApp, activeExpedition.ID)
+	if afterScopedUndo.Expedition.Name != "Scoped Base" || afterScopedUndo.Expedition.Description != "Base Desc" ||
+		afterScopedUndo.Expedition.CommanderProfileID != profileOneID || afterScopedUndo.Rows[0].Row.Notes != noteText {
+		testingContext.Fatalf("expected same-profile scoped undo to revert only metadata, got exp=%+v row=%+v",
+			afterScopedUndo.Expedition, afterScopedUndo.Rows[0].Row)
+	}
+
+	if scopedError := testApp.UpdateExpeditionScoped(activeExpedition.ID, "Switched Commander", "Base Desc", profileTwoID); scopedError != nil {
+		testingContext.Fatalf("UpdateExpeditionScoped(profileTwo): %v", scopedError)
+	}
+	if clearedUndo, clearUndoError := testApp.UndoExpedition(activeExpedition.ID); clearUndoError != nil || clearedUndo.Applied {
+		testingContext.Fatalf("expected profile-changing UpdateExpeditionScoped to clear undo stack, got res=%+v err=%v", clearedUndo, clearUndoError)
+	}
+}

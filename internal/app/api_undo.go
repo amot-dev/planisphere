@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"log"
+	"strings"
 
 	"planisphere/internal/store/expedition"
 )
@@ -57,6 +58,18 @@ func (app *App) clearExpeditionUndoHistory(expeditionID int64) {
 	if history != nil {
 		history.ClearExpedition(expeditionID)
 	}
+}
+
+// clearExpeditionUndoHistoryLocked clears expeditionID's undo stack while the
+// caller already holds app.dbMu (avoiding recursive RLock acquisition).
+func (app *App) clearExpeditionUndoHistoryLocked(targetDB *sql.DB, expeditionID int64) {
+	if app.db == targetDB && targetDB != nil && app.undoHistory != nil {
+		app.undoHistory.ClearExpedition(expeditionID)
+	}
+}
+
+func expeditionMetaChanged(before expedition.Expedition, name, description string) bool {
+	return before.Name != strings.TrimSpace(name) || before.Description != strings.TrimSpace(description)
 }
 
 // runUndoExclusive serializes non-undoable DB mutations together with their

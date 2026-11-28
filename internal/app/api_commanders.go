@@ -94,19 +94,18 @@ func (app *App) UpdateExpeditionScoped(
 	commanderProfileID int64,
 ) error {
 	var profileChanged bool
-	if updateError := app.runUndoExclusive(func() error {
-		if err := app.withReadyReadLock(func() error {
-			var txError error
-			profileChanged, txError = expedition.UpdateMetaAndCommanderTx(app.db, id, name, description, commanderProfileID)
-			return txError
-		}); err != nil {
-			return err
+	metaChanged, updateError := app.recordExpeditionMetaMutation(id, "Edit Expedition", func(targetDB *sql.DB, before expedition.Expedition) (bool, error) {
+		var txError error
+		if profileChanged, txError = expedition.UpdateMetaAndCommanderTx(targetDB, id, name, description, commanderProfileID); txError != nil {
+			return false, txError
 		}
 		if profileChanged {
-			app.clearExpeditionUndoHistory(id)
+			app.clearExpeditionUndoHistoryLocked(targetDB, id)
+			return false, nil
 		}
-		return nil
-	}); updateError != nil {
+		return expeditionMetaChanged(before, name, description), nil
+	})
+	if updateError != nil {
 		return updateError
 	}
 	app.clearExportSnapshot()
@@ -114,7 +113,9 @@ func (app *App) UpdateExpeditionScoped(
 		app.publishApp(id, events.AppExpeditionPlanChanged, events.AppExpeditionBoundsChanged, events.AppExpeditionModesChanged)
 		return nil
 	}
-	app.publishApp(id, events.AppExpeditionPlanChanged)
+	if metaChanged {
+		app.publishApp(id, events.AppExpeditionPlanChanged)
+	}
 	return nil
 }
 
