@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"planisphere/internal/core/db"
+	"planisphere/internal/reference"
 	"planisphere/internal/store/expedition"
 	"planisphere/internal/testutil/dbtest"
 	"planisphere/internal/testutil/expeditiontest"
@@ -431,5 +432,52 @@ func TestUpdateRowActiveStructuralGuards(testingContext *testing.T) {
 	}
 	if _, err := expedition.UpdateRowTx(databaseConnection, expedition.RowPatch{ID: originWaypoint.ID, SystemName: &newSystem}); err == nil {
 		testingContext.Fatalf("expected active expedition to reject SystemName edit on unvisited origin waypoint #1")
+	}
+}
+
+func TestInsertRegionRowAutoFillsSuggestedRegion(t *testing.T) {
+	dbConn := dbtest.OpenMemory(t)
+	coloniaRegion, ok := reference.RegionAt(-9530, -910, 19808)
+	if !ok || coloniaRegion.ID == reference.InnerOrionSpurID {
+		t.Fatalf("expected Colonia coordinates to resolve outside Inner Orion Spur, got %+v ok=%v", coloniaRegion, ok)
+	}
+
+	expeditionRecord := mustCreateWithWaypoints(
+		t,
+		dbConn,
+		"Suggested Region Insert",
+		"Verify region header auto-fill on insert",
+		expedition.SeedWaypoint{SystemName: "Sol", HasCoords: true, X: 0, Y: 0, Z: 0, CoordsSource: "edsm"},
+		expedition.SeedWaypoint{SystemName: "Unresolved Stop"},
+		expedition.SeedWaypoint{SystemName: "Colonia", HasCoords: true, X: -9530, Y: -910, Z: 19808, CoordsSource: "edsm"},
+	)
+	initialRows, listErr := expedition.ListRows(dbConn, expeditionRecord.ID)
+	if listErr != nil || len(initialRows) != 3 {
+		t.Fatalf("ListRows = %d err=%v", len(initialRows), listErr)
+	}
+	solRow, unresolvedRow, coloniaRow := initialRows[0], initialRows[1], initialRows[2]
+
+	// Inserting before an unresolved waypoint skips it and auto-fills from Colonia.
+	beforeUnresolved := mustInsert(t, dbConn, expeditionRecord.ID, solRow.ID, expedition.RowRegion, 0)
+	if beforeUnresolved.RegionID != coloniaRegion.ID {
+		t.Fatalf("expected auto-filled region %d (%s), got %d", coloniaRegion.ID, coloniaRegion.Name, beforeUnresolved.RegionID)
+	}
+
+	// Inserting directly before Colonia also auto-fills Colonia's region.
+	beforeColonia := mustInsert(t, dbConn, expeditionRecord.ID, unresolvedRow.ID, expedition.RowRegion, 0)
+	if beforeColonia.RegionID != coloniaRegion.ID {
+		t.Fatalf("expected auto-filled region %d before Colonia, got %d", coloniaRegion.ID, beforeColonia.RegionID)
+	}
+
+	// Appending at the end has no downstream waypoint, so it falls back to Inner Orion Spur.
+	atEnd := mustInsert(t, dbConn, expeditionRecord.ID, expedition.InsertAtEnd, expedition.RowRegion, 0)
+	if atEnd.RegionID != reference.InnerOrionSpurID {
+		t.Fatalf("expected fallback region %d at end, got %d", reference.InnerOrionSpurID, atEnd.RegionID)
+	}
+
+	// Passing an explicit valid region ID overrides the downstream suggestion.
+	explicitHeader := mustInsert(t, dbConn, expeditionRecord.ID, coloniaRow.ID, expedition.RowRegion, reference.InnerOrionSpurID)
+	if explicitHeader.RegionID != reference.InnerOrionSpurID {
+		t.Fatalf("expected explicit region %d to be preserved, got %d", reference.InnerOrionSpurID, explicitHeader.RegionID)
 	}
 }

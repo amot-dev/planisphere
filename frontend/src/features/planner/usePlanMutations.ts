@@ -21,8 +21,6 @@ import {
 import { createBusyTaskTracker, type BusyTaskTracker } from '../../hooks/useBusyTasks'
 import type { PlannerConfirmState } from './PlannerConfirmModal'
 
-const DEFAULT_GALACTIC_REGION_ID = 18 // Inner Orion Spur
-
 /**
  * PlanMutationContextCallbacks supplies the busy banner, optional token-scoped
  * busy tracker, optimistic PlanView setter, and rollback refresh handler shared
@@ -305,7 +303,7 @@ export function usePlanMutations({
       await runPlanMutation(
         rowType === 'region' ? 'ADDING REGION HEADER' : 'ADDING WAYPOINT',
         `Failed to insert ${rowType}`,
-        () => AddRow(plan.expedition.id, afterRowId, rowType, DEFAULT_GALACTIC_REGION_ID),
+        () => AddRow(plan.expedition.id, afterRowId, rowType, 0),
         { rollbackOnError: true },
       )
     },

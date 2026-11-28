@@ -122,6 +122,23 @@ const (
 	InsertAtTop = int64(-1)
 )
 
+// SuggestedRegionID returns the galactic region ID of the first waypoint at or
+// after startIndex that has resolved coordinates, or 0 if none exists.
+func SuggestedRegionID(rows []Row, startIndex int) int {
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	for rowIndex := startIndex; rowIndex < len(rows); rowIndex++ {
+		if rows[rowIndex].IsWaypoint() && rows[rowIndex].HasCoords {
+			if foundRegion, ok := reference.RegionAt(rows[rowIndex].X, rows[rowIndex].Y, rows[rowIndex].Z); ok {
+				return foundRegion.ID
+			}
+			break
+		}
+	}
+	return 0
+}
+
 // InsertRow adds a row after afterRowID (InsertAtEnd or InsertAtTop for the ends).
 func InsertRow(transaction *sql.Tx, expeditionID, afterRowID int64, rowType string, regionID int) (Row, error) {
 	if rowType != RowWaypoint && rowType != RowRegion {
@@ -151,7 +168,11 @@ func InsertRow(transaction *sql.Tx, expeditionID, afterRowID int64, rowType stri
 	var regionValue any
 	if rowType == RowRegion {
 		if _, ok := reference.RegionByID(regionID); !ok {
-			regionID = reference.InnerOrionSpurID
+			if suggested := SuggestedRegionID(rows, insertIndex); suggested > 0 {
+				regionID = suggested
+			} else {
+				regionID = reference.InnerOrionSpurID
+			}
 		}
 		regionValue = regionID
 	}

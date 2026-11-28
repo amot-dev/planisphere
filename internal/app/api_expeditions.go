@@ -201,7 +201,9 @@ func (app *App) gecLookup(name string, address int64) *expedition.GECRef {
 }
 
 // AddRow inserts a row after afterRowID (0 appends at end, -1 inserts at top).
-// rowType is "waypoint" or "region"; regionID is used for region headers.
+// rowType is "waypoint" or "region"; regionID is used for region headers (0
+// auto-selects the suggested region from the next resolved waypoint, falling
+// back to Inner Orion Spur).
 func (app *App) AddRow(expeditionID, afterRowID int64, rowType string, regionID int) (expedition.Row, error) {
 	var newRow expedition.Row
 	applied, err := app.recordUndoableMutation(expeditionID, rowActionLabel("Add", rowType), func(targetDB *sql.DB) (bool, error) {
@@ -413,14 +415,7 @@ func (app *App) GetRegionOptions(expeditionID, rowID int64, editing bool) (Regio
 	if editing {
 		startIndex = cutoffIndex + 1
 	}
-	for rowIndex := startIndex; rowIndex < len(rows); rowIndex++ {
-		if rows[rowIndex].IsWaypoint() && rows[rowIndex].HasCoords {
-			if foundRegion, ok := reference.RegionAt(rows[rowIndex].X, rows[rowIndex].Y, rows[rowIndex].Z); ok {
-				regionOptionsResult.SuggestedRegionID = foundRegion.ID
-			}
-			break
-		}
-	}
+	regionOptionsResult.SuggestedRegionID = expedition.SuggestedRegionID(rows, startIndex)
 	return regionOptionsResult, nil
 }
 
