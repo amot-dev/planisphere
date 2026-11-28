@@ -7,6 +7,7 @@ import {
   buildOptimisticFcStopTogglePlan,
   buildOptimisticLegModePlan,
   buildOptimisticMovedRowPlan,
+  buildOptimisticSystemNamePlan,
 } from './planOptimisticReducers'
 
 describe('planOptimisticReducers structural sharing', () => {
@@ -206,5 +207,13 @@ describe('planOptimisticReducers structural sharing', () => {
     expect(deletedPlan.rows[1]).toBe(initialPlan.rows[1])
     expect(deletedPlan.rows[2].number).toBe(2)
     expect(deletedPlan.rows[2].row).toBe(initialPlan.rows[3].row)
+
+    // System name update clones only the targeted row and returns plan unchanged when identical.
+    expect(buildOptimisticSystemNamePlan(initialPlan, 12, 'Colonia')).toBe(initialPlan)
+    const renamedPlan = buildOptimisticSystemNamePlan(initialPlan, 12, 'Rohini')
+    expect(renamedPlan.rows[0]).toBe(initialPlan.rows[0])
+    expect(renamedPlan.rows[1]).toBe(initialPlan.rows[1])
+    expect(renamedPlan.rows[3]).toBe(initialPlan.rows[3])
+    expect(renamedPlan.rows[2].row.systemName).toBe('Rohini')
   })
 })

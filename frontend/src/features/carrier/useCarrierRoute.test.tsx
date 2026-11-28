@@ -2,6 +2,7 @@
 import { act, useEffect, useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { expedition } from '../../api/models'
+import { createDeferred, type Deferred } from '../../test/async'
 import { renderHook } from '../../test/render'
 import { installWailsAppMock } from '../../test/wailsMock'
 import { useCarrierRoute } from './useCarrierRoute'
@@ -60,6 +61,8 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
     const planOne = buildCarrierPlan(1, 11, 'Colonia')
     const planTwo = buildCarrierPlan(2, 21, 'Beagle Point')
     const busyMessages: Array<string | null> = []
+    let pendingFlush: Deferred<boolean> | null = null
+    const flushPendingRowUpdates = vi.fn(() => pendingFlush?.promise ?? Promise.resolve(true))
 
     const mountedHook = renderHook(
       ({
@@ -80,6 +83,7 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
           dbPath,
           manualPlotterRequestCount: manualRequestCount,
           onBusyChange: (message) => busyMessages.push(message),
+          flushPendingRowUpdates,
           onPlanOptimisticUpdate: setCurrentPlan,
         })
       },
@@ -90,8 +94,25 @@ describe('useCarrierRoute backend RPC coordination and cross-DB guards', () => {
       await Promise.resolve()
     })
 
+    // Waits for pending row updates before PrepareCarrierRoutePrompt and aborts if flushing fails.
+    pendingFlush = createDeferred<boolean>()
+    const failedPromptOpen = mountedHook.getResult().openCarrierRoutePrompt(1, planOne.rows[1].row)
+    expect(spies.PrepareCarrierRoutePrompt).not.toHaveBeenCalled()
     await act(async () => {
-      await mountedHook.getResult().openCarrierRoutePrompt(1, planOne.rows[1].row)
+      pendingFlush?.resolve(false)
+      pendingFlush = null
+      await failedPromptOpen
+    })
+    expect(spies.PrepareCarrierRoutePrompt).not.toHaveBeenCalled()
+    expect(mountedHook.getResult().routePrompt).toBeNull()
+
+    pendingFlush = createDeferred<boolean>()
+    const succeededPromptOpen = mountedHook.getResult().openCarrierRoutePrompt(1, planOne.rows[1].row)
+    expect(spies.PrepareCarrierRoutePrompt).not.toHaveBeenCalled()
+    await act(async () => {
+      pendingFlush?.resolve(true)
+      pendingFlush = null
+      await succeededPromptOpen
     })
     expect(mountedHook.getResult().routePrompt?.destination).toBe('Colonia')
 

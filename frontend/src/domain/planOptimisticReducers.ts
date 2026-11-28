@@ -111,6 +111,31 @@ function applyOptimisticFcRowUpdate(
 }
 
 /**
+ * buildOptimisticSystemNamePlan returns an optimistic PlanView updating a
+ * waypoint row's star system name while preserving reference identity on all
+ * unaffected rows.
+ */
+export function buildOptimisticSystemNamePlan(
+  plan: expedition.PlanView,
+  rowId: number,
+  systemName: string,
+): expedition.PlanView {
+  if (
+    !plan.rows?.some(
+      (rowView) => rowView?.row?.id === rowId && (rowView.row.systemName ?? '') !== systemName,
+    )
+  ) {
+    return plan
+  }
+  const optimisticRows = plan.rows.map((rowView) =>
+    rowView?.row?.id === rowId
+      ? cloneWailsInstance(rowView, { row: cloneWailsInstance(rowView.row, { systemName }) })
+      : rowView,
+  )
+  return cloneWailsInstance(plan, { rows: optimisticRows })
+}
+
+/**
  * buildOptimisticFcArrivedPlan returns an optimistic PlanView updating a
  * waypoint's Fleet Carrier arrival state, carrier permissions, and frontier
  * indices while preserving reference identity on all unaffected rows.

@@ -126,6 +126,7 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
 
   const mutations = usePlanMutations({
     plan,
+    dbPath,
     isPlanning: Boolean(isPlanning),
     onBusyChange,
     busyTracker: sharedBusyTracker,
@@ -139,10 +140,55 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
     manualPlotterRequestCount,
     onBusyChange,
     busyTracker: sharedBusyTracker,
+    flushPendingRowUpdates: mutations.flushPendingRowUpdates,
     onPlanOptimisticUpdate,
     onRefreshPlan,
     onCarrierRouteOpenChange,
   })
+
+  const plannerScopeRef = useRef({
+    mounted: true,
+    expeditionId: plan?.expedition?.id,
+    status: plan?.expedition?.status,
+    dbPath,
+    exportEnabled: Boolean(exportEnabled),
+  })
+  plannerScopeRef.current = {
+    mounted: plannerScopeRef.current.mounted,
+    expeditionId: plan?.expedition?.id,
+    status: plan?.expedition?.status,
+    dbPath,
+    exportEnabled: Boolean(exportEnabled),
+  }
+
+  const handleOpenStartModal = useCallback(async () => {
+    const { expeditionId: requestExpeditionId, dbPath: requestDbPath } = plannerScopeRef.current
+    if (!(await mutations.flushPendingRowUpdates())) return
+    const currentScope = plannerScopeRef.current
+    if (
+      currentScope.mounted &&
+      currentScope.expeditionId === requestExpeditionId &&
+      currentScope.dbPath === requestDbPath &&
+      currentScope.status === 'planning'
+    ) {
+      onOpenStartModal()
+    }
+  }, [mutations.flushPendingRowUpdates, onOpenStartModal])
+
+  const handleOpenExportModal = useCallback(async () => {
+    if (!onOpenExportModal) return
+    const { expeditionId: requestExpeditionId, dbPath: requestDbPath } = plannerScopeRef.current
+    if (!(await mutations.flushPendingRowUpdates())) return
+    const currentScope = plannerScopeRef.current
+    if (
+      currentScope.mounted &&
+      currentScope.expeditionId === requestExpeditionId &&
+      currentScope.dbPath === requestDbPath &&
+      currentScope.exportEnabled
+    ) {
+      onOpenExportModal()
+    }
+  }, [mutations.flushPendingRowUpdates, onOpenExportModal])
 
   const [highlightedRowId, setHighlightedRowId] = useState<number | null>(null)
   const highlightTimeoutRef = useRef<number | null>(null)
@@ -150,7 +196,9 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
   onScrollTargetConsumedRef.current = onScrollTargetConsumed
 
   useEffect(() => {
+    plannerScopeRef.current.mounted = true
     return () => {
+      plannerScopeRef.current.mounted = false
       if (highlightTimeoutRef.current !== null) {
         window.clearTimeout(highlightTimeoutRef.current)
         highlightTimeoutRef.current = null
@@ -351,8 +399,8 @@ export const ExpeditionPlanner = memo(function ExpeditionPlanner({
         carrierRouteOpen={Boolean(carrierRoute.activeCarrierRoute || carrierRoute.routePrompt)}
         exportEnabled={exportEnabled}
         onChangeActiveMode={mutations.handleActiveModeChange}
-        onOpenStartModal={onOpenStartModal}
-        onOpenExportModal={onOpenExportModal}
+        onOpenStartModal={() => void handleOpenStartModal()}
+        onOpenExportModal={onOpenExportModal ? () => void handleOpenExportModal() : undefined}
         onLifecycleAction={mutations.handleLifecycleAction}
       />
 

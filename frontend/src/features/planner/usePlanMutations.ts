@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AddRow,
   DeleteRow,
@@ -16,6 +16,7 @@ import {
   buildOptimisticFcStopTogglePlan,
   buildOptimisticLegModePlan,
   buildOptimisticMovedRowPlan,
+  buildOptimisticSystemNamePlan,
 } from '../../domain/planOptimisticReducers'
 import { createBusyTaskTracker, type BusyTaskTracker } from '../../hooks/useBusyTasks'
 import type { PlannerConfirmState } from './PlannerConfirmModal'
@@ -36,12 +37,14 @@ export interface PlanMutationContextCallbacks {
 
 /**
  * PlanMutationBehaviorOptions configures optional optimistic PlanView state,
- * post-success refresh, and rollback behavior for a single planner mutation.
+ * post-success refresh, rollback behavior, and pending row-update tracking for
+ * a single planner mutation.
  */
 export interface PlanMutationBehaviorOptions {
   optimisticPlan?: expedition.PlanView
   onSuccess?: () => void
   rollbackOnError?: boolean
+  trackRowUpdate?: boolean
 }
 
 /**
@@ -85,16 +88,17 @@ export async function executePlanMutation(
 }
 
 /**
- * UsePlanMutationsOptions configures plan state and optimistic update callbacks
- * for expedition planner mutations.
+ * UsePlanMutationsOptions configures plan state, optional active database path
+ * key, and optimistic update callbacks for expedition planner mutations.
  */
 export interface UsePlanMutationsOptions {
   plan: expedition.PlanView | null
+  dbPath?: string
   isPlanning: boolean
   onBusyChange: (busyMessage: string | null) => void
   busyTracker?: BusyTaskTracker
   applyOptimisticPlan: (nextPlan: expedition.PlanView) => void
-  onRefreshPlan: () => void
+  onRefreshPlan: () => void | Promise<void>
 }
 
 /**
@@ -103,6 +107,7 @@ export interface UsePlanMutationsOptions {
  */
 export function usePlanMutations({
   plan,
+  dbPath,
   isPlanning,
   onBusyChange,
   busyTracker: externalBusyTracker,
@@ -111,6 +116,38 @@ export function usePlanMutations({
 }: UsePlanMutationsOptions) {
   const [insertMenuAfterId, setInsertMenuAfterId] = useState<number | null>(null)
   const [confirmState, setConfirmState] = useState<PlannerConfirmState | null>(null)
+  const latestPlanRef = useRef(plan)
+  latestPlanRef.current = plan
+  const pendingRowUpdatesRef = useRef<Set<Promise<boolean>>>(new Set())
+
+  useEffect(() => {
+    pendingRowUpdatesRef.current.clear()
+  }, [plan?.expedition?.id, dbPath])
+
+  const trackRowUpdate = useCallback((updatePromise: Promise<boolean>): Promise<boolean> => {
+    const removePendingUpdate = () => {
+      pendingRowUpdatesRef.current.delete(updatePromise)
+    }
+    pendingRowUpdatesRef.current.add(updatePromise)
+    updatePromise.then(removePendingUpdate, removePendingUpdate)
+    return updatePromise
+  }, [])
+
+  const flushPendingRowUpdates = useCallback(async (): Promise<boolean> => {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    let allUpdatesSucceeded = true
+    while (pendingRowUpdatesRef.current.size > 0) {
+      const pendingBatch = Array.from(pendingRowUpdatesRef.current)
+      const batchResults = await Promise.all(
+        pendingBatch.map((pendingUpdate) => pendingUpdate.catch(() => false)),
+      )
+      if (batchResults.some((succeeded) => !succeeded)) allUpdatesSucceeded = false
+      for (const settledUpdate of pendingBatch) pendingRowUpdatesRef.current.delete(settledUpdate)
+    }
+    return allUpdatesSucceeded
+  }, [])
 
   const onBusyChangeRef = useRef(onBusyChange)
   onBusyChangeRef.current = onBusyChange
@@ -126,20 +163,25 @@ export function usePlanMutations({
       errorContext: string,
       mutationAction: () => Promise<unknown>,
       options?: PlanMutationBehaviorOptions,
-    ) =>
-      executePlanMutation(
+    ) => {
+      const mutationPromise = executePlanMutation(
         busyMessage,
         errorContext,
         mutationAction,
         {
           onBusyChange,
           busyTracker,
-          onPlanOptimisticUpdate: applyOptimisticPlan,
+          onPlanOptimisticUpdate: (nextPlan) => {
+            latestPlanRef.current = nextPlan
+            applyOptimisticPlan(nextPlan)
+          },
           onRefreshPlan,
         },
         options,
-      ),
-    [applyOptimisticPlan, busyTracker, onBusyChange, onRefreshPlan],
+      )
+      return options?.trackRowUpdate ? trackRowUpdate(mutationPromise) : mutationPromise
+    },
+    [applyOptimisticPlan, busyTracker, onBusyChange, onRefreshPlan, trackRowUpdate],
   )
 
   const setFcArrived = useCallback(
@@ -149,7 +191,7 @@ export function usePlanMutations({
         'UPDATING CARRIER ARRIVAL',
         'Failed to update carrier arrival',
         () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, fcArrived: arrived })),
-        { optimisticPlan: buildOptimisticFcArrivedPlan(plan, rowId, arrived) },
+        { optimisticPlan: buildOptimisticFcArrivedPlan(plan, rowId, arrived), trackRowUpdate: true },
       )
     },
     [plan, runPlanMutation],
@@ -161,12 +203,18 @@ export function usePlanMutations({
       field: 'systemName' | 'poiName' | 'notes',
       value: string,
     ): Promise<boolean> => {
-      if ((row[field] ?? '') === value) return true
+      const normalizedValue = field === 'systemName' ? value.trim().replace(/\s+/g, ' ') : value
+      if ((row[field] ?? '') === normalizedValue) return true
+      const currentPlan = latestPlanRef.current
+      const optimisticPlan =
+        field === 'systemName' && currentPlan
+          ? buildOptimisticSystemNamePlan(currentPlan, row.id, normalizedValue)
+          : undefined
       return runPlanMutation(
         'UPDATING WAYPOINT',
         `Failed to update waypoint ${field}`,
-        () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, [field]: value })),
-        { rollbackOnError: true },
+        () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, [field]: normalizedValue })),
+        { ...(optimisticPlan ? { optimisticPlan } : { rollbackOnError: true }), trackRowUpdate: true },
       )
     },
     [runPlanMutation],
@@ -189,7 +237,7 @@ export function usePlanMutations({
         'UPDATING FC STOP',
         'Failed to toggle fleet carrier stop',
         () => UpdateRow(expedition.RowPatch.createFrom({ id: row.id, fcStop: nextFcStop })),
-        { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop) },
+        { optimisticPlan: buildOptimisticFcStopTogglePlan(plan, row, nextFcStop), trackRowUpdate: true },
       )
     },
     [plan, runPlanMutation],
@@ -244,7 +292,7 @@ export function usePlanMutations({
         'UPDATING REGION',
         'Failed to update galactic region',
         () => UpdateRow(expedition.RowPatch.createFrom({ id: rowId, regionId })),
-        { rollbackOnError: true },
+        { rollbackOnError: true, trackRowUpdate: true },
       )
     },
     [runPlanMutation],
@@ -379,6 +427,7 @@ export function usePlanMutations({
     setConfirmState,
     setFcArrived,
     commitField,
+    flushPendingRowUpdates,
     toggleFcStop,
     handleRequestOverrideFcArrived,
     handleActiveModeChange,

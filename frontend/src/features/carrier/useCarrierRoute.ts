@@ -30,6 +30,7 @@ export interface UseCarrierRouteOptions {
   manualPlotterRequestCount?: number
   onBusyChange: (busyMessage: string | null) => void
   busyTracker?: BusyTaskTracker
+  flushPendingRowUpdates?: () => Promise<boolean>
   onPlanOptimisticUpdate?: (next: expedition.PlanView) => void
   onRefreshPlan?: () => void
   onCarrierRouteOpenChange?: (isOpen: boolean) => void
@@ -39,6 +40,7 @@ interface CarrierScopeSnapshot {
   plan: expedition.PlanView | null
   expeditionId: number | undefined
   dbPath: string
+  flushPendingRowUpdates?: () => Promise<boolean>
   onPlanOptimisticUpdate?: (next: expedition.PlanView) => void
   onRefreshPlan?: () => void
 }
@@ -221,16 +223,19 @@ function useCarrierRouteController(
   }, [applyOptimisticState, busyTracker, cancelPendingPersist, invalidateRequests, isStaleRequest, latestRef, mountedRef, syncDrafts])
 
   const openCarrierRoutePrompt = useCallback(async (_rowIndex: number, targetRow: expedition.Row) => {
-    const { plan: currentPlan, expeditionId: requestExpeditionId, dbPath: requestDbPath } = latestRef.current
+    const { plan: currentPlan, expeditionId: requestExpeditionId, dbPath: requestDbPath, flushPendingRowUpdates } = latestRef.current
     if (!currentPlan || !requestExpeditionId) return
     const requestSeq = invalidateRequests(true)
     try {
+      if (flushPendingRowUpdates && !(await flushPendingRowUpdates())) return
+      if (isStaleRequest(requestExpeditionId, requestDbPath, requestSeq)) return
       const defaults = await PrepareCarrierRoutePrompt(requestExpeditionId, targetRow.id)
       if (!isStaleRequest(requestExpeditionId, requestDbPath, requestSeq)) {
+        const flushedTargetRow = latestRef.current.plan?.rows?.find((rowView) => rowView?.row?.id === targetRow.id)?.row
         setRoutePrompt({
           targetRowId: targetRow.id,
           origin: defaults.origin,
-          destination: (targetRow.systemName ?? '').trim() || defaults.destination,
+          destination: (targetRow.systemName ?? '').trim() || (flushedTargetRow?.systemName ?? '').trim() || defaults.destination,
           capacityUsed: String(defaults.capacityUsed),
           depotTritium: String(defaults.depotTritium),
           carrierType: defaults.carrierType === 'squadron' ? 'squadron' : 'player',
@@ -360,6 +365,7 @@ export function useCarrierRoute({
   manualPlotterRequestCount = 0,
   onBusyChange,
   busyTracker: externalBusyTracker,
+  flushPendingRowUpdates,
   onPlanOptimisticUpdate,
   onRefreshPlan,
   onCarrierRouteOpenChange,
@@ -368,8 +374,8 @@ export function useCarrierRoute({
   const activeCarrierRoute = routeState?.route ?? null
   const currentExpeditionId = plan?.expedition?.id
 
-  const latestRef = useRef<CarrierScopeSnapshot>({ plan, expeditionId: currentExpeditionId, dbPath, onPlanOptimisticUpdate, onRefreshPlan })
-  latestRef.current = { plan, expeditionId: currentExpeditionId, dbPath, onPlanOptimisticUpdate, onRefreshPlan }
+  const latestRef = useRef<CarrierScopeSnapshot>({ plan, expeditionId: currentExpeditionId, dbPath, flushPendingRowUpdates, onPlanOptimisticUpdate, onRefreshPlan })
+  latestRef.current = { plan, expeditionId: currentExpeditionId, dbPath, flushPendingRowUpdates, onPlanOptimisticUpdate, onRefreshPlan }
   const mountedRef = useRef(true)
 
   const onBusyChangeRef = useRef(onBusyChange)
