@@ -101,6 +101,23 @@ export function formatOptionalCredits(value: number | null): string {
   return value != null ? formatCredits(value) : '—'
 }
 
+/** Formats a nullable light-years-per-hour pace value or an em-dash placeholder. */
+export function formatOptionalLyPerHour(value: number | null): string {
+  return value != null ? `${formatLy(value, 1)}/h` : '—'
+}
+
+/** Formats a nullable count-per-hour pace value to one decimal place or an em-dash placeholder. */
+export function formatOptionalRatePerHour(value: number | null): string {
+  return value != null
+    ? `${value.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} /h`
+    : '—'
+}
+
+/** Formats a nullable credits-per-hour pace value or an em-dash placeholder. */
+export function formatOptionalCreditsPerHour(value: number | null): string {
+  return value != null ? `${formatCredits(value)}/h` : '—'
+}
+
 /** Formats the combined elapsed and in-game duration metadata line for telemetry headers. */
 export function formatTelemetryHeaderDurationLine(
   header: Pick<TelemetryHeaderViewModel, 'durationLabel' | 'inGameDurationLabel'>,
@@ -232,6 +249,10 @@ const DETAILS_KPI_BUILDERS: Partial<Record<DetailsMetricId, KpiContentBuilder>> 
   boostRate: (context) => kpiTile('Boost Rate', formatOptionalPercent(context.derived.boostRatePercent)),
   avgDistancePerDay: (context) =>
     kpiTile('Avg Distance per Day', formatOptionalLy(context.derived.avgDistancePerDayLy)),
+  avgDistancePerHour: (context) =>
+    kpiTile('Avg Distance / Hr', formatOptionalLyPerHour(context.derived.avgDistancePerHourLy)),
+  avgJumpsPerHour: (context) =>
+    kpiTile('Avg Jumps / Hr', formatOptionalRatePerHour(context.derived.avgJumpsPerHour)),
   carrierJumps: (context) => kpiTile('Carrier Jumps', formatInt(context.metrics.carrierJumps)),
   carrierDistance: (context) => kpiTile('Carrier Distance', formatLy(context.metrics.carrierDistanceLy, 1)),
   avgCarrierJumpRange: (context) =>
@@ -263,6 +284,8 @@ const DETAILS_KPI_BUILDERS: Partial<Record<DetailsMetricId, KpiContentBuilder>> 
     kpiTile('Avg Credits / 1,000 Ly', formatOptionalCredits(context.derived.avgCombinedCreditsPer1000Ly), 'cyan'),
   avgCombinedCreditsPerDay: (context) =>
     kpiTile('Avg Credits / Day', formatOptionalCredits(context.derived.avgCombinedCreditsPerDay), 'cyan'),
+  avgCombinedCreditsPerHour: (context) =>
+    kpiTile('Avg Credits / Hr', formatOptionalCreditsPerHour(context.derived.avgCombinedCreditsPerHour), 'cyan'),
   cartoTotalValue: (context) =>
     kpiTile('Cartographics Value', formatCredits(context.metrics.scanValueTotal), 'cyan'),
   bodiesScanned: (context) =>
@@ -277,6 +300,10 @@ const DETAILS_KPI_BUILDERS: Partial<Record<DetailsMetricId, KpiContentBuilder>> 
     kpiTile('Avg Carto Cr / Jump', formatOptionalCredits(context.derived.avgCartoCreditsPerJump), 'cyan'),
   avgCartoCreditsPer1000Ly: (context) =>
     kpiTile('Avg Carto Cr / 1,000 Ly', formatOptionalCredits(context.derived.avgCartoCreditsPer1000Ly), 'cyan'),
+  avgCartoCreditsPerHour: (context) =>
+    kpiTile('Avg Carto Cr / Hr', formatOptionalCreditsPerHour(context.derived.avgCartoCreditsPerHour), 'cyan'),
+  avgBodiesScannedPerHour: (context) =>
+    kpiTile('Avg Bodies / Hr', formatOptionalRatePerHour(context.derived.avgBodiesScannedPerHour), 'cyan'),
   exoTotalValue: (context) =>
     kpiTile('Exobiology Value', formatCredits(context.metrics.organicValueTotal), 'emerald'),
   organicSamples: (context) =>
@@ -289,6 +316,10 @@ const DETAILS_KPI_BUILDERS: Partial<Record<DetailsMetricId, KpiContentBuilder>> 
     kpiTile('Avg Exo Cr / Jump', formatOptionalCredits(context.derived.avgExoCreditsPerJump), 'emerald'),
   avgExoCreditsPer1000Ly: (context) =>
     kpiTile('Avg Exo Cr / 1,000 Ly', formatOptionalCredits(context.derived.avgExoCreditsPer1000Ly), 'emerald'),
+  avgExoCreditsPerHour: (context) =>
+    kpiTile('Avg Exo Cr / Hr', formatOptionalCreditsPerHour(context.derived.avgExoCreditsPerHour), 'emerald'),
+  avgOrganicSamplesPerHour: (context) =>
+    kpiTile('Avg Samples / Hr', formatOptionalRatePerHour(context.derived.avgOrganicSamplesPerHour), 'emerald'),
   realizedTotal: (context) =>
     kpiTile('Total Realized Net', formatCredits(context.realization.totalRealized), 'amber'),
   pendingValue: (context) =>
@@ -302,6 +333,8 @@ const DETAILS_KPI_BUILDERS: Partial<Record<DetailsMetricId, KpiContentBuilder>> 
     kpiTile('Avg Realized Cr / Jump', formatOptionalCredits(context.derived.avgRealizedCreditsPerJump), 'amber'),
   avgRealizedCreditsPer1000Ly: (context) =>
     kpiTile('Avg Realized Cr / 1,000 Ly', formatOptionalCredits(context.derived.avgRealizedCreditsPer1000Ly), 'amber'),
+  avgRealizedCreditsPerHour: (context) =>
+    kpiTile('Avg Realized Cr / Hr', formatOptionalCreditsPerHour(context.derived.avgRealizedCreditsPerHour), 'amber'),
 }
 
 const buildCartographicsCard: BreakdownCardBuilder = (context) => ({

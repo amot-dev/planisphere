@@ -9,7 +9,11 @@ import (
 	"planisphere/internal/store/expedition"
 )
 
-const millisecondsPerDay = 86_400_000.0
+const (
+	millisecondsPerDay   = 86_400_000.0
+	minInGameRateSeconds = int64(3600)
+	secondsPerHour       = 3600.0
+)
 
 // ComputeElapsedDays returns fractional elapsed days between fromISO and toISO
 // (using currentTime when toISO is empty), or nil when timestamps are missing,
@@ -43,12 +47,13 @@ func computeElapsedMillis(fromISO, toISO string, currentTime time.Time) (int64, 
 }
 
 // ComputeDerivedMetrics computes derived averages, percentages, and net profits
-// with zero-division and sub-24-hour daily rate guards.
+// with zero-division, sub-24-hour calendar, and sub-1-hour in-game rate guards.
 func ComputeDerivedMetrics(
 	metrics replaystats.Metrics,
 	realization replaystats.RealizationBreakdown,
 	carrierCost *expedition.CarrierCost,
 	elapsedDays *float64,
+	inGameSeconds *int64,
 ) DerivedMetrics {
 	shipDistanceLy := computeShipDistanceLy(metrics)
 	totalBoosts := metrics.JetConeBoosts + metrics.PremiumBoosts + metrics.StandardBoosts + metrics.BasicBoosts
@@ -61,6 +66,27 @@ func ComputeDerivedMetrics(
 	if elapsedDays != nil && *elapsedDays >= 1.0 {
 		avgDistancePerDayLy = floatPtr(metrics.DistanceLy / *elapsedDays)
 		avgCombinedCreditsPerDay = floatPtr(float64(combinedEstimatedCredits) / *elapsedDays)
+	}
+	var (
+		avgDistancePerHourLy      *float64
+		avgJumpsPerHour           *float64
+		avgCombinedCreditsPerHour *float64
+		avgCartoCreditsPerHour    *float64
+		avgBodiesScannedPerHour   *float64
+		avgExoCreditsPerHour      *float64
+		avgOrganicSamplesPerHour  *float64
+		avgRealizedCreditsPerHour *float64
+	)
+	if inGameSeconds != nil && *inGameSeconds >= minInGameRateSeconds {
+		inGameHours := float64(*inGameSeconds) / secondsPerHour
+		avgDistancePerHourLy = floatPtr(metrics.DistanceLy / inGameHours)
+		avgJumpsPerHour = floatPtr(float64(metrics.Jumps) / inGameHours)
+		avgCombinedCreditsPerHour = floatPtr(float64(combinedEstimatedCredits) / inGameHours)
+		avgCartoCreditsPerHour = floatPtr(float64(metrics.ScanValueTotal) / inGameHours)
+		avgBodiesScannedPerHour = floatPtr(float64(metrics.BodiesScanned) / inGameHours)
+		avgExoCreditsPerHour = floatPtr(float64(metrics.OrganicValueTotal) / inGameHours)
+		avgOrganicSamplesPerHour = floatPtr(float64(metrics.OrganicSamples) / inGameHours)
+		avgRealizedCreditsPerHour = floatPtr(float64(realization.TotalRealized) / inGameHours)
 	}
 	var avgTritiumPerJump *float64
 	if metrics.TritiumUsed != nil && metrics.CarrierJumps > 0 {
@@ -82,6 +108,8 @@ func ComputeDerivedMetrics(
 		AvgJumpRangeLy:              safeDivide(shipDistanceLy, float64(metrics.Jumps)),
 		BoostRatePercent:            safePercent(totalBoosts, metrics.Jumps),
 		AvgDistancePerDayLy:         avgDistancePerDayLy,
+		AvgDistancePerHourLy:        avgDistancePerHourLy,
+		AvgJumpsPerHour:             avgJumpsPerHour,
 		AvgCarrierJumpRangeLy:       safeDivide(metrics.CarrierDistanceLy, float64(metrics.CarrierJumps)),
 		AvgTritiumPerJump:           avgTritiumPerJump,
 		CombinedEstimatedCredits:    combinedEstimatedCredits,
@@ -92,15 +120,21 @@ func ComputeDerivedMetrics(
 		AvgCombinedCreditsPerJump:   safeDivide(float64(combinedEstimatedCredits), float64(metrics.Jumps)),
 		AvgCombinedCreditsPer1000Ly: safePerThousand(float64(combinedEstimatedCredits), metrics.DistanceLy),
 		AvgCombinedCreditsPerDay:    avgCombinedCreditsPerDay,
+		AvgCombinedCreditsPerHour:   avgCombinedCreditsPerHour,
 		AvgCartoCreditsPerJump:      safeDivide(float64(metrics.ScanValueTotal), float64(metrics.Jumps)),
 		AvgCartoCreditsPer1000Ly:    safePerThousand(float64(metrics.ScanValueTotal), metrics.DistanceLy),
+		AvgCartoCreditsPerHour:      avgCartoCreditsPerHour,
+		AvgBodiesScannedPerHour:     avgBodiesScannedPerHour,
 		AvgExoCreditsPerJump:        safeDivide(float64(metrics.OrganicValueTotal), float64(metrics.Jumps)),
 		AvgExoCreditsPer1000Ly:      safePerThousand(float64(metrics.OrganicValueTotal), metrics.DistanceLy),
+		AvgExoCreditsPerHour:        avgExoCreditsPerHour,
+		AvgOrganicSamplesPerHour:    avgOrganicSamplesPerHour,
 		TotalLossesCredits:          totalLossesCredits,
 		RealizationRetentionPercent: retentionPercent,
 		NetProfitAfterCarrierCost:   netProfitAfterCarrierCost,
 		AvgRealizedCreditsPerJump:   safeDivide(float64(realization.TotalRealized), float64(metrics.Jumps)),
 		AvgRealizedCreditsPer1000Ly: safePerThousand(float64(realization.TotalRealized), metrics.DistanceLy),
+		AvgRealizedCreditsPerHour:   avgRealizedCreditsPerHour,
 	}
 }
 

@@ -20,6 +20,7 @@ function makeSmokeDerived(
   realization: typeof ZERO_SMOKE_REALIZATION,
   totalCarrierCost: number | null,
   elapsedDays: number | null,
+  inGameSeconds: number | null = null,
 ): Record<string, unknown> {
   const div = (n: number, d: number) => (d > 0 ? n / d : null)
   const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : null)
@@ -27,12 +28,15 @@ function makeSmokeDerived(
   const combined = metrics.scanValueTotal + metrics.organicValueTotal
   const settled = combined - realization.pendingValue
   const validDays = elapsedDays != null && elapsedDays >= 1 ? elapsedDays : null
+  const validHours = inGameSeconds != null && inGameSeconds >= 3600 ? inGameSeconds / 3600 : null
   return {
     shipDistanceLy: metrics.shipDistanceLy,
     totalBoosts: 0,
     avgJumpRangeLy: div(metrics.shipDistanceLy, metrics.jumps),
     boostRatePercent: pct(0, metrics.jumps),
     avgDistancePerDayLy: validDays != null ? metrics.distanceLy / validDays : null,
+    avgDistancePerHourLy: validHours != null ? metrics.distanceLy / validHours : null,
+    avgJumpsPerHour: validHours != null ? metrics.jumps / validHours : null,
     avgCarrierJumpRangeLy: div(metrics.carrierDistanceLy, metrics.carrierJumps),
     avgTritiumPerJump: metrics.tritiumUsed != null ? div(metrics.tritiumUsed, metrics.carrierJumps) : null,
     combinedEstimatedCredits: combined,
@@ -43,15 +47,21 @@ function makeSmokeDerived(
     avgCombinedCreditsPerJump: div(combined, metrics.jumps),
     avgCombinedCreditsPer1000Ly: perK(combined, metrics.distanceLy),
     avgCombinedCreditsPerDay: validDays != null ? combined / validDays : null,
+    avgCombinedCreditsPerHour: validHours != null ? combined / validHours : null,
     avgCartoCreditsPerJump: div(metrics.scanValueTotal, metrics.jumps),
     avgCartoCreditsPer1000Ly: perK(metrics.scanValueTotal, metrics.distanceLy),
+    avgCartoCreditsPerHour: validHours != null ? metrics.scanValueTotal / validHours : null,
+    avgBodiesScannedPerHour: validHours != null ? metrics.bodiesScanned / validHours : null,
     avgExoCreditsPerJump: div(metrics.organicValueTotal, metrics.jumps),
     avgExoCreditsPer1000Ly: perK(metrics.organicValueTotal, metrics.distanceLy),
+    avgExoCreditsPerHour: validHours != null ? metrics.organicValueTotal / validHours : null,
+    avgOrganicSamplesPerHour: validHours != null ? metrics.organicSamples / validHours : null,
     totalLossesCredits: 0,
     realizationRetentionPercent: settled > 0 ? (realization.totalRealized / settled) * 100 : null,
     netProfitAfterCarrierCost: totalCarrierCost != null ? realization.totalRealized - totalCarrierCost : null,
     avgRealizedCreditsPerJump: div(realization.totalRealized, metrics.jumps),
     avgRealizedCreditsPer1000Ly: perK(realization.totalRealized, metrics.distanceLy),
+    avgRealizedCreditsPerHour: validHours != null ? realization.totalRealized / validHours : null,
   }
 }
 
@@ -161,11 +171,16 @@ function buildSmokeExportData(): Record<string, unknown> {
       { cardId: 'mostOrganicSamples', title: 'Most Prolific Exobiology', accent: 'emerald', entries: [{ rank: 1, label: 'Leg #1 -> #2', routeLabel: 'Sol -> Alpha Centauri', primaryValue: 2, formattedPrimary: '2 samples', secondaryLabel: '2 first logged · 19,010,800 Cr', modeName: 'Exploration', modeColor: '#FF7100', rowId: 12, waypointNumber: 2 }] },
       { cardId: 'furthestFromSol', title: 'Furthest From Sol', accent: 'cyan', entries: [{ rank: 1, label: 'Waypoint #3', routeLabel: 'Barnards Star', primaryValue: 5.916, formattedPrimary: '5.9 Ly', secondaryLabel: 'Inner Orion Spur', modeName: 'Travel', modeColor: '#00D2FF', rowId: 13, waypointNumber: 3 }] },
       { cardId: 'costliestMistake', title: 'Costliest Mistake', accent: 'danger', entries: [] },
+      { cardId: 'highestEarningPace', title: 'Highest Earning Pace', accent: 'amber', entries: [] },
+      { cardId: 'fastestTransitPace', title: 'Fastest Transit Pace', accent: 'amber', entries: [] },
     ],
     highlightsVariants: [
       { cardId: 'mostLucrativeRealized', title: 'Most Lucrative Leg', accent: 'amber', entries: [{ rank: 1, label: 'Leg #1 -> #2', routeLabel: 'Sol -> Alpha Centauri', primaryValue: 20_210_800, formattedPrimary: '20,210,800 Cr', secondaryLabel: 'Carto 1,200,000 Cr · Exo 19,010,800 Cr', modeName: 'Exploration', modeColor: '#FF7100', rowId: 12, waypointNumber: 2 }] },
       { cardId: 'longestShipDistance', title: 'Longest Leg (Distance)', accent: 'amber', entries: [{ rank: 1, label: 'Leg #2 -> #3', routeLabel: 'Alpha Centauri -> Barnards Star', primaryValue: 6.1, formattedPrimary: '6.1 Ly', secondaryLabel: '1 jumps · 211d 13h 20m', modeName: 'Travel', modeColor: '#00D2FF', inSystem: true, rowId: 13, waypointNumber: 3 }] },
       { cardId: 'shortestShipDistance', title: 'Shortest Leg (Distance)', accent: 'amber', entries: [{ rank: 1, label: 'Leg #1 -> #2', routeLabel: 'Sol -> Alpha Centauri', primaryValue: 4.24, formattedPrimary: '4.2 Ly', secondaryLabel: '1 jumps · 32m', modeName: 'Exploration', modeColor: '#FF7100', rowId: 12, waypointNumber: 2 }] },
+      { cardId: 'longestInGameDuration', title: 'Longest Leg (Duration)', accent: 'cyan', entries: [] },
+      { cardId: 'highestEarningPaceRealized', title: 'Highest Earning Pace', accent: 'amber', entries: [] },
+      { cardId: 'fastestTransitPaceShip', title: 'Fastest Transit Pace', accent: 'amber', entries: [] },
     ],
   }
 }

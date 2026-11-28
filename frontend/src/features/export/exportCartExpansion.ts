@@ -1,3 +1,4 @@
+import { DurationDisplayMode } from '../../domain/durationDisplay'
 import {
   getDistinctModesForScope,
   getVisitedLegByRowId,
@@ -10,6 +11,7 @@ import {
   AllDetailsSectionsConfig,
   CartBlockItem,
   ConfiguratorBlockConfig,
+  createDefaultBlockConfig,
   defaultMetricsForSection,
   DETAILS_SECTIONS,
   DetailsBlockConfig,
@@ -18,8 +20,6 @@ import {
   ExpeditionExportData,
   ExportBlockConfig,
   ExportScopeSpec,
-  HIGHLIGHT_CARDS,
-  WAYPOINTS_COLUMNS,
 } from './exportTypes'
 
 type ConcreteTelemetryConfig = Extract<ExportBlockConfig, { kind: 'summary' | 'details' }>
@@ -82,31 +82,30 @@ export function expandConfigToCartItems(
 }
 
 /** Builds the Quick Share 3-card preset cart (Summary + Highlights Top 1 + Waypoints). */
-export function createQuickShareCart(exportData: ExpeditionExportData): CartBlockItem[] {
+export function createQuickShareCart(
+  exportData: ExpeditionExportData,
+  durationDisplayMode?: DurationDisplayMode,
+): CartBlockItem[] {
   const items: CartBlockItem[] = [
     ...expandConfigToCartItems(
       exportData,
-      { kind: 'summary', scope: { kind: 'full' }, modeGrouping: 'combined', careerDiff: 'percentage' },
+      createDefaultBlockConfig('summary', durationDisplayMode),
       'quick-1',
     ),
   ]
   if ((exportData.plan.visitedWaypointCount ?? 0) >= 2) {
-    const selectedCards = HIGHLIGHT_CARDS.filter((card) => card.defaultChecked).map((card) => card.id)
     items.push(
       ...expandConfigToCartItems(
         exportData,
-        { kind: 'highlights', depth: 1, selectedCards, lucrativeMetric: 'estimated', distanceMetric: 'total' },
+        createDefaultBlockConfig('highlights', durationDisplayMode),
         'quick-2',
       ),
     )
   }
-  const selectedColumns = WAYPOINTS_COLUMNS.filter((column) => column.defaultChecked).map(
-    (column) => column.id,
-  )
   items.push(
     ...expandConfigToCartItems(
       exportData,
-      { kind: 'waypoints', waypointsScope: 'visited', selectedColumns },
+      createDefaultBlockConfig('waypoints', durationDisplayMode),
       'quick-3',
     ),
   )

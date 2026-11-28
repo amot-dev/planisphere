@@ -50,7 +50,7 @@ describe('htmlGenerator', () => {
       expandCartItem(data, { kind: 'details', section: 'carrier', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: defaultMetricsForSection('carrier') }, 'det-carrier'),
       expandCartItem(data, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: defaultMetricsForSection('realized') }, 'det-realized'),
       expandCartItem(data, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'separate', selectedModeId: 1, selectedMetrics: ['jumps'] }, 'det-flight-sep'),
-      expandCartItem(data, { kind: 'highlights', depth: 1, selectedCards: ['mostLucrative'], lucrativeMetric: 'estimated', distanceMetric: 'total' }, 'hl'),
+      expandCartItem(data, { kind: 'highlights', depth: 1, selectedCards: ['mostLucrative'], lucrativeMetric: 'estimated', distanceMetric: 'total', durationMetric: 'elapsed' }, 'hl'),
     ]
 
     const html = generateSelfContainedHtmlReport(data, cartItems)
@@ -95,7 +95,7 @@ describe('htmlGenerator', () => {
       expandCartItem(hardenedData, { kind: 'details', section: 'flight', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: [] }, 'det-empty'),
       expandCartItem(hardenedData, { kind: 'details', section: 'realized', scope: { kind: 'full' }, modeGrouping: 'combined', selectedMetrics: ['netProfitAfterCarrierCost'] }, 'det-exact-realized'),
       expandCartItem(hardenedData, { kind: 'waypoints', waypointsScope: 'visited', selectedColumns: ['flightMode'] }, 'wp-bad-color'),
-      expandCartItem(hardenedData, { kind: 'highlights', depth: 1, selectedCards: [], lucrativeMetric: 'estimated', distanceMetric: 'total' }, 'hl-empty'),
+      expandCartItem(hardenedData, { kind: 'highlights', depth: 1, selectedCards: [], lucrativeMetric: 'estimated', distanceMetric: 'total', durationMetric: 'elapsed' }, 'hl-empty'),
     ]
 
     const html = generateSelfContainedHtmlReport(hardenedData, cartItems)

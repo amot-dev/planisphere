@@ -50,6 +50,7 @@ function computeFixtureDerived(
   rel: realization.Breakdown,
   carrierCost: ExportCarrierCost | null | undefined,
   elapsedDays: number | null,
+  inGameSeconds: number | null = null,
 ): ExportDerivedMetrics {
   const div = (n: number, d: number) => (d > 0 ? n / d : null)
   const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : null)
@@ -61,6 +62,7 @@ function computeFixtureDerived(
     rel.cartoLostDeath + rel.organicLostDeath + rel.cartoStolen + rel.organicStolen + rel.carrierTariffLoss + rel.npcCrewLoss
   const settled = combinedEstimatedCredits - rel.pendingValue
   const validDays = elapsedDays != null && elapsedDays >= 1 ? elapsedDays : null
+  const validHours = inGameSeconds != null && inGameSeconds >= 3600 ? inGameSeconds / 3600 : null
 
   return {
     shipDistanceLy,
@@ -68,6 +70,8 @@ function computeFixtureDerived(
     avgJumpRangeLy: div(shipDistanceLy, metrics.jumps),
     boostRatePercent: pct(totalBoosts, metrics.jumps),
     avgDistancePerDayLy: validDays != null ? metrics.distanceLy / validDays : null,
+    avgDistancePerHourLy: validHours != null ? metrics.distanceLy / validHours : null,
+    avgJumpsPerHour: validHours != null ? metrics.jumps / validHours : null,
     avgCarrierJumpRangeLy: div(metrics.carrierDistanceLy, metrics.carrierJumps),
     avgTritiumPerJump: metrics.tritiumUsed != null ? div(metrics.tritiumUsed, metrics.carrierJumps) : null,
     combinedEstimatedCredits,
@@ -78,15 +82,21 @@ function computeFixtureDerived(
     avgCombinedCreditsPerJump: div(combinedEstimatedCredits, metrics.jumps),
     avgCombinedCreditsPer1000Ly: perK(combinedEstimatedCredits, metrics.distanceLy),
     avgCombinedCreditsPerDay: validDays != null ? combinedEstimatedCredits / validDays : null,
+    avgCombinedCreditsPerHour: validHours != null ? combinedEstimatedCredits / validHours : null,
     avgCartoCreditsPerJump: div(metrics.scanValueTotal, metrics.jumps),
     avgCartoCreditsPer1000Ly: perK(metrics.scanValueTotal, metrics.distanceLy),
+    avgCartoCreditsPerHour: validHours != null ? metrics.scanValueTotal / validHours : null,
+    avgBodiesScannedPerHour: validHours != null ? metrics.bodiesScanned / validHours : null,
     avgExoCreditsPerJump: div(metrics.organicValueTotal, metrics.jumps),
     avgExoCreditsPer1000Ly: perK(metrics.organicValueTotal, metrics.distanceLy),
+    avgExoCreditsPerHour: validHours != null ? metrics.organicValueTotal / validHours : null,
+    avgOrganicSamplesPerHour: validHours != null ? metrics.organicSamples / validHours : null,
     totalLossesCredits,
     realizationRetentionPercent: settled > 0 ? (rel.totalRealized / settled) * 100 : null,
     netProfitAfterCarrierCost: carrierCost != null ? rel.totalRealized - carrierCost.totalCost : null,
     avgRealizedCreditsPerJump: div(rel.totalRealized, metrics.jumps),
     avgRealizedCreditsPer1000Ly: perK(rel.totalRealized, metrics.distanceLy),
+    avgRealizedCreditsPerHour: validHours != null ? rel.totalRealized / validHours : null,
   }
 }
 
@@ -161,6 +171,8 @@ function buildFixtureRegions(visited: FixtureVisitedLeg[]): ExportRegionBucket[]
     let metrics = makeMetrics()
     let rel = makeRealization()
     let totalMs = 0
+    let inGameSeconds = 0
+    let hasInGame = false
     let fromGalactic = ''
     let toGalactic = ''
     let inSystem = false
@@ -178,12 +190,18 @@ function buildFixtureRegions(visited: FixtureVisitedLeg[]): ExportRegionBucket[]
       coveredLy += leg.rowView.distFromPrevLy ?? 0
       for (const s of leg.shipsFlown) ships.add(s)
       if (leg.elapsedDays != null) totalMs += leg.elapsedDays * DAY_MS
+      if (leg.details.inGameSeconds != null) {
+        hasInGame = true
+        inGameSeconds += leg.details.inGameSeconds
+      }
     }
     const elapsedDays = totalMs > 0 ? totalMs / DAY_MS : null
     const duration = totalMs > 0 ? formatElapsedDuration(new Date(0).toISOString(), new Date(totalMs).toISOString()) : ''
+    const resolvedInGame = hasInGame ? inGameSeconds : null
     return {
-      legCount: legs.length, fromGalactic, toGalactic, inSystem, duration, elapsedDays, coveredLy,
-      shipsFlown: Array.from(ships), metrics, realization: rel, derived: computeFixtureDerived(metrics, rel, null, elapsedDays),
+      legCount: legs.length, fromGalactic, toGalactic, inSystem, duration, elapsedDays,
+      inGameSeconds: resolvedInGame, coveredLy, shipsFlown: Array.from(ships), metrics, realization: rel,
+      derived: computeFixtureDerived(metrics, rel, null, elapsedDays, resolvedInGame),
     }
   }
   const buckets: ExportRegionBucket[] = []
@@ -256,6 +274,17 @@ function buildFixtureHighlights(
     })),
   }
 
+  const paceCredits = (l: FixtureVisitedLeg, realized: boolean) => {
+    const sec = l.details.inGameSeconds ?? 0
+    const cr = realized ? l.details.realization.totalRealized : l.details.metrics.scanValueTotal + l.details.metrics.organicValueTotal
+    return sec >= 3600 && cr > 0 ? cr / (sec / 3600) : 0
+  }
+  const paceLy = (l: FixtureVisitedLeg, shipOnly: boolean) => {
+    const sec = l.details.transitInGameSeconds ?? 0
+    const ly = shipOnly ? shipLy(l) : l.details.metrics.distanceLy
+    return sec >= 3600 && ly > 0 ? ly / (sec / 3600) : 0
+  }
+
   return {
     full: [
       rank('mostLucrative', 'Most Lucrative Leg', 'amber', false, (l) => l.details.metrics.scanValueTotal + l.details.metrics.organicValueTotal, lucFmt),
@@ -267,11 +296,16 @@ function buildFixtureHighlights(
       rank('mostOrganicSamples', 'Most Prolific Exobiology', 'emerald', false, (l) => l.details.metrics.organicSamples, (l, s) => [`${formatInt(s)} samples`, `${formatInt(l.details.metrics.firstLogged)} first logged · ${formatCredits(l.details.metrics.organicValueTotal)}`]),
       furthestFromSol,
       rank('costliestMistake', 'Costliest Mistake', 'danger', false, (l) => l.details.realization.cartoLostDeath + l.details.realization.organicLostDeath, (l, v) => [`-${formatCredits(v)}`, `Carto -${formatCredits(l.details.realization.cartoLostDeath)} · Exo -${formatCredits(l.details.realization.organicLostDeath)}`]),
+      rank('highestEarningPace', 'Highest Earning Pace', 'amber', false, (l) => paceCredits(l, false), (l, v) => [`${formatCredits(v)}/h`, `${formatCredits(l.details.metrics.scanValueTotal + l.details.metrics.organicValueTotal)} · ${l.details.inGameDuration || ''}`]),
+      rank('fastestTransitPace', 'Fastest Transit Pace', 'amber', false, (l) => paceLy(l, false), (l, v) => [`${formatLy(v, 1)}/h`, `${formatLy(l.details.metrics.distanceLy, 1)} · ${l.details.transitInGameDuration || ''}`]),
     ],
     variants: [
       rank('mostLucrativeRealized', 'Most Lucrative Leg', 'amber', false, (l) => l.details.realization.totalRealized, lucFmt),
       rank('longestShipDistance', 'Longest Leg (Distance)', 'amber', false, shipLy, distFmt),
       rank('shortestShipDistance', 'Shortest Leg (Distance)', 'amber', true, shipLy, distFmt),
+      rank('longestInGameDuration', 'Longest Leg (Duration)', 'cyan', false, (l) => l.details.inGameSeconds ?? 0, (l) => [l.details.inGameDuration || '', `${formatLy(l.details.metrics.distanceLy, 1)} · ${formatInt(l.details.metrics.jumps)} jumps`]),
+      rank('highestEarningPaceRealized', 'Highest Earning Pace', 'amber', false, (l) => paceCredits(l, true), (l, v) => [`${formatCredits(v)}/h`, `${formatCredits(l.details.realization.totalRealized)} · ${l.details.inGameDuration || ''}`]),
+      rank('fastestTransitPaceShip', 'Fastest Transit Pace', 'amber', false, (l) => paceLy(l, true), (l, v) => [`${formatLy(v, 1)}/h`, `${formatLy(shipLy(l), 1)} · ${l.details.transitInGameDuration || ''}`]),
     ],
   }
 }
@@ -391,10 +425,12 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
   const expElapsedDays = overrides.expedition?.elapsedDays !== undefined ? overrides.expedition.elapsedDays : elapsedDaysBetween(effectiveStart, effectiveEnd, nowMs)
   const expMetrics = overrides.expedition?.metrics ?? defaultExpMetrics
   const expRealization = overrides.expedition?.realization ?? defaultExpRealization
+  const expInGameSeconds = overrides.expedition?.inGameSeconds ?? overrides.inGameSeconds ?? null
   const expeditionSnapshot: ExportTelemetrySnapshot = {
     metrics: expMetrics, realization: expRealization, elapsedDays: expElapsedDays,
+    inGameSeconds: expInGameSeconds, inGameDuration: overrides.expedition?.inGameDuration ?? overrides.inGameDuration,
     shipsFlown: overrides.expedition?.shipsFlown ?? allShips,
-    derived: overrides.expedition?.derived ?? computeFixtureDerived(expMetrics, expRealization, carrierCost, expElapsedDays),
+    derived: overrides.expedition?.derived ?? computeFixtureDerived(expMetrics, expRealization, carrierCost, expElapsedDays, expInGameSeconds),
   }
 
   const rawModeBuckets = overrides.modeBuckets ?? [
@@ -414,13 +450,15 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
     const modeShips = Array.from(new Set(visitedLegs.filter((leg) => leg.rowView.legModeId === bucket.modeId).flatMap((leg) => leg.shipsFlown)))
     return {
       ...bucket, elapsedDays: bucketElapsed, shipsFlown: bucket.shipsFlown ?? modeShips,
-      derived: bucket.derived ?? computeFixtureDerived(bucket.metrics, bucket.realization, null, bucketElapsed),
+      derived: bucket.derived ?? computeFixtureDerived(bucket.metrics, bucket.realization, null, bucketElapsed, bucket.inGameSeconds ?? null),
     }
   })
 
   const legTelemetry: ExportLegTelemetry[] = overrides.legTelemetry ?? visitedLegs.map((leg) => ({
-    rowId: leg.rowView.row.id, regionName: leg.regionName, elapsedDays: leg.elapsedDays, shipsFlown: leg.shipsFlown,
-    derived: computeFixtureDerived(leg.details.metrics, leg.details.realization, null, leg.elapsedDays),
+    rowId: leg.rowView.row.id, regionName: leg.regionName, elapsedDays: leg.elapsedDays,
+    inGameSeconds: leg.details.inGameSeconds ?? null, inGameDuration: leg.details.inGameDuration,
+    shipsFlown: leg.shipsFlown,
+    derived: computeFixtureDerived(leg.details.metrics, leg.details.realization, null, leg.elapsedDays, leg.details.inGameSeconds ?? null),
   }))
   const regionBuckets = overrides.regionBuckets ?? buildFixtureRegions(visitedLegs)
   const highlights = buildFixtureHighlights(plan, visitedLegs, nowMs)
@@ -429,7 +467,7 @@ export function buildSampleExportData(overrides: SampleExportDataOverrides = {})
     : originBaseline ? elapsedDaysBetween(originBaseline.from, originBaseline.to, nowMs) : null
   const originDerived = 'originBaselineDerived' in overrides
     ? overrides.originBaselineDerived
-    : originBaseline ? computeFixtureDerived(originBaseline.metrics, originBaseline.realization, null, originElapsed ?? null) : undefined
+    : originBaseline ? computeFixtureDerived(originBaseline.metrics, originBaseline.realization, null, originElapsed ?? null, originBaseline.inGameSeconds ?? null) : undefined
   const careerDiff = 'careerDiff' in overrides ? overrides.careerDiff : buildFixtureCareerDiff(originBaseline, liveMetrics, expRealization)
 
   return {

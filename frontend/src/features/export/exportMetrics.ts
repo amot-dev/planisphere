@@ -13,13 +13,15 @@ export * from './exportCartExpansion'
 export * from './exportDataIndex'
 export * from './exportFormatting'
 
-/** Derived averages, ratios, and profit metrics computed with zero-division and sub-24h guards. */
+/** Derived averages, ratios, and profit metrics computed with zero-division, sub-24h, and sub-1h guards. */
 export interface DerivedMetrics {
   shipDistanceLy: number
   totalBoosts: number
   avgJumpRangeLy: number | null
   boostRatePercent: number | null
   avgDistancePerDayLy: number | null
+  avgDistancePerHourLy: number | null
+  avgJumpsPerHour: number | null
   avgCarrierJumpRangeLy: number | null
   avgTritiumPerJump: number | null
   combinedEstimatedCredits: number
@@ -30,15 +32,21 @@ export interface DerivedMetrics {
   avgCombinedCreditsPerJump: number | null
   avgCombinedCreditsPer1000Ly: number | null
   avgCombinedCreditsPerDay: number | null
+  avgCombinedCreditsPerHour: number | null
   avgCartoCreditsPerJump: number | null
   avgCartoCreditsPer1000Ly: number | null
+  avgCartoCreditsPerHour: number | null
+  avgBodiesScannedPerHour: number | null
   avgExoCreditsPerJump: number | null
   avgExoCreditsPer1000Ly: number | null
+  avgExoCreditsPerHour: number | null
+  avgOrganicSamplesPerHour: number | null
   totalLossesCredits: number
   realizationRetentionPercent: number | null
   netProfitAfterCarrierCost: number | null
   avgRealizedCreditsPerJump: number | null
   avgRealizedCreditsPer1000Ly: number | null
+  avgRealizedCreditsPerHour: number | null
 }
 
 /** Identifier for an inline Career Diff comparison metric. */
@@ -99,14 +107,17 @@ const ZERO_REALIZATION: realization.Breakdown = Object.freeze({
 
 const ZERO_DERIVED_METRICS: DerivedMetrics = Object.freeze({
   shipDistanceLy: 0, totalBoosts: 0, avgJumpRangeLy: null, boostRatePercent: null,
-  avgDistancePerDayLy: null, avgCarrierJumpRangeLy: null, avgTritiumPerJump: null,
+  avgDistancePerDayLy: null, avgDistancePerHourLy: null, avgJumpsPerHour: null,
+  avgCarrierJumpRangeLy: null, avgTritiumPerJump: null,
   combinedEstimatedCredits: 0, dssEfficiencyPercent: null, firstDiscoveryRatePercent: null,
   firstLoggedRatePercent: null, avgCreditsPerSample: null, avgCombinedCreditsPerJump: null,
-  avgCombinedCreditsPer1000Ly: null, avgCombinedCreditsPerDay: null,
+  avgCombinedCreditsPer1000Ly: null, avgCombinedCreditsPerDay: null, avgCombinedCreditsPerHour: null,
   avgCartoCreditsPerJump: null, avgCartoCreditsPer1000Ly: null,
-  avgExoCreditsPerJump: null, avgExoCreditsPer1000Ly: null, totalLossesCredits: 0,
+  avgCartoCreditsPerHour: null, avgBodiesScannedPerHour: null,
+  avgExoCreditsPerJump: null, avgExoCreditsPer1000Ly: null,
+  avgExoCreditsPerHour: null, avgOrganicSamplesPerHour: null, totalLossesCredits: 0,
   realizationRetentionPercent: null, netProfitAfterCarrierCost: null,
-  avgRealizedCreditsPerJump: null, avgRealizedCreditsPer1000Ly: null,
+  avgRealizedCreditsPerJump: null, avgRealizedCreditsPer1000Ly: null, avgRealizedCreditsPerHour: null,
 })
 
 /** Resolves the formatted NET PROFIT readout for Full Expedition Combined Summary cards. */
@@ -116,7 +127,7 @@ export function resolveFormattedNetProfit(context: ResolvedTelemetryContext): Fo
   return formatNetProfitValue(netProfit, context.carrierCost)
 }
 
-/** Reports whether a Details metric checkbox is valid for the current scope, mode, and elapsed span. */
+/** Reports whether a Details metric checkbox is valid for the current scope, mode, and duration span. */
 export function isDetailsMetricAvailable(
   descriptor: DetailsMetricDescriptor,
   context: ResolvedTelemetryContext,
@@ -125,6 +136,7 @@ export function isDetailsMetricAvailable(
   if (descriptor.fullExpeditionCombinedOnly && !context.isFullExpeditionCombined) return false
   if (descriptor.requiresVisitedRoute && scopeKind === 'baseline') return false
   if (descriptor.requiresElapsed24h && (context.elapsedDays == null || context.elapsedDays < 1)) return false
+  if (descriptor.requiresInGame1h && (context.inGameSeconds == null || context.inGameSeconds < 3600)) return false
   if (
     descriptor.id === 'inGamePlaytimeBreakdown' &&
     (context.inGameSeconds == null || context.inGameDurationLabel === '')

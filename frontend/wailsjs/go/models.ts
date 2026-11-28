@@ -1184,6 +1184,8 @@ export namespace exporter {
 	    avgJumpRangeLy?: number;
 	    boostRatePercent?: number;
 	    avgDistancePerDayLy?: number;
+	    avgDistancePerHourLy?: number;
+	    avgJumpsPerHour?: number;
 	    avgCarrierJumpRangeLy?: number;
 	    avgTritiumPerJump?: number;
 	    combinedEstimatedCredits: number;
@@ -1194,15 +1196,21 @@ export namespace exporter {
 	    avgCombinedCreditsPerJump?: number;
 	    avgCombinedCreditsPer1000Ly?: number;
 	    avgCombinedCreditsPerDay?: number;
+	    avgCombinedCreditsPerHour?: number;
 	    avgCartoCreditsPerJump?: number;
 	    avgCartoCreditsPer1000Ly?: number;
+	    avgCartoCreditsPerHour?: number;
+	    avgBodiesScannedPerHour?: number;
 	    avgExoCreditsPerJump?: number;
 	    avgExoCreditsPer1000Ly?: number;
+	    avgExoCreditsPerHour?: number;
+	    avgOrganicSamplesPerHour?: number;
 	    totalLossesCredits: number;
 	    realizationRetentionPercent?: number;
 	    netProfitAfterCarrierCost?: number;
 	    avgRealizedCreditsPerJump?: number;
 	    avgRealizedCreditsPer1000Ly?: number;
+	    avgRealizedCreditsPerHour?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DerivedMetrics(source);
@@ -1215,6 +1223,8 @@ export namespace exporter {
 	        this.avgJumpRangeLy = source["avgJumpRangeLy"];
 	        this.boostRatePercent = source["boostRatePercent"];
 	        this.avgDistancePerDayLy = source["avgDistancePerDayLy"];
+	        this.avgDistancePerHourLy = source["avgDistancePerHourLy"];
+	        this.avgJumpsPerHour = source["avgJumpsPerHour"];
 	        this.avgCarrierJumpRangeLy = source["avgCarrierJumpRangeLy"];
 	        this.avgTritiumPerJump = source["avgTritiumPerJump"];
 	        this.combinedEstimatedCredits = source["combinedEstimatedCredits"];
@@ -1225,15 +1235,21 @@ export namespace exporter {
 	        this.avgCombinedCreditsPerJump = source["avgCombinedCreditsPerJump"];
 	        this.avgCombinedCreditsPer1000Ly = source["avgCombinedCreditsPer1000Ly"];
 	        this.avgCombinedCreditsPerDay = source["avgCombinedCreditsPerDay"];
+	        this.avgCombinedCreditsPerHour = source["avgCombinedCreditsPerHour"];
 	        this.avgCartoCreditsPerJump = source["avgCartoCreditsPerJump"];
 	        this.avgCartoCreditsPer1000Ly = source["avgCartoCreditsPer1000Ly"];
+	        this.avgCartoCreditsPerHour = source["avgCartoCreditsPerHour"];
+	        this.avgBodiesScannedPerHour = source["avgBodiesScannedPerHour"];
 	        this.avgExoCreditsPerJump = source["avgExoCreditsPerJump"];
 	        this.avgExoCreditsPer1000Ly = source["avgExoCreditsPer1000Ly"];
+	        this.avgExoCreditsPerHour = source["avgExoCreditsPerHour"];
+	        this.avgOrganicSamplesPerHour = source["avgOrganicSamplesPerHour"];
 	        this.totalLossesCredits = source["totalLossesCredits"];
 	        this.realizationRetentionPercent = source["realizationRetentionPercent"];
 	        this.netProfitAfterCarrierCost = source["netProfitAfterCarrierCost"];
 	        this.avgRealizedCreditsPerJump = source["avgRealizedCreditsPerJump"];
 	        this.avgRealizedCreditsPer1000Ly = source["avgRealizedCreditsPer1000Ly"];
+	        this.avgRealizedCreditsPerHour = source["avgRealizedCreditsPerHour"];
 	    }
 	}
 	export class HighlightRankingEntry {

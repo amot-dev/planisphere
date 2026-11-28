@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { describe, expect, it } from 'vitest'
+import type { DurationDisplayMode } from '../../domain/durationDisplay'
 import { flushMicrotasks } from '../../test/async'
 import { buildSampleExportData } from '../../test/fixtures/exportFixtures'
 import { mountTestRoot, setFormControlValue, type MountedTestRoot } from '../../test/render'
@@ -8,8 +9,14 @@ import { installWailsAppMock } from '../../test/wailsMock'
 import { BlockConfigurator } from './BlockConfigurator'
 import { useExportStudio } from './useExportStudio'
 
-function BlockConfiguratorHarness({ expeditionId }: { expeditionId: number }) {
-  const studio = useExportStudio(expeditionId)
+function BlockConfiguratorHarness({
+  expeditionId,
+  durationDisplayMode,
+}: {
+  expeditionId: number
+  durationDisplayMode?: DurationDisplayMode
+}) {
+  const studio = useExportStudio(expeditionId, durationDisplayMode)
   if (!studio.exportData) {
     return null
   }
@@ -27,6 +34,11 @@ function BlockConfiguratorHarness({ expeditionId }: { expeditionId: number }) {
         onAddToCart={studio.handleAddToCart}
       />
       <div data-testid="cart-count">{`Export Cart (${studio.cartItems.length})`}</div>
+      <div data-testid="highlights-metrics">
+        {studio.config.kind === 'highlights'
+          ? `${studio.config.lucrativeMetric}|${studio.config.distanceMetric}|${studio.config.durationMetric}`
+          : ''}
+      </div>
     </div>
   )
 }
@@ -106,5 +118,54 @@ describe('BlockConfigurator', () => {
     })
     expect(mounted.findButtonByText('Avg Credits per Day', { exact: false }).disabled).toBe(true)
     expect(mounted.findButtonByText('+ ADD TO CART', { exact: false }).disabled).toBe(true)
+  })
+
+  it('defaults Highlights Duration Metric from durationDisplayMode and scopes metric toggles to pace cards', async () => {
+    installWailsAppMock({ GetExpeditionExportData: async () => buildSampleExportData() })
+
+    let mounted!: MountedTestRoot
+    await act(async () => {
+      mounted = mountTestRoot(
+        <BlockConfiguratorHarness expeditionId={7} durationDisplayMode="in_game" />,
+      )
+      await flushMicrotasks()
+    })
+
+    const clickAndFlush = async (element: HTMLElement) => {
+      await act(async () => {
+        element.click()
+        await flushMicrotasks()
+      })
+    }
+
+    await clickAndFlush(mounted.findButtonByText('Highlights', { exact: true }))
+    expect(mounted.container.querySelector('[data-testid="highlights-metrics"]')?.textContent).toBe(
+      'estimated|total|inGame',
+    )
+
+    await clickAndFlush(mounted.findButtonByText('Calendar', { exact: true }))
+    expect(mounted.container.querySelector('[data-testid="highlights-metrics"]')?.textContent).toBe(
+      'estimated|total|elapsed',
+    )
+
+    // Uncheck all cards: all three metric toggles disable.
+    await clickAndFlush(mounted.findButtonByText('[None]', { exact: true }))
+    expect(mounted.findButtonByText('Realized', { exact: true }).disabled).toBe(true)
+    expect(mounted.findButtonByText('Ship FSD', { exact: true }).disabled).toBe(true)
+    expect(mounted.findButtonByText('In-Game', { exact: true }).disabled).toBe(true)
+
+    // Selecting Highest Earning Pace re-enables Lucrative Metric, and Fastest Transit Pace re-enables Distance Metric.
+    await clickAndFlush(mounted.findButtonByText('Highest Earning Pace', { exact: false }))
+    expect(mounted.findButtonByText('Realized', { exact: true }).disabled).toBe(false)
+    expect(mounted.findButtonByText('Ship FSD', { exact: true }).disabled).toBe(true)
+    await clickAndFlush(mounted.findButtonByText('Realized', { exact: true }))
+
+    await clickAndFlush(mounted.findButtonByText('Fastest Transit Pace', { exact: false }))
+    expect(mounted.findButtonByText('Ship FSD', { exact: true }).disabled).toBe(false)
+    await clickAndFlush(mounted.findButtonByText('Ship FSD', { exact: true }))
+
+    expect(mounted.container.querySelector('[data-testid="highlights-metrics"]')?.textContent).toBe(
+      'realized|ship|elapsed',
+    )
   })
 })

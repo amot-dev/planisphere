@@ -129,7 +129,7 @@ func BuildLegAndRegionTelemetry(
 			InSystemInGameSeconds:  cloneInt64Ptr(details.InSystemInGameSeconds),
 			InSystemInGameDuration: details.InSystemInGameDuration,
 			ShipsFlown:             shipsFlown,
-			Derived:                ComputeDerivedMetrics(details.Metrics, details.Realization, nil, legElapsedDays),
+			Derived:                ComputeDerivedMetrics(details.Metrics, details.Realization, nil, legElapsedDays, details.InGameSeconds),
 		})
 
 		regionIndex, exists := regionIndexByName[regionName]
@@ -265,21 +265,21 @@ func accumulateLegSlice(
 }
 
 func finalizeRegionBucket(bucket *RegionBucket, state *regionTrackState) {
-	bucket.ElapsedDays, bucket.Duration, bucket.Derived = finalizeSliceTimingAndDerived(bucket.Metrics, bucket.Realization, state.combined.totalElapsedMs)
 	bucket.InGameSeconds, bucket.InGameDuration, bucket.TransitInGameSeconds, bucket.TransitInGameDuration, bucket.InSystemInGameSeconds, bucket.InSystemInGameDuration = state.combined.playtime.labelsAndPtrs()
+	bucket.ElapsedDays, bucket.Duration, bucket.Derived = finalizeSliceTimingAndDerived(bucket.Metrics, bucket.Realization, state.combined.totalElapsedMs, bucket.InGameSeconds)
 	for index := range bucket.ModeBuckets {
 		modeBucket := &bucket.ModeBuckets[index]
-		modeBucket.ElapsedDays, modeBucket.Duration, modeBucket.Derived = finalizeSliceTimingAndDerived(modeBucket.Metrics, modeBucket.Realization, state.modeStates[index].totalElapsedMs)
 		modeBucket.InGameSeconds, modeBucket.InGameDuration, modeBucket.TransitInGameSeconds, modeBucket.TransitInGameDuration, modeBucket.InSystemInGameSeconds, modeBucket.InSystemInGameDuration = state.modeStates[index].playtime.labelsAndPtrs()
+		modeBucket.ElapsedDays, modeBucket.Duration, modeBucket.Derived = finalizeSliceTimingAndDerived(modeBucket.Metrics, modeBucket.Realization, state.modeStates[index].totalElapsedMs, modeBucket.InGameSeconds)
 	}
 }
 
-func finalizeSliceTimingAndDerived(metrics replaystats.Metrics, realization replaystats.RealizationBreakdown, totalElapsedMs int64) (*float64, string, DerivedMetrics) {
+func finalizeSliceTimingAndDerived(metrics replaystats.Metrics, realization replaystats.RealizationBreakdown, totalElapsedMs int64, inGameSeconds *int64) (*float64, string, DerivedMetrics) {
 	var elapsedDays *float64
 	duration := ""
 	if totalElapsedMs > 0 {
 		elapsedDays = floatPtr(float64(totalElapsedMs) / millisecondsPerDay)
 		duration = reference.DurationLabel(time.Duration(totalElapsedMs) * time.Millisecond)
 	}
-	return elapsedDays, duration, ComputeDerivedMetrics(metrics, realization, nil, elapsedDays)
+	return elapsedDays, duration, ComputeDerivedMetrics(metrics, realization, nil, elapsedDays, inGameSeconds)
 }

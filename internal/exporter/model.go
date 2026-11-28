@@ -15,13 +15,15 @@ import (
 const SchemaVersion = 1
 
 // DerivedMetrics holds derived averages, ratios, and profit metrics computed
-// with zero-division and sub-24-hour guards for JSON serialization.
+// with zero-division, sub-24-hour calendar, and sub-1-hour in-game rate guards.
 type DerivedMetrics struct {
 	ShipDistanceLy              float64  `json:"shipDistanceLy"`
 	TotalBoosts                 int      `json:"totalBoosts"`
 	AvgJumpRangeLy              *float64 `json:"avgJumpRangeLy"`
 	BoostRatePercent            *float64 `json:"boostRatePercent"`
 	AvgDistancePerDayLy         *float64 `json:"avgDistancePerDayLy"`
+	AvgDistancePerHourLy        *float64 `json:"avgDistancePerHourLy"`
+	AvgJumpsPerHour             *float64 `json:"avgJumpsPerHour"`
 	AvgCarrierJumpRangeLy       *float64 `json:"avgCarrierJumpRangeLy"`
 	AvgTritiumPerJump           *float64 `json:"avgTritiumPerJump"`
 	CombinedEstimatedCredits    int64    `json:"combinedEstimatedCredits"`
@@ -32,15 +34,21 @@ type DerivedMetrics struct {
 	AvgCombinedCreditsPerJump   *float64 `json:"avgCombinedCreditsPerJump"`
 	AvgCombinedCreditsPer1000Ly *float64 `json:"avgCombinedCreditsPer1000Ly"`
 	AvgCombinedCreditsPerDay    *float64 `json:"avgCombinedCreditsPerDay"`
+	AvgCombinedCreditsPerHour   *float64 `json:"avgCombinedCreditsPerHour"`
 	AvgCartoCreditsPerJump      *float64 `json:"avgCartoCreditsPerJump"`
 	AvgCartoCreditsPer1000Ly    *float64 `json:"avgCartoCreditsPer1000Ly"`
+	AvgCartoCreditsPerHour      *float64 `json:"avgCartoCreditsPerHour"`
+	AvgBodiesScannedPerHour     *float64 `json:"avgBodiesScannedPerHour"`
 	AvgExoCreditsPerJump        *float64 `json:"avgExoCreditsPerJump"`
 	AvgExoCreditsPer1000Ly      *float64 `json:"avgExoCreditsPer1000Ly"`
+	AvgExoCreditsPerHour        *float64 `json:"avgExoCreditsPerHour"`
+	AvgOrganicSamplesPerHour    *float64 `json:"avgOrganicSamplesPerHour"`
 	TotalLossesCredits          int64    `json:"totalLossesCredits"`
 	RealizationRetentionPercent *float64 `json:"realizationRetentionPercent"`
 	NetProfitAfterCarrierCost   *int64   `json:"netProfitAfterCarrierCost"`
 	AvgRealizedCreditsPerJump   *float64 `json:"avgRealizedCreditsPerJump"`
 	AvgRealizedCreditsPer1000Ly *float64 `json:"avgRealizedCreditsPer1000Ly"`
+	AvgRealizedCreditsPerHour   *float64 `json:"avgRealizedCreditsPerHour"`
 }
 
 // CareerDiffItem compares one expedition metric against its pre-expedition career baseline.

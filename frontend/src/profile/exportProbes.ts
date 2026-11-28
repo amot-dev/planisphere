@@ -44,14 +44,17 @@ const EMPTY_REALIZATION: realization.Breakdown = {
 
 const EMPTY_DERIVED: ExportDerivedMetrics = {
   shipDistanceLy: 0, totalBoosts: 0, avgJumpRangeLy: null, boostRatePercent: null,
-  avgDistancePerDayLy: null, avgCarrierJumpRangeLy: null, avgTritiumPerJump: null,
+  avgDistancePerDayLy: null, avgDistancePerHourLy: null, avgJumpsPerHour: null,
+  avgCarrierJumpRangeLy: null, avgTritiumPerJump: null,
   combinedEstimatedCredits: 0, dssEfficiencyPercent: null, firstDiscoveryRatePercent: null,
   firstLoggedRatePercent: null, avgCreditsPerSample: null, avgCombinedCreditsPerJump: null,
-  avgCombinedCreditsPer1000Ly: null, avgCombinedCreditsPerDay: null,
+  avgCombinedCreditsPer1000Ly: null, avgCombinedCreditsPerDay: null, avgCombinedCreditsPerHour: null,
   avgCartoCreditsPerJump: null, avgCartoCreditsPer1000Ly: null,
-  avgExoCreditsPerJump: null, avgExoCreditsPer1000Ly: null, totalLossesCredits: 0,
+  avgCartoCreditsPerHour: null, avgBodiesScannedPerHour: null,
+  avgExoCreditsPerJump: null, avgExoCreditsPer1000Ly: null,
+  avgExoCreditsPerHour: null, avgOrganicSamplesPerHour: null, totalLossesCredits: 0,
   realizationRetentionPercent: null, netProfitAfterCarrierCost: null,
-  avgRealizedCreditsPerJump: null, avgRealizedCreditsPer1000Ly: null,
+  avgRealizedCreditsPerJump: null, avgRealizedCreditsPer1000Ly: null, avgRealizedCreditsPerHour: null,
 }
 
 function normalizeMetrics(source?: stats.Metrics): stats.Metrics {
@@ -176,6 +179,7 @@ function buildProbeExportCart(exportData: ExpeditionExportData): CartBlockItem[]
         selectedCards: HIGHLIGHT_CARDS.map((card) => card.id),
         lucrativeMetric: 'estimated',
         distanceMetric: 'total',
+        durationMetric: 'elapsed',
       },
       'probe-highlights-top3',
     ),

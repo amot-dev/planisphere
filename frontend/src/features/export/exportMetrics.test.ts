@@ -383,8 +383,8 @@ describe('exportMetrics', () => {
       slug: 'wp3',
     })
 
-    // Flight section has 9 descriptors, 1 of which (distinctRegions) is fullExpeditionCombinedOnly.
-    // On allLegs, Slice 0 (>= 24h + playtime) unlocks all 8 achievable metrics so Slice 1 rowId is never resolved.
+    // Flight section has 11 descriptors, 1 of which (distinctRegions) is fullExpeditionCombinedOnly.
+    // On allLegs, Slice 0 (>= 24h + 2h playtime) unlocks all 10 achievable metrics so Slice 1 rowId is never resolved.
     const dataWithPlaytime = buildSampleExportData({
       rowDetails: data.rowDetails.map((detail) =>
         detail.rowId === 2
@@ -441,7 +441,7 @@ describe('exportMetrics', () => {
       syntheticItems,
       Date.parse('2026-04-05T12:00:00Z'),
     )
-    expect(available?.size).toBe(8)
+    expect(available?.size).toBe(10)
     expect(available?.has('distinctRegions')).toBe(false)
     expect(available?.has('inGamePlaytimeBreakdown')).toBe(true)
     expect(available?.has('avgDistancePerDay')).toBe(true)

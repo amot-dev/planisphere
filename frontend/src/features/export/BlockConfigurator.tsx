@@ -39,7 +39,7 @@ const CAREER_DIFF_OPTIONS: ReadonlyArray<{ id: CareerDiffDisplay; label: string 
 ]
 
 const UNAVAILABLE_METRIC_TOOLTIP =
-  'Not available for the currently selected scope, mode split, or sub-24h duration'
+  'Not available for the currently selected scope, mode split, sub-24h elapsed duration, or sub-1h in-game duration'
 
 /**
  * BlockConfigurator renders sticky block-type, scope, conditional mode grouping,
@@ -323,9 +323,64 @@ function WaypointsControls(props: { config: WaypointsBlockConfig; disabled: bool
   )
 }
 
+const LUCRATIVE_METRIC_OPTIONS: ReadonlyArray<{ id: 'estimated' | 'realized'; label: string }> = [
+  { id: 'estimated', label: 'Estimated' },
+  { id: 'realized', label: 'Realized' },
+]
+
+const DISTANCE_METRIC_OPTIONS: ReadonlyArray<{ id: 'total' | 'ship'; label: string }> = [
+  { id: 'total', label: 'Total Ly' },
+  { id: 'ship', label: 'Ship FSD' },
+]
+
+const DURATION_METRIC_OPTIONS: ReadonlyArray<{ id: 'elapsed' | 'inGame'; label: string }> = [
+  { id: 'elapsed', label: 'Calendar' },
+  { id: 'inGame', label: 'In-Game' },
+]
+
+function HighlightMetricToggle<TValue extends string>(props: {
+  label: string
+  value: TValue
+  options: ReadonlyArray<{ id: TValue; label: string }>
+  disabled: boolean
+  disabledTooltip?: string
+  onSelect: (nextValue: TValue) => void
+}) {
+  const { label, value, options, disabled, disabledTooltip, onSelect } = props
+  return (
+    <div title={disabled ? disabledTooltip : undefined}>
+      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-ed-text-muted mb-1">{label}</div>
+      <div className="grid grid-cols-2 gap-1">
+        {options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(option.id)}
+            className={`py-1 text-[10px] font-extrabold uppercase tracking-wider border ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
+              value === option.id
+                ? 'bg-ed-cyan-tint border-ed-cyan text-ed-cyan'
+                : 'bg-ed-control border-ed-border text-ed-text-muted hover:text-ed-text-main'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function HighlightsControls(props: { config: HighlightsBlockConfig; disabled: boolean; onChange: (nextConfig: HighlightsBlockConfig) => void }) {
   const { config, disabled, onChange } = props
-  const metricButtonClassName = `px-2 py-1 border border-ed-border bg-ed-control text-[10px] font-mono-tabular text-ed-text-muted ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:text-ed-text-main cursor-pointer'}`
+  const hasLucrativeCard =
+    config.selectedCards.includes('mostLucrative') || config.selectedCards.includes('highestEarningPace')
+  const hasDistanceCard =
+    config.selectedCards.includes('longestDistance') ||
+    config.selectedCards.includes('shortestDistance') ||
+    config.selectedCards.includes('fastestTransitPace')
+  const hasDurationCard = config.selectedCards.includes('longestDuration')
+
   return (
     <div className="space-y-3">
       <div>
@@ -346,13 +401,31 @@ function HighlightsControls(props: { config: HighlightsBlockConfig; disabled: bo
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        <button type="button" disabled={disabled} onClick={() => onChange({ ...config, lucrativeMetric: config.lucrativeMetric === 'estimated' ? 'realized' : 'estimated' })} className={metricButtonClassName}>
-          Value: {config.lucrativeMetric === 'estimated' ? 'Estimated' : 'Realized'}
-        </button>
-        <button type="button" disabled={disabled} onClick={() => onChange({ ...config, distanceMetric: config.distanceMetric === 'total' ? 'ship' : 'total' })} className={metricButtonClassName}>
-          Dist: {config.distanceMetric === 'total' ? 'Total Ly' : 'Ship FSD'}
-        </button>
+      <div className="space-y-2">
+        <HighlightMetricToggle
+          label="Lucrative Metric"
+          value={config.lucrativeMetric}
+          options={LUCRATIVE_METRIC_OPTIONS}
+          disabled={disabled || !hasLucrativeCard}
+          disabledTooltip="Select Most Lucrative Leg or Highest Earning Pace to customize"
+          onSelect={(lucrativeMetric) => onChange({ ...config, lucrativeMetric })}
+        />
+        <HighlightMetricToggle
+          label="Distance Metric"
+          value={config.distanceMetric}
+          options={DISTANCE_METRIC_OPTIONS}
+          disabled={disabled || !hasDistanceCard}
+          disabledTooltip="Select a distance or transit pace card to customize"
+          onSelect={(distanceMetric) => onChange({ ...config, distanceMetric })}
+        />
+        <HighlightMetricToggle
+          label="Duration Metric"
+          value={config.durationMetric}
+          options={DURATION_METRIC_OPTIONS}
+          disabled={disabled || !hasDurationCard}
+          disabledTooltip="Select Longest Leg (Duration) to customize"
+          onSelect={(durationMetric) => onChange({ ...config, durationMetric })}
+        />
       </div>
       <ChecklistSelector label="Trophy Cards" items={HIGHLIGHT_CARDS} selectedIds={config.selectedCards} disabled={disabled} maxHeightClassName="max-h-44" onChangeSelectedIds={(selectedCards) => onChange({ ...config, selectedCards })} />
     </div>

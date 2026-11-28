@@ -19,7 +19,7 @@ type visitedLeg struct {
 	details expedition.WaypointDetails
 }
 
-// ComputeHighlightLeaderboards computes all nine canonical Highlight leaderboards
+// ComputeHighlightLeaderboards computes all eleven canonical Highlight leaderboards
 // across visited non-origin legs and visited coordinate waypoints in stable plan order.
 func ComputeHighlightLeaderboards(
 	planView expedition.PlanView,
@@ -37,11 +37,13 @@ func ComputeHighlightLeaderboards(
 		buildMostOrganicSamplesBoard(visitedLegs),
 		buildFurthestFromSolBoard(planView),
 		buildCostliestMistakeBoard(visitedLegs),
+		buildEarningPaceBoard(visitedLegs, false),
+		buildTransitPaceBoard(visitedLegs, false),
 	}
 }
 
-// ComputeHighlightVariants computes the three non-default toggle variant Highlight leaderboards
-// (realized valuation and ship-only FSD distance) across visited legs in stable plan order.
+// ComputeHighlightVariants computes the six non-default toggle variant Highlight leaderboards
+// (realized valuation, ship-only FSD distance, and in-game duration) across visited legs in stable plan order.
 func ComputeHighlightVariants(
 	planView expedition.PlanView,
 	rowDetails []expedition.WaypointDetails,
@@ -51,6 +53,9 @@ func ComputeHighlightVariants(
 		buildMostLucrativeBoard(visitedLegs, true),
 		buildDistanceBoard(visitedLegs, false, true),
 		buildDistanceBoard(visitedLegs, true, true),
+		buildLongestInGameDurationBoard(visitedLegs),
+		buildEarningPaceBoard(visitedLegs, true),
+		buildTransitPaceBoard(visitedLegs, true),
 	}
 }
 
@@ -323,6 +328,92 @@ func buildCostliestMistakeBoard(legs []visitedLeg) HighlightLeaderboard {
 				formatCredits(realization.CartoLostDeath),
 				formatCredits(realization.OrganicLostDeath))
 			return fmt.Sprintf("-%s", formatCredits(deathLoss)), secondary
+		},
+	)
+}
+
+func buildLongestInGameDurationBoard(legs []visitedLeg) HighlightLeaderboard {
+	return rankLegBoard(
+		"longestInGameDuration", "Longest Leg (Duration)", "cyan", legs, false,
+		func(leg visitedLeg) (int64, float64, bool) {
+			if leg.details.InGameSeconds == nil || *leg.details.InGameSeconds <= 0 {
+				return 0, 0, false
+			}
+			seconds := *leg.details.InGameSeconds
+			return seconds, float64(seconds), true
+		},
+		func(leg visitedLeg, seconds int64) (string, string) {
+			durationLabel := cmp.Or(leg.details.InGameDuration, formatPlaySeconds(seconds))
+			secondary := fmt.Sprintf("%s · %s jumps",
+				formatLightYearsOneDecimal(leg.details.Metrics.DistanceLy),
+				formatInt64WithCommas(int64(leg.details.Metrics.Jumps)))
+			return durationLabel, secondary
+		},
+	)
+}
+
+func buildEarningPaceBoard(legs []visitedLeg, realized bool) HighlightLeaderboard {
+	cardID := "highestEarningPace"
+	if realized {
+		cardID = "highestEarningPaceRealized"
+	}
+	return rankLegBoard(
+		cardID, "Highest Earning Pace", "amber", legs, false,
+		func(leg visitedLeg) (float64, float64, bool) {
+			if leg.details.InGameSeconds == nil || *leg.details.InGameSeconds < minInGameRateSeconds {
+				return 0, 0, false
+			}
+			credits := leg.details.Metrics.ScanValueTotal + leg.details.Metrics.OrganicValueTotal
+			if realized {
+				credits = leg.details.Realization.TotalRealized
+			}
+			if credits <= 0 {
+				return 0, 0, false
+			}
+			creditsPerHour := float64(credits) / (float64(*leg.details.InGameSeconds) / secondsPerHour)
+			return creditsPerHour, creditsPerHour, true
+		},
+		func(leg visitedLeg, creditsPerHour float64) (string, string) {
+			credits := leg.details.Metrics.ScanValueTotal + leg.details.Metrics.OrganicValueTotal
+			if realized {
+				credits = leg.details.Realization.TotalRealized
+			}
+			durationLabel := cmp.Or(leg.details.InGameDuration, formatPlaySeconds(*leg.details.InGameSeconds))
+			return formatCredits(int64(math.Round(creditsPerHour))) + "/h",
+				fmt.Sprintf("%s · %s", formatCredits(credits), durationLabel)
+		},
+	)
+}
+
+func buildTransitPaceBoard(legs []visitedLeg, shipOnly bool) HighlightLeaderboard {
+	cardID := "fastestTransitPace"
+	if shipOnly {
+		cardID = "fastestTransitPaceShip"
+	}
+	return rankLegBoard(
+		cardID, "Fastest Transit Pace", "amber", legs, false,
+		func(leg visitedLeg) (float64, float64, bool) {
+			if leg.details.TransitInGameSeconds == nil || *leg.details.TransitInGameSeconds < minInGameRateSeconds {
+				return 0, 0, false
+			}
+			distanceLy := leg.details.Metrics.DistanceLy
+			if shipOnly {
+				distanceLy = computeShipDistanceLy(leg.details.Metrics)
+			}
+			if distanceLy <= 0 {
+				return 0, 0, false
+			}
+			lightYearsPerHour := distanceLy / (float64(*leg.details.TransitInGameSeconds) / secondsPerHour)
+			return lightYearsPerHour, lightYearsPerHour, true
+		},
+		func(leg visitedLeg, lightYearsPerHour float64) (string, string) {
+			distanceLy := leg.details.Metrics.DistanceLy
+			if shipOnly {
+				distanceLy = computeShipDistanceLy(leg.details.Metrics)
+			}
+			durationLabel := cmp.Or(leg.details.TransitInGameDuration, formatPlaySeconds(*leg.details.TransitInGameSeconds))
+			return formatLightYearsOneDecimal(lightYearsPerHour) + "/h",
+				fmt.Sprintf("%s · %s", formatLightYearsOneDecimal(distanceLy), durationLabel)
 		},
 	)
 }

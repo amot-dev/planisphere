@@ -30,10 +30,11 @@ export interface HighlightLeaderboard {
   entries: HighlightRankingEntry[]
 }
 
-/** Options controlling which valuation, distance, card selection, or depth drive Highlight rankings. */
+/** Options controlling which valuation, distance, duration, card selection, or depth drive Highlight rankings. */
 export interface HighlightRankingOptions {
   lucrativeMetric?: 'estimated' | 'realized'
   distanceMetric?: 'total' | 'ship'
+  durationMetric?: 'elapsed' | 'inGame'
   nowMs?: number
   cardIds?: readonly HighlightCardId[]
   maxDepth?: number
@@ -58,6 +59,7 @@ export function computeAllHighlightLeaderboards(
 
   const lucrativeMetric = options.lucrativeMetric ?? 'estimated'
   const distanceMetric = options.distanceMetric ?? 'total'
+  const durationMetric = options.durationMetric ?? 'elapsed'
   const maxDepth = options.maxDepth
   const fullOrderById = indexBoards(exportData.highlightsFullOrder)
   const variantsById = indexBoards(exportData.highlightsVariants)
@@ -65,7 +67,12 @@ export function computeAllHighlightLeaderboards(
   const leaderboards: HighlightLeaderboard[] = []
   for (const cardMeta of HIGHLIGHT_CARDS) {
     if (requestedSet && !requestedSet.has(cardMeta.id)) continue
-    const sourceCardId = resolveSourceBoardId(cardMeta.id, lucrativeMetric, distanceMetric)
+    const sourceCardId = resolveSourceBoardId(
+      cardMeta.id,
+      lucrativeMetric,
+      distanceMetric,
+      durationMetric,
+    )
     const sourceBoard =
       sourceCardId === cardMeta.id
         ? fullOrderById?.get(cardMeta.id)
@@ -99,10 +106,14 @@ function resolveSourceBoardId(
   cardId: HighlightCardId,
   lucrativeMetric: 'estimated' | 'realized',
   distanceMetric: 'total' | 'ship',
+  durationMetric: 'elapsed' | 'inGame',
 ): string {
   if (cardId === 'mostLucrative' && lucrativeMetric === 'realized') return 'mostLucrativeRealized'
+  if (cardId === 'highestEarningPace' && lucrativeMetric === 'realized') return 'highestEarningPaceRealized'
   if (cardId === 'longestDistance' && distanceMetric === 'ship') return 'longestShipDistance'
   if (cardId === 'shortestDistance' && distanceMetric === 'ship') return 'shortestShipDistance'
+  if (cardId === 'fastestTransitPace' && distanceMetric === 'ship') return 'fastestTransitPaceShip'
+  if (cardId === 'longestDuration' && durationMetric === 'inGame') return 'longestInGameDuration'
   return cardId
 }
 

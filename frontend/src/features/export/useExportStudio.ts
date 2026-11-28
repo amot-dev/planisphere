@@ -118,24 +118,6 @@ export function useExportStudio(expeditionId: number, durationDisplayMode?: Dura
   }
 }
 
-function buildQuickShareCart(
-  exportData: ExpeditionExportData,
-  durationDisplayMode?: DurationDisplayMode,
-): CartBlockItem[] {
-  const quickItems = createQuickShareCart(exportData)
-  const defaultWaypointsConfig = createDefaultBlockConfig('waypoints', durationDisplayMode)
-  if (defaultWaypointsConfig.kind !== 'waypoints') return quickItems
-  return quickItems.map((item) => {
-    if (item.config.kind !== 'waypoints') return item
-    const selectedColumns = [...defaultWaypointsConfig.selectedColumns]
-    return {
-      ...item,
-      subtitle: `${selectedColumns.length} columns`,
-      config: { ...item.config, selectedColumns },
-    }
-  })
-}
-
 function useExpeditionExportSnapshot(
   expeditionId: number,
   durationDisplayMode: DurationDisplayMode | undefined,
@@ -155,7 +137,7 @@ function useExpeditionExportSnapshot(
       .then((payload) => {
         if (cancelled) return
         setExportData(payload)
-        setCartItems(buildQuickShareCart(payload, durationDisplayModeRef.current))
+        setCartItems(createQuickShareCart(payload, durationDisplayModeRef.current))
       })
       .catch((error: unknown) => { if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error)) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -185,7 +167,7 @@ function useExportCartActions(
   const handleApplyQuickShare = useCallback(() => {
     if (!exportData) return
     setInspectedCartItemId(null)
-    setCartItems(buildQuickShareCart(exportData, durationDisplayMode))
+    setCartItems(createQuickShareCart(exportData, durationDisplayMode))
   }, [durationDisplayMode, exportData, setCartItems, setInspectedCartItemId])
   const handleClearCart = useCallback(() => { setInspectedCartItemId(null); setCartItems([]) }, [setCartItems, setInspectedCartItemId])
   const handleInspectCartItem = useCallback((itemId: string) => setInspectedCartItemId(itemId), [setInspectedCartItemId])

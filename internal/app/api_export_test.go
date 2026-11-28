@@ -113,7 +113,7 @@ func TestAppExportFacadeEndToEnd(testingContext *testing.T) {
 	if exportError != nil {
 		testingContext.Fatalf("GetExpeditionExportData: %v", exportError)
 	}
-	if !exportData.Departed || exportData.Live.Jumps != 1 || len(exportData.RowDetails) != 1 || len(exportData.HighlightsFullOrder) != 9 {
+	if !exportData.Departed || exportData.Live.Jumps != 1 || len(exportData.RowDetails) != 1 || len(exportData.HighlightsFullOrder) != 11 {
 		testingContext.Fatalf("unexpected export snapshot: departed=%v jumps=%d rows=%d highlights=%d",
 			exportData.Departed, exportData.Live.Jumps, len(exportData.RowDetails), len(exportData.HighlightsFullOrder))
 	}
@@ -164,7 +164,7 @@ func TestAppExportFacadeEndToEnd(testingContext *testing.T) {
 		bundledSnapshot.ExportedAt != exportData.ExportedAt ||
 		bundledSnapshot.Live.Jumps != 1 ||
 		bundledSnapshot.Plan.Expedition.Description != "End to end" ||
-		len(bundledSnapshot.HighlightsFullOrder) != 9 {
+		len(bundledSnapshot.HighlightsFullOrder) != 11 {
 		testingContext.Fatalf("expected pinned zip bundle to preserve modal snapshot without drift, got exportedAt=%q jumps=%d desc=%q",
 			bundledSnapshot.ExportedAt, bundledSnapshot.Live.Jumps, bundledSnapshot.Plan.Expedition.Description)
 	}

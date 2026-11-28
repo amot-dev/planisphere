@@ -10,7 +10,7 @@ describe('exportHighlights', () => {
   it('selects canonical Go leaderboards including IN SYSTEM while excluding unvisited legs', () => {
     const data = buildSampleExportData()
     const leaderboards = computeAllHighlightLeaderboards(data)
-    expect(leaderboards).toHaveLength(9)
+    expect(leaderboards).toHaveLength(11)
 
     const mostLucrative = leaderboards.find((board) => board.cardId === 'mostLucrative')!
     expect(mostLucrative.entries.map((entry) => entry.waypointNumber)).toEqual([4, 2, 3])
@@ -106,5 +106,72 @@ describe('exportHighlights', () => {
     ])
     expect(shipDistanceBoards[0].entries[1].primaryValue).toBe(1000)
     expect(shipDistanceBoards[1].entries[0].primaryValue).toBe(600)
+  })
+
+  it('routes durationMetric and pace toggles to Go variant boards while keeping canonical cardIds', () => {
+    const baseData = buildSampleExportData()
+    const paceData = buildSampleExportData({
+      rowDetails: baseData.rowDetails.map((detail) => {
+        if (detail.rowId === 2) {
+          return {
+            ...detail,
+            inGameSeconds: 7200,
+            inGameDuration: '2h 00m',
+            transitInGameSeconds: 3600,
+            transitInGameDuration: '1h 00m',
+          }
+        }
+        if (detail.rowId === 3) {
+          return {
+            ...detail,
+            inGameSeconds: 10_800,
+            inGameDuration: '3h 00m',
+            transitInGameSeconds: 7200,
+            transitInGameDuration: '2h 00m',
+          }
+        }
+        return detail
+      }) as typeof baseData.rowDetails,
+    })
+
+    const inGameDurationBoards = computeAllHighlightLeaderboards(paceData, {
+      durationMetric: 'inGame',
+      cardIds: ['longestDuration'],
+      maxDepth: 2,
+    })
+    expect(inGameDurationBoards[0].cardId).toBe('longestDuration')
+    expect(inGameDurationBoards[0].entries.map((entry) => entry.waypointNumber)).toEqual([3, 2])
+    expect(inGameDurationBoards[0].entries[0].formattedPrimary).toBe('3h 00m')
+
+    const earningEstimated = computeAllHighlightLeaderboards(paceData, {
+      lucrativeMetric: 'estimated',
+      cardIds: ['highestEarningPace'],
+      maxDepth: 1,
+    })
+    expect(earningEstimated[0].cardId).toBe('highestEarningPace')
+    expect(earningEstimated[0].entries[0].formattedPrimary).toBe('26,000,000 Cr/h')
+
+    const earningRealized = computeAllHighlightLeaderboards(paceData, {
+      lucrativeMetric: 'realized',
+      cardIds: ['highestEarningPace'],
+      maxDepth: 1,
+    })
+    expect(earningRealized[0].cardId).toBe('highestEarningPace')
+    expect(earningRealized[0].entries[0].formattedPrimary).toBe('24,000,000 Cr/h')
+
+    const transitTotal = computeAllHighlightLeaderboards(paceData, {
+      distanceMetric: 'total',
+      cardIds: ['fastestTransitPace'],
+      maxDepth: 2,
+    })
+    expect(transitTotal[0].entries[1].formattedPrimary).toBe('1,200.0 Ly/h')
+
+    const transitShip = computeAllHighlightLeaderboards(paceData, {
+      distanceMetric: 'ship',
+      cardIds: ['fastestTransitPace'],
+      maxDepth: 2,
+    })
+    expect(transitShip[0].cardId).toBe('fastestTransitPace')
+    expect(transitShip[0].entries[1].formattedPrimary).toBe('1,000.0 Ly/h')
   })
 })

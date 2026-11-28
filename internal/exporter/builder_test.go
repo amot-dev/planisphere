@@ -183,7 +183,7 @@ func TestBuildCompletedExpeditionBoundariesAndModeBuckets(testingContext *testin
 	}
 	if len(snapshot.LegTelemetry) != 2 || len(snapshot.RegionBuckets) != 1 ||
 		len(snapshot.RegionBuckets[0].ModeBuckets) != 2 ||
-		len(snapshot.HighlightsFullOrder) != 9 || len(snapshot.HighlightsVariants) != 3 {
+		len(snapshot.HighlightsFullOrder) != 11 || len(snapshot.HighlightsVariants) != 6 {
 		testingContext.Fatalf("unexpected leg/region/highlight aggregations: legs=%d regions=%d full=%d variants=%d",
 			len(snapshot.LegTelemetry), len(snapshot.RegionBuckets), len(snapshot.HighlightsFullOrder), len(snapshot.HighlightsVariants))
 	}

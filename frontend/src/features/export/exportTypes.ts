@@ -126,6 +126,8 @@ export type DetailsMetricId =
   | 'avgJumpRange'
   | 'boostRate'
   | 'avgDistancePerDay'
+  | 'avgDistancePerHour'
+  | 'avgJumpsPerHour'
   | 'carrierJumps'
   | 'carrierDistance'
   | 'avgCarrierJumpRange'
@@ -140,6 +142,7 @@ export type DetailsMetricId =
   | 'avgCombinedCreditsPerJump'
   | 'avgCombinedCreditsPer1000Ly'
   | 'avgCombinedCreditsPerDay'
+  | 'avgCombinedCreditsPerHour'
   | 'cartoTotalValue'
   | 'cartoValueBreakdown'
   | 'bodiesScanned'
@@ -148,6 +151,8 @@ export type DetailsMetricId =
   | 'firstDiscoveryRate'
   | 'avgCartoCreditsPerJump'
   | 'avgCartoCreditsPer1000Ly'
+  | 'avgCartoCreditsPerHour'
+  | 'avgBodiesScannedPerHour'
   | 'exoTotalValue'
   | 'exoValueBreakdown'
   | 'organicSamples'
@@ -155,6 +160,8 @@ export type DetailsMetricId =
   | 'avgCreditsPerSample'
   | 'avgExoCreditsPerJump'
   | 'avgExoCreditsPer1000Ly'
+  | 'avgExoCreditsPerHour'
+  | 'avgOrganicSamplesPerHour'
   | 'realizedTotal'
   | 'pendingValue'
   | 'estimatedValueTotal'
@@ -163,6 +170,7 @@ export type DetailsMetricId =
   | 'netProfitAfterCarrierCost'
   | 'avgRealizedCreditsPerJump'
   | 'avgRealizedCreditsPer1000Ly'
+  | 'avgRealizedCreditsPerHour'
 
 /** Optional column identifiers for the Waypoints route table block. */
 export type WaypointsColumnId =
@@ -188,6 +196,8 @@ export type HighlightCardId =
   | 'mostOrganicSamples'
   | 'furthestFromSol'
   | 'costliestMistake'
+  | 'highestEarningPace'
+  | 'fastestTransitPace'
 
 /** Visual layout zone for a Details metric entry. */
 export type DetailsMetricZone = 'kpi' | 'card'
@@ -200,6 +210,7 @@ export interface DetailsMetricDescriptor {
   defaultChecked: boolean
   fullExpeditionCombinedOnly?: boolean
   requiresElapsed24h?: boolean
+  requiresInGame1h?: boolean
   requiresVisitedRoute?: boolean
 }
 
@@ -248,6 +259,7 @@ export interface HighlightsBlockConfig {
   selectedCards: HighlightCardId[]
   lucrativeMetric: 'estimated' | 'realized'
   distanceMetric: 'total' | 'ship'
+  durationMetric: 'elapsed' | 'inGame'
 }
 
 /** Discriminated union of all four Export Studio block configurations. */
@@ -306,6 +318,8 @@ export const DETAILS_SECTION_METRICS: Record<DetailsSection, ReadonlyArray<Detai
     { id: 'avgJumpRange', label: 'Avg Jump Range (Ly / Jump)', zone: 'kpi', defaultChecked: true },
     { id: 'boostRate', label: 'Boost Rate (%)', zone: 'kpi', defaultChecked: true },
     { id: 'avgDistancePerDay', label: 'Avg Distance per Day', zone: 'kpi', defaultChecked: true, requiresElapsed24h: true },
+    { id: 'avgDistancePerHour', label: 'Avg Distance per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
+    { id: 'avgJumpsPerHour', label: 'Avg Jumps per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
   ],
   carrier: [
     { id: 'carrierJumps', label: 'Expedition Carrier Jumps', zone: 'kpi', defaultChecked: true, fullExpeditionCombinedOnly: true },
@@ -324,6 +338,7 @@ export const DETAILS_SECTION_METRICS: Record<DetailsSection, ReadonlyArray<Detai
     { id: 'avgCombinedCreditsPerJump', label: 'Avg Credits per Jump', zone: 'kpi', defaultChecked: true },
     { id: 'avgCombinedCreditsPer1000Ly', label: 'Avg Credits per 1,000 Ly', zone: 'kpi', defaultChecked: true },
     { id: 'avgCombinedCreditsPerDay', label: 'Avg Credits per Day', zone: 'kpi', defaultChecked: true, requiresElapsed24h: true },
+    { id: 'avgCombinedCreditsPerHour', label: 'Avg Credits per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
   ],
   cartographics: [
     { id: 'cartoTotalValue', label: 'Cartographics Total Value', zone: 'kpi', defaultChecked: true },
@@ -334,6 +349,8 @@ export const DETAILS_SECTION_METRICS: Record<DetailsSection, ReadonlyArray<Detai
     { id: 'firstDiscoveryRate', label: 'First Discovery Rate (%)', zone: 'kpi', defaultChecked: true },
     { id: 'avgCartoCreditsPerJump', label: 'Avg Carto Credits per Jump', zone: 'kpi', defaultChecked: true },
     { id: 'avgCartoCreditsPer1000Ly', label: 'Avg Carto Credits per 1,000 Ly', zone: 'kpi', defaultChecked: true },
+    { id: 'avgCartoCreditsPerHour', label: 'Avg Carto Credits per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
+    { id: 'avgBodiesScannedPerHour', label: 'Avg Bodies Scanned per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
   ],
   exobiology: [
     { id: 'exoTotalValue', label: 'Exobiology Total Value', zone: 'kpi', defaultChecked: true },
@@ -343,6 +360,8 @@ export const DETAILS_SECTION_METRICS: Record<DetailsSection, ReadonlyArray<Detai
     { id: 'avgCreditsPerSample', label: 'Avg Credits per Sample', zone: 'kpi', defaultChecked: true },
     { id: 'avgExoCreditsPerJump', label: 'Avg Exo Credits per Jump', zone: 'kpi', defaultChecked: true },
     { id: 'avgExoCreditsPer1000Ly', label: 'Avg Exo Credits per 1,000 Ly', zone: 'kpi', defaultChecked: true },
+    { id: 'avgExoCreditsPerHour', label: 'Avg Exo Credits per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
+    { id: 'avgOrganicSamplesPerHour', label: 'Avg Organic Samples per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
   ],
   realized: [
     { id: 'realizedTotal', label: 'Total Realized Net Value', zone: 'kpi', defaultChecked: true },
@@ -353,6 +372,7 @@ export const DETAILS_SECTION_METRICS: Record<DetailsSection, ReadonlyArray<Detai
     { id: 'netProfitAfterCarrierCost', label: 'Net Profit After Carrier Costs', zone: 'kpi', defaultChecked: true, fullExpeditionCombinedOnly: true },
     { id: 'avgRealizedCreditsPerJump', label: 'Avg Realized Credits per Jump', zone: 'kpi', defaultChecked: true },
     { id: 'avgRealizedCreditsPer1000Ly', label: 'Avg Realized Credits per 1,000 Ly', zone: 'kpi', defaultChecked: true },
+    { id: 'avgRealizedCreditsPerHour', label: 'Avg Realized Credits per In-Game Hr', zone: 'kpi', defaultChecked: true, requiresInGame1h: true },
   ],
 }
 
@@ -390,6 +410,8 @@ export const HIGHLIGHT_CARDS: ReadonlyArray<{
   { id: 'mostOrganicSamples', label: 'Most Prolific Exobiology', accent: 'emerald', defaultChecked: true },
   { id: 'furthestFromSol', label: 'Furthest From Sol', accent: 'cyan', defaultChecked: true },
   { id: 'costliestMistake', label: 'Costliest Mistake', accent: 'danger', defaultChecked: false },
+  { id: 'highestEarningPace', label: 'Highest Earning Pace', accent: 'amber', defaultChecked: false },
+  { id: 'fastestTransitPace', label: 'Fastest Transit Pace', accent: 'amber', defaultChecked: false },
 ]
 
 /** Returns the default checked metric IDs for a given Details section. */
@@ -439,6 +461,7 @@ export function createDefaultBlockConfig(
         selectedCards: HIGHLIGHT_CARDS.filter((card) => card.defaultChecked).map((card) => card.id),
         lucrativeMetric: 'estimated',
         distanceMetric: 'total',
+        durationMetric: normalizeDurationDisplayMode(durationDisplayMode) === 'in_game' ? 'inGame' : 'elapsed',
       }
   }
 }

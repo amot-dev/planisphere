@@ -52,6 +52,13 @@ func Build(databaseConnection *sql.DB, expeditionID int64, dependencies BuilderD
 	if playtimeError := populateExpeditionPlaytime(expeditionRecord, displayStart, departed, dependencies.Projections, &exportSnapshot); playtimeError != nil {
 		return ExpeditionExport{}, playtimeError
 	}
+	exportSnapshot.Expedition.Derived = ComputeDerivedMetrics(
+		exportSnapshot.Expedition.Metrics,
+		exportSnapshot.Expedition.Realization,
+		&exportSnapshot.CarrierCost,
+		exportSnapshot.Expedition.ElapsedDays,
+		exportSnapshot.Expedition.InGameSeconds,
+	)
 	if bucketsError := populateModeBuckets(planView, queryAfter, departed, dependencies.Projections, &exportSnapshot); bucketsError != nil {
 		return ExpeditionExport{}, bucketsError
 	}
@@ -178,15 +185,9 @@ func populateRowDetailsAndBaseline(
 	exportSnapshot.OriginBaseline = originBaseline
 	exportSnapshot.RowDetails = rowDetails
 	exportSnapshot.Expedition.ShipsFlown = CollectShipsForVisitedLegs(planView, rowDetails, nil)
-	exportSnapshot.Expedition.Derived = ComputeDerivedMetrics(
-		exportSnapshot.Expedition.Metrics,
-		exportSnapshot.Expedition.Realization,
-		&exportSnapshot.CarrierCost,
-		exportSnapshot.Expedition.ElapsedDays,
-	)
 	if originBaseline != nil {
 		baselineElapsedDays := ComputeElapsedDays(originBaseline.From, originBaseline.To, currentTime)
-		baselineDerived := ComputeDerivedMetrics(originBaseline.Metrics, originBaseline.Realization, nil, baselineElapsedDays)
+		baselineDerived := ComputeDerivedMetrics(originBaseline.Metrics, originBaseline.Realization, nil, baselineElapsedDays, originBaseline.InGameSeconds)
 		exportSnapshot.OriginBaselineElapsedDays = baselineElapsedDays
 		exportSnapshot.OriginBaselineDerived = &baselineDerived
 		exportSnapshot.CareerDiff = BuildCareerDiff(originBaseline, exportSnapshot.Live, exportSnapshot.Expedition.Realization)
@@ -267,7 +268,7 @@ func populateModeBuckets(
 				ShipsFlown:             CollectShipsForVisitedLegs(planView, exportSnapshot.RowDetails, &modeID),
 				Metrics:                exportSnapshot.Live,
 				Realization:            exportSnapshot.Expedition.Realization,
-				Derived:                ComputeDerivedMetrics(exportSnapshot.Live, exportSnapshot.Expedition.Realization, nil, exportSnapshot.Expedition.ElapsedDays),
+				Derived:                ComputeDerivedMetrics(exportSnapshot.Live, exportSnapshot.Expedition.Realization, nil, exportSnapshot.Expedition.ElapsedDays, exportSnapshot.Expedition.InGameSeconds),
 			}}
 		}
 		return nil
@@ -336,9 +337,9 @@ func computeFilteredModeBuckets(
 			ShipsFlown:  CollectShipsForVisitedLegs(planView, rowDetails, &modeID),
 			Metrics:     summary.Metrics,
 			Realization: summary.Realization,
-			Derived:     ComputeDerivedMetrics(summary.Metrics, summary.Realization, nil, expeditionElapsedDays),
 		}
 		modeBucket.InGameSeconds, modeBucket.InGameDuration, modeBucket.TransitInGameSeconds, modeBucket.TransitInGameDuration, modeBucket.InSystemInGameSeconds, modeBucket.InSystemInGameDuration = playtimeByModeID[modeID].labelsAndPtrs()
+		modeBucket.Derived = ComputeDerivedMetrics(summary.Metrics, summary.Realization, nil, expeditionElapsedDays, modeBucket.InGameSeconds)
 		buckets = append(buckets, modeBucket)
 	}
 	return buckets, nil

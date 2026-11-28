@@ -91,6 +91,7 @@ describe('ExportBlockRenderer', () => {
           selectedCards: ['mostLucrative', 'furthestFromSol'],
           lucrativeMetric: 'estimated',
           distanceMetric: 'total',
+          durationMetric: 'elapsed',
         }}
       />,
     )
@@ -193,6 +194,7 @@ describe('ExportBlockRenderer', () => {
       selectedCards: ['mostLucrative'],
       lucrativeMetric: 'estimated',
       distanceMetric: 'total',
+      durationMetric: 'elapsed',
     })
     const sanitizedEntryColors = highlightsUnsafeViewModel.boards[0].entries.map(
       (entry) => entry.modeColor,

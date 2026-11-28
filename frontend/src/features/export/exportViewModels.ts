@@ -349,6 +349,7 @@ export function buildHighlightsViewModel(
   const allLeaderboards = computeAllHighlightLeaderboards(exportData, {
     lucrativeMetric: config.lucrativeMetric,
     distanceMetric: config.distanceMetric,
+    durationMetric: config.durationMetric,
     cardIds: config.selectedCards,
     maxDepth: config.depth,
     nowMs,

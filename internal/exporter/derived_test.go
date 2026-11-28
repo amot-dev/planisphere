@@ -57,15 +57,19 @@ func TestComputeElapsedDaysGuardsAndOpenWindow(testingContext *testing.T) {
 
 func TestComputeDerivedMetricsGuardsAndFormulas(testingContext *testing.T) {
 	subDay := 0.75
+	subHourSeconds := int64(3599)
 	zeroDerived := exporter.ComputeDerivedMetrics(
 		replaystats.Metrics{},
 		replaystats.RealizationBreakdown{TotalRealized: 5_000_000, PendingValue: 5_000_000},
 		nil,
 		&subDay,
+		&subHourSeconds,
 	)
 	if zeroDerived.AvgJumpRangeLy != nil ||
 		zeroDerived.BoostRatePercent != nil ||
 		zeroDerived.AvgDistancePerDayLy != nil ||
+		zeroDerived.AvgDistancePerHourLy != nil ||
+		zeroDerived.AvgJumpsPerHour != nil ||
 		zeroDerived.AvgCarrierJumpRangeLy != nil ||
 		zeroDerived.AvgTritiumPerJump != nil ||
 		zeroDerived.DSSEfficiencyPercent != nil ||
@@ -75,11 +79,17 @@ func TestComputeDerivedMetricsGuardsAndFormulas(testingContext *testing.T) {
 		zeroDerived.AvgCombinedCreditsPerJump != nil ||
 		zeroDerived.AvgCombinedCreditsPer1000Ly != nil ||
 		zeroDerived.AvgCombinedCreditsPerDay != nil ||
+		zeroDerived.AvgCombinedCreditsPerHour != nil ||
+		zeroDerived.AvgCartoCreditsPerHour != nil ||
+		zeroDerived.AvgBodiesScannedPerHour != nil ||
+		zeroDerived.AvgExoCreditsPerHour != nil ||
+		zeroDerived.AvgOrganicSamplesPerHour != nil ||
 		zeroDerived.RealizationRetentionPercent != nil ||
 		zeroDerived.NetProfitAfterCarrierCost != nil ||
 		zeroDerived.AvgRealizedCreditsPerJump != nil ||
-		zeroDerived.AvgRealizedCreditsPer1000Ly != nil {
-		testingContext.Fatalf("expected nil pointer fields on zero-denominator/sub-24h metrics, got %+v", zeroDerived)
+		zeroDerived.AvgRealizedCreditsPer1000Ly != nil ||
+		zeroDerived.AvgRealizedCreditsPerHour != nil {
+		testingContext.Fatalf("expected nil pointer fields on zero-denominator/sub-24h/sub-1h metrics, got %+v", zeroDerived)
 	}
 
 	encodedZero, marshalError := json.Marshal(zeroDerived)
@@ -87,6 +97,7 @@ func TestComputeDerivedMetricsGuardsAndFormulas(testingContext *testing.T) {
 		testingContext.Fatalf("marshal zero DerivedMetrics: %v", marshalError)
 	}
 	if !strings.Contains(string(encodedZero), `"avgJumpRangeLy":null`) ||
+		!strings.Contains(string(encodedZero), `"avgDistancePerHourLy":null`) ||
 		!strings.Contains(string(encodedZero), `"netProfitAfterCarrierCost":null`) {
 		testingContext.Fatalf("expected pointer fields to marshal explicit null without omitempty, got %s", string(encodedZero))
 	}
@@ -126,7 +137,21 @@ func TestComputeDerivedMetricsGuardsAndFormulas(testingContext *testing.T) {
 	}
 	carrierCost := expedition.CarrierCost{TotalCost: 160_000_000}
 
-	derived := exporter.ComputeDerivedMetrics(metrics, realization, &carrierCost, &elapsedDays)
+	// Sub-1-hour in-game duration (3599s) must suppress all 8 hourly rates even with positive telemetry.
+	subHourPopulated := exporter.ComputeDerivedMetrics(metrics, realization, &carrierCost, &elapsedDays, &subHourSeconds)
+	if subHourPopulated.AvgDistancePerHourLy != nil ||
+		subHourPopulated.AvgJumpsPerHour != nil ||
+		subHourPopulated.AvgCombinedCreditsPerHour != nil ||
+		subHourPopulated.AvgCartoCreditsPerHour != nil ||
+		subHourPopulated.AvgBodiesScannedPerHour != nil ||
+		subHourPopulated.AvgExoCreditsPerHour != nil ||
+		subHourPopulated.AvgOrganicSamplesPerHour != nil ||
+		subHourPopulated.AvgRealizedCreditsPerHour != nil {
+		testingContext.Fatalf("expected all 8 hourly rates to remain nil at 3599s, got %+v", subHourPopulated)
+	}
+
+	inGameFourHours := int64(4 * 3600)
+	derived := exporter.ComputeDerivedMetrics(metrics, realization, &carrierCost, &elapsedDays, &inGameFourHours)
 	if math.Abs(derived.ShipDistanceLy-4600.0) > 1e-6 || derived.TotalBoosts != 16 {
 		testingContext.Fatalf("unexpected shipDistanceLy=%.2f totalBoosts=%d", derived.ShipDistanceLy, derived.TotalBoosts)
 	}
@@ -136,6 +161,8 @@ func TestComputeDerivedMetricsGuardsAndFormulas(testingContext *testing.T) {
 	assertOptionalFloat(testingContext, "AvgJumpRangeLy", derived.AvgJumpRangeLy, 4600.0/80.0)
 	assertOptionalFloat(testingContext, "BoostRatePercent", derived.BoostRatePercent, 20.0)
 	assertOptionalFloat(testingContext, "AvgDistancePerDayLy", derived.AvgDistancePerDayLy, 1200.0)
+	assertOptionalFloat(testingContext, "AvgDistancePerHourLy", derived.AvgDistancePerHourLy, 1200.0)
+	assertOptionalFloat(testingContext, "AvgJumpsPerHour", derived.AvgJumpsPerHour, 20.0)
 	assertOptionalFloat(testingContext, "AvgCarrierJumpRangeLy", derived.AvgCarrierJumpRangeLy, 450.0)
 	assertOptionalFloat(testingContext, "AvgTritiumPerJump", derived.AvgTritiumPerJump, 100.0)
 	assertOptionalFloat(testingContext, "DSSEfficiencyPercent", derived.DSSEfficiencyPercent, 75.0)
@@ -143,13 +170,25 @@ func TestComputeDerivedMetricsGuardsAndFormulas(testingContext *testing.T) {
 	assertOptionalFloat(testingContext, "FirstLoggedRatePercent", derived.FirstLoggedRatePercent, 80.0)
 	assertOptionalFloat(testingContext, "AvgCreditsPerSample", derived.AvgCreditsPerSample, 13_000_000.0)
 	assertOptionalFloat(testingContext, "AvgCombinedCreditsPerDay", derived.AvgCombinedCreditsPerDay, 43_000_000.0)
+	assertOptionalFloat(testingContext, "AvgCombinedCreditsPerHour", derived.AvgCombinedCreditsPerHour, 43_000_000.0)
 	assertOptionalFloat(testingContext, "AvgCartoCreditsPer1000Ly", derived.AvgCartoCreditsPer1000Ly, 8_750_000.0)
+	assertOptionalFloat(testingContext, "AvgCartoCreditsPerHour", derived.AvgCartoCreditsPerHour, 10_500_000.0)
+	assertOptionalFloat(testingContext, "AvgBodiesScannedPerHour", derived.AvgBodiesScannedPerHour, 25.0)
 	assertOptionalFloat(testingContext, "AvgExoCreditsPerJump", derived.AvgExoCreditsPerJump, 1_625_000.0)
+	assertOptionalFloat(testingContext, "AvgExoCreditsPerHour", derived.AvgExoCreditsPerHour, 32_500_000.0)
+	assertOptionalFloat(testingContext, "AvgOrganicSamplesPerHour", derived.AvgOrganicSamplesPerHour, 2.5)
 	assertOptionalFloat(testingContext, "RealizationRetentionPercent", derived.RealizationRetentionPercent, 87.5)
 	assertOptionalFloat(testingContext, "AvgRealizedCreditsPer1000Ly", derived.AvgRealizedCreditsPer1000Ly, 140_000_000.0/4.8)
+	assertOptionalFloat(testingContext, "AvgRealizedCreditsPerHour", derived.AvgRealizedCreditsPerHour, 35_000_000.0)
 	if derived.NetProfitAfterCarrierCost == nil || *derived.NetProfitAfterCarrierCost != -20_000_000 {
 		testingContext.Fatalf("expected negative netProfitAfterCarrierCost -20,000,000, got %v", derived.NetProfitAfterCarrierCost)
 	}
+
+	// Exact 3600s (1.0h) boundary unlocks hourly rates.
+	exactOneHour := int64(3600)
+	atBoundary := exporter.ComputeDerivedMetrics(metrics, realization, nil, nil, &exactOneHour)
+	assertOptionalFloat(testingContext, "BoundaryAvgDistancePerHourLy", atBoundary.AvgDistancePerHourLy, 4800.0)
+	assertOptionalFloat(testingContext, "BoundaryAvgJumpsPerHour", atBoundary.AvgJumpsPerHour, 80.0)
 }
 
 func TestBuildCareerDiffBaselineAndNewGrowth(testingContext *testing.T) {

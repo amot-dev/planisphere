@@ -196,6 +196,8 @@ func TestComputeHighlightLeaderboardsParityAndTieBreaking(testingContext *testin
 		"mostOrganicSamples",
 		"furthestFromSol",
 		"costliestMistake",
+		"highestEarningPace",
+		"fastestTransitPace",
 	}
 	if len(boards) != len(expectedOrder) {
 		testingContext.Fatalf("expected %d boards, got %d", len(expectedOrder), len(boards))
@@ -289,8 +291,8 @@ func TestComputeHighlightLeaderboardsParityAndTieBreaking(testingContext *testin
 	if unmarshalError := json.Unmarshal(canonicalBytes, &roundTrip); unmarshalError != nil {
 		testingContext.Fatalf("unmarshal canonical json: %v", unmarshalError)
 	}
-	if len(roundTrip.HighlightsFullOrder) != 9 {
-		testingContext.Fatalf("expected 9 round-tripped leaderboards, got %d", len(roundTrip.HighlightsFullOrder))
+	if len(roundTrip.HighlightsFullOrder) != 11 {
+		testingContext.Fatalf("expected 11 round-tripped leaderboards, got %d", len(roundTrip.HighlightsFullOrder))
 	}
 
 	// Populate differential realized payouts and pure carrier-passenger travel to verify ComputeHighlightVariants.
@@ -301,7 +303,14 @@ func TestComputeHighlightLeaderboardsParityAndTieBreaking(testingContext *testin
 	rowDetails[1].Metrics.CarrierPassengerLy = 3000.0
 
 	variants := exporter.ComputeHighlightVariants(planView, rowDetails)
-	expectedVariants := []string{"mostLucrativeRealized", "longestShipDistance", "shortestShipDistance"}
+	expectedVariants := []string{
+		"mostLucrativeRealized",
+		"longestShipDistance",
+		"shortestShipDistance",
+		"longestInGameDuration",
+		"highestEarningPaceRealized",
+		"fastestTransitPaceShip",
+	}
 	if len(variants) != len(expectedVariants) {
 		testingContext.Fatalf("expected %d variant boards, got %d", len(expectedVariants), len(variants))
 	}
@@ -325,5 +334,93 @@ func TestComputeHighlightLeaderboardsParityAndTieBreaking(testingContext *testin
 	if len(variants[2].Entries) != 2 || variants[2].Title != "Shortest Leg (Distance)" ||
 		variants[2].Entries[0].WaypointNumber != 4 || variants[2].Entries[0].FormattedPrimary != "600.0 Ly" {
 		testingContext.Fatalf("unexpected shortestShipDistance entries: %+v", variants[2].Entries)
+	}
+}
+
+func TestComputeHighlightInGameDurationAndPaceBoards(testingContext *testing.T) {
+	pinnedNow := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	planView := expedition.PlanView{
+		Rows: []expedition.RowView{
+			{Row: expedition.Row{ID: 1, RowType: expedition.RowWaypoint, SystemName: "Sol", VisitedAt: "2026-04-01T08:00:00Z"}, Number: 1},
+			{Row: expedition.Row{ID: 2, RowType: expedition.RowWaypoint, SystemName: "Alpha Rim", VisitedAt: "2026-04-02T10:00:00Z"}, Number: 2},
+			{Row: expedition.Row{ID: 3, RowType: expedition.RowWaypoint, SystemName: "Beta Crossing", VisitedAt: "2026-04-03T10:00:00Z"}, Number: 3},
+			{Row: expedition.Row{ID: 4, RowType: expedition.RowWaypoint, SystemName: "Gamma Sprint", VisitedAt: "2026-04-04T10:00:00Z"}, Number: 4},
+		},
+	}
+	// Leg #2: 2h in-game (7200s), 1.5h transit (5400s), 1,500 Ly total (1,200 Ly ship), 60M est / 30M realized.
+	// Leg #3: 1h in-game (3600s, empty label fallback), 1h transit (3600s), 2,000 Ly pure carrier (0 ship Ly), 40M est / 40M realized.
+	// Leg #4: 3599s in-game and 3599s transit (< 1h guard), huge distance and value must be excluded from pace boards but still appear in longestInGameDuration.
+	rowDetails := []expedition.WaypointDetails{
+		{
+			RowID: 2, Kind: "leg", Number: 2, PrevSystem: "Sol",
+			InGameSeconds: int64Ptr(7200), InGameDuration: "2h 00m",
+			TransitInGameSeconds: int64Ptr(5400), TransitInGameDuration: "1h 30m",
+			Metrics:     replaystats.Metrics{DistanceLy: 1500, ShipDistanceLy: 1200, Jumps: 24, ScanValueTotal: 20_000_000, OrganicValueTotal: 40_000_000},
+			Realization: replaystats.RealizationBreakdown{TotalRealized: 30_000_000},
+		},
+		{
+			RowID: 3, Kind: "leg", Number: 3, PrevSystem: "Alpha Rim",
+			InGameSeconds: int64Ptr(3600), InGameDuration: "",
+			TransitInGameSeconds: int64Ptr(3600), TransitInGameDuration: "",
+			Metrics:     replaystats.Metrics{DistanceLy: 2000, ShipDistanceLy: 0, CarrierPassengerLy: 2000, Jumps: 0, ScanValueTotal: 40_000_000},
+			Realization: replaystats.RealizationBreakdown{TotalRealized: 40_000_000},
+		},
+		{
+			RowID: 4, Kind: "leg", Number: 4, PrevSystem: "Beta Crossing",
+			InGameSeconds: int64Ptr(3599), InGameDuration: "59m",
+			TransitInGameSeconds: int64Ptr(3599), TransitInGameDuration: "59m",
+			Metrics:     replaystats.Metrics{DistanceLy: 5000, ShipDistanceLy: 5000, Jumps: 80, ScanValueTotal: 200_000_000},
+			Realization: replaystats.RealizationBreakdown{TotalRealized: 200_000_000},
+		},
+	}
+
+	boards := exporter.ComputeHighlightLeaderboards(planView, rowDetails, pinnedNow)
+	boardByID := make(map[string]exporter.HighlightLeaderboard, len(boards))
+	for _, board := range boards {
+		boardByID[board.CardID] = board
+	}
+	variants := exporter.ComputeHighlightVariants(planView, rowDetails)
+	variantByID := make(map[string]exporter.HighlightLeaderboard, len(variants))
+	for _, variantBoard := range variants {
+		variantByID[variantBoard.CardID] = variantBoard
+	}
+
+	longestInGame := variantByID["longestInGameDuration"]
+	if len(longestInGame.Entries) != 3 || longestInGame.Accent != "cyan" ||
+		longestInGame.Entries[0].WaypointNumber != 2 || longestInGame.Entries[0].FormattedPrimary != "2h 00m" ||
+		longestInGame.Entries[0].SecondaryLabel != "1,500.0 Ly · 24 jumps" ||
+		longestInGame.Entries[1].FormattedPrimary != "1h 00m" {
+		testingContext.Fatalf("unexpected longestInGameDuration entries: %+v", longestInGame.Entries)
+	}
+
+	earningEst := boardByID["highestEarningPace"]
+	if len(earningEst.Entries) != 2 || earningEst.Accent != "amber" ||
+		earningEst.Entries[0].WaypointNumber != 3 || earningEst.Entries[0].FormattedPrimary != "40,000,000 Cr/h" ||
+		earningEst.Entries[0].SecondaryLabel != "40,000,000 Cr · 1h 00m" ||
+		earningEst.Entries[1].WaypointNumber != 2 || earningEst.Entries[1].FormattedPrimary != "30,000,000 Cr/h" {
+		testingContext.Fatalf("unexpected highestEarningPace entries: %+v", earningEst.Entries)
+	}
+
+	earningRealized := variantByID["highestEarningPaceRealized"]
+	if len(earningRealized.Entries) != 2 ||
+		earningRealized.Entries[0].WaypointNumber != 3 || earningRealized.Entries[0].FormattedPrimary != "40,000,000 Cr/h" ||
+		earningRealized.Entries[1].FormattedPrimary != "15,000,000 Cr/h" ||
+		earningRealized.Entries[1].SecondaryLabel != "30,000,000 Cr · 2h 00m" {
+		testingContext.Fatalf("unexpected highestEarningPaceRealized entries: %+v", earningRealized.Entries)
+	}
+
+	transitTotal := boardByID["fastestTransitPace"]
+	if len(transitTotal.Entries) != 2 ||
+		transitTotal.Entries[0].WaypointNumber != 3 || transitTotal.Entries[0].FormattedPrimary != "2,000.0 Ly/h" ||
+		transitTotal.Entries[0].SecondaryLabel != "2,000.0 Ly · 1h 00m" ||
+		transitTotal.Entries[1].FormattedPrimary != "1,000.0 Ly/h" {
+		testingContext.Fatalf("unexpected fastestTransitPace entries: %+v", transitTotal.Entries)
+	}
+
+	transitShip := variantByID["fastestTransitPaceShip"]
+	if len(transitShip.Entries) != 1 ||
+		transitShip.Entries[0].WaypointNumber != 2 || transitShip.Entries[0].FormattedPrimary != "800.0 Ly/h" ||
+		transitShip.Entries[0].SecondaryLabel != "1,200.0 Ly · 1h 30m" {
+		testingContext.Fatalf("unexpected fastestTransitPaceShip entries: %+v", transitShip.Entries)
 	}
 }
